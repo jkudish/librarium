@@ -67,7 +67,7 @@ export class PerplexityDeepProvider extends BaseProvider {
           content: '',
           citations: [],
           durationMs,
-          error: `API returned ${response.status}: ${JSON.stringify(response.data)}`,
+          error: this.formatError(response.status, response.data),
         };
       }
 
@@ -95,7 +95,7 @@ export class PerplexityDeepProvider extends BaseProvider {
         content: '',
         citations: [],
         durationMs,
-        error: err instanceof Error ? err.message : String(err),
+        error: this.formatCatchError(err),
       };
     }
   }

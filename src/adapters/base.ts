@@ -56,6 +56,32 @@ export abstract class BaseProvider implements Provider {
     return httpRequest<T>(url, options);
   }
 
+  /**
+   * Format an HTTP error response with helpful hints
+   */
+  protected formatError(status: number, data: unknown): string {
+    const body = JSON.stringify(data).slice(0, 200);
+    const base = `API returned ${status}: ${body}`;
+    if (status === 401) {
+      return `${base} — check that ${this.envVar} is set and valid`;
+    }
+    if (status === 403) {
+      return `${base} — API key may lack required permissions`;
+    }
+    return base;
+  }
+
+  /**
+   * Format a catch-block error with user-friendly messages
+   */
+  protected formatCatchError(err: unknown): string {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === 'fetch failed' || msg === 'Failed to fetch') {
+      return `Network error connecting to ${this.displayName} — check your internet connection`;
+    }
+    return msg;
+  }
+
   abstract execute(
     query: string,
     options: ProviderOptions,
