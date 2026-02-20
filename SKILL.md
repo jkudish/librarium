@@ -3,6 +3,7 @@ description: Run multi-provider deep research queries using the librarium CLI
 triggers:
   - /librarium
   - /research
+  - /deep-research
   - deep research
   - multi-provider search
 ---
