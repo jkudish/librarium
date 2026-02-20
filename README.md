@@ -346,6 +346,67 @@ Each research run creates a timestamped output directory:
 | `1` | Partial success (some providers failed) |
 | `2` | Total failure (all providers failed, or configuration error) |
 
+## Claude Code Skill
+
+Librarium ships with a Claude Code skill that teaches AI agents how to use it effectively via a 7-phase research workflow.
+
+### Install the Skill
+
+Copy the skill file to your Claude Code skills directory:
+
+```bash
+mkdir -p ~/.claude/skills/librarium
+cp SKILL.md ~/.claude/skills/librarium/SKILL.md
+```
+
+Or if you installed librarium globally:
+
+```bash
+mkdir -p ~/.claude/skills/librarium
+curl -o ~/.claude/skills/librarium/SKILL.md https://raw.githubusercontent.com/jkudish/librarium/main/SKILL.md
+```
+
+### 7-Phase Research Workflow
+
+The skill guides agents through:
+
+1. **Query Analysis** -- Classify the research question and pick the right provider group
+2. **Provider Selection** -- Match query type to tier (`quick` for facts, `deep` for thorough research, `all` for max coverage)
+3. **Dispatch** -- Run the query with appropriate flags
+4. **Monitor** -- Track async deep-research tasks
+5. **Retrieve** -- Fetch completed async results
+6. **Analyze** -- Read `summary.md`, `sources.json`, and per-provider output files
+7. **Synthesize** -- Cross-reference multi-provider findings, weight by citation frequency
+
+### Agent Prompt
+
+Drop this into any AI agent's system prompt or context to give it librarium capabilities:
+
+```
+You have access to the `librarium` CLI for deep multi-provider research.
+
+To research a topic, run:
+  librarium run "<query>" --group <group>
+
+Groups:
+  quick          — Fast AI-grounded answers (seconds)
+  deep           — Thorough async research (minutes)
+  fast           — Quick results from multiple tiers
+  comprehensive  — Deep + AI-grounded combined
+  all            — All 10 providers
+
+Output lands in ./agents/librarium/<timestamp>-<slug>/:
+  summary.md     — Synthesized overview with stats
+  sources.json   — Deduplicated citations ranked by frequency
+  {provider}.md  — Per-provider detailed results
+  run.json       — Machine-readable manifest
+
+For async deep research, check status with:
+  librarium status --wait
+
+Cross-reference sources appearing in multiple providers for higher confidence.
+```
+
 ## License
 
 MIT
