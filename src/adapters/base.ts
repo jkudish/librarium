@@ -60,7 +60,12 @@ export abstract class BaseProvider implements Provider {
    * Format an HTTP error response with helpful hints
    */
   protected formatError(status: number, data: unknown): string {
-    const body = JSON.stringify(data).slice(0, 200);
+    let body: string;
+    try {
+      body = JSON.stringify(data).slice(0, 200);
+    } catch {
+      body = String(data);
+    }
     const base = `API returned ${status}: ${body}`;
     if (status === 401) {
       return `${base} — check that ${this.envVar} is set and valid`;
@@ -76,7 +81,12 @@ export abstract class BaseProvider implements Provider {
    */
   protected formatCatchError(err: unknown): string {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg === 'fetch failed' || msg === 'Failed to fetch') {
+    if (
+      err instanceof TypeError ||
+      /fetch failed|failed to fetch|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(
+        msg,
+      )
+    ) {
       return `Network error connecting to ${this.displayName} — check your internet connection`;
     }
     return msg;

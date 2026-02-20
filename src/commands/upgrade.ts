@@ -50,14 +50,21 @@ export function registerUpgradeCommand(program: Command): void {
         try {
           execSync('npm install -g librarium@latest', {
             encoding: 'utf-8',
-            timeout: 60_000,
+            timeout: 120_000,
             stdio: 'inherit',
           });
           console.log(`Successfully upgraded to ${latest}.`);
-        } catch {
-          console.error(
-            'Upgrade failed. Try running manually: npm install -g librarium@latest',
-          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/EACCES|permission denied/i.test(msg)) {
+            console.error(
+              'Permission denied. Try: sudo npm install -g librarium@latest',
+            );
+          } else {
+            console.error(
+              'Upgrade failed. Try running manually: npm install -g librarium@latest',
+            );
+          }
           process.exitCode = 1;
         }
       } catch (e) {

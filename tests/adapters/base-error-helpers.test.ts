@@ -52,6 +52,13 @@ describe('BaseProvider error helpers', () => {
       const result = provider.testFormatError(400, longData);
       expect(result.length).toBeLessThan(300);
     });
+
+    it('handles non-serializable data gracefully', () => {
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      const result = provider.testFormatError(500, circular);
+      expect(result).toContain('500');
+    });
   });
 
   describe('formatCatchError', () => {
@@ -69,6 +76,34 @@ describe('BaseProvider error helpers', () => {
     it('replaces Failed to fetch with user-friendly message', () => {
       const result = provider.testFormatCatchError(
         new Error('Failed to fetch'),
+      );
+      expect(result).toContain('Network error');
+    });
+
+    it('catches TypeError (common for network failures)', () => {
+      const result = provider.testFormatCatchError(
+        new TypeError('other network issue'),
+      );
+      expect(result).toContain('Network error');
+    });
+
+    it('catches ENOTFOUND errors', () => {
+      const result = provider.testFormatCatchError(
+        new Error('getaddrinfo ENOTFOUND api.example.com'),
+      );
+      expect(result).toContain('Network error');
+    });
+
+    it('catches ECONNREFUSED errors', () => {
+      const result = provider.testFormatCatchError(
+        new Error('connect ECONNREFUSED 127.0.0.1:443'),
+      );
+      expect(result).toContain('Network error');
+    });
+
+    it('catches ETIMEDOUT errors', () => {
+      const result = provider.testFormatCatchError(
+        new Error('connect ETIMEDOUT 1.2.3.4:443'),
       );
       expect(result).toContain('Network error');
     });
