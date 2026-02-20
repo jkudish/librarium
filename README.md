@@ -32,36 +32,6 @@ librarium run "React Server Components" --group quick
 librarium status --wait
 ```
 
-<details>
-<summary><strong>Agent Prompt</strong> -- drop this into any AI agent's system prompt to give it librarium capabilities</summary>
-
-```
-You have access to the `librarium` CLI for deep multi-provider research.
-
-To research a topic, run:
-  librarium run "<query>" --group <group>
-
-Groups:
-  quick          — Fast AI-grounded answers (seconds)
-  deep           — Thorough async research (minutes)
-  fast           — Quick results from multiple tiers
-  comprehensive  — Deep + AI-grounded combined
-  all            — All 10 providers
-
-Output lands in ./agents/librarium/<timestamp>-<slug>/:
-  summary.md     — Synthesized overview with stats
-  sources.json   — Deduplicated citations ranked by frequency
-  {provider}.md  — Per-provider detailed results
-  run.json       — Machine-readable manifest
-
-For async deep research, check status with:
-  librarium status --wait
-
-Cross-reference sources appearing in multiple providers for higher confidence.
-```
-
-</details>
-
 ## Providers
 
 Librarium ships with 10 provider adapters organized into three tiers:
@@ -376,15 +346,65 @@ Each research run creates a timestamped output directory:
 | `1` | Partial success (some providers failed) |
 | `2` | Total failure (all providers failed, or configuration error) |
 
-## Claude Code Skill
+## Using with AI Agents
 
-Librarium ships with a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that teaches AI agents how to use it effectively via a 7-phase research workflow.
+Librarium is designed to be used by AI coding agents. There are three ways to set it up:
 
-### Install the Skill
+### Option 1: Claude Code Skill (Recommended)
+
+The built-in skill teaches Claude Code how to use librarium through a 7-phase research workflow.
 
 ```bash
+# Install via CLI
+librarium install-skill
+
+# Or manually
 mkdir -p ~/.claude/skills/librarium
 curl -o ~/.claude/skills/librarium/SKILL.md https://raw.githubusercontent.com/jkudish/librarium/main/SKILL.md
+```
+
+Once installed, Claude Code will automatically use librarium when you ask it to research a topic. Triggers: `/librarium`, `/research`, `/deep-research`.
+
+### Option 2: Agent Prompt
+
+Drop this into any AI agent's system prompt to give it librarium capabilities:
+
+```
+You have access to the `librarium` CLI for deep multi-provider research.
+
+To research a topic, run:
+  librarium run "<query>" --group <group>
+
+Groups:
+  quick          — Fast AI-grounded answers (seconds)
+  deep           — Thorough async research (minutes)
+  fast           — Quick results from multiple tiers
+  comprehensive  — Deep + AI-grounded combined
+  all            — All 10 providers
+
+Output lands in ./agents/librarium/<timestamp>-<slug>/:
+  summary.md     — Synthesized overview with stats
+  sources.json   — Deduplicated citations ranked by frequency
+  {provider}.md  — Per-provider detailed results
+  run.json       — Machine-readable manifest
+
+For async deep research, check status with:
+  librarium status --wait
+
+Cross-reference sources appearing in multiple providers for higher confidence.
+```
+
+### Option 3: CLAUDE.md Project Instructions
+
+Add to your project's `CLAUDE.md` for project-scoped research:
+
+```markdown
+## Research
+
+Use `librarium` for research queries. It's installed globally.
+- Quick lookups: `librarium run "query" --group quick`
+- Deep research: `librarium run "query" --group deep --mode sync`
+- Results land in `./agents/librarium/` — read `summary.md` first, then `sources.json` for citations
 ```
 
 ### 7-Phase Research Workflow
@@ -398,6 +418,10 @@ The skill guides agents through:
 5. **Retrieve** -- Fetch completed async results
 6. **Analyze** -- Read `summary.md`, `sources.json`, and per-provider output files
 7. **Synthesize** -- Cross-reference multi-provider findings, weight by citation frequency
+
+## Publishing
+
+The release workflow at `.github/workflows/release.yml` handles npm publishing. It requires a `NPM_TOKEN` repository secret configured in GitHub Settings > Secrets.
 
 ## License
 

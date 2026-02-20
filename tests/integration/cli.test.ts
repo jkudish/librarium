@@ -32,6 +32,7 @@ describe('CLI integration', () => {
       'config',
       'cleanup',
       'upgrade',
+      'install-skill',
     ]) {
       expect(output).toContain(cmd);
     }
