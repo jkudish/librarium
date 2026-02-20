@@ -36,8 +36,21 @@
   "files": [
     "dist"
   ],
+  "keywords": [
+    "research",
+    "search",
+    "deep-research",
+    "multi-provider",
+    "perplexity",
+    "brave",
+    "exa",
+    "tavily",
+    "parallel",
+    "cli"
+  ],
   "license": "MIT",
   "author": "Joey Kudish",
+  "homepage": "https://github.com/jkudish/librarium",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jkudish/librarium.git"

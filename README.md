@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="banner.png" alt="Librarium" width="100%" />
+  <img src="art/gh-og.png" alt="Librarium" width="100%" />
 </p>
 
 # librarium
@@ -31,6 +31,36 @@ librarium run "React Server Components" --group quick
 # Check async deep research status
 librarium status --wait
 ```
+
+<details>
+<summary><strong>Agent Prompt</strong> -- drop this into any AI agent's system prompt to give it librarium capabilities</summary>
+
+```
+You have access to the `librarium` CLI for deep multi-provider research.
+
+To research a topic, run:
+  librarium run "<query>" --group <group>
+
+Groups:
+  quick          — Fast AI-grounded answers (seconds)
+  deep           — Thorough async research (minutes)
+  fast           — Quick results from multiple tiers
+  comprehensive  — Deep + AI-grounded combined
+  all            — All 10 providers
+
+Output lands in ./agents/librarium/<timestamp>-<slug>/:
+  summary.md     — Synthesized overview with stats
+  sources.json   — Deduplicated citations ranked by frequency
+  {provider}.md  — Per-provider detailed results
+  run.json       — Machine-readable manifest
+
+For async deep research, check status with:
+  librarium status --wait
+
+Cross-reference sources appearing in multiple providers for higher confidence.
+```
+
+</details>
 
 ## Providers
 
@@ -348,18 +378,9 @@ Each research run creates a timestamped output directory:
 
 ## Claude Code Skill
 
-Librarium ships with a Claude Code skill that teaches AI agents how to use it effectively via a 7-phase research workflow.
+Librarium ships with a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that teaches AI agents how to use it effectively via a 7-phase research workflow.
 
 ### Install the Skill
-
-Copy the skill file to your Claude Code skills directory:
-
-```bash
-mkdir -p ~/.claude/skills/librarium
-cp SKILL.md ~/.claude/skills/librarium/SKILL.md
-```
-
-Or if you installed librarium globally:
 
 ```bash
 mkdir -p ~/.claude/skills/librarium
@@ -377,35 +398,6 @@ The skill guides agents through:
 5. **Retrieve** -- Fetch completed async results
 6. **Analyze** -- Read `summary.md`, `sources.json`, and per-provider output files
 7. **Synthesize** -- Cross-reference multi-provider findings, weight by citation frequency
-
-### Agent Prompt
-
-Drop this into any AI agent's system prompt or context to give it librarium capabilities:
-
-```
-You have access to the `librarium` CLI for deep multi-provider research.
-
-To research a topic, run:
-  librarium run "<query>" --group <group>
-
-Groups:
-  quick          — Fast AI-grounded answers (seconds)
-  deep           — Thorough async research (minutes)
-  fast           — Quick results from multiple tiers
-  comprehensive  — Deep + AI-grounded combined
-  all            — All 10 providers
-
-Output lands in ./agents/librarium/<timestamp>-<slug>/:
-  summary.md     — Synthesized overview with stats
-  sources.json   — Deduplicated citations ranked by frequency
-  {provider}.md  — Per-provider detailed results
-  run.json       — Machine-readable manifest
-
-For async deep research, check status with:
-  librarium status --wait
-
-Cross-reference sources appearing in multiple providers for higher confidence.
-```
 
 ## License
 
