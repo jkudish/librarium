@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="banner.png" alt="Librarium" width="100%" />
+</p>
+
 # librarium
 
 Fan out research queries to multiple search and deep-research APIs in parallel.
