@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] - 2026-02-21
 
+### Fixed
+- Various bug fixes
+
+
+
+## [0.1.0] - 2026-02-21
+
 ### Added
 - Multi-provider parallel dispatch with `p-limit` and progress callbacks
 - 10 provider adapters across three tiers: deep-research (Perplexity Deep, OpenAI Deep, Gemini Deep), ai-grounded (Perplexity Sonar, Brave Answers, Exa), raw-search (Brave Search, SearchAPI, SerpAPI, Tavily)
