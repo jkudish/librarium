@@ -46,12 +46,26 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux — full suite
           - os: ubuntu-latest
             node-version: 20
+            run-integration: true
           - os: ubuntu-latest
             node-version: 22
+            run-integration: true
           - os: ubuntu-latest
             node-version: 24
+            run-integration: true
+          # Windows — unit tests only
+          - os: windows-latest
+            node-version: 20
+            run-integration: false
+          - os: windows-latest
+            node-version: 22
+            run-integration: false
+          - os: windows-latest
+            node-version: 24
+            run-integration: false
 
     steps:
       - name: Checkout
@@ -77,5 +91,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Unit tests
         run: npm run test
+
+      - name: Integration tests
+        if: matrix.run-integration
+        run: npm run test:integration

@@ -10,6 +10,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/ tests/",
@@ -54,5 +55,11 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jkudish/librarium.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jkudish/librarium/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

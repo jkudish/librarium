@@ -109,7 +109,7 @@ export class OpenAIDeepProvider extends BaseProvider {
         content: '',
         citations: [],
         durationMs,
-        error: err instanceof Error ? err.message : String(err),
+        error: this.formatCatchError(err),
       };
     }
   }
@@ -136,9 +136,7 @@ export class OpenAIDeepProvider extends BaseProvider {
     );
 
     if (response.status !== 200) {
-      throw new Error(
-        `OpenAI submit failed with ${response.status}: ${JSON.stringify(response.data)}`,
-      );
+      throw new Error(this.formatError(response.status, response.data));
     }
 
     const data = response.data;
@@ -231,7 +229,7 @@ export class OpenAIDeepProvider extends BaseProvider {
         content: '',
         citations: [],
         durationMs,
-        error: err instanceof Error ? err.message : String(err),
+        error: this.formatCatchError(err),
       };
     }
   }
