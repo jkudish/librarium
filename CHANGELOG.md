@@ -10,22 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-02-21
 
 ### Added
-- Standalone binaries via Node.js Single Executable Applications (SEA) for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64)
-- Curl-based installer script (`scripts/install.sh`) for one-line binary installation
-- Homebrew tap (`brew install jkudish/tap/librarium`) for macOS and Linux
-- Install method detection (`detectInstallMethod()`) supporting npm, pnpm, yarn, Homebrew, and standalone binary
-- Multi-method upgrade command — `librarium upgrade` auto-detects install method and uses the correct upgrade path
-- GitHub Releases with platform binaries attached automatically on release
-- `build:sea` script for building standalone executables locally
-
-### Changed
-- Upgrade command now checks GitHub Releases API instead of npm registry (works for all install methods)
-- Upgrade command displays detected install method in output
-
-
-## [0.1.0] - 2026-02-21
-
-### Added
 - Multi-provider parallel dispatch with `p-limit` and progress callbacks
 - 10 provider adapters across three tiers: deep-research (Perplexity Deep, OpenAI Deep, Gemini Deep), ai-grounded (Perplexity Sonar, Brave Answers, Exa), raw-search (Brave Search, SearchAPI, SerpAPI, Tavily)
 - Mixed async mode: sync providers return immediately, deep-research providers submit background tasks
@@ -38,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Async task management with `status --wait` polling and `status --retrieve` for completed results
 - Claude Code skill (`SKILL.md`) with 7-phase research workflow
 - Atomic file writes via temp+rename pattern
+- Standalone binaries via Node.js Single Executable Applications (SEA) for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64)
+- Curl-based installer script (`scripts/install.sh`) for one-line binary installation
+- Homebrew tap (`brew install jkudish/tap/librarium`) for macOS and Linux
+- Install method detection (`detectInstallMethod()`) supporting npm, pnpm, yarn, Homebrew, and standalone binary
+- Multi-method upgrade command — `librarium upgrade` auto-detects install method and uses the correct upgrade path
+- GitHub Releases with platform binaries attached automatically on release
+- `build:sea` script for building standalone executables locally
 
 ### Security
 - Sanitize provider IDs before use in filenames
