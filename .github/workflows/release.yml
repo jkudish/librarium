@@ -99,15 +99,15 @@ jobs:
       - name: Commit version bump and changelog
         run: |
           git add package.json package-lock.json CHANGELOG.md
-          git commit -m "Release v${{ steps.version.outputs.number }}"
+          git diff --cached --quiet || git commit -m "Release v${{ steps.version.outputs.number }}"
 
       - name: Create and push tag
         run: |
-          git tag "v${{ steps.version.outputs.number }}"
-          git push origin "v${{ steps.version.outputs.number }}"
+          git tag -f "v${{ steps.version.outputs.number }}"
+          git push origin "v${{ steps.version.outputs.number }}" --force
 
       - name: Push to main
-        run: git push
+        run: git push || true
 
       - name: Build
         run: npm run build
