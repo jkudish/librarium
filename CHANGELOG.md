@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-02-21
+
 ### Added
 - Standalone binaries via Node.js Single Executable Applications (SEA) for Linux (x64, arm64), macOS (x64, arm64), and Windows (x64)
 - Curl-based installer script (`scripts/install.sh`) for one-line binary installation
@@ -19,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Upgrade command now checks GitHub Releases API instead of npm registry (works for all install methods)
 - Upgrade command displays detected install method in output
+
 
 ## [0.1.0] - 2026-02-21
 
