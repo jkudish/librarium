@@ -89,7 +89,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version in package.json
-        run: npm version ${{ steps.version.outputs.number }} --no-git-tag-version
+        run: npm version ${{ steps.version.outputs.number }} --no-git-tag-version --allow-same-version
 
       - name: Update changelog
         run: .github/scripts/parse-changelog.sh release ${{ steps.version.outputs.number }}
