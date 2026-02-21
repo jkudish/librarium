@@ -47,6 +47,8 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     if: github.actor == 'jkudish'
+    outputs:
+      version: ${{ steps.version.outputs.number }}
 
     steps:
       - name: Checkout
@@ -114,3 +116,151 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.number }}" \
+            --title "v${{ steps.version.outputs.number }}" \
+            --notes "See [CHANGELOG.md](https://github.com/jkudish/librarium/blob/main/CHANGELOG.md) for details." \
+            --latest
+
+  build-binaries:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            binary: librarium-linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            binary: librarium-linux-arm64
+          - os: macos-13
+            platform: darwin
+            arch: x64
+            binary: librarium-macos-x64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+            binary: librarium-macos-arm64
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            binary: librarium-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SEA binary
+        run: npm run build:sea
+
+      - name: Verify binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.platform }}" == "win32" ]]; then
+            ./dist/${{ matrix.binary }} --version
+          else
+            chmod +x ./dist/${{ matrix.binary }}
+            ./dist/${{ matrix.binary }} --version
+          fi
+
+      - name: Upload binary to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.version }}" "./dist/${{ matrix.binary }}" --clobber
+
+  update-homebrew:
+    needs: [release, build-binaries]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download binaries and compute SHAs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          BASE_URL="https://github.com/jkudish/librarium/releases/download/v${VERSION}"
+
+          mkdir -p binaries
+          for binary in librarium-macos-arm64 librarium-macos-x64 librarium-linux-arm64 librarium-linux-x64; do
+            curl -fsSL -o "binaries/${binary}" "${BASE_URL}/${binary}"
+          done
+
+          echo "SHA_MACOS_ARM64=$(sha256sum binaries/librarium-macos-arm64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          echo "SHA_MACOS_X64=$(sha256sum binaries/librarium-macos-x64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_ARM64=$(sha256sum binaries/librarium-linux-arm64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_X64=$(sha256sum binaries/librarium-linux-x64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Update Homebrew formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/jkudish/homebrew-tap.git" tap
+          cd tap
+
+          mkdir -p Formula
+          cat > Formula/librarium.rb << RUBY
+          class Librarium < Formula
+            desc "Fan out research queries to multiple search and deep-research APIs in parallel"
+            homepage "https://github.com/jkudish/librarium"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-macos-arm64"
+                sha256 "${SHA_MACOS_ARM64}"
+              else
+                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-macos-x64"
+                sha256 "${SHA_MACOS_X64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-linux-arm64"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-linux-x64"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+
+            def install
+              binary_name = "librarium"
+              bin.install Dir["librarium-*"].first => binary_name
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/librarium --version")
+            end
+          end
+          RUBY
+
+          # Fix indentation (heredoc adds extra spaces)
+          sed -i 's/^          //' Formula/librarium.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/librarium.rb
+          git commit -m "Update librarium to v${VERSION}" || echo "No changes to commit"
+          git push

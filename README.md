@@ -10,11 +10,49 @@ Inspired by Aaron Francis' [counselors](https://github.com/aarondfrancis/counsel
 
 ## Installation
 
+### npm (requires Node.js >= 20)
+
 ```bash
 npm install -g librarium
 ```
 
-Requires Node.js >= 20.
+### pnpm
+
+```bash
+pnpm install -g librarium
+```
+
+### yarn
+
+```bash
+yarn global add librarium
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install jkudish/tap/librarium
+```
+
+### Standalone binary
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh
+```
+
+### npx (no install)
+
+```bash
+npx librarium run "your query"
+```
+
+### Upgrade
+
+```bash
+librarium upgrade
+```
+
+Auto-detects your install method (npm, pnpm, yarn, Homebrew, standalone) and runs the correct upgrade command.
 
 ## Quick Start
 

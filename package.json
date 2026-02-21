@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:sea": "node scripts/build-sea.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -25,6 +26,8 @@
     "strip-ansi": "^7.1.0"
   },
   "devDependencies": {
+    "esbuild": "^0.24.0",
+    "postject": "^1.0.0-alpha.6",
     "tsup": "^8.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",

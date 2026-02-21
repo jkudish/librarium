@@ -34,4 +34,11 @@ describe('upgrade command', () => {
     const forceOption = cmd?.options.find((o) => o.long === '--force');
     expect(forceOption).toBeDefined();
   });
+
+  it('description mentions updates', () => {
+    const program = new Command();
+    registerUpgradeCommand(program);
+    const cmd = program.commands.find((c) => c.name() === 'upgrade');
+    expect(cmd?.description()).toContain('updates');
+  });
 });
