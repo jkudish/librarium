@@ -121,6 +121,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh release view "v${{ steps.version.outputs.number }}" >/dev/null 2>&1 || \
           gh release create "v${{ steps.version.outputs.number }}" \
             --title "v${{ steps.version.outputs.number }}" \
             --notes "See [CHANGELOG.md](https://github.com/jkudish/librarium/blob/main/CHANGELOG.md) for details." \
@@ -140,7 +141,7 @@ jobs:
             platform: linux
             arch: arm64
             binary: librarium-linux-arm64
-          - os: macos-13
+          - os: macos-14-large
             platform: darwin
             arch: x64
             binary: librarium-macos-x64
@@ -190,6 +191,7 @@ jobs:
   update-homebrew:
     needs: [release, build-binaries]
     runs-on: ubuntu-latest
+    if: always() && needs.release.result == 'success'
 
     steps:
       - name: Download binaries and compute SHAs
