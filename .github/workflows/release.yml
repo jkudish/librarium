@@ -273,3 +273,129 @@ jobs:
           git add Formula/librarium.rb
           git commit -m "Update librarium to v${VERSION}" || echo "No changes to commit"
           git push origin main
+
+  smoke-test-installs:
+    needs: [release, build-binaries, update-homebrew]
+    if: always() && needs.release.result == 'success'
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        method:
+          - npm
+          - standalone
+          - homebrew
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+
+    steps:
+      - name: Smoke test npm install
+        if: matrix.method == 'npm'
+        run: |
+          set -euo pipefail
+          PREFIX="$RUNNER_TEMP/librarium-npm"
+          rm -rf "$PREFIX"
+
+          for attempt in $(seq 1 8); do
+            if npm install -g "librarium@${VERSION}" --prefix "$PREFIX"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 8 ]; then
+              echo "npm install failed after retries."
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          "$PREFIX/bin/librarium" --help >/dev/null
+          INSTALLED="$("$PREFIX/bin/librarium" --version)"
+          if [ "$INSTALLED" != "$VERSION" ]; then
+            echo "Version mismatch: expected $VERSION, got $INSTALLED"
+            exit 1
+          fi
+          echo "npm install smoke test passed: $INSTALLED"
+
+      - name: Smoke test standalone install
+        if: matrix.method == 'standalone'
+        run: |
+          set -euo pipefail
+          INSTALL_DIR="$RUNNER_TEMP/librarium-standalone"
+          SCRIPT="$RUNNER_TEMP/librarium-install.sh"
+
+          for attempt in $(seq 1 8); do
+            if curl -fsSL "https://raw.githubusercontent.com/jkudish/librarium/v${VERSION}/scripts/install.sh" -o "$SCRIPT"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 8 ]; then
+              echo "Failed to download install.sh after retries."
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          chmod +x "$SCRIPT"
+          rm -rf "$INSTALL_DIR"
+          mkdir -p "$INSTALL_DIR"
+
+          for attempt in $(seq 1 8); do
+            if LIBRARIUM_INSTALL_DIR="$INSTALL_DIR" LIBRARIUM_VERSION="$VERSION" bash "$SCRIPT"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 8 ]; then
+              echo "Standalone install failed after retries."
+              exit 1
+            fi
+
+            rm -f "$INSTALL_DIR/librarium"
+            sleep 10
+          done
+
+          "$INSTALL_DIR/librarium" --help >/dev/null
+          INSTALLED="$("$INSTALL_DIR/librarium" --version)"
+          if [ "$INSTALLED" != "$VERSION" ]; then
+            echo "Version mismatch: expected $VERSION, got $INSTALLED"
+            exit 1
+          fi
+          echo "Standalone install smoke test passed: $INSTALLED"
+
+      - name: Smoke test Homebrew install
+        if: matrix.method == 'homebrew'
+        run: |
+          set -euo pipefail
+
+          brew tap jkudish/tap
+
+          for attempt in $(seq 1 8); do
+            if brew list --versions librarium >/dev/null 2>&1; then
+              brew upgrade jkudish/tap/librarium || true
+            else
+              brew install jkudish/tap/librarium || true
+            fi
+
+            INSTALLED_VERSION="$(brew list --versions librarium 2>/dev/null | awk '{print $2}')"
+            if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
+              break
+            fi
+
+            if [ "$attempt" -eq 8 ]; then
+              echo "Homebrew install failed after retries."
+              exit 1
+            fi
+
+            brew uninstall librarium --force >/dev/null 2>&1 || true
+            sleep 15
+          done
+
+          BREW_BIN="$(brew --prefix librarium)/bin/librarium"
+          "$BREW_BIN" --help >/dev/null
+          INSTALLED="$("$BREW_BIN" --version)"
+          if [ "$INSTALLED" != "$VERSION" ]; then
+            echo "Version mismatch: expected $VERSION, got $INSTALLED"
+            exit 1
+          fi
+          echo "Homebrew install smoke test passed: $INSTALLED"
