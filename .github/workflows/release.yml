@@ -93,8 +93,14 @@ jobs:
       - name: Bump version in package.json
         run: npm version ${{ steps.version.outputs.number }} --no-git-tag-version --allow-same-version
 
-      - name: Update changelog
-        run: .github/scripts/parse-changelog.sh release ${{ steps.version.outputs.number }}
+      - name: Update changelog (skip if Unreleased is empty)
+        run: |
+          UNRELEASED=$(awk '/^## \[Unreleased\]/{c=1;next}/^## \[/{c=0}c' CHANGELOG.md | grep -v '^[[:space:]]*$' | grep -v '^###' || true)
+          if [ -n "$UNRELEASED" ]; then
+            .github/scripts/parse-changelog.sh release ${{ steps.version.outputs.number }}
+          else
+            echo "No unreleased changes — skipping changelog update"
+          fi
 
       - name: Commit version bump and changelog
         run: |
