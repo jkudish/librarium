@@ -211,7 +211,24 @@ export async function dispatch(
               error: result.error,
             };
             reports.push(report);
-            onProgress?.({ providerId: id, event: 'completed', report });
+
+            if (result.error) {
+              const fallbackReport = await tryFallback(id, report);
+              if (fallbackReport) {
+                reports.push(fallbackReport);
+                if (fallbackReport.status === 'success') {
+                  onProgress?.({
+                    providerId: fallbackReport.id,
+                    event: 'completed',
+                    report: fallbackReport,
+                  });
+                } else {
+                  onProgress?.({ providerId: fallbackReport.id, event: 'error' });
+                }
+              }
+            }
+
+            onProgress?.({ providerId: id, event: result.error ? 'error' : 'completed', report });
             return;
           }
 
