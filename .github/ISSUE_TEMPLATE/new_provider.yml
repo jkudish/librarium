@@ -1,0 +1,52 @@
+name: New Provider Request
+description: Request support for a new search or research API provider
+labels: ["new-provider"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        librarium supports three provider tiers: **deep-research** (async, thorough), **ai-grounded** (fast, cited), and **raw-search** (results only). If you know of an API that fits one of these tiers, open a request here.
+
+  - type: input
+    id: provider_name
+    attributes:
+      label: Provider name
+      placeholder: "e.g. You.com Research, Kagi, Bing Web Search"
+    validations:
+      required: true
+
+  - type: input
+    id: provider_url
+    attributes:
+      label: Provider API docs URL
+    validations:
+      required: false
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which tier does this fit?
+      options:
+        - deep-research (async, thorough synthesis)
+        - ai-grounded (fast, AI-summarized with citations)
+        - raw-search (search results only)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would this provider be valuable?
+      description: What does it do better than existing providers? What use cases does it unlock?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing_to_contribute
+    attributes:
+      label: Are you willing to contribute the adapter?
+      options:
+        - label: Yes, I can open a PR with the implementation
+        - label: I can help test it but not implement it
+        - label: Just requesting — happy for someone else to pick it up
