@@ -91,6 +91,7 @@ export const ProviderConfigSchema = z.object({
   enabled: z.boolean().default(true),
   model: z.string().optional(),
   options: z.record(z.unknown()).optional(),
+  fallback: z.string().optional(),
 });
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
@@ -154,6 +155,7 @@ export interface ProviderReport {
   outputFile: string;
   metaFile: string;
   error?: string;
+  fallbackFor?: string;
 }
 
 // Deduplicated source entry in sources.json
@@ -168,6 +170,11 @@ export interface DeduplicatedSource {
 // Progress events from dispatcher
 export interface ProgressEvent {
   providerId: string;
-  event: 'started' | 'completed' | 'error' | 'async-submitted';
+  event:
+    | 'started'
+    | 'completed'
+    | 'error'
+    | 'async-submitted'
+    | 'fallback-started';
   report?: ProviderReport;
 }

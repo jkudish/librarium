@@ -96,6 +96,8 @@ export function registerRunCommand(program: Command): void {
               spinner.text = `Running: ${event.providerId}...`;
             } else if (event.event === 'completed') {
               spinner.text = `Completed: ${event.providerId}`;
+            } else if (event.event === 'fallback-started') {
+              spinner.text = `Falling back: ${event.report?.id} → ${event.providerId}...`;
             }
           },
         });
@@ -130,12 +132,26 @@ export function registerRunCommand(program: Command): void {
           saveAsyncTasks(outputDir, asyncTasks);
         }
 
-        // Determine exit code
-        const successCount = reports.filter(
+        // Determine exit code. When a primary fails but its fallback succeeds,
+        // the user's intent was fully satisfied — exclude the recovered primary's
+        // error report so it doesn't inflate the failure count.
+        const recoveredPrimaries = new Set(
+          reports
+            .filter((r) => r.fallbackFor && r.status === 'success')
+            .map((r) => r.fallbackFor as string),
+        );
+        const effectiveReports = reports.filter(
+          (r) => !recoveredPrimaries.has(r.id),
+        );
+        const successCount = effectiveReports.filter(
           (r) => r.status === 'success' || r.status === 'async-pending',
         ).length;
         const exitCode =
-          successCount === 0 ? 2 : successCount < reports.length ? 1 : 0;
+          successCount === 0
+            ? 2
+            : successCount < effectiveReports.length
+              ? 1
+              : 0;
 
         // Write run manifest
         const timestamp = Math.floor(Date.now() / 1000);
@@ -172,10 +188,14 @@ export function registerRunCommand(program: Command): void {
 
         spinner.succeed(`Research complete: ${outputDir}`);
 
-        // Print summary
-        const successful = reports.filter((r) => r.status === 'success');
-        const failed = reports.filter((r) => r.status === 'error');
-        const pending = reports.filter((r) => r.status === 'async-pending');
+        // Print summary (exclude recovered primaries so they don't show as failures)
+        const successful = effectiveReports.filter(
+          (r) => r.status === 'success',
+        );
+        const failed = effectiveReports.filter((r) => r.status === 'error');
+        const pending = effectiveReports.filter(
+          (r) => r.status === 'async-pending',
+        );
         console.log(
           `  ${successful.length} succeeded, ${failed.length} failed, ${pending.length} async pending`,
         );

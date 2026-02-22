@@ -8,6 +8,7 @@ import {
   loadConfig,
   mergeConfigs,
   resolveEnvVar,
+  validateFallbacks,
 } from '../src/core/config.js';
 import type { Config, ProjectConfig } from '../src/types.js';
 
@@ -184,5 +185,100 @@ describe('hasApiKey', () => {
 
   it('returns true for non-$ string (treated as literal key)', () => {
     expect(hasApiKey('literal-api-key')).toBe(true);
+  });
+});
+
+describe('validateFallbacks', () => {
+  const makeConfig = (
+    providers: Record<
+      string,
+      { apiKey: string; enabled: boolean; fallback?: string }
+    >,
+  ): Config => ({
+    version: 1,
+    defaults: {
+      outputDir: './agents/librarium',
+      maxParallel: 6,
+      timeout: 30,
+      asyncTimeout: 1800,
+      asyncPollInterval: 10,
+      mode: 'mixed',
+    },
+    providers,
+    groups: {},
+  });
+
+  it('returns no warnings for valid fallback reference', () => {
+    const config = makeConfig({
+      'gemini-deep': {
+        apiKey: '$GEMINI_API_KEY',
+        enabled: true,
+        fallback: 'gemini-flash',
+      },
+      'gemini-flash': {
+        apiKey: '$GEMINI_API_KEY',
+        enabled: false,
+      },
+    });
+    expect(validateFallbacks(config)).toEqual([]);
+  });
+
+  it('warns on unknown fallback provider', () => {
+    const config = makeConfig({
+      'gemini-deep': {
+        apiKey: '$GEMINI_API_KEY',
+        enabled: true,
+        fallback: 'nonexistent-provider',
+      },
+    });
+    const warnings = validateFallbacks(config);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('unknown fallback provider');
+    expect(warnings[0]).toContain('nonexistent-provider');
+  });
+
+  it('warns on self-referencing fallback', () => {
+    const config = makeConfig({
+      'gemini-deep': {
+        apiKey: '$GEMINI_API_KEY',
+        enabled: true,
+        fallback: 'gemini-deep',
+      },
+    });
+    const warnings = validateFallbacks(config);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('self-referencing fallback');
+  });
+
+  it('warns on fallback chain', () => {
+    const config = makeConfig({
+      'gemini-deep': {
+        apiKey: '$GEMINI_API_KEY',
+        enabled: true,
+        fallback: 'gemini-flash',
+      },
+      'gemini-flash': {
+        apiKey: '$GEMINI_API_KEY',
+        enabled: false,
+        fallback: 'perplexity-sonar',
+      },
+      'perplexity-sonar': {
+        apiKey: '$PERPLEXITY_API_KEY',
+        enabled: true,
+      },
+    });
+    const warnings = validateFallbacks(config);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('only single-level fallback is supported');
+  });
+
+  it('returns no warnings when no fallbacks are configured', () => {
+    const config = makeConfig({
+      'perplexity-sonar': {
+        apiKey: '$PERPLEXITY_API_KEY',
+        enabled: true,
+      },
+    });
+    expect(validateFallbacks(config)).toEqual([]);
   });
 });

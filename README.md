@@ -267,6 +267,45 @@ Librarium supports three execution modes, configurable via `--mode` or the `defa
 
 - **`mixed`** (default) -- Run ai-grounded and raw-search providers synchronously. Submit deep-research providers asynchronously. You get fast results right away and can retrieve deep research later.
 
+## Provider Fallback
+
+When a provider fails for any reason (exception, error response, timeout), librarium can automatically try a lighter alternative. Add an optional `fallback` field to any provider's config:
+
+```json
+{
+  "providers": {
+    "gemini-deep": {
+      "apiKey": "$GEMINI_API_KEY",
+      "enabled": true,
+      "fallback": "gemini-flash"
+    },
+    "gemini-flash": {
+      "apiKey": "$GEMINI_API_KEY",
+      "enabled": false
+    }
+  }
+}
+```
+
+**Behavior:**
+
+- Fallback triggers after the primary provider's execution fails (error or timeout)
+- Only single-level fallback is supported (a fallback's own fallback is ignored)
+- The fallback provider must be configured with a valid API key but can be `enabled: false` (it will only activate as a backup)
+- If the fallback provider is already running in the same dispatch (e.g., explicitly listed in `--providers`), it won't be triggered again
+- Output files use the fallback provider's ID (e.g., `gemini-flash.md`)
+
+**In `run.json`**, both the original error report and the fallback result appear in the `providers` array. The fallback report includes a `fallbackFor` field indicating which provider it replaced:
+
+```json
+{
+  "id": "gemini-flash",
+  "tier": "ai-grounded",
+  "status": "success",
+  "fallbackFor": "gemini-deep"
+}
+```
+
 ## Configuration
 
 Librarium uses a layered configuration system:
