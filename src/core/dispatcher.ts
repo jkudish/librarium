@@ -33,6 +33,10 @@ export async function dispatch(
   const limit = pLimit(config.defaults.maxParallel);
   const reports: ProviderReport[] = [];
   const asyncTasks: AsyncTaskHandle[] = [];
+  // Track fallback IDs already claimed to prevent two failing providers from
+  // both triggering the same fallback concurrently (check+add is sync, no await
+  // between them, so this is race-free despite the async event loop).
+  const usedFallbacks = new Set<string>();
 
   // Execute a fallback provider, returning its report (with fallbackFor set)
   async function executeFallback(
@@ -110,8 +114,17 @@ export async function dispatch(
     const fallbackConfig = config.providers[fallbackId];
     if (!fallbackConfig || !hasApiKey(fallbackConfig.apiKey)) return null;
 
-    // Don't use a fallback that's already running in this dispatch
+    // Don't use a fallback that's already running as a primary in this dispatch
     if (providerIds.includes(fallbackId)) return null;
+
+    // Claim this fallback atomically (synchronous check+add before any await)
+    // to prevent two concurrently failing providers from both triggering the
+    // same fallback target.
+    if (usedFallbacks.has(fallbackId)) return null;
+    usedFallbacks.add(fallbackId);
+
+    // Note: enabled is intentionally not checked here — fallback providers may
+    // be configured with enabled: false so they only activate as backups.
 
     onProgress?.({
       providerId: fallbackId,

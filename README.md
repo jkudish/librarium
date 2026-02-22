@@ -269,7 +269,7 @@ Librarium supports three execution modes, configurable via `--mode` or the `defa
 
 ## Provider Fallback
 
-When a provider fails (429 rate limit, 5xx server error, timeout), librarium can automatically try a lighter alternative. Add an optional `fallback` field to any provider's config:
+When a provider fails for any reason (exception, error response, timeout), librarium can automatically try a lighter alternative. Add an optional `fallback` field to any provider's config:
 
 ```json
 {
