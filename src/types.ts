@@ -170,6 +170,11 @@ export interface DeduplicatedSource {
 // Progress events from dispatcher
 export interface ProgressEvent {
   providerId: string;
-  event: 'started' | 'completed' | 'error' | 'async-submitted' | 'fallback-started';
+  event:
+    | 'started'
+    | 'completed'
+    | 'error'
+    | 'async-submitted'
+    | 'fallback-started';
   report?: ProviderReport;
 }
