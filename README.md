@@ -6,6 +6,12 @@
 
 Fan out research queries to multiple search and deep-research APIs in parallel.
 
+<p align="center">
+  <a href="https://github.com/sponsors/jkudish">
+    <img src="https://img.shields.io/badge/Sponsor-❤-ea4aaa?style=flat-square&logo=github-sponsors" alt="Sponsor librarium" />
+  </a>
+</p>
+
 Inspired by Aaron Francis' [counselors](https://github.com/aarondfrancis/counselors), librarium applies the same fan-out pattern to search APIs. Where counselors fans out prompts to multiple LLM CLIs, librarium fans out research queries to search engines, AI-grounded search, and deep-research APIs -- collecting, normalizing, and deduplicating results into structured output.
 
 ## Installation
