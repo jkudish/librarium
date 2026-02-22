@@ -72,7 +72,7 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 10 provider adapters organized into three tiers:
+Librarium ships with 11 provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
@@ -85,6 +85,7 @@ Librarium ships with 10 provider adapters organized into three tiers:
 | Brave Web Search | `brave-search` | raw-search | `BRAVE_API_KEY` |
 | SearchAPI | `searchapi` | raw-search | `SEARCHAPI_API_KEY` |
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
+| Synthetic Search | `synthetic` | raw-search | `SYNTHETIC_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
 
 ## Provider Tiers
@@ -236,10 +237,10 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 |---|---|---|
 | `deep` | perplexity-deep, openai-deep, gemini-deep | Thorough async research |
 | `quick` | perplexity-sonar, brave-answers, exa | Fast AI-grounded answers |
-| `raw` | brave-search, searchapi, serpapi, tavily | Traditional search results |
+| `raw` | brave-search, searchapi, serpapi, synthetic, tavily | Traditional search results |
 | `fast` | perplexity-sonar, brave-answers, exa, brave-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `all` | All 10 providers | Maximum coverage |
+| `all` | All 11 providers | Maximum coverage |
 
 ### Custom Groups
 
@@ -418,7 +419,7 @@ Groups:
   deep           — Thorough async research (minutes)
   fast           — Quick results from multiple tiers
   comprehensive  — Deep + AI-grounded combined
-  all            — All 10 providers
+  all            — All 11 providers
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     — Synthesized overview with stats

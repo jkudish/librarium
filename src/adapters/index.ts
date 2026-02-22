@@ -66,7 +66,7 @@ export function getProviderMeta(
 
 /**
  * Initialize all providers — called at startup.
- * Instantiates and registers all 10 provider adapters.
+ * Instantiates and registers all 11 provider adapters.
  */
 export async function initializeProviders(): Promise<void> {
   // Deep Research (async capable)

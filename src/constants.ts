@@ -69,7 +69,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'brave-answers',
     'exa',
     'brave-search',
-    'synthetic',
     'tavily',
   ],
   comprehensive: [
