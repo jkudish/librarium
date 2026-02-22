@@ -147,7 +147,11 @@ export function registerRunCommand(program: Command): void {
           (r) => r.status === 'success' || r.status === 'async-pending',
         ).length;
         const exitCode =
-          successCount === 0 ? 2 : successCount < effectiveReports.length ? 1 : 0;
+          successCount === 0
+            ? 2
+            : successCount < effectiveReports.length
+              ? 1
+              : 0;
 
         // Write run manifest
         const timestamp = Math.floor(Date.now() / 1000);
@@ -185,9 +189,13 @@ export function registerRunCommand(program: Command): void {
         spinner.succeed(`Research complete: ${outputDir}`);
 
         // Print summary (exclude recovered primaries so they don't show as failures)
-        const successful = effectiveReports.filter((r) => r.status === 'success');
+        const successful = effectiveReports.filter(
+          (r) => r.status === 'success',
+        );
         const failed = effectiveReports.filter((r) => r.status === 'error');
-        const pending = effectiveReports.filter((r) => r.status === 'async-pending');
+        const pending = effectiveReports.filter(
+          (r) => r.status === 'async-pending',
+        );
         console.log(
           `  ${successful.length} succeeded, ${failed.length} failed, ${pending.length} async pending`,
         );
