@@ -249,7 +249,10 @@ export async function dispatch(
             return;
           }
 
-          // Truly async — add to pending queue
+          // Truly async — add to pending queue.
+          // Note: fallback is not supported for tasks that remain pending/running,
+          // since there is no synchronous result to evaluate. Fallback only fires
+          // when a provider completes immediately with an error (handled above).
           asyncTasks.push(handle);
           reports.push({
             id,
