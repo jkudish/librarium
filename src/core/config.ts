@@ -37,6 +37,42 @@ export function resolveEnvVar(value: string): string | undefined {
 }
 
 /**
+ * Validate fallback references in provider config.
+ * Returns an array of warning messages (non-fatal).
+ */
+export function validateFallbacks(config: Config): string[] {
+  const warnings: string[] = [];
+  const providerIds = Object.keys(config.providers);
+
+  for (const [id, providerConfig] of Object.entries(config.providers)) {
+    const fallbackId = providerConfig.fallback;
+    if (!fallbackId) continue;
+
+    if (fallbackId === id) {
+      warnings.push(`Provider "${id}" has a self-referencing fallback`);
+      continue;
+    }
+
+    if (!providerIds.includes(fallbackId)) {
+      warnings.push(
+        `Provider "${id}" references unknown fallback provider "${fallbackId}"`,
+      );
+      continue;
+    }
+
+    // Check for chains (fallback's fallback)
+    const fallbackConfig = config.providers[fallbackId];
+    if (fallbackConfig?.fallback) {
+      warnings.push(
+        `Provider "${id}" → "${fallbackId}" → "${fallbackConfig.fallback}": only single-level fallback is supported, chain will be ignored`,
+      );
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Load global config from ~/.config/librarium/config.json
  */
 export function loadConfig(globalPath?: string): Config {
@@ -55,6 +91,13 @@ export function loadConfig(globalPath?: string): Config {
   const config = ConfigSchema.parse(raw);
   // Merge default groups with user groups (user groups take priority)
   config.groups = { ...DEFAULT_GROUPS, ...config.groups };
+
+  // Validate fallback references (non-fatal warnings)
+  const warnings = validateFallbacks(config);
+  for (const warning of warnings) {
+    console.error(`[librarium] warning: ${warning}`);
+  }
+
   return config;
 }
 

@@ -96,6 +96,8 @@ export function registerRunCommand(program: Command): void {
               spinner.text = `Running: ${event.providerId}...`;
             } else if (event.event === 'completed') {
               spinner.text = `Completed: ${event.providerId}`;
+            } else if (event.event === 'fallback-started') {
+              spinner.text = `Falling back: ${event.report?.id} → ${event.providerId}...`;
             }
           },
         });
