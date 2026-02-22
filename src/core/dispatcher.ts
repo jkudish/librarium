@@ -213,6 +213,7 @@ export async function dispatch(
             reports.push(report);
 
             if (result.error) {
+              onProgress?.({ providerId: id, event: 'error' });
               const fallbackReport = await tryFallback(id, report);
               if (fallbackReport) {
                 reports.push(fallbackReport);
@@ -223,12 +224,15 @@ export async function dispatch(
                     report: fallbackReport,
                   });
                 } else {
-                  onProgress?.({ providerId: fallbackReport.id, event: 'error' });
+                  onProgress?.({
+                    providerId: fallbackReport.id,
+                    event: 'error',
+                  });
                 }
               }
+            } else {
+              onProgress?.({ providerId: id, event: 'completed', report });
             }
-
-            onProgress?.({ providerId: id, event: result.error ? 'error' : 'completed', report });
             return;
           }
 
@@ -293,7 +297,29 @@ export async function dispatch(
         };
 
         reports.push(report);
-        onProgress?.({ providerId: id, event: 'completed', report });
+
+        // If provider returned an error result (e.g. 401/403), attempt fallback
+        if (result.error) {
+          onProgress?.({ providerId: id, event: 'error' });
+          const fallbackReport = await tryFallback(id, report);
+          if (fallbackReport) {
+            reports.push(fallbackReport);
+            if (fallbackReport.status === 'success') {
+              onProgress?.({
+                providerId: fallbackReport.id,
+                event: 'completed',
+                report: fallbackReport,
+              });
+            } else {
+              onProgress?.({
+                providerId: fallbackReport.id,
+                event: 'error',
+              });
+            }
+          }
+        } else {
+          onProgress?.({ providerId: id, event: 'completed', report });
+        }
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
         const errorReport: ProviderReport = {

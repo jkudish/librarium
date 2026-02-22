@@ -326,4 +326,66 @@ describe('dispatcher fallback', () => {
     const fallbackReports = reports.filter((r) => r.fallbackFor !== undefined);
     expect(fallbackReports).toHaveLength(0);
   });
+
+  it('triggers fallback when provider returns error result without throwing', async () => {
+    process.env.MOCK_PRIMARY_KEY = 'key-primary';
+    process.env.MOCK_FALLBACK_KEY = 'key-fallback';
+
+    // Provider that returns an error result (like most adapters do on 401/403)
+    const errorResultProvider: Provider = {
+      id: 'error-result',
+      displayName: 'Mock error-result',
+      tier: 'ai-grounded',
+      envVar: 'MOCK_PRIMARY_KEY',
+      execute: async (
+        _query: string,
+        _options: ProviderOptions,
+      ): Promise<ProviderResult> => ({
+        provider: 'error-result',
+        tier: 'ai-grounded',
+        content: '',
+        citations: [],
+        durationMs: 100,
+        error: 'API returned 401: Unauthorized',
+      }),
+    };
+
+    const fallback = createSuccessProvider('fallback');
+
+    registerProvider(errorResultProvider);
+    registerProvider(fallback);
+
+    const config = makeConfig({
+      'error-result': {
+        apiKey: '$MOCK_PRIMARY_KEY',
+        enabled: true,
+        fallback: 'fallback',
+      },
+      fallback: {
+        apiKey: '$MOCK_FALLBACK_KEY',
+        enabled: false,
+      },
+    });
+
+    const { reports } = await dispatch({
+      config,
+      providerIds: ['error-result'],
+      query: 'test query',
+      outputDir: tmpDir,
+      mode: 'sync',
+    });
+
+    // Should have two reports: the primary error and the fallback success.
+    expect(reports).toHaveLength(2);
+
+    const primaryReport = reports.find((r) => r.id === 'error-result');
+    expect(primaryReport).toBeDefined();
+    expect(primaryReport!.status).toBe('error');
+    expect(primaryReport!.error).toContain('401');
+
+    const fallbackReport = reports.find((r) => r.id === 'fallback');
+    expect(fallbackReport).toBeDefined();
+    expect(fallbackReport!.status).toBe('success');
+    expect(fallbackReport!.fallbackFor).toBe('error-result');
+  });
 });
