@@ -40,6 +40,7 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
   exa: 'EXA_API_KEY',
   searchapi: 'SEARCHAPI_API_KEY',
   serpapi: 'SERPAPI_API_KEY',
+  synthetic: 'SYNTHETIC_API_KEY',
   tavily: 'TAVILY_API_KEY',
 };
 
@@ -54,6 +55,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   exa: 'Exa Search',
   searchapi: 'SearchAPI',
   serpapi: 'SerpAPI',
+  synthetic: 'Synthetic Search',
   tavily: 'Tavily Search',
 };
 
@@ -61,8 +63,15 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 export const DEFAULT_GROUPS: Record<string, string[]> = {
   deep: ['perplexity-deep', 'openai-deep', 'gemini-deep'],
   quick: ['perplexity-sonar', 'brave-answers', 'exa'],
-  raw: ['brave-search', 'searchapi', 'serpapi', 'tavily'],
-  fast: ['perplexity-sonar', 'brave-answers', 'exa', 'brave-search', 'tavily'],
+  raw: ['brave-search', 'searchapi', 'serpapi', 'synthetic', 'tavily'],
+  fast: [
+    'perplexity-sonar',
+    'brave-answers',
+    'exa',
+    'brave-search',
+    'synthetic',
+    'tavily',
+  ],
   comprehensive: [
     'perplexity-deep',
     'openai-deep',
@@ -81,6 +90,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'brave-search',
     'searchapi',
     'serpapi',
+    'synthetic',
     'tavily',
   ],
 };

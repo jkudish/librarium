@@ -10,6 +10,7 @@ import { PerplexityDeepProvider } from './perplexity-deep.js';
 import { PerplexitySonarProvider } from './perplexity-sonar.js';
 import { SearchApiProvider } from './searchapi.js';
 import { SerpApiProvider } from './serpapi.js';
+import { SyntheticProvider } from './synthetic.js';
 import { TavilyProvider } from './tavily.js';
 
 const providers = new Map<string, Provider>();
@@ -82,5 +83,6 @@ export async function initializeProviders(): Promise<void> {
   registerProvider(new BraveSearchProvider());
   registerProvider(new SearchApiProvider());
   registerProvider(new SerpApiProvider());
+  registerProvider(new SyntheticProvider());
   registerProvider(new TavilyProvider());
 }

@@ -119,10 +119,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 10 providers', async () => {
+  it('initializeProviders registers all 11 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(10);
+    expect(all).toHaveLength(11);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-deep');
@@ -134,6 +134,7 @@ describe('registry', () => {
     expect(ids).toContain('brave-search');
     expect(ids).toContain('searchapi');
     expect(ids).toContain('serpapi');
+    expect(ids).toContain('synthetic');
     expect(ids).toContain('tavily');
   });
 });
