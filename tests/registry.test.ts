@@ -119,10 +119,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 12 providers', async () => {
+  it('initializeProviders registers all 13 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(12);
+    expect(all).toHaveLength(13);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -133,6 +133,7 @@ describe('registry', () => {
     expect(ids).toContain('perplexity-sonar-pro');
     expect(ids).toContain('brave-answers');
     expect(ids).toContain('exa');
+    expect(ids).toContain('perplexity-search');
     expect(ids).toContain('brave-search');
     expect(ids).toContain('searchapi');
     expect(ids).toContain('serpapi');

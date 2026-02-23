@@ -81,7 +81,7 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 |------|-----------|-------|-------|
 | deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, gemini-deep | Minutes | Comprehensive |
 | ai-grounded | perplexity-sonar-pro, brave-answers, exa | Seconds | Good |
-| raw-search | brave-search, searchapi, serpapi, tavily | Fast | Links only |
+| raw-search | perplexity-search, brave-search, searchapi, serpapi, tavily | Fast | Links only |
 
 ## Output Structure
 

@@ -69,6 +69,7 @@ body:
         - openai-deep
         - gemini-deep
         - perplexity-sonar-pro
+        - perplexity-search
         - brave-answers
         - exa
         - brave-search
