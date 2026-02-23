@@ -36,8 +36,6 @@ export function registerRunCommand(program: Command): void {
       const spinner = ora('Initializing providers...').start();
 
       try {
-        await initializeProviders();
-
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const cliFlags: Partial<Defaults> = {};
@@ -47,6 +45,7 @@ export function registerRunCommand(program: Command): void {
         if (opts.mode) cliFlags.mode = opts.mode;
 
         const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
+        await initializeProviders(config.providers);
 
         // Resolve provider list
         let providerIds: string[];

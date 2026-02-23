@@ -14,6 +14,8 @@ import { TavilyProvider } from './tavily.js';
 
 const providers = new Map<string, Provider>();
 
+type ProviderInitConfig = Record<string, { model?: string }>;
+
 /**
  * Register a provider in the registry
  */
@@ -67,11 +69,17 @@ export function getProviderMeta(
  * Initialize all providers — called at startup.
  * Instantiates and registers all 10 provider adapters.
  */
-export async function initializeProviders(): Promise<void> {
+export async function initializeProviders(
+  config: ProviderInitConfig = {},
+): Promise<void> {
+  providers.clear();
+
   // Deep Research (async capable)
   registerProvider(new PerplexityDeepProvider());
   registerProvider(new OpenAIDeepProvider());
-  registerProvider(new GeminiDeepProvider());
+  registerProvider(
+    new GeminiDeepProvider({ model: config['gemini-deep']?.model }),
+  );
 
   // AI-Grounded Search (sync)
   registerProvider(new PerplexitySonarProvider());

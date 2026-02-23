@@ -39,16 +39,28 @@ interface GeminiResponse {
   error?: { message?: string; code?: number };
 }
 
+interface GeminiDeepProviderOptions {
+  model?: string;
+}
+
+const DEFAULT_GEMINI_DEEP_MODEL = 'gemini-2.5-flash';
+
 /**
  * Gemini Deep Research provider.
- * Uses gemini-2.0-flash with Google Search grounding for research.
+ * Uses Gemini with Google Search grounding for research.
  * Tier: deep-research (sync - wraps execute for async interface)
  */
 export class GeminiDeepProvider extends BaseProvider {
   readonly id = 'gemini-deep';
   readonly tier: ProviderTier = 'deep-research';
+  private readonly model: string;
 
   private storedResults = new Map<string, ProviderResult>();
+
+  constructor(options: GeminiDeepProviderOptions = {}) {
+    super();
+    this.model = options.model?.trim() || DEFAULT_GEMINI_DEEP_MODEL;
+  }
 
   async execute(
     query: string,
@@ -58,7 +70,7 @@ export class GeminiDeepProvider extends BaseProvider {
     const apiKey = this.getApiKey();
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`;
 
       const response = await this.request<GeminiResponse>(url, {
         method: 'POST',
@@ -109,7 +121,7 @@ export class GeminiDeepProvider extends BaseProvider {
         content,
         citations,
         durationMs,
-        model: 'gemini-2.0-flash',
+        model: this.model,
         tokenUsage: {
           input: data.usageMetadata?.promptTokenCount,
           output: data.usageMetadata?.candidatesTokenCount,
@@ -171,7 +183,7 @@ export class GeminiDeepProvider extends BaseProvider {
   async test(): Promise<{ ok: boolean; error?: string }> {
     try {
       const apiKey = this.getApiKey();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`;
 
       const response = await this.request<GeminiResponse>(url, {
         method: 'POST',
@@ -182,7 +194,15 @@ export class GeminiDeepProvider extends BaseProvider {
       });
 
       if (response.status === 200) return { ok: true };
-      return { ok: false, error: `HTTP ${response.status}` };
+      const apiError =
+        typeof response.data?.error?.message === 'string'
+          ? response.data.error.message
+          : undefined;
+      const detail = apiError ? `: ${apiError}` : '';
+      return {
+        ok: false,
+        error: `HTTP ${response.status}${detail} (model: ${this.model})`,
+      };
     } catch (err) {
       return {
         ok: false,

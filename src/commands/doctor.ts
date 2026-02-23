@@ -26,11 +26,10 @@ export function registerDoctorCommand(program: Command): void {
       const spinner = ora('Running health checks...').start();
 
       try {
-        await initializeProviders();
-
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
+        await initializeProviders(config.providers);
 
         const providers = getAllProviders();
         const results: DoctorResult[] = [];
