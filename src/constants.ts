@@ -74,7 +74,14 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   ],
   quick: ['perplexity-sonar-pro', 'brave-answers', 'exa'],
   raw: ['perplexity-search', 'brave-search', 'searchapi', 'serpapi', 'tavily'],
-  fast: ['perplexity-sonar-pro', 'perplexity-search', 'brave-answers', 'exa', 'brave-search', 'tavily'],
+  fast: [
+    'perplexity-sonar-pro',
+    'perplexity-search',
+    'brave-answers',
+    'exa',
+    'brave-search',
+    'tavily',
+  ],
   comprehensive: [
     'perplexity-sonar-deep',
     'perplexity-deep-research',

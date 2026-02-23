@@ -4,7 +4,6 @@ import type {
   Citation,
   ProviderOptions,
   ProviderResult,
-  ProviderTier,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
