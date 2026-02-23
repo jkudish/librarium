@@ -6,31 +6,28 @@ import type {
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
-interface PerplexityMessage {
-  role: string;
-  content: string;
+interface PerplexitySearchResult {
+  url: string;
+  title?: string;
+  snippet?: string;
+  date?: string;
 }
 
-interface PerplexityChoice {
-  message: PerplexityMessage;
-}
-
-interface PerplexityResponse {
+interface PerplexitySearchResponse {
   id: string;
-  model?: string;
-  choices: PerplexityChoice[];
-  citations?: string[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  results?: PerplexitySearchResult[];
 }
+
+const SEARCH_API_URL = 'https://api.perplexity.ai/search';
 
 /**
- * Perplexity Sonar Pro provider.
- * Uses sonar-pro model for AI-grounded search with citations.
- * Tier: ai-grounded (sync)
+ * Perplexity Search API provider.
+ * Returns raw ranked web search results with snippets and content extraction.
+ * Tier: raw-search (sync)
  */
-export class PerplexitySonarProvider extends BaseProvider {
-  readonly id = 'perplexity-sonar';
-  readonly tier: ProviderTier = 'ai-grounded';
+export class PerplexitySearchProvider extends BaseProvider {
+  readonly id = 'perplexity-search';
+  readonly tier: ProviderTier = 'raw-search';
 
   async execute(
     query: string,
@@ -40,14 +37,14 @@ export class PerplexitySonarProvider extends BaseProvider {
     const apiKey = this.getApiKey();
 
     try {
-      const response = await this.request<PerplexityResponse>(
-        'https://api.perplexity.ai/chat/completions',
+      const response = await this.request<PerplexitySearchResponse>(
+        SEARCH_API_URL,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-pro',
-            messages: [{ role: 'user', content: query }],
+            query,
+            max_results: 10,
           },
           timeout: options.timeout * 1000,
           signal: options.signal,
@@ -68,8 +65,9 @@ export class PerplexitySonarProvider extends BaseProvider {
       }
 
       const data = response.data;
-      const content = data.choices?.[0]?.message?.content ?? '';
-      const citations = this.extractCitations(data.citations);
+      const results = data.results ?? [];
+      const citations = this.extractCitations(results);
+      const content = this.buildContent(results);
 
       return {
         provider: this.id,
@@ -77,11 +75,6 @@ export class PerplexitySonarProvider extends BaseProvider {
         content,
         citations,
         durationMs,
-        model: data.model ?? 'sonar-pro',
-        tokenUsage: {
-          input: data.usage?.prompt_tokens,
-          output: data.usage?.completion_tokens,
-        },
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -99,15 +92,14 @@ export class PerplexitySonarProvider extends BaseProvider {
   async test(): Promise<{ ok: boolean; error?: string }> {
     try {
       const apiKey = this.getApiKey();
-      const response = await this.request<PerplexityResponse>(
-        'https://api.perplexity.ai/chat/completions',
+      const response = await this.request<PerplexitySearchResponse>(
+        SEARCH_API_URL,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-pro',
-            messages: [{ role: 'user', content: 'ping' }],
-            max_tokens: 5,
+            query: 'test',
+            max_results: 1,
           },
           timeout: 10000,
         },
@@ -123,10 +115,27 @@ export class PerplexitySonarProvider extends BaseProvider {
     }
   }
 
-  private extractCitations(urls?: string[]): Citation[] {
-    if (!urls || !Array.isArray(urls)) return [];
-    return urls.map((url) => ({
-      url,
+  private buildContent(results: PerplexitySearchResult[]): string {
+    if (results.length === 0) return 'No results found.';
+
+    const parts: string[] = [];
+
+    for (const result of results) {
+      const title = result.title ?? 'Untitled';
+      parts.push(`- **[${title}](${result.url})**`);
+      if (result.snippet) {
+        parts.push(`  ${result.snippet.slice(0, 300)}`);
+      }
+    }
+
+    return parts.join('\n');
+  }
+
+  private extractCitations(results: PerplexitySearchResult[]): Citation[] {
+    return results.map((result) => ({
+      url: result.url,
+      title: result.title,
+      snippet: result.snippet?.slice(0, 200),
       provider: this.id,
     }));
   }

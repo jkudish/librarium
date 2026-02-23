@@ -72,20 +72,39 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 10 provider adapters organized into three tiers:
+Librarium ships with 13 provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
-| Perplexity Deep Research | `perplexity-deep` | deep-research | `PERPLEXITY_API_KEY` |
+| Perplexity Sonar Deep Research | `perplexity-sonar-deep` | deep-research | `PERPLEXITY_API_KEY` |
+| Perplexity Deep Research | `perplexity-deep-research` | deep-research | `PERPLEXITY_API_KEY` |
+| Perplexity Advanced Deep Research | `perplexity-advanced-deep` | deep-research | `PERPLEXITY_API_KEY` |
 | OpenAI Deep Research | `openai-deep` | deep-research | `OPENAI_API_KEY` |
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
-| Perplexity Sonar Pro | `perplexity-sonar` | ai-grounded | `PERPLEXITY_API_KEY` |
+| Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Brave AI Answers | `brave-answers` | ai-grounded | `BRAVE_API_KEY` |
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
+| Perplexity Search | `perplexity-search` | raw-search | `PERPLEXITY_API_KEY` |
 | Brave Web Search | `brave-search` | raw-search | `BRAVE_API_KEY` |
 | SearchAPI | `searchapi` | raw-search | `SEARCHAPI_API_KEY` |
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
+
+### Provider ID Migration (Legacy Aliases)
+
+Perplexity provider IDs were renamed to match current product names:
+
+- `perplexity-sonar` -> `perplexity-sonar-pro`
+- `perplexity-deep` -> `perplexity-sonar-deep`
+
+For backward compatibility, librarium still accepts legacy IDs in:
+
+- `run --providers`
+- provider config keys in `~/.config/librarium/config.json`
+- custom group members
+- `fallback` targets
+
+Legacy IDs are normalized to canonical IDs and emit a warning. Output files and `run.json` always use canonical IDs.
 
 ## Provider Tiers
 
@@ -119,7 +138,7 @@ librarium run <query> [options]
 
 ```bash
 # Run with specific providers
-librarium run "database indexing" --providers perplexity-sonar,exa
+librarium run "database indexing" --providers perplexity-sonar-pro,exa
 
 # Deep research, wait for completion
 librarium run "AI agent architectures" --group deep --mode sync
@@ -169,7 +188,7 @@ List and manage provider groups.
 librarium groups
 
 # Add a custom group
-librarium groups add my-stack perplexity-sonar exa tavily
+librarium groups add my-stack perplexity-sonar-pro exa tavily
 
 # Remove a custom group
 librarium groups remove my-stack
@@ -234,12 +253,12 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 
 | Group | Providers | Use Case |
 |---|---|---|
-| `deep` | perplexity-deep, openai-deep, gemini-deep | Thorough async research |
-| `quick` | perplexity-sonar, brave-answers, exa | Fast AI-grounded answers |
-| `raw` | brave-search, searchapi, serpapi, tavily | Traditional search results |
-| `fast` | perplexity-sonar, brave-answers, exa, brave-search, tavily | Quick results from multiple tiers |
+| `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, gemini-deep | Thorough async research |
+| `quick` | perplexity-sonar-pro, brave-answers, exa | Fast AI-grounded answers |
+| `raw` | perplexity-search, brave-search, searchapi, serpapi, tavily | Traditional search results |
+| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, brave-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `all` | All 10 providers | Maximum coverage |
+| `all` | All 13 providers | Maximum coverage |
 
 ### Custom Groups
 
@@ -247,12 +266,12 @@ Add custom groups via CLI or config file:
 
 ```bash
 # Via CLI
-librarium groups add my-research perplexity-sonar exa brave-search
+librarium groups add my-research perplexity-sonar-pro exa brave-search
 
 # Via config.json
 {
   "groups": {
-    "my-research": ["perplexity-sonar", "exa", "brave-search"]
+    "my-research": ["perplexity-sonar-pro", "exa", "brave-search"]
   }
 }
 ```
@@ -330,7 +349,7 @@ Each layer overrides the previous. Project config can override defaults but cann
     "mode": "mixed"
   },
   "providers": {
-    "perplexity-sonar": {
+    "perplexity-sonar-pro": {
       "apiKey": "$PERPLEXITY_API_KEY",
       "enabled": true
     },
@@ -348,7 +367,7 @@ Each layer overrides the previous. Project config can override defaults but cann
     }
   },
   "groups": {
-    "my-custom-group": ["perplexity-sonar", "exa"]
+    "my-custom-group": ["perplexity-sonar-pro", "exa"]
   }
 }
 ```
@@ -390,8 +409,8 @@ Each research run creates a timestamped output directory:
   run.json               # Run manifest (machine-readable)
   summary.md             # Synthesized summary with statistics
   sources.json           # Deduplicated citations across all providers
-  perplexity-sonar.md    # Per-provider markdown results
-  perplexity-sonar.meta.json  # Per-provider metadata (model, timing, citations)
+  perplexity-sonar-pro.md    # Per-provider markdown results
+  perplexity-sonar-pro.meta.json  # Per-provider metadata (model, timing, citations)
   brave-answers.md
   brave-answers.meta.json
   async-tasks.json       # Present if any async tasks were submitted
@@ -409,14 +428,14 @@ Each research run creates a timestamped output directory:
   "outputDir": "/absolute/path/to/output",
   "providers": [
     {
-      "id": "perplexity-sonar",
+      "id": "perplexity-sonar-pro",
       "tier": "ai-grounded",
       "status": "success",
       "durationMs": 2340,
       "wordCount": 850,
       "citationCount": 12,
-      "outputFile": "perplexity-sonar.md",
-      "metaFile": "perplexity-sonar.meta.json"
+      "outputFile": "perplexity-sonar-pro.md",
+      "metaFile": "perplexity-sonar-pro.meta.json"
     }
   ],
   "sources": {
@@ -471,7 +490,7 @@ Groups:
   deep           — Thorough async research (minutes)
   fast           — Quick results from multiple tiers
   comprehensive  — Deep + AI-grounded combined
-  all            — All 10 providers
+  all            — All 13 providers
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     — Synthesized overview with stats

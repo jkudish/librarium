@@ -119,18 +119,21 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 10 providers', async () => {
+  it('initializeProviders registers all 13 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(10);
+    expect(all).toHaveLength(13);
 
     const ids = all.map((p) => p.id);
-    expect(ids).toContain('perplexity-deep');
+    expect(ids).toContain('perplexity-sonar-deep');
+    expect(ids).toContain('perplexity-deep-research');
+    expect(ids).toContain('perplexity-advanced-deep');
     expect(ids).toContain('openai-deep');
     expect(ids).toContain('gemini-deep');
-    expect(ids).toContain('perplexity-sonar');
+    expect(ids).toContain('perplexity-sonar-pro');
     expect(ids).toContain('brave-answers');
     expect(ids).toContain('exa');
+    expect(ids).toContain('perplexity-search');
     expect(ids).toContain('brave-search');
     expect(ids).toContain('searchapi');
     expect(ids).toContain('serpapi');
@@ -147,5 +150,11 @@ describe('registry', () => {
     const gemini = getProvider('gemini-deep');
     expect(gemini).toBeDefined();
     expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
+  });
+
+  it('getProvider resolves legacy provider ID aliases', async () => {
+    await initializeProviders();
+    expect(getProvider('perplexity-sonar')?.id).toBe('perplexity-sonar-pro');
+    expect(getProvider('perplexity-deep')?.id).toBe('perplexity-sonar-deep');
   });
 });

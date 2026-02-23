@@ -63,10 +63,13 @@ body:
       label: Which providers are involved?
       multiple: true
       options:
-        - perplexity-deep
+        - perplexity-sonar-deep
+        - perplexity-deep-research
+        - perplexity-advanced-deep
         - openai-deep
         - gemini-deep
-        - perplexity-sonar
+        - perplexity-sonar-pro
+        - perplexity-search
         - brave-answers
         - exa
         - brave-search

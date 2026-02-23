@@ -1,6 +1,4 @@
 import type {
-  AsyncPollResult,
-  AsyncTaskHandle,
   Citation,
   ProviderOptions,
   ProviderResult,
@@ -26,15 +24,13 @@ interface PerplexityResponse {
 }
 
 /**
- * Perplexity Deep Research provider.
- * Uses sonar-deep-research model for comprehensive research queries.
- * Tier: deep-research (async capable)
+ * Perplexity Sonar Pro provider.
+ * Uses sonar-pro model for AI-grounded search with citations.
+ * Tier: ai-grounded (sync)
  */
-export class PerplexityDeepProvider extends BaseProvider {
-  readonly id = 'perplexity-deep';
-  readonly tier: ProviderTier = 'deep-research';
-
-  private storedResults = new Map<string, ProviderResult>();
+export class PerplexitySonarProProvider extends BaseProvider {
+  readonly id = 'perplexity-sonar-pro';
+  readonly tier: ProviderTier = 'ai-grounded';
 
   async execute(
     query: string,
@@ -50,7 +46,7 @@ export class PerplexityDeepProvider extends BaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-deep-research',
+            model: 'sonar-pro',
             messages: [{ role: 'user', content: query }],
           },
           timeout: options.timeout * 1000,
@@ -81,7 +77,7 @@ export class PerplexityDeepProvider extends BaseProvider {
         content,
         citations,
         durationMs,
-        model: data.model ?? 'sonar-deep-research',
+        model: data.model ?? 'sonar-pro',
         tokenUsage: {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
@@ -100,46 +96,6 @@ export class PerplexityDeepProvider extends BaseProvider {
     }
   }
 
-  async submit(
-    query: string,
-    options: ProviderOptions,
-  ): Promise<AsyncTaskHandle> {
-    const result = await this.execute(query, options);
-    const taskId = `pplx-deep-${Date.now()}`;
-    this.storedResults.set(taskId, result);
-
-    return {
-      provider: this.id,
-      taskId,
-      query,
-      submittedAt: Date.now(),
-      status: result.error ? 'failed' : 'completed',
-      completedAt: Date.now(),
-    };
-  }
-
-  async poll(_handle: AsyncTaskHandle): Promise<AsyncPollResult> {
-    // Perplexity deep research returns full results on the initial call
-    return { status: 'completed', progress: 100 };
-  }
-
-  async retrieve(handle: AsyncTaskHandle): Promise<ProviderResult> {
-    const stored = this.storedResults.get(handle.taskId);
-    if (stored) {
-      this.storedResults.delete(handle.taskId);
-      return stored;
-    }
-
-    return {
-      provider: this.id,
-      tier: this.tier,
-      content: '',
-      citations: [],
-      durationMs: 0,
-      error: `No stored result for task ${handle.taskId}`,
-    };
-  }
-
   async test(): Promise<{ ok: boolean; error?: string }> {
     try {
       const apiKey = this.getApiKey();
@@ -149,11 +105,11 @@ export class PerplexityDeepProvider extends BaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-deep-research',
+            model: 'sonar-pro',
             messages: [{ role: 'user', content: 'ping' }],
             max_tokens: 5,
           },
-          timeout: 15000,
+          timeout: 10000,
         },
       );
 

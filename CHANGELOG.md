@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Perplexity Agent API provider adapters: `perplexity-deep-research` and `perplexity-advanced-deep`
+- Perplexity Search API provider adapter: `perplexity-search` (raw-search tier)
+
+### Changed
+- Renamed Perplexity provider IDs to match current product naming:
+  - `perplexity-sonar` -> `perplexity-sonar-pro`
+  - `perplexity-deep` -> `perplexity-sonar-deep`
+- Updated default provider groups and docs to include 13 total providers
+
+### Fixed
+- Added backward-compatible legacy ID support for `perplexity-sonar` and `perplexity-deep` across CLI provider selection, config provider keys, group members, and fallback targets
+- `librarium ls` output table now uses dynamic column widths for long provider IDs
+
 ## [0.1.1] - 2026-02-23
 
 ### Added

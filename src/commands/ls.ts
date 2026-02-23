@@ -28,13 +28,25 @@ export function registerLsCommand(program: Command): void {
           return;
         }
 
+        const idWidth = Math.max('ID'.length, ...meta.map((p) => p.id.length));
+        const nameWidth = Math.max(
+          'Name'.length,
+          ...meta.map((p) => p.displayName.length),
+        );
+        const tierWidth = Math.max(
+          'Tier'.length,
+          ...meta.map((p) => p.tier.length),
+        );
+        const enabledWidth = Math.max('Enabled'.length, 'Yes'.length);
+        const apiKeyWidth = Math.max('API Key'.length, 'Missing'.length);
+
         // Table header
         const header = [
-          'ID'.padEnd(20),
-          'Name'.padEnd(28),
-          'Tier'.padEnd(16),
-          'Enabled'.padEnd(10),
-          'API Key'.padEnd(10),
+          'ID'.padEnd(idWidth),
+          'Name'.padEnd(nameWidth),
+          'Tier'.padEnd(tierWidth),
+          'Enabled'.padEnd(enabledWidth),
+          'API Key'.padEnd(apiKeyWidth),
         ].join('  ');
 
         console.log(`\n${header}`);
@@ -44,11 +56,11 @@ export function registerLsCommand(program: Command): void {
           const enabled = p.enabled ? 'Yes' : 'No';
           const apiKey = p.hasApiKey ? 'Set' : 'Missing';
           const row = [
-            p.id.padEnd(20),
-            p.displayName.padEnd(28),
-            p.tier.padEnd(16),
-            enabled.padEnd(10),
-            apiKey.padEnd(10),
+            p.id.padEnd(idWidth),
+            p.displayName.padEnd(nameWidth),
+            p.tier.padEnd(tierWidth),
+            enabled.padEnd(enabledWidth),
+            apiKey.padEnd(apiKeyWidth),
           ].join('  ');
           console.log(row);
         }
