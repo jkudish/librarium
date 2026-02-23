@@ -5,6 +5,8 @@ import {
   CONFIG_FILE_MODE,
   DEFAULT_GROUPS,
   PROJECT_CONFIG_FILE,
+  resolveProviderId,
+  resolveProviderIds,
 } from '../constants.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
 import { ConfigSchema, ProjectConfigSchema } from '../types.js';
@@ -91,8 +93,12 @@ export function loadConfig(globalPath?: string): Config {
   const config = ConfigSchema.parse(raw);
   // Merge default groups with user groups (user groups take priority)
   config.groups = { ...DEFAULT_GROUPS, ...config.groups };
+  const migrationWarnings = migrateLegacyProviderIds(config);
 
   // Validate fallback references (non-fatal warnings)
+  for (const warning of migrationWarnings) {
+    console.error(`[librarium] warning: ${warning}`);
+  }
   const warnings = validateFallbacks(config);
   for (const warning of warnings) {
     console.error(`[librarium] warning: ${warning}`);
@@ -175,4 +181,61 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
     }
   }
   return result;
+}
+
+function migrateLegacyProviderIds(config: Config): string[] {
+  const warnings: string[] = [];
+  const migratedProviders: Config['providers'] = {};
+
+  for (const [id, providerConfig] of Object.entries(config.providers)) {
+    const canonicalId = resolveProviderId(id);
+    const normalizedFallback = providerConfig.fallback
+      ? resolveProviderId(providerConfig.fallback)
+      : undefined;
+
+    if (canonicalId !== id) {
+      warnings.push(
+        `Provider ID "${id}" is deprecated; using "${canonicalId}"`,
+      );
+    }
+    if (
+      providerConfig.fallback &&
+      normalizedFallback &&
+      normalizedFallback !== providerConfig.fallback
+    ) {
+      warnings.push(
+        `Provider "${canonicalId}" fallback "${providerConfig.fallback}" is deprecated; using "${normalizedFallback}"`,
+      );
+    }
+
+    const normalizedConfig = {
+      ...providerConfig,
+      fallback: normalizedFallback,
+    };
+
+    if (!migratedProviders[canonicalId] || id === canonicalId) {
+      migratedProviders[canonicalId] = normalizedConfig;
+      continue;
+    }
+
+    warnings.push(
+      `Provider "${id}" maps to "${canonicalId}", but "${canonicalId}" is also configured; keeping "${canonicalId}"`,
+    );
+  }
+
+  config.providers = migratedProviders;
+
+  for (const [groupName, members] of Object.entries(config.groups)) {
+    for (const member of members) {
+      const canonicalMember = resolveProviderId(member);
+      if (canonicalMember !== member) {
+        warnings.push(
+          `Group "${groupName}" member "${member}" is deprecated; using "${canonicalMember}"`,
+        );
+      }
+    }
+    config.groups[groupName] = resolveProviderIds(members);
+  }
+
+  return warnings;
 }

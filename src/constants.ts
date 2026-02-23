@@ -63,6 +63,37 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   tavily: 'Tavily Search',
 };
 
+// Backward-compatible provider ID aliases (legacy -> canonical)
+export const PROVIDER_ID_ALIASES: Record<string, string> = {
+  'perplexity-deep': 'perplexity-sonar-deep',
+  'perplexity-sonar': 'perplexity-sonar-pro',
+};
+
+/**
+ * Resolve legacy provider IDs to canonical IDs.
+ */
+export function resolveProviderId(id: string): string {
+  return PROVIDER_ID_ALIASES[id] ?? id;
+}
+
+/**
+ * Resolve and deduplicate provider IDs while preserving input order.
+ */
+export function resolveProviderIds(ids: string[]): string[] {
+  const resolved: string[] = [];
+  const seen = new Set<string>();
+
+  for (const id of ids) {
+    const canonicalId = resolveProviderId(id);
+    if (!seen.has(canonicalId)) {
+      seen.add(canonicalId);
+      resolved.push(canonicalId);
+    }
+  }
+
+  return resolved;
+}
+
 // Default groups
 export const DEFAULT_GROUPS: Record<string, string[]> = {
   deep: [

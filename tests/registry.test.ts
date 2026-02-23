@@ -151,4 +151,10 @@ describe('registry', () => {
     expect(gemini).toBeDefined();
     expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
   });
+
+  it('getProvider resolves legacy provider ID aliases', async () => {
+    await initializeProviders();
+    expect(getProvider('perplexity-sonar')?.id).toBe('perplexity-sonar-pro');
+    expect(getProvider('perplexity-deep')?.id).toBe('perplexity-sonar-deep');
+  });
 });
