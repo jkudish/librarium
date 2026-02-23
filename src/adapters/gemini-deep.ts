@@ -53,7 +53,7 @@ const DEFAULT_GEMINI_DEEP_MODEL = 'gemini-2.5-flash';
 export class GeminiDeepProvider extends BaseProvider {
   readonly id = 'gemini-deep';
   readonly tier: ProviderTier = 'deep-research';
-  private readonly model: string;
+  readonly model: string;
 
   private storedResults = new Map<string, ProviderResult>();
 
