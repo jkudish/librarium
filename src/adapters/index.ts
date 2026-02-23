@@ -1,3 +1,4 @@
+import { resolveProviderId } from '../constants.js';
 import { hasApiKey } from '../core/config.js';
 import type { Provider, ProviderMeta, ProviderTier } from '../types.js';
 import { BraveAnswersProvider } from './brave-answers.js';
@@ -30,7 +31,7 @@ export function registerProvider(provider: Provider): void {
  * Get a provider by ID
  */
 export function getProvider(id: string): Provider | undefined {
-  return providers.get(id);
+  return providers.get(resolveProviderId(id));
 }
 
 /**

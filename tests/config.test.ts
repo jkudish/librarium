@@ -87,6 +87,49 @@ describe('loadConfig', () => {
     // Default groups should be merged in
     expect(config.groups).toHaveProperty('deep');
   });
+
+  it('migrates legacy provider IDs in providers, groups, and fallbacks', () => {
+    const configPath = join(tmpDir, 'config.json');
+    const configData = {
+      version: 1,
+      defaults: {
+        outputDir: './custom-output',
+        maxParallel: 4,
+        timeout: 60,
+        asyncTimeout: 3600,
+        asyncPollInterval: 15,
+        mode: 'sync',
+      },
+      providers: {
+        'perplexity-sonar': {
+          apiKey: '$PERPLEXITY_API_KEY',
+          enabled: true,
+          fallback: 'perplexity-deep',
+        },
+        'perplexity-deep': {
+          apiKey: '$PERPLEXITY_API_KEY',
+          enabled: false,
+        },
+      },
+      groups: {
+        legacy: ['perplexity-sonar', 'perplexity-deep', 'perplexity-sonar-pro'],
+      },
+    };
+    writeFileSync(configPath, JSON.stringify(configData));
+
+    const config = loadConfig(configPath);
+    expect(config.providers['perplexity-sonar']).toBeUndefined();
+    expect(config.providers['perplexity-deep']).toBeUndefined();
+    expect(config.providers['perplexity-sonar-pro']).toBeDefined();
+    expect(config.providers['perplexity-sonar-deep']).toBeDefined();
+    expect(config.providers['perplexity-sonar-pro'].fallback).toBe(
+      'perplexity-sonar-deep',
+    );
+    expect(config.groups.legacy).toEqual([
+      'perplexity-sonar-pro',
+      'perplexity-sonar-deep',
+    ]);
+  });
 });
 
 describe('mergeConfigs', () => {

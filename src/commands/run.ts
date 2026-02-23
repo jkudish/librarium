@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
 import { initializeProviders } from '../adapters/index.js';
+import { resolveProviderIds } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { dispatch } from '../core/dispatcher.js';
@@ -50,7 +51,7 @@ export function registerRunCommand(program: Command): void {
         // Resolve provider list
         let providerIds: string[];
         if (opts.providers) {
-          providerIds = opts.providers;
+          providerIds = resolveProviderIds(opts.providers);
         } else if (opts.group) {
           const group = config.groups[opts.group];
           if (!group) {
@@ -58,12 +59,14 @@ export function registerRunCommand(program: Command): void {
             process.exitCode = 2;
             return;
           }
-          providerIds = group;
+          providerIds = resolveProviderIds(group);
         } else {
           // Default: use all enabled providers
-          providerIds = Object.entries(config.providers)
-            .filter(([, p]) => p.enabled)
-            .map(([id]) => id);
+          providerIds = resolveProviderIds(
+            Object.entries(config.providers)
+              .filter(([, p]) => p.enabled)
+              .map(([id]) => id),
+          );
         }
 
         if (providerIds.length === 0) {
