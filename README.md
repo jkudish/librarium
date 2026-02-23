@@ -90,6 +90,22 @@ Librarium ships with 13 provider adapters organized into three tiers:
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
 
+### Provider ID Migration (Legacy Aliases)
+
+Perplexity provider IDs were renamed to match current product names:
+
+- `perplexity-sonar` -> `perplexity-sonar-pro`
+- `perplexity-deep` -> `perplexity-sonar-deep`
+
+For backward compatibility, librarium still accepts legacy IDs in:
+
+- `run --providers`
+- provider config keys in `~/.config/librarium/config.json`
+- custom group members
+- `fallback` targets
+
+Legacy IDs are normalized to canonical IDs and emit a warning. Output files and `run.json` always use canonical IDs.
+
 ## Provider Tiers
 
 Providers are categorized into three tiers based on their capabilities, latency, and depth:
