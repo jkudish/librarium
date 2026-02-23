@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-02-23
+
 ### Added
 - Provider-level fallback on failure — optional `fallback` field in provider config triggers a backup provider when the primary fails for any reason (exception, error response, or timeout). Fallback providers can be `enabled: false` to only activate as backups. ([#2](https://github.com/jkudish/librarium/issues/2) — thanks @taocoding99)
+
 
 ## [0.1.0] - 2026-02-21
 
@@ -38,5 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.1...HEAD
 [0.1.0]: https://github.com/jkudish/librarium/releases/tag/v0.1.0
+[0.1.1]: https://github.com/jkudish/librarium/releases/tag/v0.1.1
