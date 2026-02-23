@@ -26,12 +26,12 @@ interface PerplexityResponse {
 }
 
 /**
- * Perplexity Deep Research provider.
- * Uses sonar-deep-research model for comprehensive research queries.
+ * Perplexity Sonar Deep Research provider.
+ * Uses the sonar-deep-research model via the Chat Completions API for comprehensive research queries.
  * Tier: deep-research (async capable)
  */
-export class PerplexityDeepProvider extends BaseProvider {
-  readonly id = 'perplexity-deep';
+export class PerplexitySonarDeepProvider extends BaseProvider {
+  readonly id = 'perplexity-sonar-deep';
   readonly tier: ProviderTier = 'deep-research';
 
   private storedResults = new Map<string, ProviderResult>();

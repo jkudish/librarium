@@ -6,8 +6,10 @@ import { ExaProvider } from './exa.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { OpenAIDeepProvider } from './openai-deep.js';
 // Provider imports
-import { PerplexityDeepProvider } from './perplexity-deep.js';
-import { PerplexitySonarProvider } from './perplexity-sonar.js';
+import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
+import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
+import { PerplexitySonarDeepProvider } from './perplexity-sonar-deep.js';
+import { PerplexitySonarProProvider } from './perplexity-sonar-pro.js';
 import { SearchApiProvider } from './searchapi.js';
 import { SerpApiProvider } from './serpapi.js';
 import { TavilyProvider } from './tavily.js';
@@ -67,7 +69,7 @@ export function getProviderMeta(
 
 /**
  * Initialize all providers — called at startup.
- * Instantiates and registers all 10 provider adapters.
+ * Instantiates and registers all 12 provider adapters.
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
@@ -75,14 +77,16 @@ export async function initializeProviders(
   providers.clear();
 
   // Deep Research (async capable)
-  registerProvider(new PerplexityDeepProvider());
+  registerProvider(new PerplexitySonarDeepProvider());
+  registerProvider(new PerplexityDeepResearchProvider());
+  registerProvider(new PerplexityAdvancedDeepProvider());
   registerProvider(new OpenAIDeepProvider());
   registerProvider(
     new GeminiDeepProvider({ model: config['gemini-deep']?.model }),
   );
 
   // AI-Grounded Search (sync)
-  registerProvider(new PerplexitySonarProvider());
+  registerProvider(new PerplexitySonarProProvider());
   registerProvider(new BraveAnswersProvider());
   registerProvider(new ExaProvider());
 

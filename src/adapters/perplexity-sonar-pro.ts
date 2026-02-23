@@ -28,8 +28,8 @@ interface PerplexityResponse {
  * Uses sonar-pro model for AI-grounded search with citations.
  * Tier: ai-grounded (sync)
  */
-export class PerplexitySonarProvider extends BaseProvider {
-  readonly id = 'perplexity-sonar';
+export class PerplexitySonarProProvider extends BaseProvider {
+  readonly id = 'perplexity-sonar-pro';
   readonly tier: ProviderTier = 'ai-grounded';
 
   async execute(

@@ -119,16 +119,18 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 10 providers', async () => {
+  it('initializeProviders registers all 12 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(10);
+    expect(all).toHaveLength(12);
 
     const ids = all.map((p) => p.id);
-    expect(ids).toContain('perplexity-deep');
+    expect(ids).toContain('perplexity-sonar-deep');
+    expect(ids).toContain('perplexity-deep-research');
+    expect(ids).toContain('perplexity-advanced-deep');
     expect(ids).toContain('openai-deep');
     expect(ids).toContain('gemini-deep');
-    expect(ids).toContain('perplexity-sonar');
+    expect(ids).toContain('perplexity-sonar-pro');
     expect(ids).toContain('brave-answers');
     expect(ids).toContain('exa');
     expect(ids).toContain('brave-search');

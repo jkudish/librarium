@@ -55,7 +55,7 @@ describe('deduplicateSources', () => {
       {
         url: 'https://example.com/page',
         title: 'Example Page',
-        provider: 'perplexity-sonar',
+        provider: 'perplexity-sonar-pro',
       },
       {
         url: 'https://www.example.com/page/',
@@ -66,14 +66,14 @@ describe('deduplicateSources', () => {
     const result = deduplicateSources(citations);
     expect(result).toHaveLength(1);
     expect(result[0].citationCount).toBe(2);
-    expect(result[0].providers).toContain('perplexity-sonar');
+    expect(result[0].providers).toContain('perplexity-sonar-pro');
     expect(result[0].providers).toContain('brave-answers');
   });
 
   it('sorts by citation count descending', () => {
     const citations: Citation[] = [
       { url: 'https://rare.com', provider: 'exa' },
-      { url: 'https://popular.com', provider: 'perplexity-sonar' },
+      { url: 'https://popular.com', provider: 'perplexity-sonar-pro' },
       { url: 'https://popular.com', provider: 'brave-answers' },
       { url: 'https://popular.com', provider: 'exa' },
     ];
@@ -89,7 +89,7 @@ describe('deduplicateSources', () => {
       {
         url: 'https://example.com',
         title: 'First Title',
-        provider: 'perplexity-sonar',
+        provider: 'perplexity-sonar-pro',
       },
       {
         url: 'https://example.com',

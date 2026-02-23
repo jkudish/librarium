@@ -79,8 +79,8 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 
 | Tier | Providers | Speed | Depth |
 |------|-----------|-------|-------|
-| deep-research | perplexity-deep, openai-deep, gemini-deep | Minutes | Comprehensive |
-| ai-grounded | perplexity-sonar, brave-answers, exa | Seconds | Good |
+| deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, gemini-deep | Minutes | Comprehensive |
+| ai-grounded | perplexity-sonar-pro, brave-answers, exa | Seconds | Good |
 | raw-search | brave-search, searchapi, serpapi, tavily | Fast | Links only |
 
 ## Output Structure

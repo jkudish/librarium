@@ -68,7 +68,7 @@ describe('loadConfig', () => {
         mode: 'sync',
       },
       providers: {
-        'perplexity-sonar': {
+        'perplexity-sonar-pro': {
           apiKey: '$PERPLEXITY_API_KEY',
           enabled: true,
         },
@@ -82,8 +82,8 @@ describe('loadConfig', () => {
     expect(config.defaults.maxParallel).toBe(4);
     expect(config.defaults.timeout).toBe(60);
     expect(config.defaults.mode).toBe('sync');
-    expect(config.providers['perplexity-sonar']).toBeDefined();
-    expect(config.providers['perplexity-sonar'].enabled).toBe(true);
+    expect(config.providers['perplexity-sonar-pro']).toBeDefined();
+    expect(config.providers['perplexity-sonar-pro'].enabled).toBe(true);
     // Default groups should be merged in
     expect(config.groups).toHaveProperty('deep');
   });
@@ -101,14 +101,14 @@ describe('mergeConfigs', () => {
       mode: 'mixed',
     },
     providers: {
-      'perplexity-sonar': {
+      'perplexity-sonar-pro': {
         apiKey: '$PERPLEXITY_API_KEY',
         enabled: true,
       },
     },
     groups: {
-      deep: ['perplexity-deep', 'openai-deep', 'gemini-deep'],
-      quick: ['perplexity-sonar', 'brave-answers', 'exa'],
+      deep: ['perplexity-sonar-deep', 'openai-deep', 'gemini-deep'],
+      quick: ['perplexity-sonar-pro', 'brave-answers', 'exa'],
     },
   };
 
@@ -117,7 +117,7 @@ describe('mergeConfigs', () => {
     expect(merged.defaults.outputDir).toBe('./agents/librarium');
     expect(merged.defaults.maxParallel).toBe(6);
     expect(merged.defaults.mode).toBe('mixed');
-    expect(merged.providers['perplexity-sonar']).toBeDefined();
+    expect(merged.providers['perplexity-sonar-pro']).toBeDefined();
   });
 
   it('applies project overrides', () => {
@@ -260,9 +260,9 @@ describe('validateFallbacks', () => {
       'gemini-flash': {
         apiKey: '$GEMINI_API_KEY',
         enabled: false,
-        fallback: 'perplexity-sonar',
+        fallback: 'perplexity-sonar-pro',
       },
-      'perplexity-sonar': {
+      'perplexity-sonar-pro': {
         apiKey: '$PERPLEXITY_API_KEY',
         enabled: true,
       },
@@ -274,7 +274,7 @@ describe('validateFallbacks', () => {
 
   it('returns no warnings when no fallbacks are configured', () => {
     const config = makeConfig({
-      'perplexity-sonar': {
+      'perplexity-sonar-pro': {
         apiKey: '$PERPLEXITY_API_KEY',
         enabled: true,
       },

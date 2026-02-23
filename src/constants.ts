@@ -31,8 +31,10 @@ export const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Provider environment variable names
 export const PROVIDER_ENV_VARS: Record<string, string> = {
-  'perplexity-deep': 'PERPLEXITY_API_KEY',
-  'perplexity-sonar': 'PERPLEXITY_API_KEY',
+  'perplexity-sonar-deep': 'PERPLEXITY_API_KEY',
+  'perplexity-deep-research': 'PERPLEXITY_API_KEY',
+  'perplexity-advanced-deep': 'PERPLEXITY_API_KEY',
+  'perplexity-sonar-pro': 'PERPLEXITY_API_KEY',
   'openai-deep': 'OPENAI_API_KEY',
   'gemini-deep': 'GEMINI_API_KEY',
   'brave-answers': 'BRAVE_API_KEY',
@@ -45,8 +47,10 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
 
 // Provider display names
 export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  'perplexity-deep': 'Perplexity Deep Research',
-  'perplexity-sonar': 'Perplexity Sonar Pro',
+  'perplexity-sonar-deep': 'Perplexity Sonar Deep Research',
+  'perplexity-deep-research': 'Perplexity Deep Research',
+  'perplexity-advanced-deep': 'Perplexity Advanced Deep Research',
+  'perplexity-sonar-pro': 'Perplexity Sonar Pro',
   'openai-deep': 'OpenAI Deep Research',
   'gemini-deep': 'Gemini Deep Research',
   'brave-answers': 'Brave AI Answers',
@@ -59,23 +63,33 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 
 // Default groups
 export const DEFAULT_GROUPS: Record<string, string[]> = {
-  deep: ['perplexity-deep', 'openai-deep', 'gemini-deep'],
-  quick: ['perplexity-sonar', 'brave-answers', 'exa'],
-  raw: ['brave-search', 'searchapi', 'serpapi', 'tavily'],
-  fast: ['perplexity-sonar', 'brave-answers', 'exa', 'brave-search', 'tavily'],
-  comprehensive: [
-    'perplexity-deep',
+  deep: [
+    'perplexity-sonar-deep',
+    'perplexity-deep-research',
+    'perplexity-advanced-deep',
     'openai-deep',
     'gemini-deep',
-    'perplexity-sonar',
+  ],
+  quick: ['perplexity-sonar-pro', 'brave-answers', 'exa'],
+  raw: ['brave-search', 'searchapi', 'serpapi', 'tavily'],
+  fast: ['perplexity-sonar-pro', 'brave-answers', 'exa', 'brave-search', 'tavily'],
+  comprehensive: [
+    'perplexity-sonar-deep',
+    'perplexity-deep-research',
+    'perplexity-advanced-deep',
+    'openai-deep',
+    'gemini-deep',
+    'perplexity-sonar-pro',
     'brave-answers',
     'exa',
   ],
   all: [
-    'perplexity-deep',
+    'perplexity-sonar-deep',
+    'perplexity-deep-research',
+    'perplexity-advanced-deep',
     'openai-deep',
     'gemini-deep',
-    'perplexity-sonar',
+    'perplexity-sonar-pro',
     'brave-answers',
     'exa',
     'brave-search',
