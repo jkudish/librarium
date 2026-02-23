@@ -136,4 +136,16 @@ describe('registry', () => {
     expect(ids).toContain('serpapi');
     expect(ids).toContain('tavily');
   });
+
+  it('initializeProviders applies gemini model config override', async () => {
+    await initializeProviders({
+      'gemini-deep': {
+        model: 'gemini-2.5-pro',
+      },
+    });
+
+    const gemini = getProvider('gemini-deep');
+    expect(gemini).toBeDefined();
+    expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
+  });
 });

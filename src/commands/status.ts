@@ -90,11 +90,10 @@ export function registerStatusCommand(program: Command): void {
     .option('--json', 'Output JSON')
     .action(async (opts) => {
       try {
-        await initializeProviders();
-
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
+        await initializeProviders(config.providers);
         const baseDir = resolve(config.defaults.outputDir);
 
         // Gather all async tasks (pending + completed unretrieved)

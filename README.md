@@ -277,10 +277,10 @@ When a provider fails for any reason (exception, error response, timeout), libra
     "gemini-deep": {
       "apiKey": "$GEMINI_API_KEY",
       "enabled": true,
-      "fallback": "gemini-flash"
+      "fallback": "openai-deep"
     },
-    "gemini-flash": {
-      "apiKey": "$GEMINI_API_KEY",
+    "openai-deep": {
+      "apiKey": "$OPENAI_API_KEY",
       "enabled": false
     }
   }
@@ -293,14 +293,14 @@ When a provider fails for any reason (exception, error response, timeout), libra
 - Only single-level fallback is supported (a fallback's own fallback is ignored)
 - The fallback provider must be configured with a valid API key but can be `enabled: false` (it will only activate as a backup)
 - If the fallback provider is already running in the same dispatch (e.g., explicitly listed in `--providers`), it won't be triggered again
-- Output files use the fallback provider's ID (e.g., `gemini-flash.md`)
+- Output files use the fallback provider's ID (e.g., `openai-deep.md`)
 
 **In `run.json`**, both the original error report and the fallback result appear in the `providers` array. The fallback report includes a `fallbackFor` field indicating which provider it replaced:
 
 ```json
 {
-  "id": "gemini-flash",
-  "tier": "ai-grounded",
+  "id": "openai-deep",
+  "tier": "deep-research",
   "status": "success",
   "fallbackFor": "gemini-deep"
 }
@@ -354,6 +354,20 @@ Each layer overrides the previous. Project config can override defaults but cann
 ```
 
 API keys use the `$ENV_VAR` pattern -- the value `"$PERPLEXITY_API_KEY"` resolves to `process.env.PERPLEXITY_API_KEY` at runtime. Keys are never stored in plaintext.
+
+Some providers support optional model overrides. For example, to override Gemini Deep Research:
+
+```json
+{
+  "providers": {
+    "gemini-deep": {
+      "apiKey": "$GEMINI_API_KEY",
+      "enabled": true,
+      "model": "gemini-2.5-flash"
+    }
+  }
+}
+```
 
 ### Project Config Example
 
