@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-02-23
+
 ### Added
 - Perplexity Agent API provider adapters: `perplexity-deep-research` and `perplexity-advanced-deep`
 - Perplexity Search API provider adapter: `perplexity-search` (raw-search tier)
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Added backward-compatible legacy ID support for `perplexity-sonar` and `perplexity-deep` across CLI provider selection, config provider keys, group members, and fallback targets
 - `librarium ls` output table now uses dynamic column widths for long provider IDs
+
 
 ## [0.1.1] - 2026-02-23
 
@@ -55,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.2...HEAD
 [0.1.0]: https://github.com/jkudish/librarium/releases/tag/v0.1.0
 [0.1.1]: https://github.com/jkudish/librarium/releases/tag/v0.1.1
+[0.1.2]: https://github.com/jkudish/librarium/releases/tag/v0.1.2
