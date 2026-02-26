@@ -12,7 +12,10 @@ export function registerLsCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        await initializeProviders(config.providers);
+        const initResult = await initializeProviders(config);
+        for (const warning of initResult.warnings) {
+          console.error(`[librarium] warning: ${warning}`);
+        }
 
         const meta = getProviderMeta(config.providers);
 
@@ -37,6 +40,10 @@ export function registerLsCommand(program: Command): void {
           'Tier'.length,
           ...meta.map((p) => p.tier.length),
         );
+        const sourceWidth = Math.max(
+          'Source'.length,
+          ...meta.map((p) => p.source.length),
+        );
         const enabledWidth = Math.max('Enabled'.length, 'Yes'.length);
         const apiKeyWidth = Math.max('API Key'.length, 'Missing'.length);
 
@@ -45,6 +52,7 @@ export function registerLsCommand(program: Command): void {
           'ID'.padEnd(idWidth),
           'Name'.padEnd(nameWidth),
           'Tier'.padEnd(tierWidth),
+          'Source'.padEnd(sourceWidth),
           'Enabled'.padEnd(enabledWidth),
           'API Key'.padEnd(apiKeyWidth),
         ].join('  ');
@@ -59,6 +67,7 @@ export function registerLsCommand(program: Command): void {
             p.id.padEnd(idWidth),
             p.displayName.padEnd(nameWidth),
             p.tier.padEnd(tierWidth),
+            p.source.padEnd(sourceWidth),
             enabled.padEnd(enabledWidth),
             apiKey.padEnd(apiKeyWidth),
           ].join('  ');

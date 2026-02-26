@@ -88,8 +88,8 @@ export function registerInitCommand(program: Command): void {
         }
 
         // Disable unselected providers that were previously enabled
-        for (const id of Object.keys(existingConfig.providers)) {
-          if (!selectedProviders.includes(id)) {
+        for (const id of Object.keys(PROVIDER_ENV_VARS)) {
+          if (existingConfig.providers[id] && !selectedProviders.includes(id)) {
             existingConfig.providers[id].enabled = false;
           }
         }

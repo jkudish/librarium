@@ -72,7 +72,7 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 13 provider adapters organized into three tiers:
+Librarium ships with 13 built-in provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
@@ -105,6 +105,8 @@ For backward compatibility, librarium still accepts legacy IDs in:
 - `fallback` targets
 
 Legacy IDs are normalized to canonical IDs and emit a warning. Output files and `run.json` always use canonical IDs.
+
+You can also add **custom providers** (npm modules or local scripts) via config. See [Custom Providers](#custom-providers).
 
 ## Provider Tiers
 
@@ -177,7 +179,7 @@ List all available providers with their status.
 librarium ls [--json]
 ```
 
-Shows each provider's ID, display name, tier, enabled state, and whether an API key is configured.
+Shows each provider's ID, display name, tier, source (`builtin`, `npm`, `script`), enabled state, and whether an API key is configured.
 
 ### `groups`
 
@@ -333,7 +335,13 @@ Librarium uses a layered configuration system:
 2. **Project config**: `.librarium.json` (in current directory)
 3. **CLI flags**: Passed directly to commands
 
-Each layer overrides the previous. Project config can override defaults but cannot define providers (providers are global only).
+Each layer overrides the previous:
+
+- `defaults`: project overrides global
+- `providers`: deep-merged by provider ID (project overrides keys on conflict)
+- `customProviders`: merged by provider ID (project overrides global on same ID)
+- `trustedProviderIds`: union + dedupe across global and project
+- `groups`: project overrides global group names on conflict
 
 ### Global Config Example
 
@@ -366,6 +374,8 @@ Each layer overrides the previous. Project config can override defaults but cann
       "enabled": true
     }
   },
+  "customProviders": {},
+  "trustedProviderIds": [],
   "groups": {
     "my-custom-group": ["perplexity-sonar-pro", "exa"]
   }
@@ -395,6 +405,148 @@ Some providers support optional model overrides. For example, to override Gemini
   "defaults": {
     "outputDir": "./research",
     "timeout": 60
+  },
+  "providers": {
+    "perplexity-sonar-pro": {
+      "enabled": false
+    },
+    "my-script-provider": {
+      "enabled": true
+    }
+  },
+  "customProviders": {
+    "my-script-provider": {
+      "type": "script",
+      "command": "node",
+      "args": ["./scripts/librarium-provider.mjs"]
+    }
+  },
+  "trustedProviderIds": ["my-script-provider"],
+  "groups": {
+    "project-research": ["my-script-provider", "exa"]
+  }
+}
+```
+
+## Custom Providers
+
+Librarium supports external providers without changing core code. Add definitions to config and trust them explicitly.
+
+### Trust Model
+
+- Custom providers load only when their ID appears in `trustedProviderIds`
+- Trust lists from global and project config are unioned and deduped
+- Built-in IDs are reserved; custom providers cannot override built-ins
+
+### NPM Provider Example
+
+```json
+{
+  "customProviders": {
+    "my-npm-provider": {
+      "type": "npm",
+      "module": "librarium-provider-myteam",
+      "export": "createProvider",
+      "options": { "preset": "fast" }
+    }
+  },
+  "trustedProviderIds": ["my-npm-provider"],
+  "providers": {
+    "my-npm-provider": {
+      "enabled": true,
+      "apiKey": "$MY_PROVIDER_API_KEY"
+    }
+  }
+}
+```
+
+`module` resolution order is:
+1. Current project (`process.cwd()`)
+2. Librarium runtime install context
+
+In standalone/Homebrew binary installs, npm custom providers are skipped with a warning.
+
+### Script Provider Example
+
+```json
+{
+  "customProviders": {
+    "my-script-provider": {
+      "type": "script",
+      "command": "node",
+      "args": ["./scripts/librarium-provider.mjs"],
+      "cwd": ".",
+      "env": { "LOG_LEVEL": "warn" },
+      "options": { "flavor": "deep" }
+    }
+  },
+  "trustedProviderIds": ["my-script-provider"],
+  "providers": {
+    "my-script-provider": {
+      "enabled": true
+    }
+  }
+}
+```
+
+Script providers are invoked as one process per operation (`describe`, `execute`, `submit`, `poll`, `retrieve`, `test`) with JSON over stdin/stdout.
+
+### Script Protocol (v1)
+
+Request envelope:
+
+```json
+{
+  "protocolVersion": 1,
+  "operation": "execute",
+  "providerId": "my-script-provider",
+  "query": "research topic",
+  "options": { "timeout": 30 },
+  "providerConfig": { "enabled": true },
+  "sourceOptions": { "flavor": "deep" }
+}
+```
+
+Response envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "provider": "my-script-provider",
+    "tier": "ai-grounded",
+    "content": "# Result",
+    "citations": [],
+    "durationMs": 1200
+  }
+}
+```
+
+Error response:
+
+```json
+{
+  "ok": false,
+  "error": "upstream timeout"
+}
+```
+
+`describe` must return provider metadata and capabilities:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "displayName": "My Script Provider",
+    "tier": "deep-research",
+    "envVar": "MY_PROVIDER_API_KEY",
+    "requiresApiKey": true,
+    "capabilities": {
+      "submit": true,
+      "poll": true,
+      "retrieve": true,
+      "test": true
+    }
   }
 }
 ```

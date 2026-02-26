@@ -1,8 +1,9 @@
 import { resolveProviderId } from '../constants.js';
 import { hasApiKey } from '../core/config.js';
-import type { Provider, ProviderMeta, ProviderTier } from '../types.js';
+import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
+import { loadCustomProviders } from './custom.js';
 import { ExaProvider } from './exa.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { OpenAIDeepProvider } from './openai-deep.js';
@@ -18,12 +19,22 @@ import { TavilyProvider } from './tavily.js';
 
 const providers = new Map<string, Provider>();
 
-type ProviderInitConfig = Record<string, { model?: string }>;
+type ProviderInitConfig = Partial<
+  Pick<Config, 'providers' | 'customProviders' | 'trustedProviderIds'>
+>;
+
+export interface ProviderInitResult {
+  warnings: string[];
+  loadedCustomProviders: string[];
+  skippedCustomProviders: string[];
+}
 
 /**
  * Register a provider in the registry
  */
 export function registerProvider(provider: Provider): void {
+  provider.source ??= 'builtin';
+  provider.requiresApiKey ??= true;
   providers.set(provider.id, provider);
 }
 
@@ -52,19 +63,23 @@ export function getProvidersByTier(tier: ProviderTier): Provider[] {
  * Get provider metadata for display (ls command)
  */
 export function getProviderMeta(
-  config: Record<string, { apiKey: string; enabled: boolean }>,
+  config: Record<string, { apiKey?: string; enabled?: boolean }>,
 ): ProviderMeta[] {
   return getAllProviders().map((p) => {
     const providerConfig = config[p.id];
+    const requiresApiKey = p.requiresApiKey ?? true;
     return {
       id: p.id,
       displayName: p.displayName,
       tier: p.tier,
       envVar: p.envVar,
+      source: p.source ?? 'builtin',
       enabled: providerConfig?.enabled ?? false,
-      hasApiKey: providerConfig
-        ? hasApiKey(providerConfig.apiKey)
-        : !!process.env[p.envVar],
+      hasApiKey: requiresApiKey
+        ? providerConfig
+          ? hasApiKey(providerConfig.apiKey)
+          : !!process.env[p.envVar]
+        : true,
     };
   });
 }
@@ -75,27 +90,53 @@ export function getProviderMeta(
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
-): Promise<void> {
+): Promise<ProviderInitResult> {
   providers.clear();
+  const providerConfig = config.providers ?? {};
 
-  // Deep Research (async capable)
-  registerProvider(new PerplexitySonarDeepProvider());
-  registerProvider(new PerplexityDeepResearchProvider());
-  registerProvider(new PerplexityAdvancedDeepProvider());
-  registerProvider(new OpenAIDeepProvider());
-  registerProvider(
-    new GeminiDeepProvider({ model: config['gemini-deep']?.model }),
-  );
+  const builtIns: Provider[] = [
+    // Deep Research (async capable)
+    new PerplexitySonarDeepProvider(),
+    new PerplexityDeepResearchProvider(),
+    new PerplexityAdvancedDeepProvider(),
+    new OpenAIDeepProvider(),
+    new GeminiDeepProvider({ model: providerConfig['gemini-deep']?.model }),
 
-  // AI-Grounded Search (sync)
-  registerProvider(new PerplexitySonarProProvider());
-  registerProvider(new BraveAnswersProvider());
-  registerProvider(new ExaProvider());
+    // AI-Grounded Search (sync)
+    new PerplexitySonarProProvider(),
+    new BraveAnswersProvider(),
+    new ExaProvider(),
 
-  // Raw Search (sync)
-  registerProvider(new PerplexitySearchProvider());
-  registerProvider(new BraveSearchProvider());
-  registerProvider(new SearchApiProvider());
-  registerProvider(new SerpApiProvider());
-  registerProvider(new TavilyProvider());
+    // Raw Search (sync)
+    new PerplexitySearchProvider(),
+    new BraveSearchProvider(),
+    new SearchApiProvider(),
+    new SerpApiProvider(),
+    new TavilyProvider(),
+  ];
+
+  const reservedProviderIds = new Set<string>();
+  for (const provider of builtIns) {
+    provider.source = 'builtin';
+    provider.requiresApiKey = true;
+    registerProvider(provider);
+    reservedProviderIds.add(provider.id);
+  }
+
+  const customResult = await loadCustomProviders({
+    customProviders: config.customProviders ?? {},
+    trustedProviderIds: config.trustedProviderIds ?? [],
+    providerConfigs: providerConfig,
+    reservedProviderIds,
+  });
+
+  for (const provider of customResult.providers) {
+    registerProvider(provider);
+  }
+
+  return {
+    warnings: customResult.warnings,
+    loadedCustomProviders: customResult.loadedIds,
+    skippedCustomProviders: customResult.skippedIds,
+  };
 }

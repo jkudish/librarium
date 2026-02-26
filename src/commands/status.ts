@@ -93,7 +93,10 @@ export function registerStatusCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        await initializeProviders(config.providers);
+        const initResult = await initializeProviders(config);
+        for (const warning of initResult.warnings) {
+          console.error(`[librarium] warning: ${warning}`);
+        }
         const baseDir = resolve(config.defaults.outputDir);
 
         // Gather all async tasks (pending + completed unretrieved)

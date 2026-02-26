@@ -29,7 +29,10 @@ export function registerDoctorCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        await initializeProviders(config.providers);
+        const initResult = await initializeProviders(config);
+        for (const warning of initResult.warnings) {
+          console.error(`[librarium] warning: ${warning}`);
+        }
 
         const providers = getAllProviders();
         const results: DoctorResult[] = [];
@@ -37,9 +40,12 @@ export function registerDoctorCommand(program: Command): void {
         for (const provider of providers) {
           const providerConfig = config.providers[provider.id];
           const enabled = providerConfig?.enabled ?? false;
-          const keyPresent = providerConfig
-            ? hasApiKey(providerConfig.apiKey)
-            : !!process.env[provider.envVar];
+          const requiresApiKey = provider.requiresApiKey ?? true;
+          const keyPresent = requiresApiKey
+            ? providerConfig
+              ? hasApiKey(providerConfig.apiKey)
+              : !!process.env[provider.envVar]
+            : true;
 
           if (!enabled) {
             results.push({

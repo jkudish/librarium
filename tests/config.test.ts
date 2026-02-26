@@ -50,6 +50,8 @@ describe('loadConfig', () => {
     expect(config.defaults.asyncTimeout).toBe(1800);
     expect(config.defaults.asyncPollInterval).toBe(10);
     expect(config.defaults.mode).toBe('mixed');
+    expect(config.customProviders).toEqual({});
+    expect(config.trustedProviderIds).toEqual([]);
     expect(config.groups).toHaveProperty('deep');
     expect(config.groups).toHaveProperty('quick');
     expect(config.groups).toHaveProperty('all');
@@ -149,6 +151,8 @@ describe('mergeConfigs', () => {
         enabled: true,
       },
     },
+    customProviders: {},
+    trustedProviderIds: [],
     groups: {
       deep: ['perplexity-sonar-deep', 'openai-deep', 'gemini-deep'],
       quick: ['perplexity-sonar-pro', 'brave-answers', 'exa'],
@@ -176,6 +180,70 @@ describe('mergeConfigs', () => {
     // Non-overridden fields preserved
     expect(merged.defaults.maxParallel).toBe(6);
     expect(merged.defaults.mode).toBe('mixed');
+  });
+
+  it('deep-merges project provider overrides', () => {
+    const project: ProjectConfig = {
+      providers: {
+        'perplexity-sonar-pro': {
+          enabled: false,
+        },
+        'custom-provider': {
+          enabled: true,
+          apiKey: '$CUSTOM_PROVIDER_KEY',
+        },
+      },
+    };
+
+    const merged = mergeConfigs(baseGlobal, project);
+    expect(merged.providers['perplexity-sonar-pro'].apiKey).toBe(
+      '$PERPLEXITY_API_KEY',
+    );
+    expect(merged.providers['perplexity-sonar-pro'].enabled).toBe(false);
+    expect(merged.providers['custom-provider'].enabled).toBe(true);
+    expect(merged.providers['custom-provider'].apiKey).toBe(
+      '$CUSTOM_PROVIDER_KEY',
+    );
+  });
+
+  it('merges custom providers and trusted provider IDs', () => {
+    const globalWithCustom: Config = {
+      ...baseGlobal,
+      customProviders: {
+        'my-custom': {
+          type: 'script',
+          command: 'node',
+          args: ['./global-provider.js'],
+        },
+      },
+      trustedProviderIds: ['my-custom'],
+    };
+    const project: ProjectConfig = {
+      customProviders: {
+        'my-custom': {
+          type: 'script',
+          command: 'node',
+          args: ['./project-provider.js'],
+        },
+        'my-custom-2': {
+          type: 'npm',
+          module: 'librarium-custom-provider',
+        },
+      },
+      trustedProviderIds: ['my-custom', 'my-custom-2'],
+    };
+
+    const merged = mergeConfigs(globalWithCustom, project);
+    expect(merged.customProviders['my-custom']).toEqual({
+      type: 'script',
+      command: 'node',
+      args: ['./project-provider.js'],
+    });
+    expect(merged.customProviders['my-custom-2']).toEqual({
+      type: 'npm',
+      module: 'librarium-custom-provider',
+    });
+    expect(merged.trustedProviderIds).toEqual(['my-custom', 'my-custom-2']);
   });
 
   it('applies CLI flags', () => {
@@ -248,6 +316,8 @@ describe('validateFallbacks', () => {
       mode: 'mixed',
     },
     providers,
+    customProviders: {},
+    trustedProviderIds: [],
     groups: {},
   });
 
