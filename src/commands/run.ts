@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
-import { initializeProviders } from '../adapters/index.js';
+import { getAllProviders, initializeProviders } from '../adapters/index.js';
 import { resolveProviderIds } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
@@ -46,7 +46,10 @@ export function registerRunCommand(program: Command): void {
         if (opts.mode) cliFlags.mode = opts.mode;
 
         const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
-        await initializeProviders(config.providers);
+        const initResult = await initializeProviders(config);
+        for (const warning of initResult.warnings) {
+          console.error(`[librarium] warning: ${warning}`);
+        }
 
         // Resolve provider list
         let providerIds: string[];
@@ -72,6 +75,29 @@ export function registerRunCommand(program: Command): void {
         if (providerIds.length === 0) {
           spinner.fail(
             'No providers selected. Run `librarium init` to configure providers.',
+          );
+          process.exitCode = 2;
+          return;
+        }
+
+        const availableProviderIds = new Set(
+          getAllProviders().map((provider) => provider.id),
+        );
+        const unavailableProviders = providerIds.filter(
+          (id) => !availableProviderIds.has(id),
+        );
+        if (unavailableProviders.length > 0) {
+          console.error(
+            `[librarium] warning: Provider(s) not registered and will be skipped: ${unavailableProviders.join(', ')}`,
+          );
+          providerIds = providerIds.filter((id) =>
+            availableProviderIds.has(id),
+          );
+        }
+
+        if (providerIds.length === 0) {
+          spinner.fail(
+            'No valid providers selected after validation. Check provider trust/availability in config.',
           );
           process.exitCode = 2;
           return;

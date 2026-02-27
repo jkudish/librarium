@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 // Provider tiers
 export type ProviderTier = 'deep-research' | 'ai-grounded' | 'raw-search';
+export type ProviderSource = 'builtin' | 'npm' | 'script';
 
 // Async task status
 export type AsyncTaskStatus =
@@ -62,6 +63,8 @@ export interface Provider {
   displayName: string;
   tier: ProviderTier;
   envVar: string;
+  source?: ProviderSource;
+  requiresApiKey?: boolean;
 
   // Sync execution (all providers)
   execute(query: string, options: ProviderOptions): Promise<ProviderResult>;
@@ -81,19 +84,53 @@ export interface ProviderMeta {
   displayName: string;
   tier: ProviderTier;
   envVar: string;
+  source: ProviderSource;
   enabled: boolean;
   hasApiKey: boolean;
 }
 
 // Config for a single provider
 export const ProviderConfigSchema = z.object({
-  apiKey: z.string(), // "$ENV_VAR" pattern — resolved at runtime
+  apiKey: z.string().optional(), // "$ENV_VAR" pattern — resolved at runtime
   enabled: z.boolean().default(true),
   model: z.string().optional(),
   options: z.record(z.unknown()).optional(),
   fallback: z.string().optional(),
 });
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+
+export const ProjectProviderConfigSchema = z.object({
+  apiKey: z.string().optional(),
+  enabled: z.boolean().optional(),
+  model: z.string().optional(),
+  options: z.record(z.unknown()).optional(),
+  fallback: z.string().optional(),
+});
+export type ProjectProviderConfig = z.infer<typeof ProjectProviderConfigSchema>;
+
+export const NpmProviderSourceSchema = z.object({
+  type: z.literal('npm'),
+  module: z.string().min(1),
+  export: z.string().optional(),
+  options: z.record(z.unknown()).optional(),
+});
+export type NpmProviderSource = z.infer<typeof NpmProviderSourceSchema>;
+
+export const ScriptProviderSourceSchema = z.object({
+  type: z.literal('script'),
+  command: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().optional(),
+  env: z.record(z.string()).optional(),
+  options: z.record(z.unknown()).optional(),
+});
+export type ScriptProviderSource = z.infer<typeof ScriptProviderSourceSchema>;
+
+export const CustomProviderSourceSchema = z.discriminatedUnion('type', [
+  NpmProviderSourceSchema,
+  ScriptProviderSourceSchema,
+]);
+export type CustomProviderSource = z.infer<typeof CustomProviderSourceSchema>;
 
 // Defaults config
 export const DefaultsSchema = z.object({
@@ -111,11 +148,13 @@ export const ConfigSchema = z.object({
   version: z.literal(1),
   defaults: DefaultsSchema,
   providers: z.record(ProviderConfigSchema).default({}),
+  customProviders: z.record(CustomProviderSourceSchema).default({}),
+  trustedProviderIds: z.array(z.string()).default([]),
   groups: z.record(z.array(z.string())).default({}),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
-// Project-level config (subset — no providers allowed)
+// Project-level config (subset overrides)
 export const ProjectConfigSchema = z.object({
   defaults: z
     .object({
@@ -127,6 +166,10 @@ export const ProjectConfigSchema = z.object({
       mode: z.enum(['sync', 'async', 'mixed']).optional(),
     })
     .optional(),
+  providers: z.record(ProjectProviderConfigSchema).optional(),
+  customProviders: z.record(CustomProviderSourceSchema).optional(),
+  trustedProviderIds: z.array(z.string()).optional(),
+  groups: z.record(z.array(z.string())).optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 

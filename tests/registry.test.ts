@@ -115,6 +115,7 @@ describe('registry', () => {
     expect(meta).toHaveLength(1);
     expect(meta[0].id).toBe('test-meta');
     expect(meta[0].tier).toBe('ai-grounded');
+    expect(meta[0].source).toBe('builtin');
     expect(meta[0].enabled).toBe(true);
     expect(meta[0].hasApiKey).toBe(true);
   });
@@ -142,8 +143,10 @@ describe('registry', () => {
 
   it('initializeProviders applies gemini model config override', async () => {
     await initializeProviders({
-      'gemini-deep': {
-        model: 'gemini-2.5-pro',
+      providers: {
+        'gemini-deep': {
+          model: 'gemini-2.5-pro',
+        },
       },
     });
 

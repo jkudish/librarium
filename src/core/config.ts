@@ -23,6 +23,8 @@ const DEFAULT_CONFIG: Config = {
     mode: 'mixed',
   },
   providers: {},
+  customProviders: {},
+  trustedProviderIds: [],
   groups: { ...DEFAULT_GROUPS },
 };
 
@@ -80,7 +82,13 @@ export function validateFallbacks(config: Config): string[] {
 export function loadConfig(globalPath?: string): Config {
   const path = globalPath ?? CONFIG_FILE;
   if (!existsSync(path))
-    return { ...DEFAULT_CONFIG, groups: { ...DEFAULT_GROUPS } };
+    return {
+      ...DEFAULT_CONFIG,
+      providers: {},
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: { ...DEFAULT_GROUPS },
+    };
 
   let raw: unknown;
   try {
@@ -137,6 +145,8 @@ export function mergeConfigs(
     version: 1,
     defaults: { ...global.defaults },
     providers: { ...global.providers },
+    customProviders: { ...global.customProviders },
+    trustedProviderIds: [...global.trustedProviderIds],
     groups: { ...global.groups },
   };
 
@@ -147,9 +157,35 @@ export function mergeConfigs(
     };
   }
 
+  if (project?.providers) {
+    merged.providers = mergeProviderConfigs(
+      merged.providers,
+      project.providers,
+    );
+  }
+
+  if (project?.customProviders) {
+    merged.customProviders = {
+      ...merged.customProviders,
+      ...project.customProviders,
+    };
+  }
+
+  if (project?.trustedProviderIds) {
+    merged.trustedProviderIds = Array.from(
+      new Set([...merged.trustedProviderIds, ...project.trustedProviderIds]),
+    );
+  }
+
+  if (project?.groups) {
+    merged.groups = { ...merged.groups, ...project.groups };
+  }
+
   if (cliFlags) {
     merged.defaults = { ...merged.defaults, ...stripUndefined(cliFlags) };
   }
+
+  migrateLegacyProviderIds(merged);
 
   return merged;
 }
@@ -168,7 +204,8 @@ export function saveConfig(config: Config, path?: string): void {
 /**
  * Check if a provider has a valid API key available
  */
-export function hasApiKey(apiKeyRef: string): boolean {
+export function hasApiKey(apiKeyRef?: string): boolean {
+  if (!apiKeyRef) return false;
   const resolved = resolveEnvVar(apiKeyRef);
   return resolved !== undefined && resolved.length > 0;
 }
@@ -181,6 +218,27 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
     }
   }
   return result;
+}
+
+function mergeProviderConfigs(
+  base: Config['providers'],
+  overrides: NonNullable<ProjectConfig['providers']>,
+): Config['providers'] {
+  const merged: Config['providers'] = { ...base };
+
+  for (const [id, override] of Object.entries(overrides)) {
+    const existing = merged[id];
+    const next = {
+      ...(existing ?? {}),
+      ...stripUndefined(override),
+    } as Config['providers'][string];
+    merged[id] =
+      next.enabled === undefined
+        ? { ...next, enabled: true }
+        : { ...next, enabled: next.enabled };
+  }
+
+  return merged;
 }
 
 function migrateLegacyProviderIds(config: Config): string[] {

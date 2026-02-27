@@ -61,6 +61,29 @@ function printConfig(config: Record<string, unknown>, title: string): void {
     }
   }
 
+  const customProviders = config.customProviders as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const customProviderIds = Object.keys(customProviders);
+  console.log(`\n  Custom Providers (${customProviderIds.length}):`);
+  if (customProviderIds.length === 0) {
+    console.log('    (none configured)');
+  } else {
+    for (const [id, source] of Object.entries(customProviders)) {
+      const type = String(source.type ?? 'unknown');
+      console.log(`    ${id}: ${type}`);
+    }
+  }
+
+  const trustedProviderIds = (config.trustedProviderIds as string[]) ?? [];
+  console.log(`\n  Trusted Provider IDs (${trustedProviderIds.length}):`);
+  if (trustedProviderIds.length === 0) {
+    console.log('    (none)');
+  } else {
+    console.log(`    ${trustedProviderIds.join(', ')}`);
+  }
+
   const groups = config.groups as Record<string, string[]>;
   const groupNames = Object.keys(groups);
   console.log(`\n  Groups (${groupNames.length}):`);

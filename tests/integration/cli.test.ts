@@ -1,10 +1,17 @@
 import { execSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 // Integration tests run against the built CLI.
 // Run `npm run build` before executing these tests.
 const CLI = resolve(import.meta.dirname, '../../dist/cli.js');
+const TEST_HOME = mkdtempSync(resolve(tmpdir(), 'librarium-integration-'));
+
+afterAll(() => {
+  rmSync(TEST_HOME, { recursive: true, force: true });
+});
 
 function run(args: string): string {
   try {
@@ -12,6 +19,10 @@ function run(args: string): string {
       encoding: 'utf-8',
       timeout: 15_000,
       stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        HOME: TEST_HOME,
+      },
     });
   } catch (err: unknown) {
     const e = err as { stdout?: string; stderr?: string };
