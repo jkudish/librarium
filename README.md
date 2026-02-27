@@ -432,6 +432,8 @@ Some providers support optional model overrides. For example, to override Gemini
 
 Librarium supports external providers without changing core code. Add definitions to config and trust them explicitly.
 
+For provider-author implementation details (module contract, script runtime semantics, timeouts, and troubleshooting), see [`docs/provider-development.md`](docs/provider-development.md).
+
 ### Trust Model
 
 - Custom providers load only when their ID appears in `trustedProviderIds`
