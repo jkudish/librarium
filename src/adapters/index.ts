@@ -6,6 +6,9 @@ import { BraveSearchProvider } from './brave-search.js';
 import { loadCustomProviders } from './custom.js';
 import { ExaProvider } from './exa.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
+import { JinaSearchProvider } from './jina-search.js';
+import { KagiFastGPTProvider } from './kagi-fastgpt.js';
+import { OpenAIDeepO3Provider } from './openai-deep-o3.js';
 import { OpenAIDeepProvider } from './openai-deep.js';
 // Provider imports
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
@@ -16,6 +19,7 @@ import { PerplexitySonarProProvider } from './perplexity-sonar-pro.js';
 import { SearchApiProvider } from './searchapi.js';
 import { SerpApiProvider } from './serpapi.js';
 import { TavilyProvider } from './tavily.js';
+import { YouResearchProvider } from './you-research.js';
 
 const providers = new Map<string, Provider>();
 
@@ -86,7 +90,7 @@ export function getProviderMeta(
 
 /**
  * Initialize all providers — called at startup.
- * Instantiates and registers all 13 provider adapters.
+ * Instantiates and registers all 17 provider adapters.
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
@@ -100,16 +104,20 @@ export async function initializeProviders(
     new PerplexityDeepResearchProvider(),
     new PerplexityAdvancedDeepProvider(),
     new OpenAIDeepProvider(),
+    new OpenAIDeepO3Provider(),
     new GeminiDeepProvider({ model: providerConfig['gemini-deep']?.model }),
 
     // AI-Grounded Search (sync)
     new PerplexitySonarProProvider(),
     new BraveAnswersProvider(),
     new ExaProvider(),
+    new YouResearchProvider(),
+    new KagiFastGPTProvider(),
 
     // Raw Search (sync)
     new PerplexitySearchProvider(),
     new BraveSearchProvider(),
+    new JinaSearchProvider(),
     new SearchApiProvider(),
     new SerpApiProvider(),
     new TavilyProvider(),
