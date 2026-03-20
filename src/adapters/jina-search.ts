@@ -22,7 +22,7 @@ interface JinaSearchResponse {
 /**
  * Jina AI Search provider.
  * Search-to-markdown API purpose-built for LLM consumption.
- * Tier: ai-grounded (sync)
+ * Tier: raw-search (sync)
  */
 export class JinaSearchProvider extends BaseProvider {
   readonly id = 'jina-search';
