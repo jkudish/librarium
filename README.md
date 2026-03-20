@@ -72,20 +72,24 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 13 built-in provider adapters organized into three tiers:
+Librarium ships with 17 built-in provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
 | Perplexity Sonar Deep Research | `perplexity-sonar-deep` | deep-research | `PERPLEXITY_API_KEY` |
 | Perplexity Deep Research | `perplexity-deep-research` | deep-research | `PERPLEXITY_API_KEY` |
 | Perplexity Advanced Deep Research | `perplexity-advanced-deep` | deep-research | `PERPLEXITY_API_KEY` |
-| OpenAI Deep Research | `openai-deep` | deep-research | `OPENAI_API_KEY` |
+| OpenAI Deep Research (o4-mini) | `openai-deep` | deep-research | `OPENAI_API_KEY` |
+| OpenAI Deep Research (o3) | `openai-deep-o3` | deep-research | `OPENAI_API_KEY` |
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
 | Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Brave AI Answers | `brave-answers` | ai-grounded | `BRAVE_API_KEY` |
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
+| You.com Research | `you-research` | ai-grounded | `YOU_COM_API_KEY` |
+| Kagi FastGPT | `kagi-fastgpt` | ai-grounded | `KAGI_API_KEY` |
 | Perplexity Search | `perplexity-search` | raw-search | `PERPLEXITY_API_KEY` |
 | Brave Web Search | `brave-search` | raw-search | `BRAVE_API_KEY` |
+| Jina AI Search | `jina-search` | raw-search | `JINA_AI_API_KEY` |
 | SearchAPI | `searchapi` | raw-search | `SEARCHAPI_API_KEY` |
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
@@ -255,12 +259,12 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 
 | Group | Providers | Use Case |
 |---|---|---|
-| `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, gemini-deep | Thorough async research |
-| `quick` | perplexity-sonar-pro, brave-answers, exa | Fast AI-grounded answers |
-| `raw` | perplexity-search, brave-search, searchapi, serpapi, tavily | Traditional search results |
-| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, brave-search, tavily | Quick results from multiple tiers |
+| `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Thorough async research |
+| `quick` | perplexity-sonar-pro, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
+| `raw` | perplexity-search, brave-search, jina-search, searchapi, serpapi, tavily | Traditional search results |
+| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `all` | All 13 providers | Maximum coverage |
+| `all` | All 17 providers | Maximum coverage |
 
 ### Custom Groups
 
@@ -644,7 +648,7 @@ Groups:
   deep           — Thorough async research (minutes)
   fast           — Quick results from multiple tiers
   comprehensive  — Deep + AI-grounded combined
-  all            — All 13 providers
+  all            — All 17 providers
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     — Synthesized overview with stats
