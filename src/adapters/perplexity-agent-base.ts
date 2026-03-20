@@ -46,7 +46,7 @@ interface AgentResponseBody {
   error?: { message?: string; code?: string };
 }
 
-const AGENT_API_URL = 'https://api.perplexity.ai/v1/responses';
+const AGENT_API_URL = 'https://api.perplexity.ai/v1/agent';
 
 /**
  * Shared base for Perplexity Agent API providers (preset-based).
@@ -177,7 +177,6 @@ export abstract class PerplexityAgentBaseProvider extends BaseProvider {
         body: {
           preset: this.preset,
           input: 'ping',
-          max_output_tokens: 5,
         },
         timeout: 15000,
       });

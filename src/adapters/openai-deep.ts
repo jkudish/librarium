@@ -237,9 +237,10 @@ export class OpenAIDeepProvider extends BaseProvider {
   async test(): Promise<{ ok: boolean; error?: string }> {
     try {
       const apiKey = this.getApiKey();
-      // Use a lightweight models endpoint to verify key validity
+      // Deep research models don't appear in /v1/models, so verify
+      // the API key via the general models list endpoint instead.
       const response = await this.request(
-        'https://api.openai.com/v1/models/o4-mini-deep-research',
+        'https://api.openai.com/v1/models',
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${apiKey}` },
