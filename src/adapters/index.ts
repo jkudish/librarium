@@ -8,9 +8,8 @@ import { ExaProvider } from './exa.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
-import { OpenAIDeepO3Provider } from './openai-deep-o3.js';
 import { OpenAIDeepProvider } from './openai-deep.js';
-// Provider imports
+import { OpenAIDeepO3Provider } from './openai-deep-o3.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
 import { PerplexitySearchProvider } from './perplexity-search.js';

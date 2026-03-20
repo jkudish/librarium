@@ -113,7 +113,14 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'gemini-deep',
   ],
   quick: ['perplexity-sonar-pro', 'brave-answers', 'exa', 'kagi-fastgpt'],
-  raw: ['perplexity-search', 'brave-search', 'jina-search', 'searchapi', 'serpapi', 'tavily'],
+  raw: [
+    'perplexity-search',
+    'brave-search',
+    'jina-search',
+    'searchapi',
+    'serpapi',
+    'tavily',
+  ],
   fast: [
     'perplexity-sonar-pro',
     'perplexity-search',
@@ -136,7 +143,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'exa',
     'you-research',
     'kagi-fastgpt',
-    'jina-search',
   ],
   all: [
     'perplexity-sonar-deep',

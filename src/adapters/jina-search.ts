@@ -26,7 +26,7 @@ interface JinaSearchResponse {
  */
 export class JinaSearchProvider extends BaseProvider {
   readonly id = 'jina-search';
-  readonly tier: ProviderTier = 'ai-grounded';
+  readonly tier: ProviderTier = 'raw-search';
 
   async execute(
     query: string,
