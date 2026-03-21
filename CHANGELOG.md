@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- OpenAI Deep Research (o3) provider adapter: `openai-deep-o3` — higher-quality deep research using the o3-deep-research model
+- You.com Research provider adapter: `you-research` — AI-powered research with cited answers (ai-grounded tier)
+- Jina AI Search provider adapter: `jina-search` — search-to-markdown API for LLM-native content (raw-search tier)
+- Kagi FastGPT provider adapter: `kagi-fastgpt` — AI answers with curated, ad-free sources (ai-grounded tier)
+
+### Fixed
+- Perplexity Agent API endpoint updated from `/v1/responses` to canonical `/v1/agent` — fixes HTTP 400 errors for all Perplexity Agent providers (`perplexity-sonar-deep`, `perplexity-deep-research`, `perplexity-advanced-deep`) in both health checks and live queries
+- Perplexity Deep Research health check: removed unsupported `max_output_tokens` parameter from test request
+- OpenAI Deep Research health check failing with HTTP 404 — deep research models don't appear in `/v1/models` endpoint; test now verifies API key via general models list
+
 ## [0.1.2] - 2026-02-23
 
 ### Added

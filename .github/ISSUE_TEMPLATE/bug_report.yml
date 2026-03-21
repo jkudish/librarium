@@ -67,12 +67,16 @@ body:
         - perplexity-deep-research
         - perplexity-advanced-deep
         - openai-deep
+        - openai-deep-o3
         - gemini-deep
         - perplexity-sonar-pro
         - perplexity-search
         - brave-answers
         - exa
+        - you-research
+        - kagi-fastgpt
         - brave-search
+        - jina-search
         - searchapi
         - serpapi
         - tavily
