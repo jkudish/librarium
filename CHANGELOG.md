@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Firecrawl Search provider adapter: `firecrawl-search` — web search via Firecrawl v2 Search API (raw-search tier)
 - OpenAI Deep Research (o3) provider adapter: `openai-deep-o3` — higher-quality deep research using the o3-deep-research model
 - You.com Research provider adapter: `you-research` — AI-powered research with cited answers (ai-grounded tier)
 - Jina AI Search provider adapter: `jina-search` — search-to-markdown API for LLM-native content (raw-search tier)

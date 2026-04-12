@@ -72,7 +72,7 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 17 built-in provider adapters organized into three tiers:
+Librarium ships with 18 built-in provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
@@ -93,6 +93,7 @@ Librarium ships with 17 built-in provider adapters organized into three tiers:
 | SearchAPI | `searchapi` | raw-search | `SEARCHAPI_API_KEY` |
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
+| Firecrawl Search | `firecrawl-search` | raw-search | `FIRECRAWL_API_KEY` |
 
 ### Provider ID Migration (Legacy Aliases)
 
@@ -261,10 +262,10 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 |---|---|---|
 | `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Thorough async research |
 | `quick` | perplexity-sonar-pro, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
-| `raw` | perplexity-search, brave-search, jina-search, searchapi, serpapi, tavily | Traditional search results |
-| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, tavily | Quick results from multiple tiers |
+| `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
+| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `all` | All 17 providers | Maximum coverage |
+| `all` | All 18 providers | Maximum coverage |
 
 ### Custom Groups
 
