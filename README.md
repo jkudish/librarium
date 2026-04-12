@@ -72,7 +72,7 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 17 built-in provider adapters organized into three tiers:
+Librarium ships with 18 built-in provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|

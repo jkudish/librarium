@@ -90,7 +90,7 @@ export function getProviderMeta(
 
 /**
  * Initialize all providers — called at startup.
- * Instantiates and registers all 17 provider adapters.
+ * Instantiates and registers all 18 provider adapters.
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
