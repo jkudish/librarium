@@ -5,6 +5,7 @@ import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
 import { loadCustomProviders } from './custom.js';
 import { ExaProvider } from './exa.js';
+import { FirecrawlSearchProvider } from './firecrawl-search.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
@@ -117,6 +118,7 @@ export async function initializeProviders(
     new PerplexitySearchProvider(),
     new BraveSearchProvider(),
     new JinaSearchProvider(),
+    new FirecrawlSearchProvider(),
     new SearchApiProvider(),
     new SerpApiProvider(),
     new TavilyProvider(),

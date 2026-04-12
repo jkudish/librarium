@@ -48,6 +48,7 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
   searchapi: 'SEARCHAPI_API_KEY',
   serpapi: 'SERPAPI_API_KEY',
   tavily: 'TAVILY_API_KEY',
+  'firecrawl-search': 'FIRECRAWL_API_KEY',
 };
 
 // Provider display names
@@ -69,6 +70,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   searchapi: 'SearchAPI',
   serpapi: 'SerpAPI',
   tavily: 'Tavily Search',
+  'firecrawl-search': 'Firecrawl Search',
 };
 
 // Backward-compatible provider ID aliases (legacy -> canonical)
@@ -117,6 +119,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'perplexity-search',
     'brave-search',
     'jina-search',
+    'firecrawl-search',
     'searchapi',
     'serpapi',
     'tavily',
@@ -129,6 +132,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'kagi-fastgpt',
     'jina-search',
     'brave-search',
+    'firecrawl-search',
     'tavily',
   ],
   comprehensive: [
@@ -157,6 +161,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'you-research',
     'kagi-fastgpt',
     'jina-search',
+    'firecrawl-search',
     'perplexity-search',
     'brave-search',
     'searchapi',
