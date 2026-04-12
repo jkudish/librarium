@@ -1,6 +1,6 @@
 {
   "name": "librarium",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Fan out research queries to multiple search and deep-research APIs in parallel",
   "type": "module",
   "bin": {

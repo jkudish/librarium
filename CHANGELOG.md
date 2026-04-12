@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-11
+
 ### Added
 - Firecrawl Search provider adapter: `firecrawl-search` — web search via Firecrawl v2 Search API (raw-search tier)
 - OpenAI Deep Research (o3) provider adapter: `openai-deep-o3` — higher-quality deep research using the o3-deep-research model
@@ -70,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/jkudish/librarium/compare/v0.1.2...v0.1.3
 [0.1.0]: https://github.com/jkudish/librarium/releases/tag/v0.1.0
 [0.1.1]: https://github.com/jkudish/librarium/releases/tag/v0.1.1
 [0.1.2]: https://github.com/jkudish/librarium/releases/tag/v0.1.2
