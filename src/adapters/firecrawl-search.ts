@@ -10,7 +10,6 @@ interface FirecrawlWebResult {
   url: string;
   title?: string;
   description?: string;
-  markdown?: string;
 }
 
 interface FirecrawlSearchResponse {
@@ -150,7 +149,7 @@ export class FirecrawlSearchProvider extends BaseProvider {
     return results.map((result) => ({
       url: result.url,
       title: result.title,
-      snippet: result.description,
+      snippet: result.description?.slice(0, 200),
       provider: this.id,
     }));
   }
