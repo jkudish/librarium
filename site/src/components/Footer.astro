@@ -1,0 +1,23 @@
+---
+const links = [
+  { href: "https://github.com/jkudish/librarium", label: "GitHub" },
+  { href: "https://www.npmjs.com/package/librarium", label: "npm" },
+  { href: "/docs", label: "Docs" },
+  { href: "https://github.com/jkudish/librarium/blob/main/CHANGELOG.md", label: "Changelog" },
+  { href: "https://github.com/jkudish/librarium/blob/main/LICENSE", label: "MIT License" },
+];
+---
+
+<footer class="border-t border-neutral-950/10 py-12">
+  <div class="mx-auto flex max-w-6xl flex-col items-start justify-between gap-y-6 px-6 sm:flex-row sm:items-center lg:px-8">
+    <a href="/" aria-label="Homepage"><span class="font-mono text-base font-semibold text-neutral-950 sm:text-sm">librarium</span></a>
+    <nav class="flex flex-wrap gap-x-7 gap-y-2 text-base font-normal text-neutral-600 sm:text-sm">
+      {links.map((link) => (
+        <a href={link.href} class="hover:text-neutral-950">{link.label}</a>
+      ))}
+    </nav>
+  </div>
+  <div class="mx-auto mt-8 max-w-6xl px-6 lg:px-8">
+    <p class="text-base/7 text-neutral-500 sm:text-sm/6">Brought to you by <a href="https://agentsy.build" class="font-medium text-neutral-700 hover:text-neutral-950">Agentsy</a> and <a href="https://jkudish.com" class="font-medium text-neutral-700 hover:text-neutral-950">Joey Kudish</a>.</p>
+  </div>
+</footer>

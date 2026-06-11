@@ -1,0 +1,122 @@
+---
+import Base from "./Base.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import { getCollection } from "astro:content";
+
+interface Props {
+  title: string;
+  description?: string;
+  currentSlug: string;
+}
+
+const { title, description, currentSlug } = Astro.props;
+
+const allDocs = await getCollection("docs");
+const navItems = allDocs
+  .sort((a, b) => a.data.order - b.data.order)
+  .map((entry) => ({
+    slug: entry.id === "index" ? "" : entry.id,
+    title: entry.data.title,
+    href: entry.id === "index" ? "/docs" : `/docs/${entry.id}`,
+  }));
+---
+
+<Base title={`${title} — librarium docs`} description={description}>
+  <Header />
+
+  <div class="mx-auto max-w-6xl px-6 lg:px-8">
+    <!-- Mobile nav -->
+    <div class="border-b border-neutral-950/10 py-4 lg:hidden">
+      <details class="group">
+        <summary
+          class="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-neutral-950 tracking-tight"
+        >
+          <span>{title}</span>
+          <svg
+            viewBox="0 0 16 16"
+            class="size-4 shrink-0 fill-none stroke-neutral-600 stroke-[1.5] transition-transform group-open:rotate-180"
+            aria-hidden="true"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6l4 4 4-4" />
+          </svg>
+        </summary>
+        <nav class="mt-3 flex flex-col gap-y-0.5" aria-label="Documentation pages">
+          <ul role="list" class="flex flex-col gap-y-0.5">
+            {
+              navItems.map((item) => {
+                const isActive =
+                  item.slug === currentSlug ||
+                  (item.slug === "" && currentSlug === "index");
+                return (
+                  <li>
+                    <a
+                      href={item.href}
+                      class:list={[
+                        "block rounded-lg px-3 py-1.5 text-sm",
+                        isActive
+                          ? "bg-neutral-950/[0.04] text-neutral-950"
+                          : "text-neutral-600 hover:text-neutral-950",
+                      ]}
+                      aria-current={isActive ? "page" : undefined}
+                    >
+                      {item.title}
+                    </a>
+                  </li>
+                );
+              })
+            }
+          </ul>
+        </nav>
+      </details>
+    </div>
+
+    <!-- Two-column layout -->
+    <div class="flex gap-x-16 py-12">
+      <!-- Sidebar (desktop only) -->
+      <aside class="hidden w-52 shrink-0 lg:block">
+        <nav class="sticky top-8" aria-label="Documentation">
+          <ul role="list" class="flex flex-col gap-y-0.5">
+            {
+              navItems.map((item) => {
+                const isActive =
+                  item.slug === currentSlug ||
+                  (item.slug === "" && currentSlug === "index");
+                return (
+                  <li>
+                    <a
+                      href={item.href}
+                      class:list={[
+                        "block rounded-lg px-3 py-1.5 text-sm",
+                        isActive
+                          ? "bg-neutral-950/[0.04] text-neutral-950"
+                          : "text-neutral-600 hover:text-neutral-950",
+                      ]}
+                      aria-current={isActive ? "page" : undefined}
+                    >
+                      {item.title}
+                    </a>
+                  </li>
+                );
+              })
+            }
+          </ul>
+        </nav>
+      </aside>
+
+      <!-- Main content -->
+      <main class="min-w-0 flex-1">
+        <h1
+          class="text-3xl font-semibold tracking-tight text-balance text-neutral-950"
+        >
+          {title}
+        </h1>
+        <div class="prose max-w-[75ch] mt-2">
+          <slot />
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <Footer />
+</Base>

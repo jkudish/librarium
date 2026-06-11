@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
+/* Prose styles for rendered markdown (docs pages). */
+@utility prose {
+  color: var(--color-neutral-600);
+  font-size: var(--text-base);
+  line-height: --spacing(7);
+
+  & > * + * {
+    margin-top: --spacing(5);
+  }
+
+  & h1,
+  & h2,
+  & h3,
+  & h4 {
+    color: var(--color-neutral-950);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+
+  & h2 {
+    margin-top: --spacing(12);
+    font-size: var(--text-2xl);
+    line-height: var(--text-2xl--line-height);
+  }
+
+  & h3 {
+    margin-top: --spacing(8);
+    font-size: var(--text-lg);
+    line-height: var(--text-lg--line-height);
+  }
+
+  & h4 {
+    margin-top: --spacing(6);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+  }
+
+  & a {
+    color: var(--color-amber-700);
+    font-weight: var(--font-weight-medium);
+
+    @variant hover {
+      color: var(--color-amber-600);
+    }
+  }
+
+  & code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    color: var(--color-neutral-950);
+    background-color: --alpha(var(--color-neutral-950) / 4%);
+    border-radius: var(--radius-sm);
+    padding: 1px 4px;
+  }
+
+  & pre {
+    background-color: var(--color-neutral-950) !important;
+    border-radius: var(--radius-xl);
+    padding: --spacing(5);
+    overflow-x: auto;
+    font-size: var(--text-sm);
+    line-height: --spacing(6);
+  }
+
+  & pre code {
+    background-color: transparent;
+    color: inherit;
+    font-size: inherit;
+    padding: 0;
+    border-radius: 0;
+  }
+
+  & ul {
+    list-style: disc;
+    padding-left: --spacing(5);
+  }
+
+  & ol {
+    list-style: decimal;
+    padding-left: --spacing(5);
+  }
+
+  & li + li {
+    margin-top: --spacing(2);
+  }
+
+  & strong {
+    color: var(--color-neutral-950);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  & blockquote {
+    border-left: 2px solid --alpha(var(--color-neutral-950) / 10%);
+    padding-left: --spacing(4);
+  }
+
+  & table {
+    width: 100%;
+    text-align: left;
+    font-size: var(--text-sm);
+    line-height: --spacing(6);
+  }
+
+  & th {
+    color: var(--color-neutral-950);
+    font-weight: var(--font-weight-semibold);
+    white-space: nowrap;
+    padding: --spacing(2) --spacing(4) --spacing(2) 0;
+    border-bottom: 1px solid --alpha(var(--color-neutral-950) / 10%);
+  }
+
+  & td {
+    padding: --spacing(2.5) --spacing(4) --spacing(2.5) 0;
+    border-bottom: 1px solid --alpha(var(--color-neutral-950) / 5%);
+  }
+}
