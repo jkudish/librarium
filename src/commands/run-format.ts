@@ -151,7 +151,7 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
     lines.push('');
     lines.push(
       paint(
-        '  ◷ async tasks pending — run `librarium status --wait` to poll and retrieve',
+        '  ◷ async tasks pending: run `librarium status --wait` to poll and retrieve',
         ANSI.yellow,
         input.color,
       ),
