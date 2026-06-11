@@ -1,0 +1,152 @@
+import type {
+  Citation,
+  ProviderOptions,
+  ProviderResult,
+  ProviderTier,
+} from '../types.js';
+import { BaseProvider } from './base.js';
+
+interface OpenRouterAnnotation {
+  type?: string;
+  url_citation?: {
+    url?: string;
+    title?: string;
+    content?: string;
+  };
+}
+
+interface OpenRouterMessage {
+  content?: string;
+  annotations?: OpenRouterAnnotation[];
+}
+
+interface OpenRouterChoice {
+  message?: OpenRouterMessage;
+}
+
+interface OpenRouterResponse {
+  model?: string;
+  choices?: OpenRouterChoice[];
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
+  error?: {
+    message?: string;
+  };
+}
+
+const OPENROUTER_ONLINE_MODEL = 'openai/gpt-4o-mini:online';
+
+/**
+ * OpenRouter online search provider.
+ * Uses OpenRouter chat completions with Exa-backed online grounding.
+ * Tier: ai-grounded (sync)
+ */
+export class OpenRouterOnlineProvider extends BaseProvider {
+  readonly id = 'openrouter-online';
+  readonly tier: ProviderTier = 'ai-grounded';
+
+  async execute(
+    query: string,
+    options: ProviderOptions,
+  ): Promise<ProviderResult> {
+    const start = performance.now();
+    const apiKey = this.getApiKey();
+
+    try {
+      const response = await this.request<OpenRouterResponse>(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://github.com/jkudish/librarium',
+            'X-Title': 'librarium',
+          },
+          body: {
+            model: OPENROUTER_ONLINE_MODEL,
+            messages: [{ role: 'user', content: query }],
+          },
+          timeout: options.timeout * 1000,
+          signal: options.signal,
+        },
+      );
+
+      const durationMs = Math.round(performance.now() - start);
+      const data = response.data;
+
+      if (response.status !== 200 || data.error) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: data.error?.message ?? this.formatError(response.status, data),
+        };
+      }
+
+      const message = data.choices?.[0]?.message;
+      if (!Array.isArray(message?.annotations)) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: 'OpenRouter online response did not include annotations',
+        };
+      }
+
+      return {
+        provider: this.id,
+        tier: this.tier,
+        content: message.content?.trim() ?? '',
+        citations: this.extractCitations(message.annotations),
+        durationMs,
+        model: data.model ?? OPENROUTER_ONLINE_MODEL,
+        tokenUsage: {
+          input: data.usage?.prompt_tokens,
+          output: data.usage?.completion_tokens,
+        },
+      };
+    } catch (err) {
+      const durationMs = Math.round(performance.now() - start);
+      return {
+        provider: this.id,
+        tier: this.tier,
+        content: '',
+        citations: [],
+        durationMs,
+        error: this.formatCatchError(err),
+      };
+    }
+  }
+
+  async test(): Promise<{ ok: boolean; error?: string }> {
+    const result = await this.execute('ping', { timeout: 10 });
+    if (!result.error) return { ok: true };
+    return { ok: false, error: result.error };
+  }
+
+  private extractCitations(annotations: OpenRouterAnnotation[]): Citation[] {
+    const seen = new Set<string>();
+    const citations: Citation[] = [];
+
+    for (const annotation of annotations) {
+      if (annotation.type !== 'url_citation') continue;
+      const citation = annotation.url_citation;
+      if (!citation?.url || seen.has(citation.url)) continue;
+      seen.add(citation.url);
+      citations.push({
+        url: citation.url,
+        title: citation.title,
+        snippet: citation.content,
+        provider: this.id,
+      });
+    }
+
+    return citations;
+  }
+}

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import {
-  CONFIG_FILE,
   CONFIG_FILE_MODE,
   DEFAULT_GROUPS,
   PROJECT_CONFIG_FILE,
@@ -10,7 +10,12 @@ import {
 } from '../constants.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
 import { ConfigSchema, ProjectConfigSchema } from '../types.js';
+import type { EnvRecord } from './credentials.js';
+import { hasCredential, resolveCredential } from './credentials.js';
 import { safeWriteFile } from './fs-utils.js';
+
+export const CONFIG_DIR = resolve(homedir(), '.config', 'librarium');
+export const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json');
 
 const DEFAULT_CONFIG: Config = {
   version: 1,
@@ -32,12 +37,11 @@ const DEFAULT_CONFIG: Config = {
  * Resolve $ENV_VAR references in a string.
  * Returns the resolved value or undefined if the env var is not set.
  */
-export function resolveEnvVar(value: string): string | undefined {
-  if (value.startsWith('$')) {
-    const envName = value.slice(1);
-    return process.env[envName];
-  }
-  return value;
+export function resolveEnvVar(
+  value: string,
+  env: EnvRecord = process.env,
+): string | undefined {
+  return resolveCredential(value, { env });
 }
 
 /**
@@ -204,10 +208,11 @@ export function saveConfig(config: Config, path?: string): void {
 /**
  * Check if a provider has a valid API key available
  */
-export function hasApiKey(apiKeyRef?: string): boolean {
-  if (!apiKeyRef) return false;
-  const resolved = resolveEnvVar(apiKeyRef);
-  return resolved !== undefined && resolved.length > 0;
+export function hasApiKey(
+  apiKeyRef?: string,
+  env: EnvRecord = process.env,
+): boolean {
+  return hasCredential(apiKeyRef, { env });
 }
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {

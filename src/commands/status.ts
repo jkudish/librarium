@@ -2,7 +2,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
-import { getProvider, initializeProviders } from '../adapters/index.js';
+import { getProvider, initializeProviders } from '../adapters/node-registry.js';
 import { sanitizeId } from '../constants.js';
 import {
   getPendingTasks,
@@ -93,7 +93,10 @@ export function registerStatusCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        const initResult = await initializeProviders(config);
+        const initResult = await initializeProviders({
+          ...config,
+          credentials: { env: process.env },
+        });
         for (const warning of initResult.warnings) {
           console.error(`[librarium] warning: ${warning}`);
         }

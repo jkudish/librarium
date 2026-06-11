@@ -1,5 +1,8 @@
 import { PROVIDER_DISPLAY_NAMES, PROVIDER_ENV_VARS } from '../constants.js';
-import { resolveEnvVar } from '../core/config.js';
+import {
+  type CredentialContext,
+  resolveCredential,
+} from '../core/credentials.js';
 import {
   type HttpRequestOptions,
   type HttpResponse,
@@ -12,6 +15,11 @@ import type {
   ProviderTier,
 } from '../types.js';
 
+export interface BaseProviderOptions {
+  apiKey?: string;
+  credentials?: CredentialContext;
+}
+
 /**
  * Base class for all provider adapters.
  * Handles common concerns: API key resolution, HTTP client, display info.
@@ -23,6 +31,16 @@ import type {
 export abstract class BaseProvider implements Provider {
   abstract readonly id: string;
   abstract readonly tier: ProviderTier;
+  source?: Provider['source'];
+  requiresApiKey?: Provider['requiresApiKey'];
+
+  private apiKeyRef?: string;
+  private credentials: CredentialContext;
+
+  constructor(options: BaseProviderOptions = {}) {
+    this.apiKeyRef = options.apiKey;
+    this.credentials = options.credentials ?? {};
+  }
 
   get displayName(): string {
     return PROVIDER_DISPLAY_NAMES[this.id] ?? this.id;
@@ -32,12 +50,17 @@ export abstract class BaseProvider implements Provider {
     return PROVIDER_ENV_VARS[this.id] ?? '';
   }
 
+  configure(options: BaseProviderOptions): void {
+    this.apiKeyRef = options.apiKey;
+    this.credentials = options.credentials ?? {};
+  }
+
   /**
    * Resolve the API key from config ($ENV_VAR pattern)
    */
   protected getApiKey(apiKeyRef?: string): string {
-    const ref = apiKeyRef ?? `$${this.envVar}`;
-    const resolved = resolveEnvVar(ref);
+    const ref = apiKeyRef ?? this.apiKeyRef ?? `$${this.envVar}`;
+    const resolved = resolveCredential(ref, this.credentials);
     if (!resolved) {
       throw new Error(
         `API key not found for ${this.id}. Set ${this.envVar} environment variable.`,
