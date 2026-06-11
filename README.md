@@ -745,7 +745,7 @@ The skill guides agents through:
 
 ## Publishing
 
-The release workflow at `.github/workflows/release.yml` handles npm publishing. It requires a `NPM_TOKEN` repository secret configured in GitHub Settings > Secrets.
+The release workflow at `.github/workflows/release.yml` handles npm publishing via [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (GitHub Actions OIDC) — no token secret required. The trusted publisher is configured in the package settings on npmjs.com (repo `jkudish/librarium`, workflow `release.yml`).
 
 ## Sponsoring
 
