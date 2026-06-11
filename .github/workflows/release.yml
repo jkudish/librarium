@@ -119,7 +119,14 @@ jobs:
         run: npm run build
 
       - name: Publish to npm
-        run: npm publish --provenance --access public 2>&1 || echo "Publish failed (version may already exist)"
+        # Tolerate ONLY the version-already-exists case (re-runs); fail loudly on
+        # everything else — npm masks auth failures as 404s on publish.
+        run: |
+          if npm view "librarium@$(node -p "require('./package.json').version")" version >/dev/null 2>&1; then
+            echo "Version already published — skipping"
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
