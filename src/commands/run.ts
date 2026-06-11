@@ -1,8 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
-import { getAllProviders, initializeProviders } from '../adapters/index.js';
+import {
+  getAllProviders,
+  initializeProviders,
+} from '../adapters/node-registry.js';
 import { resolveProviderIds } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
@@ -15,7 +18,13 @@ import {
   resolveOutputDir,
 } from '../core/prompt-builder.js';
 import { generateSummary } from '../core/synthesis.js';
-import type { Citation, Defaults, RunManifest } from '../types.js';
+import type {
+  Citation,
+  Defaults,
+  ProviderDispatchResult,
+  ProviderReport,
+  RunManifest,
+} from '../types.js';
 
 export function registerRunCommand(program: Command): void {
   program
@@ -46,7 +55,11 @@ export function registerRunCommand(program: Command): void {
         if (opts.mode) cliFlags.mode = opts.mode;
 
         const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
-        const initResult = await initializeProviders(config);
+        const credentials = { env: process.env };
+        const initResult = await initializeProviders({
+          ...config,
+          credentials,
+        });
         for (const warning of initResult.warnings) {
           console.error(`[librarium] warning: ${warning}`);
         }
@@ -107,18 +120,19 @@ export function registerRunCommand(program: Command): void {
         const slug = generateSlug(query);
         const baseDir = resolve(config.defaults.outputDir);
         const outputDir = resolveOutputDir(baseDir, slug);
+        mkdirSync(outputDir, { recursive: true });
 
         // Write prompt
         safeWriteFile(join(outputDir, 'prompt.md'), buildPrompt(query));
 
         spinner.text = `Dispatching to ${providerIds.length} providers...`;
 
-        const { reports, asyncTasks } = await dispatch({
+        const { reports, results, asyncTasks } = await dispatch({
           config,
           providerIds,
           query,
-          outputDir,
           mode: config.defaults.mode,
+          credentials,
           onProgress: (event) => {
             if (event.event === 'started') {
               spinner.text = `Running: ${event.providerId}...`;
@@ -130,22 +144,12 @@ export function registerRunCommand(program: Command): void {
           },
         });
 
+        writeProviderOutputs(outputDir, reports, results);
+
         // Collect all citations for dedup
-        const allCitations: Citation[] = [];
-        for (const report of reports) {
-          if (report.status === 'success' && report.metaFile) {
-            try {
-              const meta = JSON.parse(
-                readFileSync(join(outputDir, report.metaFile), 'utf-8'),
-              );
-              if (meta.citations) {
-                allCitations.push(...meta.citations);
-              }
-            } catch {
-              // Skip if meta file can't be read
-            }
-          }
-        }
+        const allCitations: Citation[] = results.flatMap((result) =>
+          result.status === 'success' ? result.citations : [],
+        );
 
         const sources = deduplicateSources(allCitations);
 
@@ -157,6 +161,9 @@ export function registerRunCommand(program: Command): void {
 
         // Write async tasks
         if (asyncTasks.length > 0) {
+          for (const task of asyncTasks) {
+            task.outputDir = outputDir;
+          }
           saveAsyncTasks(outputDir, asyncTasks);
         }
 
@@ -241,4 +248,37 @@ export function registerRunCommand(program: Command): void {
         process.exitCode = 2;
       }
     });
+}
+
+function writeProviderOutputs(
+  outputDir: string,
+  reports: ProviderReport[],
+  results: ProviderDispatchResult[],
+): void {
+  for (const result of results) {
+    const report = reports.find(
+      (candidate) =>
+        candidate.id === result.provider &&
+        candidate.fallbackFor === result.fallbackFor,
+    );
+    if (!report?.outputFile || !report.metaFile) continue;
+
+    safeWriteFile(join(outputDir, report.outputFile), result.text);
+    safeWriteFile(
+      join(outputDir, report.metaFile),
+      JSON.stringify(
+        {
+          provider: result.provider,
+          tier: result.tier,
+          model: result.model,
+          durationMs: result.durationMs,
+          citationCount: result.citations.length,
+          tokenUsage: result.tokenUsage,
+          citations: result.citations,
+        },
+        null,
+        2,
+      ),
+    );
+  }
 }

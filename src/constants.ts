@@ -1,6 +1,3 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-
 declare const __VERSION__: string;
 
 export const VERSION =
@@ -9,8 +6,6 @@ export const VERSION =
 export const APP_NAME = 'librarium';
 
 // Config paths
-export const CONFIG_DIR = join(homedir(), '.config', APP_NAME);
-export const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 export const CONFIG_FILE_MODE = 0o600;
 export const PROJECT_CONFIG_FILE = `.${APP_NAME}.json`;
 
@@ -39,6 +34,8 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
   'openai-deep': 'OPENAI_API_KEY',
   'openai-deep-o3': 'OPENAI_API_KEY',
   'gemini-deep': 'GEMINI_API_KEY',
+  'gemini-grounded': 'GEMINI_API_KEY',
+  'openrouter-online': 'OPENROUTER_API_KEY',
   'you-research': 'YOU_COM_API_KEY',
   'jina-search': 'JINA_AI_API_KEY',
   'kagi-fastgpt': 'KAGI_API_KEY',
@@ -61,6 +58,8 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   'openai-deep': 'OpenAI Deep Research (o4-mini)',
   'openai-deep-o3': 'OpenAI Deep Research (o3)',
   'gemini-deep': 'Gemini Deep Research',
+  'gemini-grounded': 'Gemini Grounded Search',
+  'openrouter-online': 'OpenRouter Online Search',
   'you-research': 'You.com Research',
   'jina-search': 'Jina AI Search',
   'kagi-fastgpt': 'Kagi FastGPT',
@@ -114,7 +113,14 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'openai-deep-o3',
     'gemini-deep',
   ],
-  quick: ['perplexity-sonar-pro', 'brave-answers', 'exa', 'kagi-fastgpt'],
+  quick: [
+    'perplexity-sonar-pro',
+    'gemini-grounded',
+    'openrouter-online',
+    'brave-answers',
+    'exa',
+    'kagi-fastgpt',
+  ],
   raw: [
     'perplexity-search',
     'brave-search',
@@ -126,6 +132,8 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   ],
   fast: [
     'perplexity-sonar-pro',
+    'gemini-grounded',
+    'openrouter-online',
     'perplexity-search',
     'brave-answers',
     'exa',
@@ -143,6 +151,8 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'openai-deep-o3',
     'gemini-deep',
     'perplexity-sonar-pro',
+    'gemini-grounded',
+    'openrouter-online',
     'brave-answers',
     'exa',
     'you-research',
@@ -156,6 +166,8 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'openai-deep-o3',
     'gemini-deep',
     'perplexity-sonar-pro',
+    'gemini-grounded',
+    'openrouter-online',
     'brave-answers',
     'exa',
     'you-research',

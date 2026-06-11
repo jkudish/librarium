@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { initializeProviders } from '../adapters/index.js';
+import { initializeProviders } from '../adapters/node-registry.js';
 import { PROVIDER_DISPLAY_NAMES, PROVIDER_ENV_VARS } from '../constants.js';
 import { loadConfig, saveConfig } from '../core/config.js';
 
@@ -13,7 +13,7 @@ export function registerInitCommand(program: Command): void {
     )
     .action(async (opts) => {
       try {
-        await initializeProviders();
+        await initializeProviders({ credentials: { env: process.env } });
 
         const existingConfig = loadConfig();
 

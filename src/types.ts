@@ -38,6 +38,21 @@ export interface ProviderResult {
   error?: string;
 }
 
+// Structured result returned by the core dispatcher for library consumers
+export interface ProviderDispatchResult {
+  provider: string;
+  tier: ProviderTier;
+  status: 'success' | 'error' | 'timeout' | 'skipped' | 'async-pending';
+  text: string;
+  sourceUrls: string[];
+  citations: Citation[];
+  durationMs: number;
+  model?: string;
+  tokenUsage?: { input?: number; output?: number };
+  error?: string;
+  fallbackFor?: string;
+}
+
 // Handle for async deep-research tasks
 export interface AsyncTaskHandle {
   provider: string;

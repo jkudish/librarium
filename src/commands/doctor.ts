@@ -1,6 +1,9 @@
 import type { Command } from 'commander';
 import ora from 'ora';
-import { getAllProviders, initializeProviders } from '../adapters/index.js';
+import {
+  getAllProviders,
+  initializeProviders,
+} from '../adapters/node-registry.js';
 import {
   hasApiKey,
   loadConfig,
@@ -29,7 +32,11 @@ export function registerDoctorCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        const initResult = await initializeProviders(config);
+        const credentials = { env: process.env };
+        const initResult = await initializeProviders({
+          ...config,
+          credentials,
+        });
         for (const warning of initResult.warnings) {
           console.error(`[librarium] warning: ${warning}`);
         }
@@ -43,7 +50,7 @@ export function registerDoctorCommand(program: Command): void {
           const requiresApiKey = provider.requiresApiKey ?? true;
           const keyPresent = requiresApiKey
             ? providerConfig
-              ? hasApiKey(providerConfig.apiKey)
+              ? hasApiKey(providerConfig.apiKey, process.env)
               : !!process.env[provider.envVar]
             : true;
 

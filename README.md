@@ -8,6 +8,8 @@ Fan out research queries to multiple search and deep-research APIs in parallel.
 
 Inspired by Aaron Francis' [counselors](https://github.com/aarondfrancis/counselors), librarium applies the same fan-out pattern to search APIs. Where counselors fans out prompts to multiple LLM CLIs, librarium fans out research queries to search engines, AI-grounded search, and deep-research APIs -- collecting, normalizing, and deduplicating results into structured output.
 
+Librarium is both a **CLI** and an **embeddable library**: `import { dispatch } from 'librarium/core'` gives you the same provider adapters and fan-out dispatcher as in-memory structured results, with no filesystem or Node-only dependencies -- it runs in Cloudflare Workers and other edge runtimes. See [Library Usage](#library-usage-librariumcore).
+
 ## Installation
 
 ### npm (requires Node.js >= 20)
@@ -72,7 +74,7 @@ librarium status --wait
 
 ## Providers
 
-Librarium ships with 18 built-in provider adapters organized into three tiers:
+Librarium ships with 20 built-in provider adapters organized into three tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
@@ -83,6 +85,8 @@ Librarium ships with 18 built-in provider adapters organized into three tiers:
 | OpenAI Deep Research (o3) | `openai-deep-o3` | deep-research | `OPENAI_API_KEY` |
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
 | Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
+| Gemini Grounded Search | `gemini-grounded` | ai-grounded | `GEMINI_API_KEY` |
+| ChatGPT Search (OpenRouter) | `openrouter-online` | ai-grounded | `OPENROUTER_API_KEY` |
 | Brave AI Answers | `brave-answers` | ai-grounded | `BRAVE_API_KEY` |
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
 | You.com Research | `you-research` | ai-grounded | `YOU_COM_API_KEY` |
@@ -614,6 +618,57 @@ Each research run creates a timestamped output directory:
 | `0` | All providers succeeded |
 | `1` | Partial success (some providers failed) |
 | `2` | Total failure (all providers failed, or configuration error) |
+
+## Library Usage (`librarium/core`)
+
+Everything the CLI does with providers is importable. The `librarium/core` entry exposes the adapters, registry, dispatcher, normalizer, and types -- and returns results **in memory** (writing `run.json`/report files is a CLI concern). The core entry has zero Node-only dependencies: no `node:fs`, no `process.env` access, fetch-based HTTP only. It is tested in workerd (Cloudflare's runtime) on every CI run.
+
+```bash
+npm install librarium
+```
+
+```ts
+import { dispatch, initializeProviders, type Config } from 'librarium/core';
+
+// Credentials are injected -- core never reads process.env itself.
+// Pass an env map (Workers: pass your `env` binding) or a resolveCredential fn.
+const credentials = { env: { GEMINI_API_KEY: '...', OPENROUTER_API_KEY: '...' } };
+
+await initializeProviders({ credentials });
+
+const config: Config = {
+  version: 1,
+  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync' },
+  providers: {
+    'gemini-grounded': { enabled: true },
+    'openrouter-online': { enabled: true },
+  },
+  customProviders: {},
+  trustedProviderIds: [],
+  groups: {},
+};
+
+const { results, asyncTasks } = await dispatch({
+  config,
+  providerIds: ['gemini-grounded', 'openrouter-online'],
+  query: 'What is the best wholesale produce supplier in London?',
+  mode: 'sync',
+  credentials,
+});
+
+for (const r of results) {
+  // { provider, tier, status, text, sourceUrls, citations, durationMs,
+  //   model, tokenUsage, error, fallbackFor }
+  console.log(r.provider, r.status, r.sourceUrls);
+}
+```
+
+Notes:
+
+- **Credential injection.** `CredentialContext` is `{ env?: Record<string, string | undefined>, resolveCredential?: (value: string) => string | undefined }`. `$ENV_VAR` references in provider config resolve against the injected `env`; literal keys pass through. In the CLI, this is backed by `process.env` -- in a Worker, pass your env binding.
+- **Custom providers are CLI-only.** npm- and script-based custom providers require Node (module resolution, child processes) and live behind the CLI boundary. The core registry contains the built-in adapters; you can add your own at runtime with `registerProvider()`.
+- **Async deep-research from the library.** `dispatch` with `mode: 'async'`/`'mixed'` returns `asyncTasks` handles; polling/retrieval is the caller's responsibility (in the CLI, `librarium status` does this).
+- **Bring your own persistence.** Core returns data; where it goes (D1, R2, files, nowhere) is up to you.
 
 ## Using with AI Agents
 

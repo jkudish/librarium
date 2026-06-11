@@ -1,0 +1,106 @@
+import {
+  type Config,
+  dispatch,
+  GeminiGroundedProvider,
+  getProvider,
+  initializeProviders,
+  type Provider,
+  type ProviderOptions,
+  type ProviderResult,
+  registerProvider,
+} from 'librarium/core';
+import { describe, expect, it } from 'vitest';
+
+function makeConfig(): Config {
+  return {
+    version: 1,
+    defaults: {
+      outputDir: './agents/librarium',
+      maxParallel: 2,
+      timeout: 10,
+      asyncTimeout: 60,
+      asyncPollInterval: 1,
+      mode: 'sync',
+    },
+    providers: {
+      'worker-mock': {
+        enabled: true,
+      },
+    },
+    customProviders: {},
+    trustedProviderIds: [],
+    groups: {},
+  };
+}
+
+describe('librarium/core in workerd', () => {
+  it('imports the core export, initializes adapters, and dispatches in memory', async () => {
+    await initializeProviders({
+      credentials: { env: { GEMINI_API_KEY: 'test-key' } },
+    });
+
+    const gemini = new GeminiGroundedProvider({
+      credentials: { env: { GEMINI_API_KEY: 'test-key' } },
+    });
+    expect(gemini.id).toBe('gemini-grounded');
+    expect(getProvider('gemini-grounded')?.id).toBe('gemini-grounded');
+
+    const mockProvider: Provider = {
+      id: 'worker-mock',
+      displayName: 'Worker Mock',
+      tier: 'ai-grounded',
+      envVar: '',
+      requiresApiKey: false,
+      execute: async (
+        query: string,
+        _options: ProviderOptions,
+      ): Promise<ProviderResult> => ({
+        provider: 'worker-mock',
+        tier: 'ai-grounded',
+        content: `workerd:${query}`,
+        citations: [
+          {
+            url: 'https://example.com/source',
+            title: 'Example Source',
+            provider: 'worker-mock',
+          },
+        ],
+        durationMs: 5,
+        model: 'mock-model',
+      }),
+    };
+    registerProvider(mockProvider);
+
+    const result = await dispatch({
+      config: makeConfig(),
+      providerIds: ['worker-mock'],
+      query: 'hello',
+      mode: 'sync',
+      credentials: { env: {} },
+    });
+
+    expect(result.asyncTasks).toEqual([]);
+    expect(result.reports).toHaveLength(1);
+    expect(result.results).toEqual([
+      {
+        provider: 'worker-mock',
+        tier: 'ai-grounded',
+        status: 'success',
+        text: 'workerd:hello',
+        sourceUrls: ['https://example.com/source'],
+        citations: [
+          {
+            url: 'https://example.com/source',
+            title: 'Example Source',
+            provider: 'worker-mock',
+          },
+        ],
+        durationMs: 5,
+        model: 'mock-model',
+        tokenUsage: undefined,
+        error: undefined,
+        fallbackFor: undefined,
+      },
+    ]);
+  });
+});

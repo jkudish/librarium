@@ -39,6 +39,13 @@ Load rules:
 - Built-in IDs are reserved and cannot be overridden
 - Project and global configs merge; project `customProviders` override same IDs from global
 
+## Core vs CLI Boundary (v0.2.0+)
+
+Librarium is consumable as a library via the `librarium/core` package export (see README "Library Usage"). The boundary matters for provider development:
+
+- **Built-in adapters** live in core: they must stay runtime-portable -- fetch-based HTTP only, no `node:*` imports, no direct `process.env` access. API keys resolve through the injected `CredentialContext` (`BaseProvider.getApiKey(apiKeyRef, credentials)`); a workerd CI suite enforces this.
+- **Custom npm and script providers** are CLI-only: they depend on Node module resolution and child processes and are loaded by the CLI's `node-registry`, never by core. Library consumers who need a custom provider implement the `Provider` interface directly and call `registerProvider()` at runtime.
+
 ## Provider Interface Contract
 
 Your provider must match librarium's `Provider` shape:

@@ -94,6 +94,10 @@ jobs:
       - name: Unit tests
         run: npm run test
 
+      - name: Workers compatibility tests
+        if: matrix.run-integration
+        run: npm run test:workers
+
       - name: Integration tests
         if: matrix.run-integration
         run: npm run test:integration

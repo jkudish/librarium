@@ -1,16 +1,19 @@
 import { resolveProviderId } from '../constants.js';
-import { hasApiKey } from '../core/config.js';
+import type { CredentialContext } from '../core/credentials.js';
+import { hasCredential } from '../core/credentials.js';
 import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
+import { BaseProvider } from './base.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
-import { loadCustomProviders } from './custom.js';
 import { ExaProvider } from './exa.js';
 import { FirecrawlSearchProvider } from './firecrawl-search.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
+import { GeminiGroundedProvider } from './gemini-grounded.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
 import { OpenAIDeepProvider } from './openai-deep.js';
 import { OpenAIDeepO3Provider } from './openai-deep-o3.js';
+import { OpenRouterOnlineProvider } from './openrouter-online.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
 import { PerplexitySearchProvider } from './perplexity-search.js';
@@ -23,9 +26,11 @@ import { YouResearchProvider } from './you-research.js';
 
 const providers = new Map<string, Provider>();
 
-type ProviderInitConfig = Partial<
+export type ProviderInitConfig = Partial<
   Pick<Config, 'providers' | 'customProviders' | 'trustedProviderIds'>
->;
+> & {
+  credentials?: CredentialContext;
+};
 
 export interface ProviderInitResult {
   warnings: string[];
@@ -68,6 +73,7 @@ export function getProvidersByTier(tier: ProviderTier): Provider[] {
  */
 export function getProviderMeta(
   config: Record<string, { apiKey?: string; enabled?: boolean }>,
+  credentials: CredentialContext = {},
 ): ProviderMeta[] {
   return getAllProviders().map((p) => {
     const providerConfig = config[p.id];
@@ -81,8 +87,8 @@ export function getProviderMeta(
       enabled: providerConfig?.enabled ?? false,
       hasApiKey: requiresApiKey
         ? providerConfig
-          ? hasApiKey(providerConfig.apiKey)
-          : !!process.env[p.envVar]
+          ? hasCredential(providerConfig.apiKey, credentials)
+          : hasCredential(p.envVar ? `$${p.envVar}` : undefined, credentials)
         : true,
     };
   });
@@ -90,13 +96,14 @@ export function getProviderMeta(
 
 /**
  * Initialize all providers — called at startup.
- * Instantiates and registers all 18 provider adapters.
+ * Instantiates and registers all built-in provider adapters.
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
 ): Promise<ProviderInitResult> {
   providers.clear();
   const providerConfig = config.providers ?? {};
+  const credentials = config.credentials ?? {};
 
   const builtIns: Provider[] = [
     // Deep Research (async capable)
@@ -109,6 +116,8 @@ export async function initializeProviders(
 
     // AI-Grounded Search (sync)
     new PerplexitySonarProProvider(),
+    new GeminiGroundedProvider(),
+    new OpenRouterOnlineProvider(),
     new BraveAnswersProvider(),
     new ExaProvider(),
     new YouResearchProvider(),
@@ -124,28 +133,21 @@ export async function initializeProviders(
     new TavilyProvider(),
   ];
 
-  const reservedProviderIds = new Set<string>();
   for (const provider of builtIns) {
+    if (provider instanceof BaseProvider) {
+      provider.configure({
+        apiKey: providerConfig[provider.id]?.apiKey,
+        credentials,
+      });
+    }
     provider.source = 'builtin';
     provider.requiresApiKey = true;
-    registerProvider(provider);
-    reservedProviderIds.add(provider.id);
-  }
-
-  const customResult = await loadCustomProviders({
-    customProviders: config.customProviders ?? {},
-    trustedProviderIds: config.trustedProviderIds ?? [],
-    providerConfigs: providerConfig,
-    reservedProviderIds,
-  });
-
-  for (const provider of customResult.providers) {
     registerProvider(provider);
   }
 
   return {
-    warnings: customResult.warnings,
-    loadedCustomProviders: customResult.loadedIds,
-    skippedCustomProviders: customResult.skippedIds,
+    warnings: [],
+    loadedCustomProviders: [],
+    skippedCustomProviders: [],
   };
 }

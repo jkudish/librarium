@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-11
+
+### Added
+- `librarium/core` package export for programmatic use from Workers-compatible runtimes
+- Structured in-memory dispatch results with provider text, citations/source URLs, duration, status, and errors
+- Gemini Grounded Search provider adapter: `gemini-grounded` — Gemini `gemini-2.5-flash` with the `googleSearch` tool
+- OpenRouter Online Search provider adapter: `openrouter-online` — OpenRouter `openai/gpt-4o-mini:online` with Exa-backed grounding annotations
+- Cloudflare Workers compatibility test suite using `@cloudflare/vitest-pool-workers`
+
+### Changed
+- Split core orchestration from CLI filesystem output so the CLI consumes the same in-memory dispatcher API exported by `librarium/core`
+- Provider API key resolution now flows through injectable credentials while the CLI preserves `$ENV_VAR` resolution from `process.env`
+
 ## [0.1.3] - 2026-04-11
 
 ### Added
@@ -72,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/jkudish/librarium/compare/v0.1.2...v0.1.3
 [0.1.0]: https://github.com/jkudish/librarium/releases/tag/v0.1.0
 [0.1.1]: https://github.com/jkudish/librarium/compare/v0.1.0...v0.1.1

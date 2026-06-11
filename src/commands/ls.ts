@@ -1,5 +1,8 @@
 import type { Command } from 'commander';
-import { getProviderMeta, initializeProviders } from '../adapters/index.js';
+import {
+  getProviderMeta,
+  initializeProviders,
+} from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 
 export function registerLsCommand(program: Command): void {
@@ -12,12 +15,16 @@ export function registerLsCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        const initResult = await initializeProviders(config);
+        const credentials = { env: process.env };
+        const initResult = await initializeProviders({
+          ...config,
+          credentials,
+        });
         for (const warning of initResult.warnings) {
           console.error(`[librarium] warning: ${warning}`);
         }
 
-        const meta = getProviderMeta(config.providers);
+        const meta = getProviderMeta(config.providers, credentials);
 
         if (opts.json) {
           console.log(JSON.stringify(meta, null, 2));

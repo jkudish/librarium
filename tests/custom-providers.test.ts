@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 describe('custom providers', () => {
   let tmpDir: string;
   let originalCwd: string;
-  let initializeProviders: typeof import('../src/adapters/index.js').initializeProviders;
-  let getProvider: typeof import('../src/adapters/index.js').getProvider;
+  let initializeProviders: typeof import('../src/adapters/node-registry.js').initializeProviders;
+  let getProvider: typeof import('../src/adapters/node-registry.js').getProvider;
 
   beforeEach(async () => {
     tmpDir = join(tmpdir(), `librarium-custom-${randomUUID().slice(0, 8)}`);
@@ -16,7 +16,7 @@ describe('custom providers', () => {
     originalCwd = process.cwd();
     process.chdir(tmpDir);
     vi.resetModules();
-    const adapters = await import('../src/adapters/index.js');
+    const adapters = await import('../src/adapters/node-registry.js');
     initializeProviders = adapters.initializeProviders;
     getProvider = adapters.getProvider;
   });

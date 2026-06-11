@@ -140,6 +140,7 @@ describe('dispatcher fallback', () => {
       query: 'test query',
       outputDir: tmpDir,
       mode: 'sync',
+      credentials: { env: process.env },
     });
 
     // Should have two reports: the primary error and the fallback success.
@@ -187,6 +188,7 @@ describe('dispatcher fallback', () => {
       query: 'test query',
       outputDir: tmpDir,
       mode: 'sync',
+      credentials: { env: process.env },
     });
 
     // Only the successful primary report, no fallback.
@@ -227,6 +229,7 @@ describe('dispatcher fallback', () => {
       query: 'test query',
       outputDir: tmpDir,
       mode: 'sync',
+      credentials: { env: process.env },
     });
 
     expect(reports).toHaveLength(2);
@@ -272,6 +275,7 @@ describe('dispatcher fallback', () => {
       query: 'test query',
       outputDir: tmpDir,
       mode: 'sync',
+      credentials: { env: process.env },
     });
 
     // The fallback should NOT be triggered because it is already dispatched.
@@ -315,6 +319,7 @@ describe('dispatcher fallback', () => {
       query: 'test query',
       outputDir: tmpDir,
       mode: 'sync',
+      credentials: { env: process.env },
     });
 
     // Only the primary error report, no fallback triggered.
@@ -373,6 +378,7 @@ describe('dispatcher fallback', () => {
       query: 'test query',
       outputDir: tmpDir,
       mode: 'sync',
+      credentials: { env: process.env },
     });
 
     // Should have two reports: the primary error and the fallback success.

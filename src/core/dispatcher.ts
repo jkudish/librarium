@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import pLimit from 'p-limit';
 import { getProvider } from '../adapters/index.js';
 import { sanitizeId } from '../constants.js';
@@ -7,31 +6,36 @@ import type {
   Config,
   ProgressEvent,
   Provider,
+  ProviderDispatchResult,
   ProviderReport,
+  ProviderResult,
 } from '../types.js';
-import { hasApiKey } from './config.js';
-import { safeWriteFile } from './fs-utils.js';
+import type { CredentialContext } from './credentials.js';
+import { hasCredential } from './credentials.js';
 
 export interface DispatchOptions {
   config: Config;
   providerIds: string[];
   query: string;
-  outputDir: string;
+  outputDir?: string;
   mode: 'sync' | 'async' | 'mixed';
+  credentials?: CredentialContext;
   onProgress?: (event: ProgressEvent) => void;
 }
 
 export interface DispatchResult {
   reports: ProviderReport[];
+  results: ProviderDispatchResult[];
   asyncTasks: AsyncTaskHandle[];
 }
 
 export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchResult> {
-  const { config, providerIds, query, outputDir, mode, onProgress } = options;
+  const { config, providerIds, query, mode, credentials, onProgress } = options;
   const limit = pLimit(config.defaults.maxParallel);
   const reports: ProviderReport[] = [];
+  const results: ProviderDispatchResult[] = [];
   const asyncTasks: AsyncTaskHandle[] = [];
   // Track fallback IDs already claimed to prevent two failing providers from
   // both triggering the same fallback concurrently (check+add is sync, no await
@@ -48,43 +52,28 @@ export async function dispatch(
       const result = await fallbackProvider.execute(query, {
         timeout: config.defaults.timeout,
       });
-
-      const safeId = sanitizeId(fallbackId);
-      const outputFile = `${safeId}.md`;
-      const metaFile = `${safeId}.meta.json`;
-
-      safeWriteFile(join(outputDir, outputFile), result.content);
-      safeWriteFile(
-        join(outputDir, metaFile),
-        JSON.stringify(
-          {
-            provider: result.provider,
-            tier: result.tier,
-            model: result.model,
-            durationMs: result.durationMs,
-            citationCount: result.citations.length,
-            tokenUsage: result.tokenUsage,
-            citations: result.citations,
-          },
-          null,
-          2,
-        ),
+      const structured = createDispatchResult(
+        fallbackId,
+        fallbackProvider.tier,
+        result,
+        originalId,
       );
+      results.push(structured);
 
-      return {
-        id: fallbackId,
-        tier: fallbackProvider.tier,
-        status: result.error ? 'error' : 'success',
-        durationMs: result.durationMs,
-        wordCount: result.content.split(/\s+/).filter(Boolean).length,
-        citationCount: result.citations.length,
-        outputFile,
-        metaFile,
-        error: result.error,
-        fallbackFor: originalId,
-      };
+      return createReport(fallbackId, fallbackProvider.tier, structured);
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
+      results.push({
+        provider: fallbackId,
+        tier: fallbackProvider.tier,
+        status: 'error',
+        text: '',
+        sourceUrls: [],
+        citations: [],
+        durationMs: 0,
+        error,
+        fallbackFor: originalId,
+      });
       return {
         id: fallbackId,
         tier: fallbackProvider.tier,
@@ -112,7 +101,9 @@ export async function dispatch(
     if (!fallbackProvider) return null;
 
     const fallbackConfig = config.providers[fallbackId];
-    if (!fallbackConfig || !hasApiKey(fallbackConfig.apiKey)) return null;
+    if (!fallbackConfig || !hasCredential(fallbackConfig.apiKey, credentials)) {
+      return null;
+    }
 
     // Don't use a fallback that's already running as a primary in this dispatch
     if (providerIds.includes(fallbackId)) return null;
@@ -139,6 +130,16 @@ export async function dispatch(
     limit(async (): Promise<void> => {
       const provider = getProvider(id);
       if (!provider) {
+        results.push({
+          provider: id,
+          tier: 'raw-search',
+          status: 'error',
+          text: '',
+          sourceUrls: [],
+          citations: [],
+          durationMs: 0,
+          error: `Provider "${id}" not found`,
+        });
         reports.push({
           id,
           tier: 'raw-search',
@@ -155,6 +156,16 @@ export async function dispatch(
 
       const providerConfig = config.providers[id];
       if (!providerConfig?.enabled) {
+        results.push({
+          provider: id,
+          tier: provider.tier,
+          status: 'skipped',
+          text: '',
+          sourceUrls: [],
+          citations: [],
+          durationMs: 0,
+          error: 'Provider not enabled',
+        });
         reports.push({
           id,
           tier: provider.tier,
@@ -181,7 +192,6 @@ export async function dispatch(
           const handle = await provider.submit(query, {
             timeout: config.defaults.asyncTimeout,
           });
-          handle.outputDir = outputDir;
 
           // If submit already completed (e.g. Gemini/Perplexity wrap execute),
           // retrieve immediately and treat as sync result
@@ -190,39 +200,9 @@ export async function dispatch(
             provider.retrieve
           ) {
             const result = await provider.retrieve(handle);
-            const safeId = sanitizeId(id);
-            const outputFile = `${safeId}.md`;
-            const metaFile = `${safeId}.meta.json`;
-
-            safeWriteFile(join(outputDir, outputFile), result.content);
-            safeWriteFile(
-              join(outputDir, metaFile),
-              JSON.stringify(
-                {
-                  provider: result.provider,
-                  tier: result.tier,
-                  model: result.model,
-                  durationMs: result.durationMs,
-                  citationCount: result.citations.length,
-                  tokenUsage: result.tokenUsage,
-                  citations: result.citations,
-                },
-                null,
-                2,
-              ),
-            );
-
-            const report: ProviderReport = {
-              id,
-              tier: provider.tier,
-              status: result.error ? 'error' : 'success',
-              durationMs: result.durationMs,
-              wordCount: result.content.split(/\s+/).filter(Boolean).length,
-              citationCount: result.citations.length,
-              outputFile,
-              metaFile,
-              error: result.error,
-            };
+            const structured = createDispatchResult(id, provider.tier, result);
+            results.push(structured);
+            const report = createReport(id, provider.tier, structured);
             reports.push(report);
 
             if (result.error) {
@@ -254,6 +234,15 @@ export async function dispatch(
           // since there is no synchronous result to evaluate. Fallback only fires
           // when a provider completes immediately with an error (handled above).
           asyncTasks.push(handle);
+          results.push({
+            provider: id,
+            tier: provider.tier,
+            status: 'async-pending',
+            text: '',
+            sourceUrls: [],
+            citations: [],
+            durationMs: 0,
+          });
           reports.push({
             id,
             tier: provider.tier,
@@ -276,41 +265,9 @@ export async function dispatch(
         const result = await provider.execute(query, {
           timeout: config.defaults.timeout,
         });
-
-        const safeId = sanitizeId(id);
-        const outputFile = `${safeId}.md`;
-        const metaFile = `${safeId}.meta.json`;
-
-        // Write provider output
-        safeWriteFile(join(outputDir, outputFile), result.content);
-        safeWriteFile(
-          join(outputDir, metaFile),
-          JSON.stringify(
-            {
-              provider: result.provider,
-              tier: result.tier,
-              model: result.model,
-              durationMs: result.durationMs,
-              citationCount: result.citations.length,
-              tokenUsage: result.tokenUsage,
-              citations: result.citations,
-            },
-            null,
-            2,
-          ),
-        );
-
-        const report: ProviderReport = {
-          id,
-          tier: provider.tier,
-          status: result.error ? 'error' : 'success',
-          durationMs: result.durationMs,
-          wordCount: result.content.split(/\s+/).filter(Boolean).length,
-          citationCount: result.citations.length,
-          outputFile,
-          metaFile,
-          error: result.error,
-        };
+        const structured = createDispatchResult(id, provider.tier, result);
+        results.push(structured);
+        const report = createReport(id, provider.tier, structured);
 
         reports.push(report);
 
@@ -338,6 +295,16 @@ export async function dispatch(
         }
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
+        results.push({
+          provider: id,
+          tier: provider.tier,
+          status: 'error',
+          text: '',
+          sourceUrls: [],
+          citations: [],
+          durationMs: 0,
+          error,
+        });
         const errorReport: ProviderReport = {
           id,
           tier: provider.tier,
@@ -371,5 +338,54 @@ export async function dispatch(
   );
 
   await Promise.allSettled(tasks);
-  return { reports, asyncTasks };
+  return { reports, results, asyncTasks };
+}
+
+function createDispatchResult(
+  providerId: string,
+  tier: Provider['tier'],
+  result: ProviderResult,
+  fallbackFor?: string,
+): ProviderDispatchResult {
+  return {
+    provider: providerId,
+    tier,
+    status: result.error ? 'error' : 'success',
+    text: result.content,
+    sourceUrls: Array.from(
+      new Set(result.citations.map((citation) => citation.url).filter(Boolean)),
+    ),
+    citations: result.citations,
+    durationMs: result.durationMs,
+    model: result.model,
+    tokenUsage: result.tokenUsage,
+    error: result.error,
+    fallbackFor,
+  };
+}
+
+function createReport(
+  providerId: string,
+  tier: Provider['tier'],
+  result: ProviderDispatchResult,
+): ProviderReport {
+  const safeId = sanitizeId(providerId);
+  return {
+    id: providerId,
+    tier,
+    status: result.status,
+    durationMs: result.durationMs,
+    wordCount: result.text.split(/\s+/).filter(Boolean).length,
+    citationCount: result.citations.length,
+    outputFile:
+      result.status === 'success' || result.status === 'error'
+        ? `${safeId}.md`
+        : '',
+    metaFile:
+      result.status === 'success' || result.status === 'error'
+        ? `${safeId}.meta.json`
+        : '',
+    error: result.error,
+    fallbackFor: result.fallbackFor,
+  };
 }

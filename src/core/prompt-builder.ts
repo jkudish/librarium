@@ -1,5 +1,3 @@
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { MAX_SLUG_LENGTH } from '../constants.js';
 
 /**
@@ -23,9 +21,8 @@ export function generateSlug(text: string): string {
 export function resolveOutputDir(baseDir: string, slug: string): string {
   const timestamp = Math.floor(Date.now() / 1000);
   const dirName = `${timestamp}-${slug}`;
-  const outputDir = join(baseDir, dirName);
-  mkdirSync(outputDir, { recursive: true });
-  return outputDir;
+  const separator = baseDir.endsWith('/') || baseDir.endsWith('\\') ? '' : '/';
+  return `${baseDir}${separator}${dirName}`;
 }
 
 /**
