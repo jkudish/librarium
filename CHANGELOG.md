@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `librarium/core` package export for programmatic use from Workers-compatible runtimes
 - Structured in-memory dispatch results with provider text, citations/source URLs, duration, status, and errors
-- Gemini Grounded Search provider adapter: `gemini-grounded` — Gemini `gemini-2.0-flash` with the `googleSearch` tool
+- Gemini Grounded Search provider adapter: `gemini-grounded` — Gemini `gemini-2.5-flash` with the `googleSearch` tool
 - OpenRouter Online Search provider adapter: `openrouter-online` — OpenRouter `openai/gpt-4o-mini:online` with Exa-backed grounding annotations
 - Cloudflare Workers compatibility test suite using `@cloudflare/vitest-pool-workers`
 

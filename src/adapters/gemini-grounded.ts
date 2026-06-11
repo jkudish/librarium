@@ -36,7 +36,7 @@ interface GeminiGroundedResponse {
   };
 }
 
-const GEMINI_GROUNDED_MODEL = 'gemini-2.0-flash';
+const GEMINI_GROUNDED_MODEL = 'gemini-2.5-flash';
 
 /**
  * Gemini grounded search provider.

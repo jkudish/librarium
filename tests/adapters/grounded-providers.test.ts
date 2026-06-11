@@ -69,7 +69,7 @@ describe('grounded providers', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.provider).toBe('gemini-grounded');
-    expect(result.model).toBe('gemini-2.0-flash');
+    expect(result.model).toBe('gemini-2.5-flash');
     expect(result.content).toBe('Grounded answer.');
     expect(result.citations).toEqual([
       {
@@ -86,7 +86,7 @@ describe('grounded providers', () => {
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain(
-      'models/gemini-2.0-flash:generateContent?key=gemini-key',
+      'models/gemini-2.5-flash:generateContent?key=gemini-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
       contents: [{ parts: [{ text: 'who is cited?' }] }],
