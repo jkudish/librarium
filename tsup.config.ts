@@ -1,20 +1,34 @@
 import { readFileSync } from 'node:fs';
-import { defineConfig } from 'tsup';
+import { defineConfig, type Options } from 'tsup';
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
-export default defineConfig({
-  entry: ['src/cli.ts'],
+const shared: Options = {
   format: ['esm'],
   target: 'node20',
   outDir: 'dist',
-  clean: true,
   splitting: false,
   sourcemap: true,
+  dts: true,
   define: {
     __VERSION__: JSON.stringify(pkg.version),
   },
-  banner: {
-    js: '#!/usr/bin/env node',
+};
+
+export default defineConfig([
+  {
+    ...shared,
+    entry: { cli: 'src/cli.ts' },
+    platform: 'node',
+    clean: true,
+    banner: {
+      js: '#!/usr/bin/env node',
+    },
   },
-});
+  {
+    ...shared,
+    entry: { core: 'src/core-entry.ts' },
+    platform: 'neutral',
+    clean: false,
+  },
+]);
