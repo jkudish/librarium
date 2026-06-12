@@ -132,7 +132,10 @@ export async function synthesizeAnswer(
 
   // Fail-open citation sanity check: warn (do not retry) on out-of-range or
   // missing citations so a bad synthesis is visible without losing the answer.
-  for (const warning of citationWarnings(synthesis.text, answerSources.length)) {
+  for (const warning of citationWarnings(
+    synthesis.text,
+    answerSources.length,
+  )) {
     printLine('');
     printLine(dimText(`  ! ${warning}`, color));
   }
@@ -223,7 +226,9 @@ export function citationWarnings(
   if (invalid.length > 0) {
     warnings.push(
       `the answer cites ${
-        invalid.length === 1 ? 'an invalid source index' : 'invalid source indices'
+        invalid.length === 1
+          ? 'an invalid source index'
+          : 'invalid source indices'
       } [${invalid.join('], [')}] outside the 1..${sourceCount} range`,
     );
   }
@@ -251,7 +256,9 @@ function printRenderedAnswer(
     printLine('  Sources');
     for (const source of sources) {
       const rawLabel = source.title ? source.title : source.url;
-      printLine(`  [${source.index}] ${renderSourceLink(rawLabel, source.url, color)}`);
+      printLine(
+        `  [${source.index}] ${renderSourceLink(rawLabel, source.url, color)}`,
+      );
     }
   }
 }

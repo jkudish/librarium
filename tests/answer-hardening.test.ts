@@ -22,6 +22,7 @@ describe('terminal sanitization for untrusted source data', () => {
     const evilUrl = `https://ok.example/${BEL}path${ESC}[31m`;
     const out = hyperlink(evilTitle, evilUrl, true);
     // Exactly one OSC 8 open and one close, both ours.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: counting ANSI OSC sequences is the intent.
     expect(out.match(/]8;;/g)).toHaveLength(2);
     expect(out).not.toContain(BEL);
     expect(out).toContain('Real title');

@@ -24,7 +24,10 @@ export const SOURCE_LABEL_MAX_CHARS = 300;
 export function stripControlChars(value: string): string {
   // Strip C0 controls (except tab, newline, CR), DEL, and C1 controls.
   // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control bytes is the intent.
-  return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '');
+  return value.replace(
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g,
+    '',
+  );
 }
 
 /**
