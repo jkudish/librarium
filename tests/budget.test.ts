@@ -54,3 +54,14 @@ describe('createBudgetTracker', () => {
     expect(BUDGET_SKIP_REASON).toContain('budget');
   });
 });
+
+describe('budget input validation', () => {
+  it('treats NaN and non-finite limits as no budget', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0]) {
+      const tracker = createBudgetTracker(bad);
+      tracker.record({ costUsd: 999 });
+      expect(tracker.exceeded()).toBe(false);
+      expect(tracker.limitUsd).toBeUndefined();
+    }
+  });
+});

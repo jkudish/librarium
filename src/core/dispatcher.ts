@@ -127,6 +127,13 @@ export async function dispatch(
       return null;
     }
 
+    // Fallbacks are API calls too: once the cost budget is exhausted, a
+    // failed primary must not launch its backup.
+    if (budget?.exceeded()) {
+      recordBudgetSkip(fallbackId, fallbackProvider.tier, id);
+      return null;
+    }
+
     // Don't use a fallback that's already running as a primary in this dispatch
     if (providerIds.includes(fallbackId)) return null;
 
@@ -156,7 +163,11 @@ export async function dispatch(
 
   // Emit a budget-skipped report+result for a provider whose start was
   // suppressed because the accumulated cost crossed the budget.
-  function recordBudgetSkip(id: string, tier: Provider['tier']): void {
+  function recordBudgetSkip(
+    id: string,
+    tier: Provider['tier'],
+    fallbackFor?: string,
+  ): void {
     results.push({
       provider: id,
       tier,
@@ -166,6 +177,7 @@ export async function dispatch(
       citations: [],
       durationMs: 0,
       error: BUDGET_SKIP_REASON,
+      ...(fallbackFor ? { fallbackFor } : {}),
     });
     const report: ProviderReport = {
       id,
@@ -177,9 +189,12 @@ export async function dispatch(
       outputFile: '',
       metaFile: '',
       error: BUDGET_SKIP_REASON,
+      ...(fallbackFor ? { fallbackFor } : {}),
     };
     reports.push(report);
-    onProgress?.({ providerId: id, event: 'completed', report });
+    // No progress emit: skipped reports are rendered once by the caller's
+    // final skipped-report pass (and by resolveRemaining in live mode), so
+    // emitting here would double-print them in non-live output.
   }
 
   const tasks = providerIds.map((id) =>

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import * as p from '@clack/prompts';
-import type { Command } from 'commander';
+import { type Command, InvalidArgumentError } from 'commander';
 import ora from 'ora';
 import {
   getAllProviders,
@@ -129,7 +129,13 @@ export function registerRunCommand(program: Command): void {
     .option(
       '--max-cost <usd>',
       'Stop launching providers once API-reported cost crosses this budget (USD)',
-      Number.parseFloat,
+      (value: string) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw new InvalidArgumentError('must be a positive number of USD.');
+        }
+        return parsed;
+      },
     )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
     .option('--json', 'Output run.json to stdout')
@@ -285,7 +291,10 @@ export async function executeRun(
           (id) => tierLookup.get(id) === 'deep-research',
         );
         const isTTY = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+        // In --json mode stdout must stay pure JSON: clack prompts write to
+        // stdout, so the preflight confirm is disabled entirely.
         if (
+          !opts.json &&
           shouldConfirmDeepResearch({
             deepResearchCount: countDeepResearch(providerIds, tierLookup),
             isTTY,
@@ -576,9 +585,14 @@ export async function executeRun(
       const pending = effectiveReports.filter(
         (r) => r.status === 'async-pending',
       );
-      // Total API-reported cost across providers that reported one.
-      const costReports = effectiveReports.filter(
-        (r) => r.usage?.costUsd !== undefined,
+      // Total API-reported cost across providers that reported one. Uses ALL
+      // reports (not effectiveReports): a paid primary recovered by a fallback
+      // still spent real money and must count toward reported spend.
+      const costReports = reports.filter(
+        (r) =>
+          typeof r.usage?.costUsd === 'number' &&
+          Number.isFinite(r.usage.costUsd) &&
+          r.usage.costUsd >= 0,
       );
       const reportedCost =
         costReports.length > 0
@@ -588,7 +602,7 @@ export async function executeRun(
                 0,
               ),
               reporting: costReports.length,
-              providers: effectiveReports.length,
+              providers: reports.length,
             }
           : undefined;
 

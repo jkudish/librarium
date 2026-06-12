@@ -37,7 +37,9 @@ export function createBudgetTracker(
   limitUsd: number | undefined,
 ): BudgetTracker {
   const limit =
-    typeof limitUsd === 'number' && limitUsd > 0 ? limitUsd : undefined;
+    typeof limitUsd === 'number' && Number.isFinite(limitUsd) && limitUsd > 0
+      ? limitUsd
+      : undefined;
   let spent = 0;
 
   return {

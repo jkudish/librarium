@@ -160,4 +160,76 @@ describe('dispatcher budget circuit breaker', () => {
 
     expect(reports.every((r) => r.status === 'success')).toBe(true);
   });
+
+  it('does not launch a fallback once the budget is exhausted', async () => {
+    process.env.MOCK_A_KEY = 'k';
+    process.env.MOCK_B_KEY = 'k';
+    process.env.MOCK_C_KEY = 'k';
+    // a reports cost over the budget; b then fails; b's fallback (c) must be
+    // budget-skipped instead of launched.
+    registerProvider(costProvider('mock-a', 1.0));
+    const failing: Provider = {
+      id: 'mock-b',
+      displayName: 'Mock mock-b',
+      tier: 'ai-grounded',
+      envVar: 'MOCK_B_KEY',
+      execute: async (): Promise<ProviderResult> => {
+        // Fail only after mock-a has reported its over-budget cost, so the
+        // budget is exhausted at fallback time (not at this task's start).
+        await new Promise((r) => setTimeout(r, 60));
+        return {
+          provider: 'mock-b',
+          tier: 'ai-grounded',
+          content: '',
+          citations: [],
+          durationMs: 60,
+          error: 'boom',
+        };
+      },
+    };
+    registerProvider(failing);
+    let fallbackRan = false;
+    registerProvider({
+      ...costProvider('mock-c', 0.01),
+      execute: async (): Promise<ProviderResult> => {
+        fallbackRan = true;
+        return {
+          provider: 'mock-c',
+          tier: 'ai-grounded',
+          content: 'x',
+          citations: [],
+          durationMs: 1,
+          usage: { costUsd: 0.01 },
+        };
+      },
+    });
+
+    const config = makeConfig(
+      {
+        'mock-a': { apiKey: '$MOCK_A_KEY', enabled: true },
+        'mock-b': { apiKey: '$MOCK_B_KEY', enabled: true },
+        'mock-c': { apiKey: '$MOCK_C_KEY', enabled: false },
+      },
+      2,
+    );
+    config.providers['mock-b'] = {
+      ...config.providers['mock-b'],
+      fallback: 'mock-c',
+    } as never;
+
+    const { reports } = await dispatch({
+      config,
+      providerIds: ['mock-a', 'mock-b'],
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: process.env },
+      budget: createBudgetTracker(0.5),
+    });
+
+    expect(fallbackRan).toBe(false);
+    const fallbackSkip = reports.find((r) => r.id === 'mock-c');
+    expect(fallbackSkip?.status).toBe('skipped');
+    expect(fallbackSkip?.error).toBe(BUDGET_SKIP_REASON);
+    expect(fallbackSkip?.fallbackFor).toBe('mock-b');
+  });
 });
