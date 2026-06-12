@@ -3,7 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { initializeProviders } from '../src/adapters/node-registry.js';
 import { createRunDir } from '../src/core/prompt-builder.js';
 import {
@@ -358,9 +366,9 @@ describe('review fixes: selector tightening', () => {
 
 describe('review fixes: path containment', () => {
   it('rejects a runDir outside the output base', () => {
-    expect(() => resolveRunDir(baseDir, join(baseDir, '..', 'outside'))).toThrow(
-      PathContainmentError,
-    );
+    expect(() =>
+      resolveRunDir(baseDir, join(baseDir, '..', 'outside')),
+    ).toThrow(PathContainmentError);
     expect(() => resolveRunDir(baseDir, '/etc')).toThrow(PathContainmentError);
   });
 
