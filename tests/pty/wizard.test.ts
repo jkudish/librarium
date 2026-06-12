@@ -13,14 +13,14 @@ const describeMaybe = ptyAvailable() ? describe : describe.skip;
 
 /**
  * Number of `↓` presses from the top of the provider-scope menu to reach the
- * committed `smoke` group. The menu is: "all enabled" (0), the six default
- * groups (deep, quick, raw, fast, comprehensive, all → 1..6), then user groups
- * (smoke → 7), then "pick specific providers". If librarium's DEFAULT_GROUPS
- * count changes this will land elsewhere — the test asserts the confirm line
- * names `group "smoke"` so that regression fails loudly rather than silently
- * running the wrong scope.
+ * committed `smoke` group. The menu is: "all enabled" (0), the seven default
+ * groups (deep, quick, raw, fast, comprehensive, llm, all -> 1..7), then user
+ * groups (smoke -> 8), then "pick specific providers". If librarium's
+ * DEFAULT_GROUPS count changes this will land elsewhere — the test asserts the
+ * confirm line names `group "smoke"` so that regression fails loudly rather
+ * than silently running the wrong scope.
  */
-const DOWN_TO_SMOKE = 7;
+const DOWN_TO_SMOKE = 8;
 
 describeMaybe(
   `wizard (bare invocation) [${ptyAvailable() ? 'pty' : skipReason()}]`,
