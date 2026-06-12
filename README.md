@@ -12,7 +12,7 @@ Librarium is both a **CLI** and an **embeddable library**: `import { dispatch } 
 
 ## Installation
 
-### npm (requires Node.js >= 20)
+### npm (requires Node.js >= 20.12)
 
 ```bash
 npm install -g librarium
