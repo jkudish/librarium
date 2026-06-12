@@ -7,7 +7,7 @@ import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import { resolveProviderIds } from '../constants.js';
+import { resolveProviderIds, resolveProviderTokens } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { dispatch } from '../core/dispatcher.js';
@@ -143,7 +143,31 @@ export async function executeRun(
       // Resolve provider list
       let providerIds: string[];
       if (opts.providers) {
-        providerIds = resolveProviderIds(opts.providers);
+        // CLI tokens accept canonical IDs, legacy aliases, or display names.
+        // The name index covers registered providers plus any configured
+        // provider keys (e.g. an untrusted custom provider). Configured-only
+        // IDs still resolve so they flow into the existing warn-and-skip path
+        // rather than erroring as unknown here.
+        const nameIndex = getAllProviders().map((provider) => ({
+          id: provider.id,
+          displayName: provider.displayName,
+        }));
+        const registeredIds = new Set(nameIndex.map((entry) => entry.id));
+        for (const configuredId of Object.keys(config.providers)) {
+          if (!registeredIds.has(configuredId)) {
+            nameIndex.push({ id: configuredId, displayName: configuredId });
+          }
+        }
+        const resolution = resolveProviderTokens(opts.providers, nameIndex);
+        for (const warning of resolution.warnings) {
+          console.error(`[librarium] warning: ${warning}`);
+        }
+        if (resolution.errors.length > 0) {
+          spinner.fail(resolution.errors.join('\n'));
+          process.exitCode = 2;
+          return { exitCode: 2 };
+        }
+        providerIds = resolution.ids;
       } else if (opts.group) {
         const group = config.groups[opts.group];
         if (!group) {

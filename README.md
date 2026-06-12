@@ -142,7 +142,7 @@ librarium run <query> [options]
 
 | Flag | Description |
 |---|---|
-| `-p, --providers <ids>` | Comma-separated provider IDs |
+| `-p, --providers <ids\|names>` | Comma-separated provider IDs or display names (e.g. `"Exa Search,brave-search"`) |
 | `-g, --group <name>` | Use a predefined provider group |
 | `-m, --mode <mode>` | Execution mode: `sync`, `async`, or `mixed` |
 | `-o, --output <dir>` | Output base directory |
@@ -158,12 +158,17 @@ librarium run <query> [options]
 # Run with specific providers
 librarium run "database indexing" --providers perplexity-sonar-pro,exa
 
+# Provider display names also work on the CLI (mix and match with IDs)
+librarium run "query" -p "Exa Search,brave-search"
+
 # Deep research, wait for completion
 librarium run "AI agent architectures" --group deep --mode sync
 
 # Fast results only
 librarium run "Node.js 22 features" --group fast
 ```
+
+The `--providers` flag accepts canonical IDs, legacy aliases, or display names (case- and punctuation-insensitive, so `"Exa Search"`, `exa-search`, and `EXA SEARCH` all resolve to `exa`). Display names are a CLI input convenience only. If a name is ambiguous or unrecognized, the run stops with the matching candidates or a short list of suggestions. Config files (provider keys, custom groups, fallback targets) still require canonical IDs or legacy aliases.
 
 In an interactive terminal, `run` shows a live per-provider results table. Every row appears at fan-out with a spinner and ticking elapsed time, then resolves in place as results arrive:
 

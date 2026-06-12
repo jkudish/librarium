@@ -31,7 +31,7 @@ Select providers based on query type:
 - **Technical queries**: Use `comprehensive` group (deep research + AI-grounded)
 - **Quick facts**: Use `quick` group (AI-grounded only, fast)
 - **Competitive research**: Use `all` group (maximum coverage)
-- **Specific provider**: Use `--providers` flag
+- **Specific provider**: Use `--providers` flag (accepts canonical IDs or display names, e.g. `-p "Exa Search,brave-search"`)
 
 ### Phase 3: Dispatch
 Run the query:
