@@ -5,6 +5,7 @@ import type {
   ProviderOptions,
   ProviderResult,
   ProviderTier,
+  ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
@@ -29,13 +30,16 @@ interface GeminiGroundingMetadata {
   groundingChunks?: GeminiGroundingChunk[];
 }
 
+interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+}
+
 interface GeminiResponse {
   candidates?: GeminiCandidate[];
   groundingMetadata?: GeminiGroundingMetadata;
-  usageMetadata?: {
-    promptTokenCount?: number;
-    candidatesTokenCount?: number;
-  };
+  usageMetadata?: GeminiUsageMetadata;
   error?: { message?: string; code?: number };
 }
 
@@ -126,6 +130,7 @@ export class GeminiDeepProvider extends BaseProvider {
           input: data.usageMetadata?.promptTokenCount,
           output: data.usageMetadata?.candidatesTokenCount,
         },
+        usage: this.extractUsage(data.usageMetadata),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -209,6 +214,18 @@ export class GeminiDeepProvider extends BaseProvider {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  private extractUsage(
+    metadata?: GeminiUsageMetadata,
+  ): ProviderUsage | undefined {
+    if (!metadata) return undefined;
+    return {
+      inputTokens: metadata.promptTokenCount,
+      outputTokens: metadata.candidatesTokenCount,
+      totalTokens: metadata.totalTokenCount,
+      raw: metadata,
+    };
   }
 
   private extractCitations(metadata?: GeminiGroundingMetadata): Citation[] {

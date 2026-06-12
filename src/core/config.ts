@@ -152,6 +152,7 @@ export function mergeConfigs(
     customProviders: { ...global.customProviders },
     trustedProviderIds: [...global.trustedProviderIds],
     groups: { ...global.groups },
+    refine: global.refine ? { ...global.refine } : undefined,
   };
 
   if (project?.defaults) {
@@ -183,6 +184,10 @@ export function mergeConfigs(
 
   if (project?.groups) {
     merged.groups = { ...merged.groups, ...project.groups };
+  }
+
+  if (project?.refine) {
+    merged.refine = { ...merged.refine, ...stripUndefined(project.refine) };
   }
 
   if (cliFlags) {

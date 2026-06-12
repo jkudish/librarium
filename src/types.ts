@@ -18,6 +18,17 @@ export interface ProviderOptions {
   signal?: AbortSignal;
 }
 
+// Normalized usage/cost as reported by a provider's API. Honest data only:
+// fields are set when (and only when) the API itself reported them. costUsd
+// is never estimated from a pricing table.
+export interface ProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  raw?: unknown;
+}
+
 // Normalized citation from any provider
 export interface Citation {
   url: string;
@@ -35,6 +46,7 @@ export interface ProviderResult {
   durationMs: number;
   model?: string;
   tokenUsage?: { input?: number; output?: number };
+  usage?: ProviderUsage;
   error?: string;
 }
 
@@ -49,6 +61,7 @@ export interface ProviderDispatchResult {
   durationMs: number;
   model?: string;
   tokenUsage?: { input?: number; output?: number };
+  usage?: ProviderUsage;
   error?: string;
   fallbackFor?: string;
 }
@@ -102,6 +115,8 @@ export interface ProviderMeta {
   source: ProviderSource;
   enabled: boolean;
   hasApiKey: boolean;
+  /** False when the provider has no entry in config (e.g. added after init). */
+  configured?: boolean;
 }
 
 // Config for a single provider
@@ -158,6 +173,13 @@ export const DefaultsSchema = z.object({
 });
 export type Defaults = z.infer<typeof DefaultsSchema>;
 
+// Refine (LLM query transform) settings
+export const RefineConfigSchema = z.object({
+  provider: z.enum(['openai', 'gemini', 'perplexity']).optional(),
+  model: z.string().optional(),
+});
+export type RefineConfig = z.infer<typeof RefineConfigSchema>;
+
 // Full config schema
 export const ConfigSchema = z.object({
   version: z.literal(1),
@@ -166,6 +188,7 @@ export const ConfigSchema = z.object({
   customProviders: z.record(CustomProviderSourceSchema).default({}),
   trustedProviderIds: z.array(z.string()).default([]),
   groups: z.record(z.array(z.string())).default({}),
+  refine: RefineConfigSchema.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -185,6 +208,7 @@ export const ProjectConfigSchema = z.object({
   customProviders: z.record(CustomProviderSourceSchema).optional(),
   trustedProviderIds: z.array(z.string()).optional(),
   groups: z.record(z.array(z.string())).optional(),
+  refine: RefineConfigSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -200,6 +224,8 @@ export interface RunManifest {
   sources: { total: number; unique: number; file: string };
   asyncTasks: AsyncTaskHandle[];
   exitCode: number;
+  /** Tier-tuned query variants used for dispatch (run --refine). */
+  refinedQueries?: Partial<Record<ProviderTier, string>>;
 }
 
 // Per-provider report in run manifest
@@ -212,6 +238,7 @@ export interface ProviderReport {
   citationCount: number;
   outputFile: string;
   metaFile: string;
+  usage?: ProviderUsage;
   error?: string;
   fallbackFor?: string;
 }

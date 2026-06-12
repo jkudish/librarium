@@ -3,6 +3,7 @@ import type {
   ProviderOptions,
   ProviderResult,
   ProviderTier,
+  ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
@@ -24,13 +25,17 @@ interface OpenRouterChoice {
   message?: OpenRouterMessage;
 }
 
+interface OpenRouterUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+}
+
 interface OpenRouterResponse {
   model?: string;
   choices?: OpenRouterChoice[];
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-  };
+  usage?: OpenRouterUsage;
   error?: {
     message?: string;
   };
@@ -110,6 +115,7 @@ export class OpenRouterOnlineProvider extends BaseProvider {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
         },
+        usage: this.extractUsage(data.usage),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -128,6 +134,17 @@ export class OpenRouterOnlineProvider extends BaseProvider {
     const result = await this.execute('ping', { timeout: 10 });
     if (!result.error) return { ok: true };
     return { ok: false, error: result.error };
+  }
+
+  private extractUsage(usage?: OpenRouterUsage): ProviderUsage | undefined {
+    if (!usage) return undefined;
+    return {
+      inputTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens,
+      totalTokens: usage.total_tokens,
+      costUsd: usage.cost,
+      raw: usage,
+    };
   }
 
   private extractCitations(annotations: OpenRouterAnnotation[]): Citation[] {

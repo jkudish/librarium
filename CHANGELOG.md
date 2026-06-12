@@ -15,9 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `librarium run --open`: opens the output directory when the run completes (`open` on macOS, `xdg-open` on Linux)
 - `librarium status --wait` / `--retrieve` now render retrieved results with the same table line format as `run`, with the output file and word count as a dim suffix
 - Dispatcher progress events now include the provider report on `error` and `async-submitted` events (additive — `ProgressEvent.report` was already optional)
+- Interactive wizard: bare `librarium` in a terminal prompts for query, providers (enabled set, a group with tier-breakdown hints, or hand-picked), and mode, confirms, then runs the standard flow with the live table and offers to browse the results (non-TTY bare invocations keep printing help)
+- `librarium browse`: results browser over past run manifests; pick a recent run (date, query, tallies), see providers in the run table format, expand a provider for an inline preview of its output, open the full file in `$PAGER` (fallback `less -R`) or the run's summary.md
+- New CLI-only dependency `@clack/prompts` powers the wizard and browser; `librarium/core` remains dependency-clean
+- `librarium run --html`: writes a self-contained `report.html` into the run directory (query title, run metadata, provider results table as native `<details>` blocks with rendered markdown, deduped sources with provider attribution); with `--open` the report opens instead of the directory
+- `librarium html [run-dir]`: regenerates the report for any existing run (default: most recent), also available as an "export HTML report" action in `browse`; `status --retrieve` regenerates an existing report.html so retrieved deep-research results fill in
+- Report styling matches the marketing site (inline CSS only): IBM Plex Mono and Geist via Google Fonts with swap fallbacks, white background, neutral text scale, amber accents, dark rounded code blocks. Markdown is rendered with `marked` (CLI-layer dependency) with raw HTML escaped so provider output cannot inject script; external links get `rel="noopener"`
+- `librarium ls` dims providers that have no entry in config (API Key shows "Not configured") and suggests `librarium init --auto` when builtins are missing; `librarium doctor` warns about builtin providers absent from config
+- `librarium run --open` now also works on Windows (`cmd /c start`)
+- Usage and cost tracking (honest data only): a normalized optional `usage` object (`inputTokens`, `outputTokens`, `totalTokens`, `costUsd`, `raw`) on `ProviderResult`/`ProviderDispatchResult`/`ProviderReport`, populated from whatever each provider's API actually reports (never estimated from pricing tables). Shown as a dim suffix on run table lines (`· 8.4k tok`, `· $0.012`), included in `.meta.json` and `run.json`, surfaced in `report.html`, and totaled in a `▸ reported cost` summary line when at least one provider reported cost
+- `librarium run --refine` and standalone `librarium refine <goal>`: one LLM call rewrites the query into tier-tuned variants (deep-research brief, ai-grounded question, raw-search keywords) which dispatch per tier; variants are recorded in `run.json` and `prompt.md`. Client resolution: OpenAI, then Gemini, then Perplexity by available API key, overridable via the `refine` config key; refine failures never break a run. The wizard offers refine as a toggle. Core `dispatch()` gains an optional additive `tierQueries` override
+- `librarium completions <zsh|bash|fish>`: static shell completion scripts covering commands, flags, and builtin group names
 
 ### Changed
+- Refine failures now include the API's own error detail (code and message, truncated), and refine cascades to the next available provider (openai, then gemini, then perplexity) before falling back to the original query; an explicit `refine.provider` pin disables the cascade
+- Wizard copy: execution modes explain themselves (mixed recommended), the refine toggle gets a one-line explainer and is skipped entirely when no refine-capable API key is configured
 - `librarium run --json` now keeps stdout pure JSON: all pretty/table output is routed to stderr in that mode
+
+### Fixed
+- README groups table said the `all` group covers 18 providers; there are 20 builtin adapters
 
 ## [0.2.0] - 2026-06-11
 

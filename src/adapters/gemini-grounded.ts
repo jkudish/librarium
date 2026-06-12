@@ -3,6 +3,7 @@ import type {
   ProviderOptions,
   ProviderResult,
   ProviderTier,
+  ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
@@ -24,12 +25,15 @@ interface GeminiGroundedCandidate {
   };
 }
 
+interface GeminiGroundedUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+}
+
 interface GeminiGroundedResponse {
   candidates?: GeminiGroundedCandidate[];
-  usageMetadata?: {
-    promptTokenCount?: number;
-    candidatesTokenCount?: number;
-  };
+  usageMetadata?: GeminiGroundedUsageMetadata;
   error?: {
     message?: string;
     code?: number;
@@ -113,6 +117,7 @@ export class GeminiGroundedProvider extends BaseProvider {
           input: data.usageMetadata?.promptTokenCount,
           output: data.usageMetadata?.candidatesTokenCount,
         },
+        usage: this.extractUsage(data.usageMetadata),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -131,6 +136,18 @@ export class GeminiGroundedProvider extends BaseProvider {
     const result = await this.execute('ping', { timeout: 10 });
     if (!result.error) return { ok: true };
     return { ok: false, error: result.error };
+  }
+
+  private extractUsage(
+    metadata?: GeminiGroundedUsageMetadata,
+  ): ProviderUsage | undefined {
+    if (!metadata) return undefined;
+    return {
+      inputTokens: metadata.promptTokenCount,
+      outputTokens: metadata.candidatesTokenCount,
+      totalTokens: metadata.totalTokenCount,
+      raw: metadata,
+    };
   }
 
   private extractCitations(candidate?: GeminiGroundedCandidate): Citation[] {

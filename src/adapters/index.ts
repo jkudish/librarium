@@ -85,6 +85,7 @@ export function getProviderMeta(
       envVar: p.envVar,
       source: p.source ?? 'builtin',
       enabled: providerConfig?.enabled ?? false,
+      configured: providerConfig !== undefined,
       hasApiKey: requiresApiKey
         ? providerConfig
           ? hasCredential(providerConfig.apiKey, credentials)

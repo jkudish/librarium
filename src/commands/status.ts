@@ -13,6 +13,7 @@ import {
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import type { AsyncTaskHandle, ProviderReport } from '../types.js';
+import { writeHtmlReport } from './html-report.js';
 import {
   computeLineWidths,
   dimText,
@@ -73,6 +74,7 @@ async function retrieveTask(
           durationMs: result.durationMs,
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
+          usage: result.usage,
           citations: result.citations,
         },
         null,
@@ -84,6 +86,12 @@ async function retrieveTask(
     const tasks = loadAsyncTasks(dir);
     const updatedTasks = tasks.filter((t) => t.taskId !== task.taskId);
     saveAsyncTasks(dir, updatedTasks);
+
+    // If an HTML report was already generated for this run, regenerate it so
+    // the retrieved result fills in.
+    if (existsSync(join(dir, 'report.html'))) {
+      writeHtmlReport(dir);
+    }
 
     const words = result.content.split(/\s+/).filter(Boolean).length;
     const cites = result.citations.length;
@@ -100,6 +108,7 @@ async function retrieveTask(
       citationCount: cites,
       outputFile,
       metaFile,
+      usage: result.usage,
       error: result.error,
     };
     const wasSpinning = spinner.isSpinning;

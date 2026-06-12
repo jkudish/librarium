@@ -4,6 +4,7 @@ import type {
   Citation,
   ProviderOptions,
   ProviderResult,
+  ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
@@ -34,15 +35,18 @@ interface AgentSearchResult {
   snippet?: string;
 }
 
+interface AgentUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
 interface AgentResponseBody {
   id: string;
   status: string;
   model?: string;
   output?: AgentOutputItem[];
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-  };
+  usage?: AgentUsage;
   error?: { message?: string; code?: string };
 }
 
@@ -115,6 +119,7 @@ export abstract class PerplexityAgentBaseProvider extends BaseProvider {
           input: data.usage?.input_tokens,
           output: data.usage?.output_tokens,
         },
+        usage: this.extractUsage(data.usage),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -238,5 +243,15 @@ export abstract class PerplexityAgentBaseProvider extends BaseProvider {
     }
 
     return { content: contentParts.join('\n'), citations };
+  }
+
+  private extractUsage(usage?: AgentUsage): ProviderUsage | undefined {
+    if (!usage) return undefined;
+    return {
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      totalTokens: usage.total_tokens,
+      raw: usage,
+    };
   }
 }

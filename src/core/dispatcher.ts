@@ -9,6 +9,7 @@ import type {
   ProviderDispatchResult,
   ProviderReport,
   ProviderResult,
+  ProviderUsage,
 } from '../types.js';
 import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
@@ -21,6 +22,11 @@ export interface DispatchOptions {
   mode: 'sync' | 'async' | 'mixed';
   credentials?: CredentialContext;
   onProgress?: (event: ProgressEvent) => void;
+  /**
+   * Optional per-tier query overrides (e.g. produced by `run --refine`).
+   * Providers receive the variant for their tier, falling back to `query`.
+   */
+  tierQueries?: Partial<Record<Provider['tier'], string>>;
 }
 
 export interface DispatchResult {
@@ -33,6 +39,8 @@ export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchResult> {
   const { config, providerIds, query, mode, credentials, onProgress } = options;
+  const queryForTier = (tier: Provider['tier']): string =>
+    options.tierQueries?.[tier] ?? query;
   const limit = pLimit(config.defaults.maxParallel);
   const reports: ProviderReport[] = [];
   const results: ProviderDispatchResult[] = [];
@@ -49,9 +57,12 @@ export async function dispatch(
     fallbackProvider: Provider,
   ): Promise<ProviderReport> {
     try {
-      const result = await fallbackProvider.execute(query, {
-        timeout: config.defaults.timeout,
-      });
+      const result = await fallbackProvider.execute(
+        queryForTier(fallbackProvider.tier),
+        {
+          timeout: config.defaults.timeout,
+        },
+      );
       const structured = createDispatchResult(
         fallbackId,
         fallbackProvider.tier,
@@ -189,7 +200,7 @@ export async function dispatch(
         provider.submit
       ) {
         try {
-          const handle = await provider.submit(query, {
+          const handle = await provider.submit(queryForTier(provider.tier), {
             timeout: config.defaults.asyncTimeout,
           });
 
@@ -268,7 +279,7 @@ export async function dispatch(
 
       // Sync execution
       try {
-        const result = await provider.execute(query, {
+        const result = await provider.execute(queryForTier(provider.tier), {
           timeout: config.defaults.timeout,
         });
         const structured = createDispatchResult(id, provider.tier, result);
@@ -352,6 +363,28 @@ export async function dispatch(
   return { reports, results, asyncTasks };
 }
 
+/**
+ * Normalize usage from a provider result. Adapters that report rich data
+ * (totals, direct cost) set result.usage themselves; otherwise the legacy
+ * tokenUsage pair is lifted into the normalized shape.
+ */
+export function normalizeUsage(
+  result: Pick<ProviderResult, 'usage' | 'tokenUsage'>,
+): ProviderUsage | undefined {
+  if (result.usage) return result.usage;
+  const tokens = result.tokenUsage;
+  if (!tokens || (tokens.input === undefined && tokens.output === undefined)) {
+    return undefined;
+  }
+  const usage: ProviderUsage = {};
+  if (tokens.input !== undefined) usage.inputTokens = tokens.input;
+  if (tokens.output !== undefined) usage.outputTokens = tokens.output;
+  if (tokens.input !== undefined && tokens.output !== undefined) {
+    usage.totalTokens = tokens.input + tokens.output;
+  }
+  return usage;
+}
+
 function createDispatchResult(
   providerId: string,
   tier: Provider['tier'],
@@ -370,6 +403,7 @@ function createDispatchResult(
     durationMs: result.durationMs,
     model: result.model,
     tokenUsage: result.tokenUsage,
+    usage: normalizeUsage(result),
     error: result.error,
     fallbackFor,
   };
@@ -396,6 +430,7 @@ function createReport(
       result.status === 'success' || result.status === 'error'
         ? `${safeId}.meta.json`
         : '',
+    usage: result.usage,
     error: result.error,
     fallbackFor: result.fallbackFor,
   };
