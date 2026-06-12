@@ -423,6 +423,20 @@ librarium clear --dry-run
 librarium clear -i
 ```
 
+### `mcp`
+
+Start an MCP server over stdio so AI agents can drive librarium through tool
+calls. See [Using with AI Agents](#using-with-ai-agents) for setup and the full
+tool list.
+
+```bash
+# Register with Claude Code
+claude mcp add librarium -- librarium mcp
+
+# Or run directly (stdout is the protocol stream; diagnostics go to stderr)
+librarium mcp
+```
+
 ## Groups
 
 Groups are named collections of provider IDs. Librarium ships with six default groups:
@@ -839,7 +853,7 @@ Notes:
 
 ## Using with AI Agents
 
-Librarium is designed to be used by AI coding agents. There are three ways to set it up:
+Librarium is designed to be used by AI coding agents. There are four ways to set it up:
 
 ### Option 1: Claude Code Skill (Recommended)
 
@@ -856,7 +870,38 @@ curl -o ~/.claude/skills/librarium/SKILL.md https://raw.githubusercontent.com/jk
 
 Once installed, Claude Code will automatically use librarium when you ask it to research a topic. Triggers: `/librarium`, `/research`, `/deep-research`.
 
-### Option 2: Agent Prompt
+### Option 2: MCP Server
+
+Librarium ships an MCP (Model Context Protocol) server over stdio so agents can drive it directly through tool calls instead of shelling out to the CLI. Register it with Claude Code:
+
+```bash
+claude mcp add librarium -- librarium mcp
+```
+
+Or add it to any MCP client's stdio config:
+
+```json
+{
+  "mcpServers": {
+    "librarium": {
+      "command": "librarium",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The server exposes these tools:
+
+- `research` — fan out a query across providers; writes the full run directory and returns a compact structured result (output dir, per-provider tallies, top deduped sources, pending async task ids). Full provider text is not inlined.
+- `get_results` — read provider markdown from a run directory (defaults to the most recent run), capped per provider with a truncation marker, plus the manifest summary.
+- `check_async` — one poll pass over pending async deep-research tasks; with `retrieve` it fetches completed results back into the run.
+- `list_providers` — registry and config snapshot (id, name, tier, enabled, key configured).
+- `list_groups` — configured provider groups and their members.
+
+In MCP mode, stdout carries the protocol stream only; all diagnostics go to stderr. The server shuts down cleanly when the client disconnects.
+
+### Option 3: Agent Prompt
 
 Drop this into any AI agent's system prompt to give it librarium capabilities:
 
@@ -885,7 +930,7 @@ For async deep research, check status with:
 Cross-reference sources appearing in multiple providers for higher confidence.
 ```
 
-### Option 3: CLAUDE.md Project Instructions
+### Option 4: CLAUDE.md Project Instructions
 
 Add to your project's `CLAUDE.md` for project-scoped research:
 

@@ -83,6 +83,10 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium cleanup [--days N] [--dry-run]` | Delete run dirs older than N days (default 30) |
 | `librarium clear [--dry-run] [-i] [--yes]` | Delete all run dirs (alias for `cleanup --all`); `-i` to pick interactively |
 
+## MCP Server
+
+Instead of shelling out to the CLI, agents can drive librarium over the Model Context Protocol with `librarium mcp` (stdio transport). Register it once with `claude mcp add librarium -- librarium mcp`, then call the tools: `research`, `get_results`, `check_async`, `list_providers`, `list_groups`. The `research` tool runs the same silent file-writing pipeline as `librarium run` and returns a compact structured result; fetch full provider markdown with `get_results`.
+
 ## Provider Tiers
 
 | Tier | Providers | Speed | Depth |

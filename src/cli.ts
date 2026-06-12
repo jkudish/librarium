@@ -10,6 +10,7 @@ import { registerInitCommand } from './commands/init.js';
 import { registerInstallSkillCommand } from './commands/install-skill.js';
 import { registerJsonlCommand } from './commands/jsonl.js';
 import { registerLsCommand } from './commands/ls.js';
+import { registerMcpCommand } from './commands/mcp.js';
 import { registerRefineCommand } from './commands/refine.js';
 import { registerRunCommand } from './commands/run.js';
 import { registerStatusCommand } from './commands/status.js';
@@ -40,6 +41,7 @@ registerConfigCommand(program);
 registerCleanupCommand(program);
 registerUpgradeCommand(program);
 registerInstallSkillCommand(program);
+registerMcpCommand(program);
 
 // Bare `librarium` in an interactive terminal launches the wizard. Non-TTY
 // bare invocations (pipes, CI) keep printing help so scripts never hang.
