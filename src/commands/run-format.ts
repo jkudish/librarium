@@ -10,8 +10,12 @@ const ANSI = {
   red: '\u001b[31m',
   green: '\u001b[32m',
   yellow: '\u001b[33m',
+  cyan: '\u001b[36m',
   dim: '\u001b[2m',
 } as const;
+
+/** Durations at or above this threshold are highlighted in color mode. */
+export const SLOW_DURATION_MS = 10_000;
 
 /**
  * Decide whether to emit ANSI colors for a given stream.
@@ -78,7 +82,11 @@ export function formatProviderLine(
     ANSI.dim,
     color,
   );
-  const duration = formatDuration(report.durationMs).padStart(7);
+  // Highlight slow providers so they pop in the table.
+  const duration =
+    report.durationMs >= SLOW_DURATION_MS
+      ? paint(formatDuration(report.durationMs).padStart(7), ANSI.yellow, color)
+      : formatDuration(report.durationMs).padStart(7);
   const fallbackSuffix = report.fallbackFor
     ? `   ${paint(`(fallback for ${report.fallbackFor})`, ANSI.dim, color)}`
     : '';
@@ -103,6 +111,81 @@ export function formatProviderLine(
       return `  ${glyph} ${id}   ${tier}   ${duration}   ${reason}${fallbackSuffix}`;
     }
   }
+}
+
+/** Dim a piece of text (no-op when color is disabled). */
+export function dimText(text: string, color: boolean): string {
+  return paint(text, ANSI.dim, color);
+}
+
+/**
+ * Format an unresolved provider row for the live (in-place) table.
+ * The glyph slot shows a spinner frame; the duration column ticks while
+ * the provider runs, or shows "queued" before it starts.
+ */
+export function formatPendingLine(
+  id: string,
+  tier: ProviderTier,
+  widths: LineWidths,
+  color: boolean,
+  frame: string,
+  elapsedMs?: number,
+): string {
+  const paddedId = id.padEnd(Math.max(widths.id, id.length));
+  const paddedTier = paint(
+    tier.padEnd(Math.max(widths.tier, tier.length)),
+    ANSI.dim,
+    color,
+  );
+  const glyph = paint(frame, ANSI.cyan, color);
+  const status =
+    elapsedMs === undefined
+      ? paint('queued', ANSI.dim, color)
+      : paint(formatDuration(elapsedMs).padStart(7), ANSI.dim, color);
+  return `  ${glyph} ${paddedId}   ${paddedTier}   ${status}`;
+}
+
+/**
+ * Truncate a line to a maximum visible width, preserving ANSI escape
+ * sequences (they don't count toward the width). Appends a reset when the
+ * line is cut so styling never bleeds into the next line.
+ */
+export function truncateAnsi(line: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
+  let visible = 0;
+  let out = '';
+  let i = 0;
+  let sawAnsi = false;
+  let truncated = false;
+  while (i < line.length) {
+    const char = line[i];
+    if (char === '\u001b') {
+      // Copy the full escape sequence (ESC [ ... final byte) without counting.
+      let j = i + 1;
+      if (line[j] === '[') {
+        j++;
+        while (j < line.length && !/[a-zA-Z]/.test(line[j] as string)) j++;
+        j++; // include the final byte
+      }
+      out += line.slice(i, j);
+      sawAnsi = true;
+      i = j;
+      continue;
+    }
+    if (visible >= maxWidth) {
+      // Drop remaining visible chars but keep scanning for ANSI resets.
+      truncated = true;
+      i++;
+      continue;
+    }
+    out += char;
+    visible++;
+    i++;
+  }
+  if (truncated && sawAnsi && !out.endsWith(ANSI.reset)) {
+    out += ANSI.reset;
+  }
+  return out;
 }
 
 /** Indented notice printed when a failed primary triggers its fallback. */
@@ -131,14 +214,20 @@ export interface RunSummaryInput {
   outputDir: string;
   color: boolean;
   home?: string;
+  /** Wall-clock duration of the whole dispatch, in milliseconds. */
+  totalDurationMs?: number;
 }
 
 /** End-of-run summary block (returned as individual lines). */
 export function formatRunSummary(input: RunSummaryInput): string[] {
   const lines: string[] = [''];
+  const total =
+    input.totalDurationMs === undefined
+      ? ''
+      : ` in ${formatDuration(input.totalDurationMs)}`;
   lines.push(
     paint(
-      `  ${input.succeeded} succeeded, ${input.failed} failed, ${input.pending} async pending`,
+      `  ${input.succeeded} succeeded, ${input.failed} failed, ${input.pending} async pending${total}`,
       ANSI.dim,
       input.color,
     ),

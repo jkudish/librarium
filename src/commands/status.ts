@@ -12,7 +12,14 @@ import {
 } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { safeWriteFile } from '../core/fs-utils.js';
-import type { AsyncTaskHandle } from '../types.js';
+import type { AsyncTaskHandle, ProviderReport } from '../types.js';
+import {
+  computeLineWidths,
+  dimText,
+  formatProviderLine,
+  isColorEnabled,
+  type LineWidths,
+} from './run-format.js';
 
 function formatTaskAge(submittedAt: number): string {
   // submittedAt is in milliseconds
@@ -27,10 +34,20 @@ function formatTaskStatus(task: AsyncTaskHandle): string {
   return `  ${task.provider} | Task: ${task.taskId.slice(0, 20)}... | Status: ${task.status} | Submitted: ${formatTaskAge(task.submittedAt)}`;
 }
 
+/** Column widths across a set of async tasks so result lines align. */
+function widthsForTasks(tasks: AsyncTaskHandle[]): LineWidths {
+  return computeLineWidths(
+    tasks.map((task) => task.provider),
+    tasks.map((task) => getProvider(task.provider)?.tier ?? 'deep-research'),
+  );
+}
+
 async function retrieveTask(
   task: AsyncTaskHandle,
   dir: string,
   spinner: ReturnType<typeof ora>,
+  widths: LineWidths,
+  color: boolean,
 ): Promise<boolean> {
   const provider = getProvider(task.provider);
   if (!provider?.retrieve) {
@@ -70,10 +87,30 @@ async function retrieveTask(
 
     const words = result.content.split(/\s+/).filter(Boolean).length;
     const cites = result.citations.length;
-    spinner.text = `Retrieved ${task.provider} -> ${outputFile} (${words} words, ${cites} citations)`;
+    spinner.text = `Retrieved ${task.provider} -> ${outputFile}`;
+
+    // Render the retrieved result with the same table line as `librarium run`,
+    // with the retrieval details as a dim suffix.
+    const report: ProviderReport = {
+      id: task.provider,
+      tier: result.tier,
+      status: result.error ? 'error' : 'success',
+      durationMs: result.durationMs,
+      wordCount: words,
+      citationCount: cites,
+      outputFile,
+      metaFile,
+      error: result.error,
+    };
+    const wasSpinning = spinner.isSpinning;
+    if (wasSpinning) spinner.stop();
     console.log(
-      `  Retrieved ${task.provider} -> ${outputFile} (${words} words, ${cites} citations)`,
+      `${formatProviderLine(report, widths, color)}   ${dimText(
+        `${outputFile}, ${words} words`,
+        color,
+      )}`,
     );
+    if (wasSpinning) spinner.start();
     return true;
   } catch (e) {
     spinner.text = `Error retrieving ${task.provider}: ${e instanceof Error ? e.message : String(e)}`;
@@ -101,6 +138,7 @@ export function registerStatusCommand(program: Command): void {
           console.error(`[librarium] warning: ${warning}`);
         }
         const baseDir = resolve(config.defaults.outputDir);
+        const color = isColorEnabled(process.stdout);
 
         // Gather all async tasks (pending + completed unretrieved)
         const pendingTasks = getPendingTasks(baseDir);
@@ -181,7 +219,29 @@ export function registerStatusCommand(program: Command): void {
                   if (result.status === 'completed' && task.outputDir) {
                     justCompleted.push({ task, dir: task.outputDir });
                   }
-                  spinner.text = `${task.provider}: ${result.status}${result.message ? ` — ${result.message}` : ''}`;
+                  if (result.status === 'failed') {
+                    const failureReport: ProviderReport = {
+                      id: task.provider,
+                      tier: getProvider(task.provider)?.tier ?? 'deep-research',
+                      status: 'error',
+                      durationMs: 0,
+                      wordCount: 0,
+                      citationCount: 0,
+                      outputFile: '',
+                      metaFile: '',
+                      error: result.message ?? 'task failed',
+                    };
+                    spinner.stop();
+                    console.log(
+                      formatProviderLine(
+                        failureReport,
+                        widthsForTasks(pendingTasks),
+                        color,
+                      ),
+                    );
+                    spinner.start();
+                  }
+                  spinner.text = `${task.provider}: ${result.status}${result.message ? `: ${result.message}` : ''}`;
                 } else {
                   const progress = result.progress
                     ? ` (${result.progress}%)`
@@ -215,9 +275,16 @@ export function registerStatusCommand(program: Command): void {
             const retrieveSpinner = ora(
               `Retrieving ${justCompleted.length} results...`,
             ).start();
+            const widths = widthsForTasks(justCompleted.map((c) => c.task));
             let retrieved = 0;
             for (const { task, dir } of justCompleted) {
-              const ok = await retrieveTask(task, dir, retrieveSpinner);
+              const ok = await retrieveTask(
+                task,
+                dir,
+                retrieveSpinner,
+                widths,
+                color,
+              );
               if (ok) retrieved++;
             }
             retrieveSpinner.succeed(
@@ -232,6 +299,8 @@ export function registerStatusCommand(program: Command): void {
           const entries = readdirSync(baseDir);
           let retrieved = 0;
 
+          // Collect all completed tasks first so table columns align.
+          const toRetrieve: Array<{ task: AsyncTaskHandle; dir: string }> = [];
           for (const entry of entries) {
             const dir = join(baseDir, entry);
             try {
@@ -241,12 +310,15 @@ export function registerStatusCommand(program: Command): void {
             }
 
             const tasks = loadAsyncTasks(dir);
-            const completed = tasks.filter((t) => t.status === 'completed');
-
-            for (const task of completed) {
-              const ok = await retrieveTask(task, dir, spinner);
-              if (ok) retrieved++;
+            for (const task of tasks) {
+              if (task.status === 'completed') toRetrieve.push({ task, dir });
             }
+          }
+
+          const widths = widthsForTasks(toRetrieve.map((c) => c.task));
+          for (const { task, dir } of toRetrieve) {
+            const ok = await retrieveTask(task, dir, spinner, widths, color);
+            if (ok) retrieved++;
           }
 
           if (retrieved > 0) {

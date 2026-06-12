@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeLineWidths,
+  dimText,
   formatDuration,
   formatFallbackNotice,
+  formatPendingLine,
   formatProviderLine,
   formatRunSummary,
   isColorEnabled,
   shortenHomePath,
+  truncateAnsi,
 } from '../src/commands/run-format.js';
 import type { ProviderReport } from '../src/types.js';
 
@@ -229,5 +232,110 @@ describe('isColorEnabled', () => {
     expect(isColorEnabled({ isTTY: true }, {})).toBe(true);
     expect(isColorEnabled({ isTTY: false }, {})).toBe(false);
     expect(isColorEnabled({}, {})).toBe(false);
+  });
+});
+
+describe('slow duration highlight', () => {
+  it('paints durations at or above 10s yellow in color mode', () => {
+    const line = formatProviderLine(
+      makeReport({ durationMs: 12_345 }),
+      widths,
+      true,
+    );
+    expect(line).toContain('\u001b[33m  12.3s\u001b[0m');
+  });
+
+  it('leaves fast durations unpainted in color mode', () => {
+    const line = formatProviderLine(
+      makeReport({ durationMs: 2_100 }),
+      widths,
+      true,
+    );
+    expect(line).not.toContain('\u001b[33m');
+  });
+
+  it('emits no ANSI for slow durations when color is off', () => {
+    const line = formatProviderLine(
+      makeReport({ durationMs: 12_345 }),
+      widths,
+      false,
+    );
+    expect(line).toContain('  12.3s');
+    expect(line).not.toContain('\u001b');
+  });
+});
+
+describe('formatPendingLine', () => {
+  it('shows queued before the provider starts', () => {
+    const line = formatPendingLine(
+      'exa',
+      'ai-grounded',
+      widths,
+      false,
+      '\u280b',
+    );
+    expect(line).toBe('  \u280b exa                    ai-grounded     queued');
+  });
+
+  it('ticks elapsed time once started', () => {
+    const line = formatPendingLine(
+      'exa',
+      'ai-grounded',
+      widths,
+      false,
+      '\u280b',
+      2_300,
+    );
+    expect(line).toContain('2.3s');
+  });
+});
+
+describe('truncateAnsi', () => {
+  it('returns short lines unchanged', () => {
+    expect(truncateAnsi('hello', 10)).toBe('hello');
+  });
+
+  it('truncates visible characters to the max width', () => {
+    expect(truncateAnsi('hello world', 5)).toBe('hello');
+  });
+
+  it('does not count ANSI sequences toward the width', () => {
+    const line = '\u001b[32mhello\u001b[0m world';
+    expect(truncateAnsi(line, 11)).toBe(line);
+  });
+
+  it('appends a reset when cutting a styled line', () => {
+    const line = '\u001b[32mhello world\u001b[0m';
+    const cut = truncateAnsi(line, 5);
+    expect(cut).toBe('\u001b[32mhello\u001b[0m');
+  });
+
+  it('handles zero width', () => {
+    expect(truncateAnsi('hello', 0)).toBe('');
+  });
+});
+
+describe('dimText', () => {
+  it('wraps in dim ANSI when color is on and is a no-op otherwise', () => {
+    expect(dimText('x', true)).toBe('\u001b[2mx\u001b[0m');
+    expect(dimText('x', false)).toBe('x');
+  });
+});
+
+describe('wall-clock total', () => {
+  it('appends the total duration to the tallies line', () => {
+    const lines = formatRunSummary({
+      succeeded: 4,
+      failed: 0,
+      pending: 0,
+      uniqueSources: 10,
+      totalCitations: 12,
+      outputDir: '/srv/out',
+      color: false,
+      totalDurationMs: 13_300,
+    });
+    expect(lines).toContain(
+      '  4 succeeded, 0 failed, 0 async pending in 13.3s',
+    );
   });
 });

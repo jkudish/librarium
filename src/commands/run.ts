@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
@@ -26,6 +27,7 @@ import type {
   ProviderTier,
   RunManifest,
 } from '../types.js';
+import { LiveRunTable } from './live-table.js';
 import {
   computeLineWidths,
   formatFallbackNotice,
@@ -50,6 +52,7 @@ export function registerRunCommand(program: Command): void {
     .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
     .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
     .option('--json', 'Output run.json to stdout')
+    .option('--open', 'Open the output directory when the run completes')
     .action(async (query: string, opts) => {
       // In --json mode stdout must stay pure JSON (the run manifest), so all
       // pretty output is routed to stderr. The ora spinner already writes to
@@ -158,6 +161,13 @@ export function registerRunCommand(program: Command): void {
           tableIds.map((id) => tierById.get(id) ?? 'raw-search'),
         );
 
+        // Live (resolve-in-place) rendering needs a real TTY for the cursor
+        // math; NO_COLOR and non-TTY environments keep append-on-completion.
+        const liveMode = color && Boolean(prettyStream.isTTY);
+        const live = liveMode
+          ? new LiveRunTable(prettyStream, widths, color)
+          : null;
+
         const running = new Set<string>();
         const spinnerText = (): string => {
           if (running.size === 0) return 'Waiting for providers...';
@@ -169,8 +179,16 @@ export function registerRunCommand(program: Command): void {
         printLine('');
         printLine(`  fanning out to ${providerIds.length} providers`);
         printLine('');
-        spinner.start(spinnerText());
+        if (live) {
+          for (const id of providerIds) {
+            live.addProvider(id, tierById.get(id) ?? 'raw-search');
+          }
+          live.start();
+        } else {
+          spinner.start(spinnerText());
+        }
 
+        const dispatchStartedAt = Date.now();
         const { reports, results, asyncTasks } = await dispatch({
           config,
           providerIds,
@@ -178,6 +196,26 @@ export function registerRunCommand(program: Command): void {
           mode: config.defaults.mode,
           credentials,
           onProgress: (event) => {
+            if (live) {
+              switch (event.event) {
+                case 'started':
+                  live.markStarted(event.providerId);
+                  break;
+                case 'fallback-started':
+                  live.addFallback(
+                    event.report?.id ?? event.providerId,
+                    event.providerId,
+                    tierById.get(event.providerId) ?? 'raw-search',
+                  );
+                  break;
+                case 'completed':
+                case 'error':
+                case 'async-submitted':
+                  if (event.report) live.resolve(event.report);
+                  break;
+              }
+              return;
+            }
             switch (event.event) {
               case 'started':
                 running.add(event.providerId);
@@ -198,13 +236,21 @@ export function registerRunCommand(program: Command): void {
             spinner.text = spinnerText();
           },
         });
+        const totalDurationMs = Date.now() - dispatchStartedAt;
 
         spinner.stop();
 
-        // Skipped providers never emit progress events — show them too.
-        for (const report of reports) {
-          if (report.status === 'skipped') {
-            printLine(formatProviderLine(report, widths, color));
+        if (live) {
+          // Rows that never emitted events (e.g. skipped providers) resolve
+          // from the final reports before the block is finalized.
+          live.resolveRemaining(reports);
+          live.stop();
+        } else {
+          // Skipped providers never emit progress events — show them too.
+          for (const report of reports) {
+            if (report.status === 'skipped') {
+              printLine(formatProviderLine(report, widths, color));
+            }
           }
         }
 
@@ -301,6 +347,7 @@ export function registerRunCommand(program: Command): void {
           totalCitations: allCitations.length,
           outputDir,
           color,
+          totalDurationMs,
         })) {
           printLine(line);
         }
@@ -309,12 +356,37 @@ export function registerRunCommand(program: Command): void {
           console.log(JSON.stringify(manifest, null, 2));
         }
 
+        if (opts.open && exitCode !== 2) {
+          openPath(outputDir);
+        }
+
         process.exitCode = exitCode;
       } catch (e) {
         spinner.fail(e instanceof Error ? e.message : String(e));
         process.exitCode = 2;
       }
     });
+}
+
+/** Open a file or directory with the platform opener. Failures are silent. */
+function openPath(target: string): void {
+  const command =
+    process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'linux'
+        ? 'xdg-open'
+        : null;
+  if (!command) return;
+  try {
+    const child = spawn(command, [target], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Best-effort only.
+  }
 }
 
 function writeProviderOutputs(
