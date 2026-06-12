@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `librarium completions <zsh|bash|fish>`: static shell completion scripts covering commands, flags, and builtin group names
 
 ### Changed
+- `perplexity-sonar-deep` now uses Perplexity's Async Sonar API (`POST /v1/async/sonar`, polled via `GET /v1/async/sonar/{id}`): mixed and async modes submit and return immediately instead of blocking for minutes, and `librarium status --wait --retrieve` polls and retrieves like openai-deep tasks. Retrieved results keep token usage and API-reported cost, and prefer `search_results` (titles, snippets) for citations. Sync mode is unchanged. `perplexity-deep-research` and `perplexity-advanced-deep` still complete inline: Perplexity's Agent API has no background mode
 - Refine failures now include the API's own error detail (code and message, truncated), and refine cascades to the next available provider (openai, then gemini, then perplexity) before falling back to the original query; an explicit `refine.provider` pin disables the cascade
 - Wizard copy: execution modes explain themselves (mixed recommended), the refine toggle gets a one-line explainer and is skipped entirely when no refine-capable API key is configured
 - `librarium run --json` now keeps stdout pure JSON: all pretty/table output is routed to stderr in that mode

@@ -383,6 +383,8 @@ Librarium supports three execution modes, configurable via `--mode` or the `defa
 
 - **`mixed`** (default) -- Run ai-grounded and raw-search providers synchronously. Submit deep-research providers asynchronously. You get fast results right away and can retrieve deep research later.
 
+True background submission depends on the provider's API. `openai-deep`, `openai-deep-o3`, and `perplexity-sonar-deep` (via Perplexity's Async Sonar API) submit and return immediately in `mixed`/`async` mode; poll with `librarium status --wait`. `perplexity-deep-research` and `perplexity-advanced-deep` use Perplexity's Agent API, which has no background mode, so they complete inline even in mixed mode. `gemini-deep` also completes inline.
+
 ## Provider Fallback
 
 When a provider fails for any reason (exception, error response, timeout), librarium can automatically try a lighter alternative. Add an optional `fallback` field to any provider's config:
