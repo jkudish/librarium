@@ -1,11 +1,10 @@
-import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
-import { resolveProviderIds } from '../constants.js';
+import { resolveProviderIds, resolveProviderTokens } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
@@ -14,8 +13,9 @@ import { safeWriteFile } from '../core/fs-utils.js';
 import { deduplicateSources } from '../core/normalizer.js';
 import {
   buildPrompt,
+  createRunDir,
+  type CreateRunDirDeps,
   generateSlug,
-  resolveOutputDir,
 } from '../core/prompt-builder.js';
 import { generateSummary } from '../core/synthesis.js';
 import type {
@@ -56,6 +56,12 @@ export interface SilentRunDeps {
   credentials?: CredentialContext;
   /** Diagnostic sink. Defaults to stderr. Never stdout. */
   onWarn?: (message: string) => void;
+  /**
+   * Injectable clock/suffix for collision-resistant run-dir creation. Tests can
+   * pin `now`/`randomSuffix` to assert that two same-second runs get distinct
+   * directories.
+   */
+  runDirDeps?: CreateRunDirDeps;
 }
 
 export interface SilentRunResult {
@@ -78,19 +84,56 @@ function defaultLoadMergedConfig(cliFlags: Partial<Defaults>): Config {
 /**
  * Resolve the provider id list from explicit providers, a group name, or the
  * set of enabled providers. Throws ResearchInputError for caller mistakes
- * (unknown group, empty selection) so the MCP layer can surface a tool error.
+ * (unknown group, empty selection, unknown/ambiguous provider tokens) so the
+ * MCP layer can surface a tool error.
+ *
+ * Distinguishes undefined (use defaults) from provided-but-empty: an
+ * explicitly-passed empty `providers` array or an empty/whitespace `group`
+ * is a caller mistake, not a fallthrough to the default enabled set. Provider
+ * tokens are resolved against the registry (canonical ids, legacy aliases, and
+ * display names); ANY unresolved token is a hard error listing the unknowns.
  */
 export function resolveProviderSelection(
   config: Config,
   args: Pick<SilentRunArgs, 'providers' | 'group'>,
+  onWarn: (message: string) => void = () => {},
 ): string[] {
   let providerIds: string[];
-  if (args.providers && args.providers.length > 0) {
-    providerIds = resolveProviderIds(args.providers);
-  } else if (args.group) {
-    const group = config.groups[args.group];
+
+  if (args.providers !== undefined) {
+    // Explicitly provided: trim tokens and reject an empty selection rather
+    // than silently falling through to group/defaults.
+    const tokens = args.providers
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    if (tokens.length === 0) {
+      throw new ResearchInputError(
+        'The `providers` array was provided but contains no usable provider ids. Omit `providers` to use the default enabled set, or pass at least one provider id.',
+      );
+    }
+    const known = getAllProviders().map((provider) => ({
+      id: provider.id,
+      displayName: provider.displayName,
+    }));
+    const resolution = resolveProviderTokens(tokens, known);
+    for (const warning of resolution.warnings) {
+      onWarn(`[librarium] warning: ${warning}`);
+    }
+    if (resolution.errors.length > 0) {
+      throw new ResearchInputError(resolution.errors.join(' '));
+    }
+    providerIds = resolution.ids;
+  } else if (args.group !== undefined) {
+    // Explicitly provided group: empty/whitespace is a caller mistake.
+    const groupName = args.group.trim();
+    if (groupName.length === 0) {
+      throw new ResearchInputError(
+        'The `group` was provided but is empty. Omit `group` to use the default enabled set, or pass a configured group name.',
+      );
+    }
+    const group = config.groups[groupName];
     if (!group) {
-      throw new ResearchInputError(`Unknown group: ${args.group}`);
+      throw new ResearchInputError(`Unknown group: ${groupName}`);
     }
     providerIds = resolveProviderIds(group);
   } else {
@@ -107,6 +150,8 @@ export function resolveProviderSelection(
     );
   }
 
+  // For group/default selections (already-canonical ids), drop any not present
+  // in the registry. Explicit provider tokens were already validated above.
   const available = new Set(getAllProviders().map((provider) => provider.id));
   const filtered = providerIds.filter((id) => available.has(id));
   if (filtered.length === 0) {
@@ -177,7 +222,7 @@ export async function runResearchSilent(
     onWarn(`[librarium] warning: ${warning}`);
   }
 
-  const providerIds = resolveProviderSelection(config, args);
+  const providerIds = resolveProviderSelection(config, args, onWarn);
 
   // Optional one-shot LLM refine. Never allowed to break the run.
   let refined: RefinedQueries | null = null;
@@ -195,8 +240,10 @@ export async function runResearchSilent(
 
   const slug = generateSlug(args.query);
   const baseDir = resolve(config.defaults.outputDir);
-  const outputDir = resolveOutputDir(baseDir, slug);
-  mkdirSync(outputDir, { recursive: true });
+  // Collision-resistant: exclusive mkdir with ms timestamp + random suffix so
+  // two same-second runs of the same query never share a directory. The actual
+  // created directory is what gets recorded in the manifest below.
+  const outputDir = createRunDir(baseDir, slug, deps.runDirDeps);
 
   let promptDoc = buildPrompt(args.query);
   if (refined) {

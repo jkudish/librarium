@@ -893,11 +893,11 @@ Or add it to any MCP client's stdio config:
 
 The server exposes these tools:
 
-- `research` — fan out a query across providers; writes the full run directory and returns a compact structured result (output dir, per-provider tallies, top deduped sources, pending async task ids). Full provider text is not inlined.
-- `get_results` — read provider markdown from a run directory (defaults to the most recent run), capped per provider with a truncation marker, plus the manifest summary.
-- `check_async` — one poll pass over pending async deep-research tasks; with `retrieve` it fetches completed results back into the run.
-- `list_providers` — registry and config snapshot (id, name, tier, enabled, key configured).
-- `list_groups` — configured provider groups and their members.
+- `research`: fan out a query across providers; writes the full run directory and returns a compact structured result (output dir, per-provider tallies, top deduped sources, pending async task ids). Full provider text is not inlined.
+- `get_results`: read provider markdown from a run directory (defaults to the most recent run), capped per provider with a truncation marker, plus the manifest summary.
+- `check_async`: one poll pass over pending async deep-research tasks; with `retrieve` it fetches completed results back into the run.
+- `list_providers`: registry and config snapshot (id, name, tier, enabled, key configured).
+- `list_groups`: configured provider groups and their members.
 
 In MCP mode, stdout carries the protocol stream only; all diagnostics go to stderr. The server shuts down cleanly when the client disconnects.
 
