@@ -6,6 +6,7 @@ import {
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { Config, ProviderTier } from '../types.js';
 import { browseRunDir } from './browse.js';
+import { resolveRefineClient } from './refine.js';
 import { executeRun, type RunOptions } from './run.js';
 
 /**
@@ -80,7 +81,11 @@ export async function runWizard(): Promise<void> {
         label: `group: ${name}`,
         hint: groupHint(ids, tierById),
       })),
-      { value: 'custom', label: 'pick specific providers' },
+      {
+        value: 'custom',
+        label: 'pick specific providers',
+        hint: 'choose exactly which providers run',
+      },
     ],
   });
   if (p.isCancel(scope)) return cancel();
@@ -110,23 +115,34 @@ export async function runWizard(): Promise<void> {
       {
         value: 'mixed',
         label: 'mixed',
-        hint: 'deep research async, the rest sync (default)',
+        hint: 'fast providers answer now, deep research runs in the background (recommended)',
       },
-      { value: 'sync', label: 'sync', hint: 'wait for every provider' },
+      {
+        value: 'sync',
+        label: 'sync',
+        hint: 'wait for everything to finish, deep research can take several minutes',
+      },
       {
         value: 'async',
         label: 'async',
-        hint: 'submit deep research and return',
+        hint: 'submit everything and return immediately, collect later with librarium status',
       },
     ],
   });
   if (p.isCancel(mode)) return cancel();
 
-  const refine = await p.confirm({
-    message: 'Refine the query into tier-tuned variants first (one LLM call)?',
-    initialValue: false,
-  });
-  if (p.isCancel(refine)) return cancel();
+  // Only offer refine when a refine-capable API key is configured.
+  let refine: boolean | symbol = false;
+  if (resolveRefineClient(config)) {
+    p.log.message(
+      'Refine rewrites your query three ways with one quick LLM call: a research brief for deep research, a focused question for AI answers, keywords for raw search.',
+    );
+    refine = await p.confirm({
+      message: 'Refine the query for each tier first?',
+      initialValue: false,
+    });
+    if (p.isCancel(refine)) return cancel();
+  }
 
   const scopeLabel = group
     ? `group "${group}"`

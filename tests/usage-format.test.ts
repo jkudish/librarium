@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeUsage } from '../src/core/dispatcher.js';
 import {
   computeLineWidths,
   formatCost,
@@ -8,6 +7,7 @@ import {
   formatTokens,
   usageLabel,
 } from '../src/commands/run-format.js';
+import { normalizeUsage } from '../src/core/dispatcher.js';
 import type { ProviderReport } from '../src/types.js';
 
 describe('formatTokens / formatCost', () => {
@@ -70,9 +70,7 @@ describe('normalizeUsage', () => {
 describe('usage on provider lines and summary', () => {
   const widths = computeLineWidths(['exa'], ['ai-grounded']);
 
-  function makeReport(
-    usage?: ProviderReport['usage'],
-  ): ProviderReport {
+  function makeReport(usage?: ProviderReport['usage']): ProviderReport {
     return {
       id: 'exa',
       tier: 'ai-grounded',
@@ -87,12 +85,12 @@ describe('usage on provider lines and summary', () => {
   }
 
   it('appends a dim usage suffix when reported', () => {
-    expect(formatProviderLine(makeReport({ totalTokens: 8400 }), widths, false)).toContain(
-      '· 8.4k tok',
-    );
-    expect(formatProviderLine(makeReport({ costUsd: 0.012 }), widths, false)).toContain(
-      '· $0.012',
-    );
+    expect(
+      formatProviderLine(makeReport({ totalTokens: 8400 }), widths, false),
+    ).toContain('· 8.4k tok');
+    expect(
+      formatProviderLine(makeReport({ costUsd: 0.012 }), widths, false),
+    ).toContain('· $0.012');
     expect(formatProviderLine(makeReport(), widths, false)).not.toContain('·');
   });
 

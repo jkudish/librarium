@@ -85,33 +85,96 @@ interface RefineClient {
   apiKey: string;
 }
 
-/** Pick the refine client by config override, then by available API key. */
-export function resolveRefineClient(
+const CLIENT_DEFAULTS: Record<
+  'openai' | 'gemini' | 'perplexity',
+  { envVar: string; model: string }
+> = {
+  openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
+  gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-2.5-flash' },
+  perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'sonar' },
+};
+
+/**
+ * Resolve the ordered list of usable refine clients. An explicit
+ * config.refine.provider pins the list to that single provider (no
+ * cascade); otherwise every provider with an API key is included in
+ * openai, gemini, perplexity order. A config.refine.model override only
+ * applies to the first client; cascade targets use their own defaults.
+ */
+export function resolveRefineClients(
   config: Config,
   env: NodeJS.ProcessEnv = process.env,
-): RefineClient | null {
-  const defaults: Record<
-    'openai' | 'gemini' | 'perplexity',
-    { envVar: string; model: string }
-  > = {
-    openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
-    gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-2.5-flash' },
-    perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'sonar' },
-  };
-
+): RefineClient[] {
   const preferred = config.refine?.provider;
   const order: Array<'openai' | 'gemini' | 'perplexity'> = preferred
     ? [preferred]
     : ['openai', 'gemini', 'perplexity'];
 
+  const clients: RefineClient[] = [];
   for (const provider of order) {
-    const { envVar, model } = defaults[provider];
+    const { envVar, model } = CLIENT_DEFAULTS[provider];
     const apiKey = env[envVar];
-    if (apiKey) {
-      return { provider, model: config.refine?.model ?? model, apiKey };
-    }
+    if (!apiKey) continue;
+    clients.push({
+      provider,
+      model: clients.length === 0 ? (config.refine?.model ?? model) : model,
+      apiKey,
+    });
   }
-  return null;
+  return clients;
+}
+
+/** First usable refine client, or null. */
+export function resolveRefineClient(
+  config: Config,
+  env: NodeJS.ProcessEnv = process.env,
+): RefineClient | null {
+  return resolveRefineClients(config, env)[0] ?? null;
+}
+
+/**
+ * Build a refine error message including the API's own error detail
+ * (code/type plus message, truncated) so failures like quota exhaustion
+ * are actionable. Exported for tests.
+ */
+export function formatHttpError(
+  label: string,
+  status: number,
+  body: string,
+): string {
+  let detail = '';
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: {
+        message?: string;
+        code?: unknown;
+        type?: string;
+        status?: string;
+      };
+      message?: string;
+    };
+    const err = parsed.error;
+    const code =
+      (typeof err?.code === 'string' ? err.code : undefined) ??
+      err?.type ??
+      err?.status ??
+      '';
+    const message = String(err?.message ?? parsed.message ?? '');
+    detail = [code, message ? `(${message})` : ''].filter(Boolean).join(' ');
+  } catch {
+    detail = body;
+  }
+  detail = detail.replace(/\s+/g, ' ').trim();
+  if (detail.length > 120) detail = `${detail.slice(0, 119)}\u2026`;
+  return `${label} refine call failed: HTTP ${status}${detail ? ` ${detail}` : ''}`;
+}
+
+async function safeBody(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
 }
 
 async function callOpenAi(
@@ -131,7 +194,9 @@ async function callOpenAi(
     }),
   });
   if (!response.ok) {
-    throw new Error(`OpenAI refine call failed: HTTP ${response.status}`);
+    throw new Error(
+      formatHttpError('OpenAI', response.status, await safeBody(response)),
+    );
   }
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -153,7 +218,9 @@ async function callGemini(
     }),
   });
   if (!response.ok) {
-    throw new Error(`Gemini refine call failed: HTTP ${response.status}`);
+    throw new Error(
+      formatHttpError('Gemini', response.status, await safeBody(response)),
+    );
   }
   const data = (await response.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -177,7 +244,9 @@ async function callPerplexity(
     }),
   });
   if (!response.ok) {
-    throw new Error(`Perplexity refine call failed: HTTP ${response.status}`);
+    throw new Error(
+      formatHttpError('Perplexity', response.status, await safeBody(response)),
+    );
   }
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -185,30 +254,52 @@ async function callPerplexity(
   return data.choices?.[0]?.message?.content ?? '';
 }
 
+function callClient(client: RefineClient, prompt: string): Promise<string> {
+  return client.provider === 'openai'
+    ? callOpenAi(client, prompt)
+    : client.provider === 'gemini'
+      ? callGemini(client, prompt)
+      : callPerplexity(client, prompt);
+}
+
 /**
- * Refine a query into tier-tuned variants. Throws when no client is
- * configured or the call/parse fails; callers must treat refine as
+ * Refine a query into tier-tuned variants. When the first provider fails
+ * (quota, auth, bad response) the next available provider is tried, unless
+ * config.refine.provider pins one explicitly. Throws when no client is
+ * configured or every attempt fails; callers must treat refine as
  * best-effort and fall back to the original query.
  */
 export async function refineQuery(
   query: string,
   config: Config,
   env: NodeJS.ProcessEnv = process.env,
+  onWarning?: (message: string) => void,
 ): Promise<RefinedQueries> {
-  const client = resolveRefineClient(config, env);
-  if (!client) {
+  const clients = resolveRefineClients(config, env);
+  if (clients.length === 0) {
     throw new Error(
-      'no refine provider available (set OPENAI_API_KEY, GEMINI_API_KEY, or PERPLEXITY_API_KEY)',
+      config.refine?.provider
+        ? `refine provider "${config.refine.provider}" has no API key configured`
+        : 'no refine provider available (set OPENAI_API_KEY, GEMINI_API_KEY, or PERPLEXITY_API_KEY)',
     );
   }
   const prompt = `${REFINE_PROMPT}${query}`;
-  const text =
-    client.provider === 'openai'
-      ? await callOpenAi(client, prompt)
-      : client.provider === 'gemini'
-        ? await callGemini(client, prompt)
-        : await callPerplexity(client, prompt);
-  return parseRefineResponse(text);
+  let lastError: unknown;
+  for (let index = 0; index < clients.length; index++) {
+    const client = clients[index] as RefineClient;
+    try {
+      const text = await callClient(client, prompt);
+      return parseRefineResponse(text);
+    } catch (e) {
+      lastError = e;
+      const next = clients[index + 1];
+      if (next) {
+        const message = e instanceof Error ? e.message : String(e);
+        onWarning?.(`${message}; trying ${next.provider}`);
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export function registerRefineCommand(program: Command): void {
@@ -224,7 +315,9 @@ export function registerRefineCommand(program: Command): void {
           loadConfig(),
           loadProjectConfig(process.cwd()),
         );
-        const refined = await refineQuery(query, config);
+        const refined = await refineQuery(query, config, process.env, (w) =>
+          console.error(`refine: ${w}`),
+        );
         if (opts.json) {
           console.log(JSON.stringify(refined, null, 2));
           return;

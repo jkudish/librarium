@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `librarium completions <zsh|bash|fish>`: static shell completion scripts covering commands, flags, and builtin group names
 
 ### Changed
+- Refine failures now include the API's own error detail (code and message, truncated), and refine cascades to the next available provider (openai, then gemini, then perplexity) before falling back to the original query; an explicit `refine.provider` pin disables the cascade
+- Wizard copy: execution modes explain themselves (mixed recommended), the refine toggle gets a one-line explainer and is skipped entirely when no refine-capable API key is configured
 - `librarium run --json` now keeps stdout pure JSON: all pretty/table output is routed to stderr in that mode
 
 ### Fixed

@@ -1,8 +1,4 @@
-import type {
-  ProviderReport,
-  ProviderTier,
-  ProviderUsage,
-} from '../types.js';
+import type { ProviderReport, ProviderTier, ProviderUsage } from '../types.js';
 
 /**
  * Pure formatting helpers for the `librarium run` live results table.
@@ -74,7 +70,9 @@ export function formatCost(costUsd: number): string {
  * Short usage label for a provider line: prefers API-reported cost, falls
  * back to a token count. Returns undefined when nothing was reported.
  */
-export function usageLabel(usage: ProviderUsage | undefined): string | undefined {
+export function usageLabel(
+  usage: ProviderUsage | undefined,
+): string | undefined {
   if (!usage) return undefined;
   if (usage.costUsd !== undefined) return formatCost(usage.costUsd);
   const tokens =
@@ -123,9 +121,7 @@ export function formatProviderLine(
     ? `   ${paint(`(fallback for ${report.fallbackFor})`, ANSI.dim, color)}`
     : '';
   const usage = usageLabel(report.usage);
-  const usageSuffix = usage
-    ? `   ${paint(`· ${usage}`, ANSI.dim, color)}`
-    : '';
+  const usageSuffix = usage ? `   ${paint(`· ${usage}`, ANSI.dim, color)}` : '';
 
   switch (report.status) {
     case 'success': {

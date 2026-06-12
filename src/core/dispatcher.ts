@@ -373,10 +373,7 @@ export function normalizeUsage(
 ): ProviderUsage | undefined {
   if (result.usage) return result.usage;
   const tokens = result.tokenUsage;
-  if (
-    !tokens ||
-    (tokens.input === undefined && tokens.output === undefined)
-  ) {
+  if (!tokens || (tokens.input === undefined && tokens.output === undefined)) {
     return undefined;
   }
   const usage: ProviderUsage = {};

@@ -186,8 +186,16 @@ export async function executeRun(
       let refined: RefinedQueries | null = null;
       if (opts.refine) {
         spinner.start('Refining query...');
+        const warn = (message: string): void => {
+          const wasSpinning = spinner.isSpinning;
+          if (wasSpinning) spinner.stop();
+          process.stderr.write(
+            `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
+          );
+          if (wasSpinning) spinner.start();
+        };
         try {
-          refined = await refineQuery(query, config);
+          refined = await refineQuery(query, config, process.env, warn);
           spinner.stop();
         } catch (e) {
           spinner.stop();
