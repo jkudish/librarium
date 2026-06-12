@@ -123,4 +123,29 @@ describe('usage on provider lines and summary', () => {
     const without = formatRunSummary(base);
     expect(without.join('\n')).not.toContain('reported cost');
   });
+
+  it('adds the budget-reached line only when the breaker tripped', () => {
+    const base = {
+      succeeded: 2,
+      failed: 0,
+      pending: 0,
+      uniqueSources: 10,
+      totalCitations: 12,
+      outputDir: '/srv/out',
+      color: false,
+    };
+    const tripped = formatRunSummary({
+      ...base,
+      budgetReached: { reportedUsd: 0.8, budgetUsd: 0.5, skipped: 3 },
+    });
+    expect(tripped.join('\n')).toContain(
+      '▸ budget reached: $0.80 reported of $0.50 budget, skipped 3 providers',
+    );
+    const single = formatRunSummary({
+      ...base,
+      budgetReached: { reportedUsd: 1.2, budgetUsd: 1, skipped: 1 },
+    });
+    expect(single.join('\n')).toContain('skipped 1 provider');
+    expect(formatRunSummary(base).join('\n')).not.toContain('budget reached');
+  });
 });

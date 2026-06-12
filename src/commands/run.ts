@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import ora from 'ora';
 import {
@@ -9,6 +10,7 @@ import {
 } from '../adapters/node-registry.js';
 import { resolveProviderIds, resolveProviderTokens } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
+import { BUDGET_SKIP_REASON, createBudgetTracker } from '../core/budget.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { dispatch } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
@@ -32,6 +34,11 @@ import type {
 import { writeHtmlReport } from './html-report.js';
 import { writeJsonlReport } from './jsonl-report.js';
 import { LiveRunTable } from './live-table.js';
+import {
+  countDeepResearch,
+  deepResearchWarning,
+  shouldConfirmDeepResearch,
+} from './preflight.js';
 import { type RefinedQueries, refineQuery } from './refine.js';
 import {
   computeLineWidths,
@@ -52,11 +59,18 @@ export interface RunOptions {
   output?: string;
   parallel?: number;
   timeout?: number;
+  maxCost?: number;
   json?: boolean;
   open?: boolean;
   html?: boolean;
   jsonl?: boolean;
   refine?: boolean;
+  yes?: boolean;
+  /**
+   * Set by the wizard, whose own confirm step already counts as consent, so
+   * the deep-research pre-flight confirm does not double-prompt. Not a CLI flag.
+   */
+  skipPreflightConfirm?: boolean;
 }
 
 export interface RunOutcome {
@@ -112,6 +126,12 @@ export function registerRunCommand(program: Command): void {
     .option('-o, --output <dir>', 'Output base directory')
     .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
     .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
+    .option(
+      '--max-cost <usd>',
+      'Stop launching providers once API-reported cost crosses this budget (USD)',
+      Number.parseFloat,
+    )
+    .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
     .option('--json', 'Output run.json to stdout')
     .option(
       '--refine',
@@ -165,6 +185,8 @@ export async function executeRun(
       if (opts.parallel) cliFlags.maxParallel = opts.parallel;
       if (opts.timeout) cliFlags.timeout = opts.timeout;
       if (opts.mode) cliFlags.mode = opts.mode;
+      // Flag wins over defaults.maxCostUsd from config.
+      if (opts.maxCost !== undefined) cliFlags.maxCostUsd = opts.maxCost;
 
       const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
       const credentials = { env: process.env };
@@ -248,6 +270,41 @@ export async function executeRun(
         );
         process.exitCode = 2;
         return { exitCode: 2 };
+      }
+
+      // Deep-research pre-flight confirm (TTY only). When a run would dispatch
+      // several deep-research providers, warn that they take minutes and bill
+      // per call before committing. Non-TTY runs never prompt and are never
+      // refused (pipes/CI never hang); --yes and the wizard's own confirm skip
+      // it.
+      {
+        const tierLookup = new Map(
+          getAllProviders().map((provider) => [provider.id, provider.tier]),
+        );
+        const deepResearchIds = providerIds.filter(
+          (id) => tierLookup.get(id) === 'deep-research',
+        );
+        const isTTY = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+        if (
+          shouldConfirmDeepResearch({
+            deepResearchCount: countDeepResearch(providerIds, tierLookup),
+            isTTY,
+            yes: Boolean(opts.yes),
+            fromWizard: Boolean(opts.skipPreflightConfirm),
+          })
+        ) {
+          spinner.stop();
+          p.log.warn(deepResearchWarning(deepResearchIds));
+          const proceed = await p.confirm({
+            message: 'Proceed with this deep-research run?',
+            initialValue: false,
+          });
+          if (p.isCancel(proceed) || !proceed) {
+            process.stdout.write('Cancelled.\n');
+            process.exitCode = 130;
+            return { exitCode: 130 };
+          }
+        }
       }
 
       // Optional one-shot LLM refine: never allowed to break the run.
@@ -340,6 +397,11 @@ export async function executeRun(
         spinner.start(spinnerText());
       }
 
+      // Honest runtime spend circuit breaker. Only API-reported costs count;
+      // providers that report nothing contribute 0. Undefined budget means no
+      // limit, in which case the tracker never trips.
+      const budget = createBudgetTracker(config.defaults.maxCostUsd);
+
       const dispatchStartedAt = Date.now();
       const { reports, results, asyncTasks } = await dispatch({
         config,
@@ -348,6 +410,7 @@ export async function executeRun(
         tierQueries: refined?.tierQueries,
         mode: config.defaults.mode,
         credentials,
+        budget,
         onProgress: (event) => {
           if (live) {
             switch (event.event) {
@@ -529,6 +592,21 @@ export async function executeRun(
             }
           : undefined;
 
+      // Surface the budget circuit breaker when it tripped: count the
+      // providers it skipped and report the accumulated spend against the
+      // budget ceiling.
+      const budgetSkipped = effectiveReports.filter(
+        (r) => r.status === 'skipped' && r.error === BUDGET_SKIP_REASON,
+      ).length;
+      const budgetReached =
+        budget.limitUsd !== undefined && budgetSkipped > 0
+          ? {
+              reportedUsd: budget.spentUsd,
+              budgetUsd: budget.limitUsd,
+              skipped: budgetSkipped,
+            }
+          : undefined;
+
       for (const line of formatRunSummary({
         succeeded: successful.length,
         failed: failed.length,
@@ -539,6 +617,7 @@ export async function executeRun(
         color,
         totalDurationMs,
         reportedCost,
+        budgetReached,
       })) {
         printLine(line);
       }

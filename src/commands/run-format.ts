@@ -317,6 +317,11 @@ export interface RunSummaryInput {
   totalDurationMs?: number;
   /** API-reported cost across providers, when at least one reported it. */
   reportedCost?: { totalUsd: number; reporting: number; providers: number };
+  /**
+   * Present only when a cost budget was reached mid-run: the reported total
+   * that crossed it, the budget ceiling, and how many providers were skipped.
+   */
+  budgetReached?: { reportedUsd: number; budgetUsd: number; skipped: number };
 }
 
 /** End-of-run summary block (returned as individual lines). */
@@ -346,6 +351,16 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
   if (input.reportedCost && input.reportedCost.reporting > 0) {
     lines.push(
       `  ▸ reported cost: ${formatCost(input.reportedCost.totalUsd)} (${input.reportedCost.reporting} of ${input.reportedCost.providers} providers)`,
+    );
+  }
+  if (input.budgetReached) {
+    const { reportedUsd, budgetUsd, skipped } = input.budgetReached;
+    lines.push(
+      paint(
+        `  ▸ budget reached: ${formatCost(reportedUsd)} reported of ${formatCost(budgetUsd)} budget, skipped ${skipped} ${skipped === 1 ? 'provider' : 'providers'}`,
+        ANSI.yellow,
+        input.color,
+      ),
     );
   }
   if (input.pending > 0) {

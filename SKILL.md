@@ -73,8 +73,11 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium run <query> --group deep` | Deep research (async) |
 | `librarium run <query> --group all` | All providers |
 | `librarium answer <query>` | Fan out (default `quick`) and synthesize one grounded, cited answer to `answer.md` |
+| `librarium run <query> --max-cost 0.50` | Stop launching providers once API-reported cost crosses the budget |
+| `librarium run <query> --yes` | Skip the deep-research pre-flight confirm (3+ deep providers) |
 | `librarium status` | Check async tasks |
 | `librarium status --wait --retrieve` | Wait and fetch async results |
+| `librarium usage [--days N] [--json]` | Aggregate API-reported cost and tokens across past runs |
 | `librarium run <query> --html --open` | Run, then open an HTML report |
 | `librarium run <query> --jsonl` | Run, then write machine-readable results.jsonl |
 | `librarium browse` | Browse past runs interactively |

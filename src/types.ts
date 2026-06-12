@@ -174,6 +174,9 @@ export const DefaultsSchema = z.object({
   asyncTimeout: z.number().default(1800),
   asyncPollInterval: z.number().default(10),
   mode: z.enum(['sync', 'async', 'mixed']).default('mixed'),
+  // Optional runtime spend circuit breaker. Honest budget: only API-reported
+  // costs count toward it (see src/core/budget.ts). Unset means no limit.
+  maxCostUsd: z.number().optional(),
 });
 export type Defaults = z.infer<typeof DefaultsSchema>;
 
@@ -215,6 +218,7 @@ export const ProjectConfigSchema = z.object({
       asyncTimeout: z.number().optional(),
       asyncPollInterval: z.number().optional(),
       mode: z.enum(['sync', 'async', 'mixed']).optional(),
+      maxCostUsd: z.number().optional(),
     })
     .optional(),
   providers: z.record(ProjectProviderConfigSchema).optional(),

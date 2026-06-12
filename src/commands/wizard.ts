@@ -157,7 +157,9 @@ export async function runWizard(): Promise<void> {
 
   p.outro('starting run');
 
-  const options: RunOptions = { mode };
+  // The wizard's own confirm above already counts as consent, so suppress the
+  // deep-research pre-flight confirm in executeRun to avoid double-prompting.
+  const options: RunOptions = { mode, skipPreflightConfirm: true };
   if (providers) options.providers = providers;
   if (group) options.group = group;
   if (refine) options.refine = true;
