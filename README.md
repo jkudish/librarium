@@ -151,6 +151,7 @@ librarium run <query> [options]
 | `--json` | Output `run.json` to stdout |
 | `--refine` | Rewrite the query into tier-tuned variants with one LLM call before dispatch |
 | `--html` | Generate a self-contained `report.html` in the run directory |
+| `--jsonl` | Generate a machine-readable `results.jsonl` in the run directory |
 | `--open` | Open the output directory (or `report.html` with `--html`) when the run completes |
 
 ```bash
@@ -212,6 +213,33 @@ librarium html [run-dir] [--open]
 ```
 
 The report contains the query, run metadata, the provider results table as tabs, with each provider's rendered markdown in a panel below, and the deduped source list with provider attribution. Provider markdown is HTML-escaped, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
+
+### `jsonl`
+
+Generate a machine-readable `results.jsonl` for a run directory (default: the most recent run).
+
+```bash
+librarium jsonl [run-dir]
+```
+
+The file contains one JSON object per line (JSONL / newline-delimited JSON). Each line can be parsed independently with `JSON.parse`:
+
+- **Line 1 -- run header** (`"type":"run"`): query, slug, timestamp, mode, succeeded/failed/pending counts, unique source count, total citation count, and optional `refinedQueries` (only present when `--refine` was used).
+- **One line per provider** (`"type":"result"`): id, tier, status, durationMs, citationCount, optional usage object, optional error string, optional fallbackFor string, and `content` (the full markdown from the provider's `.md` file, or `null` when missing or pending).
+- **One line per deduped source** (`"type":"source"`): url, optional title, providers array, citationCount.
+
+Keys with undefined values are omitted. `--jsonl` and `--html` are independent and combinable. `status --retrieve` regenerates an existing `results.jsonl` automatically when one is present. The JSONL export is also available as an action in `librarium browse`.
+
+```bash
+# Run and produce both formats at once
+librarium run "postgres pooling" --html --jsonl
+
+# Regenerate JSONL for an existing run
+librarium jsonl ./agents/librarium/20250601-123456-postgres-pooling
+
+# Stream-process with jq
+librarium jsonl | xargs cat | jq 'select(.type=="result") | {id, status, citationCount}'
+```
 
 ### `refine`
 

@@ -21,6 +21,7 @@ import type {
   RunManifest,
 } from '../types.js';
 import { writeHtmlReport } from './html-report.js';
+import { writeJsonlReport } from './jsonl-report.js';
 import {
   computeLineWidths,
   dimText,
@@ -149,6 +150,14 @@ async function retrieveTask(
       print(
         `  regenerated ${hyperlink(reportPath, fileUrl(reportPath), color)}`,
       );
+    }
+
+    // If a JSONL report was already generated for this run, regenerate it so
+    // the retrieved result fills in.
+    const jsonlPath = join(dir, 'results.jsonl');
+    if (existsSync(jsonlPath)) {
+      writeJsonlReport(dir);
+      print(`  regenerated ${hyperlink(jsonlPath, fileUrl(jsonlPath), color)}`);
     }
 
     spinner.text = `Retrieved ${task.provider} -> ${outputFile}`;

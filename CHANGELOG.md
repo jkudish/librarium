@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `librarium completions <zsh|bash|fish>`: static shell completion scripts covering commands, flags, and builtin group names
 
 - `librarium html --open` opens the generated report, and the browse "export HTML report" action offers to open it in the browser
+- `librarium run --jsonl`: writes a `results.jsonl` (JSONL / newline-delimited JSON) into the run directory alongside other outputs; `--jsonl` and `--html` are independent and combinable
+- `librarium jsonl [run-dir]`: regenerates `results.jsonl` for any existing run (default: most recent); also available as an "export JSONL" action in `librarium browse`
+- `status --retrieve` regenerates an existing `results.jsonl` automatically when one is present, keeping it in sync with retrieved async deep-research results
+- JSONL format: line 1 is a run header (`type:run`) with counts and optional refinedQueries; one line per provider (`type:result`) with full markdown content embedded (null when missing or pending); one line per deduped source (`type:source`); undefined-valued keys are omitted throughout
 - Printed paths are now clickable in modern terminals via OSC 8 hyperlinks (output directory summary line, report.html paths from run --html, librarium html, browse export, and the status --retrieve regeneration notice); non-TTY and NO_COLOR output stays plain
 
 ### Changed

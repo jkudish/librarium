@@ -13,6 +13,7 @@ import {
   readRunEntry,
 } from './browse-data.js';
 import { writeHtmlReport } from './html-report.js';
+import { writeJsonlReport } from './jsonl-report.js';
 import { openPath } from './run.js';
 import {
   computeLineWidths,
@@ -90,7 +91,13 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
   );
 
   for (;;) {
-    type Choice = ProviderReport | 'summary' | 'html' | 'back' | 'quit';
+    type Choice =
+      | ProviderReport
+      | 'summary'
+      | 'html'
+      | 'jsonl'
+      | 'back'
+      | 'quit';
     const choice = await p.select<Choice>({
       message: entry.manifest.query,
       options: [
@@ -101,6 +108,7 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
         })),
         { value: 'summary' as const, label: 'open summary.md' },
         { value: 'html' as const, label: 'export HTML report' },
+        { value: 'jsonl' as const, label: 'export JSONL' },
         { value: 'back' as const, label: 'back' },
         { value: 'quit' as const, label: 'quit' },
       ],
@@ -124,6 +132,17 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
         if (!p.isCancel(open) && open) openPath(reportPath);
       } else {
         p.log.warn('Could not generate report (missing run.json).');
+      }
+      continue;
+    }
+    if (choice === 'jsonl') {
+      const jsonlPath = writeJsonlReport(entry.dir);
+      if (jsonlPath) {
+        p.log.success(
+          `Wrote ${hyperlink(jsonlPath, fileUrl(jsonlPath), isColorEnabled(process.stdout))}`,
+        );
+      } else {
+        p.log.warn('Could not generate JSONL (missing run.json).');
       }
       continue;
     }
