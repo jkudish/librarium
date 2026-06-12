@@ -252,13 +252,37 @@ export function formatFallbackNotice(
 }
 
 /**
+ * Strip C0/C1 control bytes (including ESC and BEL) and collapse internal
+ * whitespace to single spaces, then trim. Untrusted display labels and URLs
+ * must pass through this before being embedded in an OSC 8 sequence: an
+ * embedded ESC \\ or BEL would otherwise terminate the hyperlink early and let
+ * the remainder break out into raw terminal control.
+ */
+export function sanitizeForTerminal(value: string): string {
+  return (
+    value
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control bytes is the intent.
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
+
+/**
  * OSC 8 terminal hyperlink. When enabled, emits
  * ESC ] 8 ; ; url ESC backslash text ESC ] 8 ; ; ESC backslash so modern
  * terminals make the text clickable; plain text otherwise.
+ *
+ * Defense-in-depth: both the label and the URL are sanitized of control bytes
+ * so an untrusted payload can never terminate the sequence early. Trusted call
+ * sites (internally-generated file:// paths) pass clean values already, so this
+ * is a no-op for them.
  */
 export function hyperlink(text: string, url: string, enabled: boolean): string {
-  if (!enabled) return text;
-  return `\u001b]8;;${url}\u001b\\${text}\u001b]8;;\u001b\\`;
+  const safeText = sanitizeForTerminal(text);
+  if (!enabled) return safeText;
+  const safeUrl = sanitizeForTerminal(url);
+  return `\u001b]8;;${safeUrl}\u001b\\${safeText}\u001b]8;;\u001b\\`;
 }
 
 /** file:// URL for an absolute path (handles Windows paths and encoding). */

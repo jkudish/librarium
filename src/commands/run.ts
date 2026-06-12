@@ -21,6 +21,8 @@ import {
 import { generateSummary } from '../core/synthesis.js';
 import type {
   Citation,
+  Config,
+  DeduplicatedSource,
   Defaults,
   ProviderDispatchResult,
   ProviderReport,
@@ -60,6 +62,39 @@ export interface RunOptions {
 export interface RunOutcome {
   exitCode: number;
   outputDir?: string;
+}
+
+/**
+ * Context handed to a post-dispatch hook (used by `librarium answer`). Exposes
+ * the deduped results, the run directory, and an output sink so the hook can
+ * run an extra transform (e.g. LLM synthesis), print to the same stream as the
+ * run, and contribute additive fields to run.json.
+ */
+export interface PostDispatchContext {
+  query: string;
+  config: Config;
+  results: ProviderDispatchResult[];
+  reports: ProviderReport[];
+  sources: DeduplicatedSource[];
+  outputDir: string;
+  color: boolean;
+  printLine: (line: string) => void;
+}
+
+export interface PostDispatchResult {
+  /** Additive fields merged into the run manifest before it is written. */
+  manifestExtra?: Partial<RunManifest>;
+}
+
+export interface ExecuteRunHooks {
+  /**
+   * Runs after sources are deduped and provider outputs are written, before
+   * the run summary and run.json are produced. Must never throw (it is the
+   * hook's job to fail open); a throw is swallowed so the run is never lost.
+   */
+  postDispatch?: (
+    context: PostDispatchContext,
+  ) => Promise<PostDispatchResult | undefined>;
 }
 
 export function registerRunCommand(program: Command): void {
@@ -106,6 +141,7 @@ export function registerRunCommand(program: Command): void {
 export async function executeRun(
   query: string,
   opts: RunOptions,
+  hooks?: ExecuteRunHooks,
 ): Promise<RunOutcome> {
   {
     // In --json mode stdout must stay pure JSON (the run manifest), so all
@@ -385,6 +421,31 @@ export async function executeRun(
         JSON.stringify(sources, null, 2),
       );
 
+      // Post-dispatch hook (e.g. `librarium answer` grounded synthesis). It
+      // owns its own fail-open behavior; a throw here must never lose the run.
+      let manifestExtra: Partial<RunManifest> = {};
+      if (hooks?.postDispatch) {
+        try {
+          const hookResult = await hooks.postDispatch({
+            query,
+            config,
+            results,
+            reports,
+            sources,
+            outputDir,
+            color,
+            printLine,
+          });
+          if (hookResult?.manifestExtra) {
+            manifestExtra = hookResult.manifestExtra;
+          }
+        } catch (e) {
+          console.error(
+            `[librarium] warning: post-dispatch hook failed (${e instanceof Error ? e.message : String(e)})`,
+          );
+        }
+      }
+
       // Write async tasks
       if (asyncTasks.length > 0) {
         for (const task of asyncTasks) {
@@ -428,6 +489,7 @@ export async function executeRun(
         asyncTasks,
         exitCode,
         refinedQueries: refined?.tierQueries,
+        ...manifestExtra,
       };
       safeWriteFile(
         join(outputDir, 'run.json'),
