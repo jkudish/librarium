@@ -63,16 +63,18 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 ### Fixed
 - README groups table said the `all` group covers 18 providers; there are 20 builtin adapters
 
-## [0.2.0] - 2026-06-11
 
-### Added
+
+### Previously staged (never published as 0.2.0; first shipped here)
+
+#### Added
 - `librarium/core` package export for programmatic use from Workers-compatible runtimes
 - Structured in-memory dispatch results with provider text, citations/source URLs, duration, status, and errors
 - Gemini Grounded Search provider adapter: `gemini-grounded` — Gemini `gemini-2.5-flash` with the `googleSearch` tool
 - OpenRouter Online Search provider adapter: `openrouter-online` — OpenRouter `openai/gpt-4o-mini:online` with Exa-backed grounding annotations
 - Cloudflare Workers compatibility test suite using `@cloudflare/vitest-pool-workers`
 
-### Changed
+#### Changed
 - Split core orchestration from CLI filesystem output so the CLI consumes the same in-memory dispatcher API exported by `librarium/core`
 - Provider API key resolution now flows through injectable credentials while the CLI preserves `$ENV_VAR` resolution from `process.env`
 
