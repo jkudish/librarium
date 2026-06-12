@@ -6,6 +6,7 @@ import type {
   ProviderOptions,
   ProviderResult,
   ProviderTier,
+  ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
@@ -31,12 +32,18 @@ interface OpenAIOutputItem {
   status?: string;
 }
 
+interface OpenAIUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
 interface OpenAIResponseBody {
   id: string;
   status: string;
   output?: OpenAIOutputItem[];
   model?: string;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: OpenAIUsage;
   error?: { message?: string; code?: string };
 }
 
@@ -217,6 +224,7 @@ export abstract class OpenAIDeepBaseProvider extends BaseProvider {
           input: data.usage?.input_tokens,
           output: data.usage?.output_tokens,
         },
+        usage: this.extractUsage(data.usage),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -283,6 +291,16 @@ export abstract class OpenAIDeepBaseProvider extends BaseProvider {
     }
 
     return { content: contentParts.join('\n'), citations };
+  }
+
+  private extractUsage(usage?: OpenAIUsage): ProviderUsage | undefined {
+    if (!usage) return undefined;
+    return {
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      totalTokens: usage.total_tokens,
+      raw: usage,
+    };
   }
 
   private sleep(ms: number): Promise<void> {

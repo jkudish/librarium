@@ -9,7 +9,7 @@ import type {
   RunManifest,
 } from '../types.js';
 import { readRunEntry } from './browse-data.js';
-import { formatDuration } from './run-format.js';
+import { formatDuration, usageLabel } from './run-format.js';
 
 /**
  * Self-contained HTML report generator for a run directory.
@@ -115,6 +115,10 @@ function providerDetails(
   const fallbackNote = report.fallbackFor
     ? `<span class="fallback">fallback for ${escapeHtml(report.fallbackFor)}</span>`
     : '';
+  const usage = usageLabel(report.usage);
+  const usageNote = usage
+    ? `<span class="usage">${escapeHtml(usage)}</span>`
+    : '';
 
   let body: string;
   if (report.status === 'async-pending') {
@@ -142,6 +146,7 @@ function providerDetails(
 <span class="tier">${escapeHtml(report.tier)}</span>
 <span class="duration">${duration}</span>
 <span class="count">${escapeHtml(countLabel(report))}</span>
+${usageNote}
 ${fallbackNote}
 </summary>
 <div class="provider-body">${body}</div>
@@ -230,7 +235,7 @@ details.provider[open] summary { border-bottom: 1px solid rgba(10, 10, 10, 0.1);
 .glyph.fail { color: #dc2626; }
 .glyph.pending { color: #d97706; }
 .glyph.muted, .tier, .duration { color: #525252; }
-.count, .cited, .fallback { color: #525252; font-size: 0.8rem; }
+.count, .cited, .fallback, .usage { color: #525252; font-size: 0.8rem; }
 .provider-body { padding: 0.25rem 1.25rem 1rem; font-size: 0.95rem; }
 .provider-body img { max-width: 100%; }
 pre {

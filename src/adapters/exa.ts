@@ -3,6 +3,7 @@ import type {
   ProviderOptions,
   ProviderResult,
   ProviderTier,
+  ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
@@ -14,9 +15,14 @@ interface ExaResult {
   score?: number;
 }
 
+interface ExaCostDollars {
+  total?: number;
+}
+
 interface ExaResponse {
   results?: ExaResult[];
   requestId?: string;
+  costDollars?: ExaCostDollars;
   error?: string;
 }
 
@@ -91,6 +97,7 @@ export class ExaProvider extends BaseProvider {
         content,
         citations,
         durationMs,
+        usage: this.extractUsage(data.costDollars),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -130,6 +137,16 @@ export class ExaProvider extends BaseProvider {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  private extractUsage(
+    costDollars?: ExaCostDollars,
+  ): ProviderUsage | undefined {
+    if (costDollars?.total === undefined) return undefined;
+    return {
+      costUsd: costDollars.total,
+      raw: costDollars,
+    };
   }
 
   private buildContent(results: ExaResult[]): string {

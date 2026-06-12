@@ -74,6 +74,7 @@ async function retrieveTask(
           durationMs: result.durationMs,
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
+          usage: result.usage,
           citations: result.citations,
         },
         null,
@@ -107,6 +108,7 @@ async function retrieveTask(
       citationCount: cites,
       outputFile,
       metaFile,
+      usage: result.usage,
       error: result.error,
     };
     const wasSpinning = spinner.isSpinning;

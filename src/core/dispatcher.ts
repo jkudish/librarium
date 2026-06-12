@@ -9,6 +9,7 @@ import type {
   ProviderDispatchResult,
   ProviderReport,
   ProviderResult,
+  ProviderUsage,
 } from '../types.js';
 import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
@@ -352,6 +353,31 @@ export async function dispatch(
   return { reports, results, asyncTasks };
 }
 
+/**
+ * Normalize usage from a provider result. Adapters that report rich data
+ * (totals, direct cost) set result.usage themselves; otherwise the legacy
+ * tokenUsage pair is lifted into the normalized shape.
+ */
+export function normalizeUsage(
+  result: Pick<ProviderResult, 'usage' | 'tokenUsage'>,
+): ProviderUsage | undefined {
+  if (result.usage) return result.usage;
+  const tokens = result.tokenUsage;
+  if (
+    !tokens ||
+    (tokens.input === undefined && tokens.output === undefined)
+  ) {
+    return undefined;
+  }
+  const usage: ProviderUsage = {};
+  if (tokens.input !== undefined) usage.inputTokens = tokens.input;
+  if (tokens.output !== undefined) usage.outputTokens = tokens.output;
+  if (tokens.input !== undefined && tokens.output !== undefined) {
+    usage.totalTokens = tokens.input + tokens.output;
+  }
+  return usage;
+}
+
 function createDispatchResult(
   providerId: string,
   tier: Provider['tier'],
@@ -370,6 +396,7 @@ function createDispatchResult(
     durationMs: result.durationMs,
     model: result.model,
     tokenUsage: result.tokenUsage,
+    usage: normalizeUsage(result),
     error: result.error,
     fallbackFor,
   };
@@ -396,6 +423,7 @@ function createReport(
       result.status === 'success' || result.status === 'error'
         ? `${safeId}.meta.json`
         : '',
+    usage: result.usage,
     error: result.error,
     fallbackFor: result.fallbackFor,
   };

@@ -18,6 +18,17 @@ export interface ProviderOptions {
   signal?: AbortSignal;
 }
 
+// Normalized usage/cost as reported by a provider's API. Honest data only:
+// fields are set when (and only when) the API itself reported them. costUsd
+// is never estimated from a pricing table.
+export interface ProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  raw?: unknown;
+}
+
 // Normalized citation from any provider
 export interface Citation {
   url: string;
@@ -35,6 +46,7 @@ export interface ProviderResult {
   durationMs: number;
   model?: string;
   tokenUsage?: { input?: number; output?: number };
+  usage?: ProviderUsage;
   error?: string;
 }
 
@@ -49,6 +61,7 @@ export interface ProviderDispatchResult {
   durationMs: number;
   model?: string;
   tokenUsage?: { input?: number; output?: number };
+  usage?: ProviderUsage;
   error?: string;
   fallbackFor?: string;
 }
@@ -214,6 +227,7 @@ export interface ProviderReport {
   citationCount: number;
   outputFile: string;
   metaFile: string;
+  usage?: ProviderUsage;
   error?: string;
   fallbackFor?: string;
 }

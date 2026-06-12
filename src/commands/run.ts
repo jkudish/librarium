@@ -31,6 +31,7 @@ import { writeHtmlReport } from './html-report.js';
 import { LiveRunTable } from './live-table.js';
 import {
   computeLineWidths,
+  dimText,
   formatFallbackNotice,
   formatProviderLine,
   formatRunSummary,
@@ -370,6 +371,22 @@ export async function executeRun(
       const pending = effectiveReports.filter(
         (r) => r.status === 'async-pending',
       );
+      // Total API-reported cost across providers that reported one.
+      const costReports = effectiveReports.filter(
+        (r) => r.usage?.costUsd !== undefined,
+      );
+      const reportedCost =
+        costReports.length > 0
+          ? {
+              totalUsd: costReports.reduce(
+                (sum, r) => sum + (r.usage?.costUsd ?? 0),
+                0,
+              ),
+              reporting: costReports.length,
+              providers: effectiveReports.length,
+            }
+          : undefined;
+
       for (const line of formatRunSummary({
         succeeded: successful.length,
         failed: failed.length,
@@ -379,6 +396,7 @@ export async function executeRun(
         outputDir,
         color,
         totalDurationMs,
+        reportedCost,
       })) {
         printLine(line);
       }
@@ -461,6 +479,7 @@ function writeProviderOutputs(
           durationMs: result.durationMs,
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
+          usage: result.usage,
           citations: result.citations,
         },
         null,

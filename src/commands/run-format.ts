@@ -1,4 +1,8 @@
-import type { ProviderReport, ProviderTier } from '../types.js';
+import type {
+  ProviderReport,
+  ProviderTier,
+  ProviderUsage,
+} from '../types.js';
 
 /**
  * Pure formatting helpers for the `librarium run` live results table.
@@ -54,6 +58,34 @@ export function formatDuration(durationMs: number): string {
   return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
+/** Abbreviate a token count: 950 -> "950", 8400 -> "8.4k", 1200000 -> "1.2M". */
+export function formatTokens(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
+  return String(count);
+}
+
+/** Format an API-reported cost in USD, e.g. "$0.038". */
+export function formatCost(costUsd: number): string {
+  return `$${costUsd.toFixed(costUsd < 0.1 ? 3 : 2)}`;
+}
+
+/**
+ * Short usage label for a provider line: prefers API-reported cost, falls
+ * back to a token count. Returns undefined when nothing was reported.
+ */
+export function usageLabel(usage: ProviderUsage | undefined): string | undefined {
+  if (!usage) return undefined;
+  if (usage.costUsd !== undefined) return formatCost(usage.costUsd);
+  const tokens =
+    usage.totalTokens ??
+    (usage.inputTokens !== undefined || usage.outputTokens !== undefined
+      ? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+      : undefined);
+  if (tokens === undefined) return undefined;
+  return `${formatTokens(tokens)} tok`;
+}
+
 function citationLabel(report: ProviderReport): string {
   const noun = report.tier === 'raw-search' ? 'results' : 'sources';
   return `${String(report.citationCount).padStart(3)} ${noun}`;
@@ -90,11 +122,15 @@ export function formatProviderLine(
   const fallbackSuffix = report.fallbackFor
     ? `   ${paint(`(fallback for ${report.fallbackFor})`, ANSI.dim, color)}`
     : '';
+  const usage = usageLabel(report.usage);
+  const usageSuffix = usage
+    ? `   ${paint(`· ${usage}`, ANSI.dim, color)}`
+    : '';
 
   switch (report.status) {
     case 'success': {
       const glyph = paint('✓', ANSI.green, color);
-      return `  ${glyph} ${id}   ${tier}   ${duration}   ${citationLabel(report)}${fallbackSuffix}`;
+      return `  ${glyph} ${id}   ${tier}   ${duration}   ${citationLabel(report)}${usageSuffix}${fallbackSuffix}`;
     }
     case 'async-pending': {
       const glyph = paint('◷', ANSI.yellow, color);
@@ -216,6 +252,8 @@ export interface RunSummaryInput {
   home?: string;
   /** Wall-clock duration of the whole dispatch, in milliseconds. */
   totalDurationMs?: number;
+  /** API-reported cost across providers, when at least one reported it. */
+  reportedCost?: { totalUsd: number; reporting: number; providers: number };
 }
 
 /** End-of-run summary block (returned as individual lines). */
@@ -236,6 +274,11 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
     `  ▸ ${input.uniqueSources} unique sources after dedupe (${input.totalCitations} total citations)`,
   );
   lines.push(`  ▸ ${shortenHomePath(input.outputDir, input.home)}/`);
+  if (input.reportedCost && input.reportedCost.reporting > 0) {
+    lines.push(
+      `  ▸ reported cost: ${formatCost(input.reportedCost.totalUsd)} (${input.reportedCost.reporting} of ${input.reportedCost.providers} providers)`,
+    );
+  }
   if (input.pending > 0) {
     lines.push('');
     lines.push(
