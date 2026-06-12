@@ -1,6 +1,7 @@
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
+  AsyncTaskStatus,
   Citation,
   ProviderOptions,
   ProviderResult,
@@ -9,129 +10,157 @@ import type {
 } from '../types.js';
 import { BaseProvider } from './base.js';
 
-interface GeminiPart {
+/**
+ * Citation annotation attached to a TextContent block.
+ * The Interactions API embeds grounding sources as annotations on text spans
+ * (url_citation / file_citation / place_citation), each carrying a real URL.
+ */
+interface InteractionAnnotation {
+  type: string;
+  url?: string;
+  title?: string;
+  // file_citation
+  document_uri?: string;
+  file_name?: string;
+  // place_citation
+  place_id?: string;
+  name?: string;
+  start_index?: number;
+  end_index?: number;
+}
+
+interface InteractionContentBlock {
+  type: string;
   text?: string;
+  annotations?: InteractionAnnotation[];
 }
 
-interface GeminiContent {
-  parts: GeminiPart[];
-  role?: string;
+interface InteractionStep {
+  type: string;
+  content?: InteractionContentBlock[];
 }
 
-interface GeminiCandidate {
-  content: GeminiContent;
+interface InteractionUsage {
+  total_input_tokens?: number;
+  total_output_tokens?: number;
+  total_tokens?: number;
 }
 
-interface GeminiGroundingChunk {
-  web?: { uri: string; title?: string };
-}
-
-interface GeminiGroundingMetadata {
-  groundingChunks?: GeminiGroundingChunk[];
-}
-
-interface GeminiUsageMetadata {
-  promptTokenCount?: number;
-  candidatesTokenCount?: number;
-  totalTokenCount?: number;
-}
-
-interface GeminiResponse {
-  candidates?: GeminiCandidate[];
-  groundingMetadata?: GeminiGroundingMetadata;
-  usageMetadata?: GeminiUsageMetadata;
-  error?: { message?: string; code?: number };
+interface InteractionResponse {
+  id: string;
+  status: string;
+  agent?: string;
+  model?: string;
+  output_text?: string;
+  steps?: InteractionStep[];
+  usage?: InteractionUsage;
+  created?: string;
+  updated?: string;
+  error?: { code?: string; message?: string };
 }
 
 interface GeminiDeepProviderOptions {
   model?: string;
 }
 
-const DEFAULT_GEMINI_DEEP_MODEL = 'gemini-2.5-flash';
+const INTERACTIONS_URL =
+  'https://generativelanguage.googleapis.com/v1beta/interactions';
+
+/**
+ * API revision pin for the Interactions endpoint family. Sent on every request
+ * so the response shape stays stable as the preview evolves.
+ */
+const API_REVISION = '2026-05-20';
+
+/**
+ * Default Deep Research agent. The `model` config override accepts the heavier
+ * `deep-research-max-preview-04-2026` variant (documented in the README).
+ */
+const DEFAULT_GEMINI_DEEP_AGENT = 'deep-research-preview-04-2026';
+
+const STATUS_MAP: Record<string, AsyncTaskStatus> = {
+  in_progress: 'running',
+  requires_action: 'running',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+  incomplete: 'failed',
+  budget_exceeded: 'failed',
+};
 
 /**
  * Gemini Deep Research provider.
- * Uses Gemini with Google Search grounding for research.
- * Tier: deep-research (sync - wraps execute for async interface)
+ * Uses Google's real Deep Research agent via the Interactions API
+ * (POST /v1beta/interactions with background: true). A single request triggers
+ * an autonomous loop of planning, searching, reading, and reasoning that runs
+ * server-side for minutes; results are polled and retrieved by interaction id.
+ * Tier: deep-research (true async).
  */
 export class GeminiDeepProvider extends BaseProvider {
   readonly id = 'gemini-deep';
   readonly tier: ProviderTier = 'deep-research';
   readonly model: string;
 
-  private storedResults = new Map<string, ProviderResult>();
-
   constructor(options: GeminiDeepProviderOptions = {}) {
     super();
-    this.model = options.model?.trim() || DEFAULT_GEMINI_DEEP_MODEL;
+    this.model = options.model?.trim() || DEFAULT_GEMINI_DEEP_AGENT;
   }
 
+  private authHeaders(apiKey: string): Record<string, string> {
+    return {
+      'x-goog-api-key': apiKey,
+      'Api-Revision': API_REVISION,
+    };
+  }
+
+  /**
+   * Sync entry point: submit then poll inline until completion or asyncTimeout.
+   * Mirrors openai-deep so `--mode sync` works the same way.
+   */
   async execute(
     query: string,
     options: ProviderOptions,
   ): Promise<ProviderResult> {
     const start = performance.now();
-    const apiKey = this.getApiKey();
 
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`;
+      const handle = await this.submit(query, options);
 
-      const response = await this.request<GeminiResponse>(url, {
-        method: 'POST',
-        body: {
-          contents: [{ parts: [{ text: query }] }],
-          tools: [{ googleSearch: {} }],
-        },
-        timeout: options.timeout * 1000,
-        signal: options.signal,
-      });
+      const deadline = Date.now() + options.timeout * 1000;
+      let pollResult: AsyncPollResult = { status: handle.status };
 
-      const durationMs = Math.round(performance.now() - start);
+      while (
+        pollResult.status !== 'completed' &&
+        pollResult.status !== 'failed' &&
+        pollResult.status !== 'cancelled' &&
+        Date.now() < deadline
+      ) {
+        await this.sleep(5000);
+        pollResult = await this.poll(handle);
+        handle.status = pollResult.status;
 
-      if (response.status !== 200) {
+        if (options.signal?.aborted) {
+          throw new Error('Request aborted');
+        }
+      }
+
+      if (pollResult.status !== 'completed') {
+        const durationMs = Math.round(performance.now() - start);
         return {
           provider: this.id,
           tier: this.tier,
           content: '',
           citations: [],
           durationMs,
-          error: this.formatError(response.status, response.data),
+          error: pollResult.message
+            ? `Task did not complete: status=${pollResult.status} (${pollResult.message})`
+            : `Task did not complete: status=${pollResult.status}`,
         };
       }
 
-      const data = response.data;
-
-      if (data.error) {
-        return {
-          provider: this.id,
-          tier: this.tier,
-          content: '',
-          citations: [],
-          durationMs,
-          error: `Gemini error: ${data.error.message ?? data.error.code}`,
-        };
-      }
-
-      const content =
-        data.candidates?.[0]?.content?.parts
-          ?.map((p) => p.text ?? '')
-          .join('') ?? '';
-
-      const citations = this.extractCitations(data.groundingMetadata);
-
-      return {
-        provider: this.id,
-        tier: this.tier,
-        content,
-        citations,
-        durationMs,
-        model: this.model,
-        tokenUsage: {
-          input: data.usageMetadata?.promptTokenCount,
-          output: data.usageMetadata?.candidatesTokenCount,
-        },
-        usage: this.extractUsage(data.usageMetadata),
-      };
+      const result = await this.retrieve(handle);
+      result.durationMs = Math.round(performance.now() - start);
+      return result;
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
       return {
@@ -145,69 +174,169 @@ export class GeminiDeepProvider extends BaseProvider {
     }
   }
 
+  /**
+   * Submit a background interaction. Returns a real pending handle (the
+   * interaction id); the dispatcher queues it and `librarium status` polls and
+   * retrieves it. Throws on submission failure so the dispatcher falls back to
+   * sync execution (mirrors openai-deep / perplexity-sonar-deep).
+   */
   async submit(
     query: string,
-    options: ProviderOptions,
+    _options: ProviderOptions,
   ): Promise<AsyncTaskHandle> {
-    const result = await this.execute(query, options);
-    const taskId = `gemini-deep-${Date.now()}`;
-    this.storedResults.set(taskId, result);
+    const apiKey = this.getApiKey();
 
+    const response = await this.request<InteractionResponse>(INTERACTIONS_URL, {
+      method: 'POST',
+      headers: this.authHeaders(apiKey),
+      body: {
+        input: query,
+        agent: this.model,
+        // Background is MANDATORY for the deep-research agent.
+        background: true,
+        agent_config: {
+          type: 'deep-research',
+          thinking_summaries: 'auto',
+        },
+        tools: [{ type: 'google_search' }],
+      },
+      timeout: 30000,
+    });
+
+    if (response.status !== 200 && response.status !== 201) {
+      throw new Error(this.formatError(response.status, response.data));
+    }
+
+    const data = response.data;
     return {
       provider: this.id,
-      taskId,
+      taskId: data.id,
       query,
       submittedAt: Date.now(),
-      status: result.error ? 'failed' : 'completed',
-      completedAt: Date.now(),
+      status: STATUS_MAP[data.status] ?? 'pending',
     };
   }
 
-  async poll(_handle: AsyncTaskHandle): Promise<AsyncPollResult> {
-    // Gemini doesn't have a true async/background mode
-    return { status: 'completed', progress: 100 };
+  async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
+    const apiKey = this.getApiKey();
+
+    const response = await this.request<InteractionResponse>(
+      `${INTERACTIONS_URL}/${handle.taskId}`,
+      {
+        method: 'GET',
+        headers: this.authHeaders(apiKey),
+        timeout: 15000,
+      },
+    );
+
+    if (response.status !== 200) {
+      // Transport-level poll failure (429, 5xx, gateway blip): the interaction
+      // may still be running server-side. Throw so the caller retries on the
+      // next poll instead of persisting a terminal failure.
+      throw new Error(`Poll returned HTTP ${response.status}`);
+    }
+
+    const data = response.data;
+    return {
+      status: STATUS_MAP[data.status] ?? 'running',
+      message: data.error?.message ?? undefined,
+    };
   }
 
   async retrieve(handle: AsyncTaskHandle): Promise<ProviderResult> {
-    const stored = this.storedResults.get(handle.taskId);
-    if (stored) {
-      this.storedResults.delete(handle.taskId);
-      return stored;
-    }
+    const apiKey = this.getApiKey();
+    const start = performance.now();
 
-    return {
-      provider: this.id,
-      tier: this.tier,
-      content: '',
-      citations: [],
-      durationMs: 0,
-      error: `No stored result for task ${handle.taskId}`,
-    };
+    try {
+      const response = await this.request<InteractionResponse>(
+        `${INTERACTIONS_URL}/${handle.taskId}`,
+        {
+          method: 'GET',
+          headers: this.authHeaders(apiKey),
+          timeout: 30000,
+        },
+      );
+
+      if (response.status !== 200) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs: Math.round(performance.now() - start),
+          error: `Retrieve failed with HTTP ${response.status}`,
+        };
+      }
+
+      const data = response.data;
+      const status = STATUS_MAP[data.status] ?? 'running';
+
+      if (status === 'failed') {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs: this.taskDurationMs(data, start),
+          error: data.error?.message ?? `Interaction failed (${data.status})`,
+        };
+      }
+
+      if (status !== 'completed') {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs: Math.round(performance.now() - start),
+          error: `Task ${handle.taskId} is not completed yet (status: ${data.status})`,
+        };
+      }
+
+      const { content, citations } = this.extractOutput(data);
+
+      return {
+        provider: this.id,
+        tier: this.tier,
+        content,
+        citations,
+        durationMs: this.taskDurationMs(data, start),
+        model: data.agent ?? data.model ?? this.model,
+        tokenUsage: {
+          input: data.usage?.total_input_tokens,
+          output: data.usage?.total_output_tokens,
+        },
+        usage: this.extractUsage(data.usage),
+      };
+    } catch (err) {
+      return {
+        provider: this.id,
+        tier: this.tier,
+        content: '',
+        citations: [],
+        durationMs: Math.round(performance.now() - start),
+        error: this.formatCatchError(err),
+      };
+    }
   }
 
   async test(): Promise<{ ok: boolean; error?: string }> {
     try {
       const apiKey = this.getApiKey();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`;
-
-      const response = await this.request<GeminiResponse>(url, {
-        method: 'POST',
-        body: {
-          contents: [{ parts: [{ text: 'ping' }] }],
+      // Creating an interaction is a billable deep-research run, so verify the
+      // key cheaply against the models list endpoint instead (same pattern as
+      // openai-deep, whose research models also can't be pinged directly).
+      const response = await this.request(
+        'https://generativelanguage.googleapis.com/v1beta/models',
+        {
+          method: 'GET',
+          headers: { 'x-goog-api-key': apiKey },
+          timeout: 10000,
         },
-        timeout: 10000,
-      });
+      );
 
       if (response.status === 200) return { ok: true };
-      const apiError =
-        typeof response.data?.error?.message === 'string'
-          ? response.data.error.message
-          : undefined;
-      const detail = apiError ? `: ${apiError}` : '';
-      return {
-        ok: false,
-        error: `HTTP ${response.status}${detail} (model: ${this.model})`,
-      };
+      return { ok: false, error: `HTTP ${response.status}` };
     } catch (err) {
       return {
         ok: false,
@@ -216,27 +345,93 @@ export class GeminiDeepProvider extends BaseProvider {
     }
   }
 
-  private extractUsage(
-    metadata?: GeminiUsageMetadata,
-  ): ProviderUsage | undefined {
-    if (!metadata) return undefined;
+  /**
+   * Final report text plus citations. Prefer the SDK-style `output_text`
+   * convenience field; fall back to concatenating text blocks from the
+   * model_output steps. Citations come from url_citation / file_citation /
+   * place_citation annotations attached to those text blocks.
+   */
+  private extractOutput(data: InteractionResponse): {
+    content: string;
+    citations: Citation[];
+  } {
+    const citations: Citation[] = [];
+    const seen = new Set<string>();
+    const textParts: string[] = [];
+
+    for (const step of data.steps ?? []) {
+      if (step.type !== 'model_output' || !step.content) continue;
+      for (const block of step.content) {
+        if (typeof block.text === 'string' && block.text.length > 0) {
+          textParts.push(block.text);
+        }
+        for (const ann of block.annotations ?? []) {
+          const citation = this.annotationToCitation(ann);
+          if (citation && !seen.has(citation.url)) {
+            seen.add(citation.url);
+            citations.push(citation);
+          }
+        }
+      }
+    }
+
+    const content =
+      typeof data.output_text === 'string' && data.output_text.length > 0
+        ? data.output_text
+        : textParts.join('\n');
+
+    return { content, citations };
+  }
+
+  /** Map an annotation to a librarium Citation, extracting a real URL. */
+  private annotationToCitation(
+    ann: InteractionAnnotation,
+  ): Citation | undefined {
+    if (ann.type === 'url_citation' && ann.url) {
+      return { url: ann.url, title: ann.title, provider: this.id };
+    }
+    if (ann.type === 'place_citation' && ann.url) {
+      return { url: ann.url, title: ann.name ?? ann.title, provider: this.id };
+    }
+    if (ann.type === 'file_citation' && ann.document_uri) {
+      return {
+        url: ann.document_uri,
+        title: ann.file_name ?? ann.title,
+        provider: this.id,
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * Server-side task duration from ISO timestamps when present, else local
+   * elapsed. The API does not always advance `updated` to the completion time
+   * (observed equal to `created` on completed interactions), so a non-advancing
+   * pair falls back to local elapsed rather than reporting a misleading 0.
+   */
+  private taskDurationMs(
+    data: InteractionResponse,
+    localStart: number,
+  ): number {
+    const begin = data.created ? Date.parse(data.created) : Number.NaN;
+    const end = data.updated ? Date.parse(data.updated) : Number.NaN;
+    if (!Number.isNaN(begin) && !Number.isNaN(end) && end > begin) {
+      return end - begin;
+    }
+    return Math.round(performance.now() - localStart);
+  }
+
+  private extractUsage(usage?: InteractionUsage): ProviderUsage | undefined {
+    if (!usage) return undefined;
     return {
-      inputTokens: metadata.promptTokenCount,
-      outputTokens: metadata.candidatesTokenCount,
-      totalTokens: metadata.totalTokenCount,
-      raw: metadata,
+      inputTokens: usage.total_input_tokens,
+      outputTokens: usage.total_output_tokens,
+      totalTokens: usage.total_tokens,
+      raw: usage,
     };
   }
 
-  private extractCitations(metadata?: GeminiGroundingMetadata): Citation[] {
-    if (!metadata?.groundingChunks) return [];
-
-    return metadata.groundingChunks
-      .filter((chunk) => chunk.web?.uri)
-      .map((chunk) => ({
-        url: chunk.web!.uri,
-        title: chunk.web!.title,
-        provider: this.id,
-      }));
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
