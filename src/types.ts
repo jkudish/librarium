@@ -234,5 +234,7 @@ export interface ProgressEvent {
     | 'error'
     | 'async-submitted'
     | 'fallback-started';
+  // Populated on 'completed', 'error', and 'async-submitted' (the report for
+  // providerId) and on 'fallback-started' (the failed primary's error report).
   report?: ProviderReport;
 }

@@ -206,7 +206,7 @@ export async function dispatch(
             reports.push(report);
 
             if (result.error) {
-              onProgress?.({ providerId: id, event: 'error' });
+              onProgress?.({ providerId: id, event: 'error', report });
               const fallbackReport = await tryFallback(id, report);
               if (fallbackReport) {
                 reports.push(fallbackReport);
@@ -220,6 +220,7 @@ export async function dispatch(
                   onProgress?.({
                     providerId: fallbackReport.id,
                     event: 'error',
+                    report: fallbackReport,
                   });
                 }
               }
@@ -243,7 +244,7 @@ export async function dispatch(
             citations: [],
             durationMs: 0,
           });
-          reports.push({
+          const pendingReport: ProviderReport = {
             id,
             tier: provider.tier,
             status: 'async-pending',
@@ -252,8 +253,13 @@ export async function dispatch(
             citationCount: 0,
             outputFile: '',
             metaFile: '',
+          };
+          reports.push(pendingReport);
+          onProgress?.({
+            providerId: id,
+            event: 'async-submitted',
+            report: pendingReport,
           });
-          onProgress?.({ providerId: id, event: 'async-submitted' });
           return;
         } catch {
           // Fall through to sync execution
@@ -273,7 +279,7 @@ export async function dispatch(
 
         // If provider returned an error result (e.g. 401/403), attempt fallback
         if (result.error) {
-          onProgress?.({ providerId: id, event: 'error' });
+          onProgress?.({ providerId: id, event: 'error', report });
           const fallbackReport = await tryFallback(id, report);
           if (fallbackReport) {
             reports.push(fallbackReport);
@@ -287,6 +293,7 @@ export async function dispatch(
               onProgress?.({
                 providerId: fallbackReport.id,
                 event: 'error',
+                report: fallbackReport,
               });
             }
           }
@@ -317,7 +324,7 @@ export async function dispatch(
           error,
         };
         reports.push(errorReport);
-        onProgress?.({ providerId: id, event: 'error' });
+        onProgress?.({ providerId: id, event: 'error', report: errorReport });
 
         // Attempt fallback
         const fallbackReport = await tryFallback(id, errorReport);
@@ -330,7 +337,11 @@ export async function dispatch(
               report: fallbackReport,
             });
           } else {
-            onProgress?.({ providerId: fallbackReport.id, event: 'error' });
+            onProgress?.({
+              providerId: fallbackReport.id,
+              event: 'error',
+              report: fallbackReport,
+            });
           }
         }
       }

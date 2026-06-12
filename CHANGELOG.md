@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Live per-provider results table for `librarium run`: each provider prints an aligned status line as it finishes (✓ success / ✗ error with reason / ◷ async-submitted), with tier, duration, and source/result counts, plus an indented `↳ falling back to …` notice when a fallback fires
+- Resolve-in-place rendering in interactive terminals: all provider rows print at fan-out with an animated spinner glyph and ticking elapsed time, then update in place as results arrive (non-TTY and NO_COLOR environments keep append-on-completion output)
+- End-of-run summary with `▸` unique-source and output-directory lines, and a `librarium status --wait` hint when async tasks are pending
+- Wall-clock total on the tallies line (`4 succeeded, 0 failed, 0 async pending in 13.3s`) and a yellow highlight on provider durations of 10s or more
+- `librarium run --open`: opens the output directory when the run completes (`open` on macOS, `xdg-open` on Linux)
+- `librarium status --wait` / `--retrieve` now render retrieved results with the same table line format as `run`, with the output file and word count as a dim suffix
+- Dispatcher progress events now include the provider report on `error` and `async-submitted` events (additive — `ProgressEvent.report` was already optional)
+
+### Changed
+- `librarium run --json` now keeps stdout pure JSON: all pretty/table output is routed to stderr in that mode
+
 ## [0.2.0] - 2026-06-11
 
 ### Added

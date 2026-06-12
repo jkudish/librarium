@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
@@ -23,8 +24,17 @@ import type {
   Defaults,
   ProviderDispatchResult,
   ProviderReport,
+  ProviderTier,
   RunManifest,
 } from '../types.js';
+import { LiveRunTable } from './live-table.js';
+import {
+  computeLineWidths,
+  formatFallbackNotice,
+  formatProviderLine,
+  formatRunSummary,
+  isColorEnabled,
+} from './run-format.js';
 
 export function registerRunCommand(program: Command): void {
   program
@@ -42,8 +52,20 @@ export function registerRunCommand(program: Command): void {
     .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
     .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
     .option('--json', 'Output run.json to stdout')
+    .option('--open', 'Open the output directory when the run completes')
     .action(async (query: string, opts) => {
+      // In --json mode stdout must stay pure JSON (the run manifest), so all
+      // pretty output is routed to stderr. The ora spinner already writes to
+      // stderr and no-ops in non-TTY environments.
+      const prettyStream = opts.json ? process.stderr : process.stdout;
+      const color = isColorEnabled(prettyStream);
       const spinner = ora('Initializing providers...').start();
+      const printLine = (line: string): void => {
+        const wasSpinning = spinner.isSpinning;
+        if (wasSpinning) spinner.stop();
+        prettyStream.write(`${line}\n`);
+        if (wasSpinning) spinner.start();
+      };
 
       try {
         const globalConfig = loadConfig();
@@ -125,8 +147,48 @@ export function registerRunCommand(program: Command): void {
         // Write prompt
         safeWriteFile(join(outputDir, 'prompt.md'), buildPrompt(query));
 
-        spinner.text = `Dispatching to ${providerIds.length} providers...`;
+        // Column widths cover both primaries and any configured fallbacks so
+        // lines stay aligned if a fallback fires mid-run.
+        const tierById = new Map<string, ProviderTier>(
+          getAllProviders().map((provider) => [provider.id, provider.tier]),
+        );
+        const fallbackIds = providerIds
+          .map((id) => config.providers[id]?.fallback)
+          .filter((id): id is string => Boolean(id && tierById.has(id)));
+        const tableIds = [...new Set([...providerIds, ...fallbackIds])];
+        const widths = computeLineWidths(
+          tableIds,
+          tableIds.map((id) => tierById.get(id) ?? 'raw-search'),
+        );
 
+        // Live (resolve-in-place) rendering needs a real TTY for the cursor
+        // math; NO_COLOR and non-TTY environments keep append-on-completion.
+        const liveMode = color && Boolean(prettyStream.isTTY);
+        const live = liveMode
+          ? new LiveRunTable(prettyStream, widths, color)
+          : null;
+
+        const running = new Set<string>();
+        const spinnerText = (): string => {
+          if (running.size === 0) return 'Waiting for providers...';
+          const names = [...running].join(', ');
+          return `running: ${names.length > 60 ? `${names.slice(0, 59)}…` : names}`;
+        };
+
+        spinner.stop();
+        printLine('');
+        printLine(`  fanning out to ${providerIds.length} providers`);
+        printLine('');
+        if (live) {
+          for (const id of providerIds) {
+            live.addProvider(id, tierById.get(id) ?? 'raw-search');
+          }
+          live.start();
+        } else {
+          spinner.start(spinnerText());
+        }
+
+        const dispatchStartedAt = Date.now();
         const { reports, results, asyncTasks } = await dispatch({
           config,
           providerIds,
@@ -134,15 +196,63 @@ export function registerRunCommand(program: Command): void {
           mode: config.defaults.mode,
           credentials,
           onProgress: (event) => {
-            if (event.event === 'started') {
-              spinner.text = `Running: ${event.providerId}...`;
-            } else if (event.event === 'completed') {
-              spinner.text = `Completed: ${event.providerId}`;
-            } else if (event.event === 'fallback-started') {
-              spinner.text = `Falling back: ${event.report?.id} → ${event.providerId}...`;
+            if (live) {
+              switch (event.event) {
+                case 'started':
+                  live.markStarted(event.providerId);
+                  break;
+                case 'fallback-started':
+                  live.addFallback(
+                    event.report?.id ?? event.providerId,
+                    event.providerId,
+                    tierById.get(event.providerId) ?? 'raw-search',
+                  );
+                  break;
+                case 'completed':
+                case 'error':
+                case 'async-submitted':
+                  if (event.report) live.resolve(event.report);
+                  break;
+              }
+              return;
             }
+            switch (event.event) {
+              case 'started':
+                running.add(event.providerId);
+                break;
+              case 'fallback-started':
+                printLine(formatFallbackNotice(event.providerId, color));
+                running.add(event.providerId);
+                break;
+              case 'completed':
+              case 'error':
+              case 'async-submitted':
+                running.delete(event.providerId);
+                if (event.report) {
+                  printLine(formatProviderLine(event.report, widths, color));
+                }
+                break;
+            }
+            spinner.text = spinnerText();
           },
         });
+        const totalDurationMs = Date.now() - dispatchStartedAt;
+
+        spinner.stop();
+
+        if (live) {
+          // Rows that never emitted events (e.g. skipped providers) resolve
+          // from the final reports before the block is finalized.
+          live.resolveRemaining(reports);
+          live.stop();
+        } else {
+          // Skipped providers never emit progress events — show them too.
+          for (const report of reports) {
+            if (report.status === 'skipped') {
+              printLine(formatProviderLine(report, widths, color));
+            }
+          }
+        }
 
         writeProviderOutputs(outputDir, reports, results);
 
@@ -221,8 +331,6 @@ export function registerRunCommand(program: Command): void {
         });
         safeWriteFile(join(outputDir, 'summary.md'), summary);
 
-        spinner.succeed(`Research complete: ${outputDir}`);
-
         // Print summary (exclude recovered primaries so they don't show as failures)
         const successful = effectiveReports.filter(
           (r) => r.status === 'success',
@@ -231,15 +339,25 @@ export function registerRunCommand(program: Command): void {
         const pending = effectiveReports.filter(
           (r) => r.status === 'async-pending',
         );
-        console.log(
-          `  ${successful.length} succeeded, ${failed.length} failed, ${pending.length} async pending`,
-        );
-        console.log(
-          `  ${sources.length} unique sources from ${allCitations.length} total citations`,
-        );
+        for (const line of formatRunSummary({
+          succeeded: successful.length,
+          failed: failed.length,
+          pending: pending.length,
+          uniqueSources: sources.length,
+          totalCitations: allCitations.length,
+          outputDir,
+          color,
+          totalDurationMs,
+        })) {
+          printLine(line);
+        }
 
         if (opts.json) {
           console.log(JSON.stringify(manifest, null, 2));
+        }
+
+        if (opts.open && exitCode !== 2) {
+          openPath(outputDir);
         }
 
         process.exitCode = exitCode;
@@ -248,6 +366,27 @@ export function registerRunCommand(program: Command): void {
         process.exitCode = 2;
       }
     });
+}
+
+/** Open a file or directory with the platform opener. Failures are silent. */
+function openPath(target: string): void {
+  const command =
+    process.platform === 'darwin'
+      ? 'open'
+      : process.platform === 'linux'
+        ? 'xdg-open'
+        : null;
+  if (!command) return;
+  try {
+    const child = spawn(command, [target], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Best-effort only.
+  }
 }
 
 function writeProviderOutputs(
