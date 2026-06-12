@@ -8,6 +8,7 @@ import {
 } from './harness.js';
 
 const SHOW_CURSOR = '[?25h';
+const HIDE_CURSOR = '[?25l';
 
 const describeMaybe = ptyAvailable() ? describe : describe.skip;
 
@@ -48,7 +49,11 @@ describeMaybe(
       // (live-table writes SHOW_CURSOR on stop), and the run does not end in a
       // hidden-cursor state.
       expect(out).toContain(SHOW_CURSOR);
-      expect(out.trimEnd().endsWith(SHOW_CURSOR)).toBe(true);
+      // Robust invariant: the last cursor state change must be a show, not a
+      // hide (exact trailing bytes depend on exit-hook ordering).
+      expect(out.lastIndexOf(SHOW_CURSOR)).toBeGreaterThan(
+        out.lastIndexOf(HIDE_CURSOR),
+      );
 
       expect(code).toBe(0);
     });

@@ -9,6 +9,7 @@ import {
 } from './harness.js';
 
 const SHOW_CURSOR = '[?25h';
+const HIDE_CURSOR = '[?25l';
 
 const describeMaybe = ptyAvailable() ? describe : describe.skip;
 
@@ -43,7 +44,9 @@ describeMaybe(
       // The SIGINT cursor-restore path (live-table.restoreCursorOnSigint) ran:
       // the cursor is shown and the terminal does not end hidden.
       expect(out).toContain(SHOW_CURSOR);
-      expect(out.trimEnd().endsWith(SHOW_CURSOR)).toBe(true);
+      expect(out.lastIndexOf(SHOW_CURSOR)).toBeGreaterThan(
+        out.lastIndexOf(HIDE_CURSOR),
+      );
 
       // Interrupted runs exit non-zero (the SIGINT handler exits 130).
       expect(code).not.toBe(0);

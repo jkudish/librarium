@@ -67,6 +67,11 @@ describeMaybe(
       session.write(KEY.SPACE);
       await delay(120);
 
+      // Scrolling must actually move the viewport: a non-top position label
+      // (percentage or "bot") must appear. The transcript keeps scrollback,
+      // so the initial "top" line legitimately remains present.
+      expect(session.plain()).toMatch(/mock-grounded\s+(\d+%|bot) \d+\//);
+
       // q returns from the pager to the run view (alt-screen exits).
       session.write(KEY.q);
       await delay(300);
@@ -89,8 +94,8 @@ describeMaybe(
       expect(onCount).toBeGreaterThanOrEqual(1);
       expect(onCount).toBe(offCount);
 
-      // Clean exit via the browse "done" outro.
-      expect(session.plain()).toContain('done');
+      // Clean exit via the clack outro line (anchored, not a bare substring).
+      expect(session.plain()).toMatch(/\bdone\b/);
       expect(code).toBe(0);
     });
   },
