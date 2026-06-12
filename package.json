@@ -33,6 +33,7 @@
   "dependencies": {
     "@clack/prompts": "^1.5.1",
     "@inquirer/prompts": "^7.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^13.0.0",
     "marked": "^18.0.5",
     "ora": "^8.0.0",
