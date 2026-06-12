@@ -47,6 +47,7 @@ describe('LiveRunTable', () => {
     table.markStarted('exa'); // triggers first render (2 rows, no cursor-up)
     const first = stream.chunks.at(-1) as string;
     expect(first.startsWith(CLEAR_LINE)).toBe(true);
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI clear-line escapes
     expect(first.match(/\u001b\[2K/g)).toHaveLength(2);
     expect(first).toContain('exa');
     expect(first).toContain('queued'); // brave-search not started yet
@@ -121,6 +122,7 @@ describe('LiveRunTable', () => {
       }),
     );
     const render = stream.chunks.at(-1) as string;
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
     const visible = render.replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, '');
     for (const line of visible.split('\n')) {
       expect(line.length).toBeLessThanOrEqual(29);

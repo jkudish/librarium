@@ -194,10 +194,10 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
     );
 
     if (response.status !== 200) {
-      return {
-        status: 'failed',
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      // Transport-level poll failure (429, 5xx, gateway blip): the task may
+      // still be running server-side. Throw so the caller retries on the next
+      // poll instead of persisting a terminal failure.
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
 
     const data = response.data;

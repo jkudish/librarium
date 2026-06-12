@@ -47,7 +47,16 @@ describe('usageLabel', () => {
 describe('normalizeUsage', () => {
   it('passes through adapter-provided usage untouched', () => {
     const usage = { costUsd: 0.01, totalTokens: 5 };
-    expect(normalizeUsage({ usage })).toBe(usage);
+    expect(normalizeUsage({ usage })).toStrictEqual(usage);
+  });
+
+  it('strips keys an adapter set to undefined', () => {
+    expect(
+      normalizeUsage({
+        usage: { costUsd: 0.01, totalTokens: undefined },
+        tokenUsage: undefined,
+      }),
+    ).toStrictEqual({ costUsd: 0.01 });
   });
 
   it('lifts legacy tokenUsage into the normalized shape', () => {

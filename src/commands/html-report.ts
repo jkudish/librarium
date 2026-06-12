@@ -37,8 +37,21 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Only allow link schemes that cannot execute code when the report is opened
+ * from file:// (provider output and citation URLs are untrusted).
+ */
+export function safeUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed;
+  if (/^[#/]/.test(trimmed)) return trimmed;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed; // relative path
+  return null; // javascript:, data:, vbscript:, file:, etc.
+}
+
+/**
  * Markdown renderer that never passes raw HTML through (provider output is
- * untrusted) and adds rel="noopener" to external links.
+ * untrusted), rejects unsafe link schemes, and adds rel="noopener" to
+ * external links.
  */
 const markdown = new Marked({
   renderer: {
@@ -53,7 +66,11 @@ const markdown = new Marked({
       const title = token.title ? ` title="${escapeHtml(token.title)}"` : '';
       // biome-ignore lint/suspicious/noExplicitAny: marked renderer this-binding
       const body = (this as any).parser.parseInline(token.tokens);
-      return `<a href="${escapeHtml(token.href)}"${title} rel="noopener" target="_blank">${body}</a>`;
+      const href = safeUrl(token.href);
+      if (href === null) {
+        return `<span${title}>${body}</span>`;
+      }
+      return `<a href="${escapeHtml(href)}"${title} rel="noopener" target="_blank">${body}</a>`;
     },
   },
 });
@@ -181,7 +198,11 @@ function sourcesSection(sources: DeduplicatedSource[]): string {
       const cited = source.providers.length
         ? `<span class="cited">${escapeHtml(source.providers.join(', '))}</span>`
         : '';
-      return `<li><a href="${escapeHtml(source.url)}" rel="noopener" target="_blank">${escapeHtml(label)}</a> ${cited}</li>`;
+      const href = safeUrl(source.url);
+      if (href === null) {
+        return `<li><span>${escapeHtml(label)}</span> ${cited}</li>`;
+      }
+      return `<li><a href="${escapeHtml(href)}" rel="noopener" target="_blank">${escapeHtml(label)}</a> ${cited}</li>`;
     })
     .join('\n');
   return `<ol class="sources">\n${items}\n</ol>`;

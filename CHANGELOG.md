@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wall-clock total on the tallies line (`4 succeeded, 0 failed, 0 async pending in 13.3s`) and a yellow highlight on provider durations of 10s or more
 - `librarium run --open`: opens the output directory when the run completes (`open` on macOS, `xdg-open` on Linux)
 - `librarium status --wait` / `--retrieve` now render retrieved results with the same table line format as `run`, with the output file and word count as a dim suffix
-- Dispatcher progress events now include the provider report on `error` and `async-submitted` events (additive — `ProgressEvent.report` was already optional)
+- Dispatcher progress events now include the provider report on `error` and `async-submitted` events (additive; `ProgressEvent.report` was already optional)
 - Interactive wizard: bare `librarium` in a terminal prompts for query, providers (enabled set, a group with tier-breakdown hints, or hand-picked), and mode, confirms, then runs the standard flow with the live table and offers to browse the results (non-TTY bare invocations keep printing help)
 - `librarium browse`: results browser over past run manifests; pick a recent run (date, query, tallies), see providers in the run table format, expand a provider for an inline preview of its output, open the full file in `$PAGER` (fallback `less -R`) or the run's summary.md
 - New CLI-only dependency `@clack/prompts` powers the wizard and browser; `librarium/core` remains dependency-clean

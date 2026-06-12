@@ -7,6 +7,7 @@ import {
   escapeHtml,
   generateHtmlReport,
   renderMarkdown,
+  safeUrl,
   writeHtmlReport,
 } from '../src/commands/html-report.js';
 import type {
@@ -80,6 +81,57 @@ describe('renderMarkdown', () => {
     expect(html).toContain('rel="noopener"');
     expect(html).toContain('href="https://example.com"');
     expect(html).toContain('>docs</a>');
+  });
+
+  it('renders javascript:/data: links as inert text', () => {
+    const html = renderMarkdown(
+      '[click](javascript:alert(1)) then [page](data:text/html,x) then [vb](vbscript:msgbox(1))',
+    );
+    expect(html).not.toContain('href="javascript:');
+    expect(html).not.toContain('href="data:');
+    expect(html).not.toContain('href="vbscript:');
+    expect(html).toContain('<span>click</span>');
+  });
+});
+
+describe('safeUrl', () => {
+  it('allows http, https, mailto, anchors, and relative paths', () => {
+    expect(safeUrl('https://example.com/a?b=c')).toBe(
+      'https://example.com/a?b=c',
+    );
+    expect(safeUrl('http://example.com')).toBe('http://example.com');
+    expect(safeUrl('mailto:hi@example.com')).toBe('mailto:hi@example.com');
+    expect(safeUrl('#section')).toBe('#section');
+    expect(safeUrl('/docs/page')).toBe('/docs/page');
+    expect(safeUrl('docs/page.md')).toBe('docs/page.md');
+  });
+
+  it('rejects script-capable schemes regardless of case or padding', () => {
+    expect(safeUrl('javascript:alert(1)')).toBeNull();
+    expect(safeUrl(' JAVASCRIPT:alert(1)')).toBeNull();
+    expect(safeUrl('data:text/html,<script>alert(1)</script>')).toBeNull();
+    expect(safeUrl('vbscript:msgbox(1)')).toBeNull();
+    expect(safeUrl('file:///etc/passwd')).toBeNull();
+  });
+
+  it('keeps unsafe citation URLs out of the sources tab', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: [
+        {
+          url: 'javascript:alert(1)',
+          normalizedUrl: 'javascript:alert(1)',
+          title: 'Evil',
+          providers: ['exa'],
+          citationCount: 1,
+        },
+        ...SOURCES,
+      ],
+    });
+    expect(html).not.toContain('href="javascript:');
+    expect(html).toContain('<span>Evil</span>');
+    expect(html).toContain('href="https://example.com/pgbouncer"');
   });
 });
 

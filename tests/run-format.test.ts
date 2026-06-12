@@ -315,6 +315,23 @@ describe('truncateAnsi', () => {
   it('handles zero width', () => {
     expect(truncateAnsi('hello', 0)).toBe('');
   });
+
+  it('does not count or split OSC 8 hyperlink sequences', () => {
+    const line = `]8;;file:///tmp/run\\report]8;;\\ done`;
+    // Visible text is "report done" (11 chars); the OSC payloads are free.
+    expect(truncateAnsi(line, 11)).toBe(line);
+    // Cutting inside the visible text must keep both OSC sequences intact.
+    const cut = truncateAnsi(line, 6);
+    expect(cut).toContain(']8;;file:///tmp/run\\');
+    expect(cut).toContain('report');
+    expect(cut).toContain(']8;;\\');
+    expect(cut).not.toContain('done');
+  });
+
+  it('consumes BEL-terminated OSC sequences', () => {
+    const line = ']0;titlehello';
+    expect(truncateAnsi(line, 5)).toBe(']0;titlehello');
+  });
 });
 
 describe('dimText', () => {

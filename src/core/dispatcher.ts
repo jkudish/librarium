@@ -371,7 +371,7 @@ export async function dispatch(
 export function normalizeUsage(
   result: Pick<ProviderResult, 'usage' | 'tokenUsage'>,
 ): ProviderUsage | undefined {
-  if (result.usage) return result.usage;
+  if (result.usage) return stripUndefinedUsage(result.usage);
   const tokens = result.tokenUsage;
   if (!tokens || (tokens.input === undefined && tokens.output === undefined)) {
     return undefined;
@@ -383,6 +383,20 @@ export function normalizeUsage(
     usage.totalTokens = tokens.input + tokens.output;
   }
   return usage;
+}
+
+/**
+ * Drop keys an adapter set to undefined (e.g. a missing total_tokens field)
+ * so serialized usage in run.json and .meta.json stays clean.
+ */
+function stripUndefinedUsage(usage: ProviderUsage): ProviderUsage {
+  const clean: ProviderUsage = {};
+  for (const [key, value] of Object.entries(usage)) {
+    if (value !== undefined) {
+      (clean as Record<string, unknown>)[key] = value;
+    }
+  }
+  return clean;
 }
 
 function createDispatchResult(
