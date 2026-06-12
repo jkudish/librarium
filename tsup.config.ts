@@ -31,4 +31,10 @@ export default defineConfig([
     platform: 'neutral',
     clean: false,
   },
+  {
+    ...shared,
+    entry: { node: 'src/node-entry.ts' },
+    platform: 'node',
+    clean: false,
+  },
 ]);
