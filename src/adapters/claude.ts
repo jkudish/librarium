@@ -19,6 +19,7 @@ interface AnthropicUsage {
 interface AnthropicResponse {
   model?: string;
   content?: AnthropicTextBlock[];
+  stop_reason?: string;
   usage?: AnthropicUsage;
   error?: {
     type?: string;
@@ -96,6 +97,23 @@ export class ClaudeProvider extends BaseProvider {
           .filter(Boolean)
           .join('\n')
           .trim() ?? '';
+
+      if (!content) {
+        // A 200 with no usable text is not a success: surface the model's
+        // stop_reason (e.g. max_tokens, refusal) so it can fail over rather
+        // than inflate the success count with an empty answer.
+        const reason = data.stop_reason
+          ? `stop_reason: ${data.stop_reason}`
+          : 'no content blocks returned';
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: `Claude returned an empty response (${reason})`,
+        };
+      }
 
       return {
         provider: this.id,

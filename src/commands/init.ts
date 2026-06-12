@@ -1,6 +1,10 @@
 import type { Command } from 'commander';
 import { initializeProviders } from '../adapters/node-registry.js';
-import { PROVIDER_DISPLAY_NAMES, PROVIDER_ENV_VARS } from '../constants.js';
+import {
+  computeInitProviderChoices,
+  PROVIDER_DISPLAY_NAMES,
+  PROVIDER_ENV_VARS,
+} from '../constants.js';
 import { loadConfig, saveConfig } from '../core/config.js';
 
 export function registerInitCommand(program: Command): void {
@@ -22,17 +26,28 @@ export function registerInitCommand(program: Command): void {
           console.log('\nAuto-discovering provider API keys...\n');
           let enabledCount = 0;
 
-          for (const [id, envVar] of Object.entries(PROVIDER_ENV_VARS)) {
+          for (const choice of computeInitProviderChoices(process.env)) {
+            const { id, envVar, keyPresent, isLlm, enableByDefault } = choice;
             const displayName = PROVIDER_DISPLAY_NAMES[id] || id;
-            const keyPresent = !!process.env[envVar];
 
-            if (keyPresent) {
+            if (enableByDefault) {
               existingConfig.providers[id] = {
                 apiKey: `$${envVar}`,
                 enabled: true,
               };
               console.log(`  [+] ${displayName} — ${envVar} found, enabled`);
               enabledCount++;
+            } else if (keyPresent && isLlm) {
+              // llm-tier providers are ungrounded and opt-in: never enabled by
+              // --auto even when their (shared) API key is present. Leave any
+              // existing config untouched.
+              if (!existingConfig.providers[id]) {
+                console.log(
+                  `  [ ] ${displayName} — ${envVar} found, but ungrounded (opt-in; enable with \`-p ${id}\` or \`--group llm\`)`,
+                );
+              } else {
+                console.log(`  [~] ${displayName}: using existing config`);
+              }
             } else {
               // Don't override existing config for providers without env vars
               if (!existingConfig.providers[id]) {
@@ -62,14 +77,17 @@ export function registerInitCommand(program: Command): void {
           checked: boolean;
         }> = [];
 
-        for (const [id, envVar] of Object.entries(PROVIDER_ENV_VARS)) {
+        for (const choice of computeInitProviderChoices(process.env)) {
+          const { id, keyPresent, isLlm, enableByDefault } = choice;
           const displayName = PROVIDER_DISPLAY_NAMES[id] || id;
-          const keyPresent = !!process.env[envVar];
           const status = keyPresent ? ' (API key found)' : ' (API key missing)';
+          // llm-tier providers are listed but left unchecked, with an
+          // "ungrounded" hint, so the user must opt in explicitly.
+          const hint = isLlm ? ' [ungrounded]' : '';
           providerChoices.push({
-            name: `${displayName}${status}`,
+            name: `${displayName}${status}${hint}`,
             value: id,
-            checked: keyPresent,
+            checked: enableByDefault,
           });
         }
 

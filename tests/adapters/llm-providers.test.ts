@@ -197,8 +197,12 @@ describe('llm providers (ungrounded)', () => {
     });
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain(
-      'models/gemini-2.5-flash:generateContent?key=gemini-key',
+    expect(url).toContain('models/gemini-2.5-flash:generateContent');
+    // The API key travels in the x-goog-api-key header, never the URL.
+    expect(url).not.toContain('key=');
+    expect(url).not.toContain('gemini-key');
+    expect((options.headers as Record<string, string>)['x-goog-api-key']).toBe(
+      'gemini-key',
     );
     // No googleSearch tool -- this is the ungrounded path.
     expect(JSON.parse(options.body as string)).toEqual({
@@ -295,5 +299,188 @@ describe('llm providers (ungrounded)', () => {
     const result = await provider.execute('hi', { timeout: 10 });
 
     expect(result.error).toContain('Network error');
+  });
+
+  // --- Empty / blocked 200 responses are errors, not successes ---
+
+  it('treats an empty Claude response as an error with the stop_reason', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'claude-haiku-4-5',
+        content: [],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 5, output_tokens: 0 },
+      }),
+    );
+
+    const provider = new ClaudeProvider({
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.content).toBe('');
+    expect(result.error).toContain('empty response');
+    expect(result.error).toContain('stop_reason: max_tokens');
+  });
+
+  it('treats a Claude response with no content field as an error', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { model: 'claude-haiku-4-5' }));
+
+    const provider = new ClaudeProvider({
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.error).toContain('empty response');
+    expect(result.error).toContain('no content blocks returned');
+  });
+
+  it('treats an empty OpenAI response as an error with the finish_reason', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'gpt-5-mini',
+        choices: [{ message: { content: '' }, finish_reason: 'length' }],
+      }),
+    );
+
+    const provider = new OpenAIChatProvider({
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.content).toBe('');
+    expect(result.error).toContain('empty response');
+    expect(result.error).toContain('finish_reason: length');
+  });
+
+  it('surfaces an OpenAI refusal instead of an empty success', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'gpt-5-mini',
+        choices: [
+          {
+            message: { content: '', refusal: 'I cannot help with that.' },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+    );
+
+    const provider = new OpenAIChatProvider({
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.error).toContain('refusal: I cannot help with that.');
+  });
+
+  it('treats an OpenAI response with no choices as an error', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { model: 'gpt-5-mini' }));
+
+    const provider = new OpenAIChatProvider({
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.error).toContain('no choices returned');
+  });
+
+  it('treats a Gemini safety block as an error with the block reason', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        promptFeedback: {
+          blockReason: 'SAFETY',
+          blockReasonMessage: 'Blocked by safety settings.',
+        },
+      }),
+    );
+
+    const provider = new GeminiChatProvider({
+      credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.content).toBe('');
+    expect(result.error).toContain('empty response');
+    expect(result.error).toContain('blocked: SAFETY');
+    expect(result.error).toContain('Blocked by safety settings.');
+  });
+
+  it('treats an empty Gemini candidate as an error with the finishReason', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        candidates: [
+          {
+            content: { parts: [] },
+            finishReason: 'RECITATION',
+            finishMessage: 'Response stopped for recitation.',
+          },
+        ],
+      }),
+    );
+
+    const provider = new GeminiChatProvider({
+      credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.error).toContain('finishReason: RECITATION');
+    expect(result.error).toContain('Response stopped for recitation.');
+  });
+
+  it('treats a Gemini response with no candidates as an error', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(jsonResponse(200, {}));
+
+    const provider = new GeminiChatProvider({
+      credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.error).toContain('no candidates returned');
+  });
+
+  it('treats an empty OpenRouter response as an error with the finish_reason', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'openai/gpt-4o-mini',
+        choices: [
+          { message: { content: '' }, finish_reason: 'content_filter' },
+        ],
+      }),
+    );
+
+    const provider = new OpenRouterChatProvider({
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.content).toBe('');
+    expect(result.error).toContain('empty response');
+    expect(result.error).toContain('finish_reason: content_filter');
+  });
+
+  it('surfaces an OpenRouter refusal instead of an empty success', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'openai/gpt-4o-mini',
+        choices: [
+          {
+            message: { content: '', refusal: 'Refused by policy.' },
+            finish_reason: 'stop',
+          },
+        ],
+      }),
+    );
+
+    const provider = new OpenRouterChatProvider({
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+    });
+    const result = await provider.execute('hi', { timeout: 10 });
+
+    expect(result.error).toContain('refusal: Refused by policy.');
   });
 });

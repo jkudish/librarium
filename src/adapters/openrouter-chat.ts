@@ -8,10 +8,12 @@ import { BaseProvider, type BaseProviderOptions } from './base.js';
 
 interface OpenRouterChatMessage {
   content?: string;
+  refusal?: string | null;
 }
 
 interface OpenRouterChatChoice {
   message?: OpenRouterChatMessage;
+  finish_reason?: string;
 }
 
 interface OpenRouterChatUsage {
@@ -95,7 +97,30 @@ export class OpenRouterChatProvider extends BaseProvider {
         };
       }
 
-      const content = data.choices?.[0]?.message?.content?.trim() ?? '';
+      const choice = data.choices?.[0];
+      const content = choice?.message?.content?.trim() ?? '';
+
+      if (!content) {
+        // A 200 with no usable text is not a success: surface a refusal or the
+        // finish_reason (e.g. content_filter, length) so it can fail over
+        // rather than inflate the success count with an empty answer.
+        const refusal = choice?.message?.refusal?.trim();
+        const reason = refusal
+          ? `refusal: ${refusal}`
+          : choice?.finish_reason
+            ? `finish_reason: ${choice.finish_reason}`
+            : data.choices && data.choices.length > 0
+              ? 'empty content'
+              : 'no choices returned';
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: `OpenRouter returned an empty response (${reason})`,
+        };
+      }
 
       return {
         provider: this.id,

@@ -14,6 +14,13 @@ interface GeminiChatCandidate {
   content?: {
     parts?: GeminiChatPart[];
   };
+  finishReason?: string;
+  finishMessage?: string;
+}
+
+interface GeminiChatPromptFeedback {
+  blockReason?: string;
+  blockReasonMessage?: string;
 }
 
 interface GeminiChatUsageMetadata {
@@ -24,6 +31,7 @@ interface GeminiChatUsageMetadata {
 
 interface GeminiChatResponse {
   candidates?: GeminiChatCandidate[];
+  promptFeedback?: GeminiChatPromptFeedback;
   usageMetadata?: GeminiChatUsageMetadata;
   modelVersion?: string;
   error?: {
@@ -63,9 +71,14 @@ export class GeminiChatProvider extends BaseProvider {
 
     try {
       const response = await this.request<GeminiChatResponse>(
-        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
         {
           method: 'POST',
+          // Pass the API key via header (not a URL query param) so it never
+          // lands in request logs; matches the gemini-deep adapter pattern.
+          headers: {
+            'x-goog-api-key': apiKey,
+          },
           body: {
             contents: [{ parts: [{ text: query }] }],
           },
@@ -99,12 +112,44 @@ export class GeminiChatProvider extends BaseProvider {
         };
       }
 
+      const candidate = data.candidates?.[0];
       const content =
-        data.candidates?.[0]?.content?.parts
+        candidate?.content?.parts
           ?.map((part) => part.text ?? '')
           .filter(Boolean)
           .join('\n')
           .trim() ?? '';
+
+      if (!content) {
+        // A 200 with no usable text is not a success: surface a prompt-level
+        // safety block or the candidate finishReason (e.g. SAFETY, RECITATION,
+        // MAX_TOKENS) so it can fail over rather than inflate the success
+        // count with an empty answer.
+        const block = data.promptFeedback?.blockReason;
+        const blockMessage = data.promptFeedback?.blockReasonMessage;
+        const finishReason = candidate?.finishReason;
+        const finishMessage = candidate?.finishMessage;
+        let reason: string;
+        if (block) {
+          reason = `blocked: ${block}${blockMessage ? ` (${blockMessage})` : ''}`;
+        } else if (finishReason) {
+          reason = `finishReason: ${finishReason}${
+            finishMessage ? ` (${finishMessage})` : ''
+          }`;
+        } else if (!data.candidates || data.candidates.length === 0) {
+          reason = 'no candidates returned';
+        } else {
+          reason = 'empty content';
+        }
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: `Gemini returned an empty response (${reason})`,
+        };
+      }
 
       return {
         provider: this.id,

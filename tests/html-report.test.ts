@@ -305,6 +305,50 @@ describe('generateHtmlReport', () => {
     );
   });
 
+  it('labels successful llm-tier rows "ungrounded" instead of "0 sources"', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        providers: [
+          makeReport({
+            id: 'claude',
+            tier: 'llm',
+            citationCount: 0,
+            outputFile: 'claude.md',
+            metaFile: 'claude.meta.json',
+          }),
+          makeReport(),
+        ],
+      }),
+      providerContents: {},
+      sources: SOURCES,
+    });
+    expect(html).toContain('ungrounded');
+    expect(html).not.toContain('0 sources');
+    // Other tiers keep their counts.
+    expect(html).toContain('25 sources');
+  });
+
+  it('keeps error/skipped labels for llm-tier rows', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        providers: [
+          makeReport({
+            id: 'claude',
+            tier: 'llm',
+            status: 'error',
+            error: 'HTTP 401',
+            citationCount: 0,
+            outputFile: '',
+          }),
+        ],
+      }),
+      providerContents: {},
+      sources: [],
+    });
+    expect(html).toContain('error');
+    expect(html).not.toContain('ungrounded');
+  });
+
   it('marks fallback providers in the summary row', () => {
     const html = generateHtmlReport({
       manifest: makeManifest({

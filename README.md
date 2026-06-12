@@ -140,6 +140,13 @@ Providers are categorized into four tiers based on their capabilities, latency, 
 
 The `llm` tier is deliberately kept apart from the grounded tiers. Grounded providers earn their place in the source tallies by citing the web; ungrounded LLMs do not, so librarium never silently folds them into a grounded run. `report.tier === 'llm'` rows render a dim `ungrounded` in place of the source count, and the dedupe pipeline, `sources.json`, and report source totals are completely unaffected by their presence. Use the built-in `llm` group (`--group llm`) to run all four at once.
 
+**Opt-in, never auto-enabled.** Several llm-tier providers share an API key with their grounded counterparts (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; Claude uses `ANTHROPIC_API_KEY`). To keep a plain `librarium run` — which dispatches every *enabled* provider — from silently calling an ungrounded model, `init` treats the llm tier specially:
+
+- `librarium init --auto` **does not** enable llm-tier providers, even when their key is present. It prints them as found-but-ungrounded with a hint to opt in.
+- Interactive `librarium init` **lists** the llm-tier providers but leaves them **unchecked** (with an `[ungrounded]` marker), so you must tick them deliberately.
+
+As a result they stay out of the default run unless you explicitly enable them in config. Reach for them on demand via `-p claude,openai-chat,...`, a custom group, or `--group llm` regardless of your init choices.
+
 ## Commands
 
 ### `run`
