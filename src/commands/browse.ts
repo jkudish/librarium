@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import * as p from '@clack/prompts';
@@ -8,12 +7,13 @@ import type { ProviderReport } from '../types.js';
 import {
   describeRun,
   discoverRuns,
-  extractPreview,
   type RunEntry,
   readRunEntry,
 } from './browse-data.js';
 import { writeHtmlReport } from './html-report.js';
 import { writeJsonlReport } from './jsonl-report.js';
+import { renderMarkdownAnsi } from './markdown-ansi.js';
+import { runPager } from './pager.js';
 import { openPath } from './run.js';
 import {
   computeLineWidths,
@@ -116,7 +116,12 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
     if (p.isCancel(choice) || choice === 'quit') return 'quit';
     if (choice === 'back') return 'back';
     if (choice === 'summary') {
-      openInPager(join(entry.dir, 'summary.md'));
+      const summaryPath = join(entry.dir, 'summary.md');
+      if (!existsSync(summaryPath)) {
+        p.log.warn(`File not found: ${summaryPath}`);
+        continue;
+      }
+      await viewMarkdownInPager(summaryPath, 'summary.md');
       continue;
     }
     if (choice === 'html') {
@@ -151,7 +156,7 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
   }
 }
 
-/** Provider view: inline preview plus actions. */
+/** Provider view: fullscreen pager over the ANSI-rendered markdown. */
 async function providerView(
   entry: RunEntry,
   report: ProviderReport,
@@ -169,36 +174,27 @@ async function providerView(
     return 'back';
   }
 
-  const content = readFileSync(filePath, 'utf-8');
-  p.note(extractPreview(content).join('\n'), report.id);
-
-  for (;;) {
-    const action = await p.select<'pager' | 'back' | 'quit'>({
-      message: report.outputFile,
-      options: [
-        { value: 'pager', label: 'open full file in pager' },
-        { value: 'back', label: 'back' },
-        { value: 'quit', label: 'quit' },
-      ],
-    });
-    if (p.isCancel(action) || action === 'quit') return 'quit';
-    if (action === 'back') return 'back';
-    openInPager(filePath);
-  }
+  await viewMarkdownInPager(filePath, report.id);
+  return 'back';
 }
 
-/** Open a file in $PAGER (fallback `less -R`), blocking until it exits. */
-function openInPager(filePath: string): void {
-  if (!existsSync(filePath)) {
-    p.log.warn(`File not found: ${filePath}`);
-    return;
-  }
-  const pagerEnv = process.env.PAGER?.trim();
-  const parts =
-    pagerEnv && pagerEnv.length > 0 ? pagerEnv.split(/\s+/) : ['less', '-R'];
-  const [command, ...args] = parts as [string, ...string[]];
-  const result = spawnSync(command, [...args, filePath], { stdio: 'inherit' });
-  if (result.error) {
-    p.log.warn(`Could not open pager (${command}): ${result.error.message}`);
-  }
+/** Content wider than this is wrapped to a readable column anyway. */
+const MAX_READING_WIDTH = 100;
+
+/** Open a markdown file in the fullscreen pager (o opens the raw file in $PAGER). */
+async function viewMarkdownInPager(
+  filePath: string,
+  title: string,
+): Promise<void> {
+  const content = readFileSync(filePath, 'utf-8');
+  const color = isColorEnabled(process.stdout);
+  await runPager({
+    title,
+    filePath,
+    render: (width) =>
+      renderMarkdownAnsi(content, {
+        color,
+        width: Math.min(Math.max(20, width), MAX_READING_WIDTH),
+      }).split('\n'),
+  });
 }
