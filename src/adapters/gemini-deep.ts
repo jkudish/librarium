@@ -128,6 +128,7 @@ export class GeminiDeepProvider extends BaseProvider {
 
       const deadline = Date.now() + options.timeout * 1000;
       let pollResult: AsyncPollResult = { status: handle.status };
+      let lastPollError: string | undefined;
 
       while (
         pollResult.status !== 'completed' &&
@@ -136,8 +137,17 @@ export class GeminiDeepProvider extends BaseProvider {
         Date.now() < deadline
       ) {
         await this.sleep(5000);
-        pollResult = await this.poll(handle);
-        handle.status = pollResult.status;
+        try {
+          pollResult = await this.poll(handle);
+          handle.status = pollResult.status;
+          lastPollError = undefined;
+        } catch (pollErr) {
+          // Retryable poll failure: the interaction may still be running.
+          // Keep polling until the deadline instead of abandoning a paid
+          // background task over a transport blip.
+          lastPollError =
+            pollErr instanceof Error ? pollErr.message : String(pollErr);
+        }
 
         if (options.signal?.aborted) {
           throw new Error('Request aborted');
@@ -146,14 +156,15 @@ export class GeminiDeepProvider extends BaseProvider {
 
       if (pollResult.status !== 'completed') {
         const durationMs = Math.round(performance.now() - start);
+        const detail = pollResult.message ?? lastPollError;
         return {
           provider: this.id,
           tier: this.tier,
           content: '',
           citations: [],
           durationMs,
-          error: pollResult.message
-            ? `Task did not complete: status=${pollResult.status} (${pollResult.message})`
+          error: detail
+            ? `Task did not complete: status=${pollResult.status} (${detail})`
             : `Task did not complete: status=${pollResult.status}`,
         };
       }
@@ -230,10 +241,22 @@ export class GeminiDeepProvider extends BaseProvider {
     );
 
     if (response.status !== 200) {
-      // Transport-level poll failure (429, 5xx, gateway blip): the interaction
-      // may still be running server-side. Throw so the caller retries on the
-      // next poll instead of persisting a terminal failure.
-      throw new Error(`Poll returned HTTP ${response.status}`);
+      // Retryable transport failures (timeouts, rate limits, 5xx, gateway
+      // blips): the interaction may still be running server-side. Throw so
+      // the caller retries on the next poll.
+      if (
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500
+      ) {
+        throw new Error(`Poll returned HTTP ${response.status}`);
+      }
+      // Non-retryable client errors (400/401/403/404...): retrying forever
+      // cannot help; surface a terminal failure with the status.
+      return {
+        status: 'failed',
+        message: `Poll returned HTTP ${response.status}`,
+      };
     }
 
     const data = response.data;

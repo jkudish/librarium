@@ -155,6 +155,16 @@ describe('GeminiDeepProvider Interactions API', () => {
     );
   });
 
+  it('returns a terminal failure for non-retryable client errors', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(401, { error: 'bad key' }));
+
+    const result = await makeProvider().poll(makeHandle());
+    expect(result.status).toBe('failed');
+    expect(result.message).toContain('401');
+  });
+
   it('retrieves a completed interaction with output_text, annotation citations, and usage', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {

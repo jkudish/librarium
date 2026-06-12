@@ -71,7 +71,10 @@ export async function dispatch(
       const result = await fallbackProvider.execute(
         queryForTier(fallbackProvider.tier),
         {
-          timeout: config.defaults.timeout,
+          timeout:
+            fallbackProvider.tier === 'deep-research'
+              ? config.defaults.asyncTimeout
+              : config.defaults.timeout,
         },
       );
       const structured = createDispatchResult(
@@ -352,7 +355,12 @@ export async function dispatch(
       // Sync execution
       try {
         const result = await provider.execute(queryForTier(provider.tier), {
-          timeout: config.defaults.timeout,
+          // Deep-research providers poll inline in sync mode and can run for
+          // minutes: give them the async deadline, not the per-request one.
+          timeout:
+            provider.tier === 'deep-research'
+              ? config.defaults.asyncTimeout
+              : config.defaults.timeout,
         });
         const structured = createDispatchResult(id, provider.tier, result);
         results.push(structured);
