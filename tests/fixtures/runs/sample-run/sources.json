@@ -1,0 +1,37 @@
+[
+  {
+    "url": "https://example.test/mock-grounded/0",
+    "normalizedUrl": "example.test/mock-grounded/0",
+    "title": "mock-grounded source 0",
+    "providers": ["mock-grounded"],
+    "citationCount": 1
+  },
+  {
+    "url": "https://example.test/mock-grounded/1",
+    "normalizedUrl": "example.test/mock-grounded/1",
+    "title": "mock-grounded source 1",
+    "providers": ["mock-grounded"],
+    "citationCount": 1
+  },
+  {
+    "url": "https://example.test/mock-grounded/2",
+    "normalizedUrl": "example.test/mock-grounded/2",
+    "title": "mock-grounded source 2",
+    "providers": ["mock-grounded"],
+    "citationCount": 1
+  },
+  {
+    "url": "https://example.test/mock-search/0",
+    "normalizedUrl": "example.test/mock-search/0",
+    "title": "mock-search source 0",
+    "providers": ["mock-search"],
+    "citationCount": 1
+  },
+  {
+    "url": "https://example.test/mock-search/1",
+    "normalizedUrl": "example.test/mock-search/1",
+    "title": "mock-search source 1",
+    "providers": ["mock-search"],
+    "citationCount": 1
+  }
+]

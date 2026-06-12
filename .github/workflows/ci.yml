@@ -101,3 +101,40 @@ jobs:
       - name: Integration tests
         if: matrix.run-integration
         run: npm run test:integration
+
+  pty:
+    # Interactive PTY smoke tests (live table, wizard, browse/pager, Ctrl+C).
+    # Runs the real terminal flows against the built CLI on POSIX runners only;
+    # the suite self-skips on Windows. Single Node version (22) keeps the matrix
+    # small — these exercise terminal behaviour, not Node version compatibility.
+    runs-on: ${{ matrix.os }}
+    needs: [autoformat]
+    if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: PTY smoke tests
+        # `test:pty` builds the CLI first, then runs the PTY suite.
+        # NOTE: if these prove flaky on CI runners (PTY timing under load),
+        # set `continue-on-error: true` here so a flake never blocks merges
+        # while still surfacing in the checks list. Kept required for now —
+        # the suite was flake-free across local runs.
+        run: npm run test:pty

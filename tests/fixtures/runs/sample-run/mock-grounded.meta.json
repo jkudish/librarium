@@ -1,0 +1,36 @@
+{
+  "provider": "mock-grounded",
+  "tier": "ai-grounded",
+  "model": "mock-model-1",
+  "durationMs": 0,
+  "citationCount": 3,
+  "tokenUsage": {
+    "input": 100,
+    "output": 200
+  },
+  "usage": {
+    "inputTokens": 100,
+    "outputTokens": 200,
+    "totalTokens": 300
+  },
+  "citations": [
+    {
+      "url": "https://example.test/mock-grounded/0",
+      "title": "mock-grounded source 0",
+      "snippet": "Synthetic snippet 0 from mock-grounded.",
+      "provider": "mock-grounded"
+    },
+    {
+      "url": "https://example.test/mock-grounded/1",
+      "title": "mock-grounded source 1",
+      "snippet": "Synthetic snippet 1 from mock-grounded.",
+      "provider": "mock-grounded"
+    },
+    {
+      "url": "https://example.test/mock-grounded/2",
+      "title": "mock-grounded source 2",
+      "snippet": "Synthetic snippet 2 from mock-grounded.",
+      "provider": "mock-grounded"
+    }
+  ]
+}
