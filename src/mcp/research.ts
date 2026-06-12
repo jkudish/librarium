@@ -13,8 +13,8 @@ import { safeWriteFile } from '../core/fs-utils.js';
 import { deduplicateSources } from '../core/normalizer.js';
 import {
   buildPrompt,
-  createRunDir,
   type CreateRunDirDeps,
+  createRunDir,
   generateSlug,
 } from '../core/prompt-builder.js';
 import { generateSummary } from '../core/synthesis.js';
