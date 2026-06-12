@@ -37,8 +37,21 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Only allow link schemes that cannot execute code when the report is opened
+ * from file:// (provider output and citation URLs are untrusted).
+ */
+export function safeUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed;
+  if (/^[#/]/.test(trimmed)) return trimmed;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed; // relative path
+  return null; // javascript:, data:, vbscript:, file:, etc.
+}
+
+/**
  * Markdown renderer that never passes raw HTML through (provider output is
- * untrusted) and adds rel="noopener" to external links.
+ * untrusted), rejects unsafe link schemes, and adds rel="noopener" to
+ * external links.
  */
 const markdown = new Marked({
   renderer: {
@@ -53,7 +66,11 @@ const markdown = new Marked({
       const title = token.title ? ` title="${escapeHtml(token.title)}"` : '';
       // biome-ignore lint/suspicious/noExplicitAny: marked renderer this-binding
       const body = (this as any).parser.parseInline(token.tokens);
-      return `<a href="${escapeHtml(token.href)}"${title} rel="noopener" target="_blank">${body}</a>`;
+      const href = safeUrl(token.href);
+      if (href === null) {
+        return `<span${title}>${body}</span>`;
+      }
+      return `<a href="${escapeHtml(href)}"${title} rel="noopener" target="_blank">${body}</a>`;
     },
   },
 });
@@ -103,54 +120,72 @@ function talliesLine(manifest: RunManifest): string {
   return `${ok} succeeded, ${failed} failed, ${pending} async pending`;
 }
 
-function providerDetails(
+function flatError(error: string | undefined): string {
+  return (error ?? 'unknown error').replace(/\s+/g, ' ').trim();
+}
+
+function compactError(error: string | undefined, maxLength = 90): string {
+  const flat = flatError(error);
+  return flat.length > maxLength
+    ? `${flat.slice(0, maxLength - 1)}\u2026`
+    : flat;
+}
+
+/** One single-line tab row in the provider table (also the tab trigger). */
+function providerRow(
   report: ProviderReport,
-  content: string | undefined,
+  index: number,
+  selected: boolean,
 ): string {
   const { glyph, cls } = glyphFor(report);
   const duration =
     report.status === 'async-pending' || report.status === 'skipped'
       ? ''
       : formatDuration(report.durationMs);
-  const fallbackNote = report.fallbackFor
-    ? `<span class="fallback">fallback for ${escapeHtml(report.fallbackFor)}</span>`
-    : '';
   const usage = usageLabel(report.usage);
-  const usageNote = usage
-    ? `<span class="usage">${escapeHtml(usage)}</span>`
-    : '';
 
-  let body: string;
-  if (report.status === 'async-pending') {
-    body =
-      '<p class="pending-note">Result not retrieved yet. Run <code>librarium status --wait</code> to poll and retrieve, then regenerate this report with <code>librarium html</code>.</p>';
-  } else if (report.status === 'skipped') {
-    body = `<p class="pending-note">Provider skipped: ${escapeHtml(report.error ?? 'not enabled')}.</p>`;
-  } else if (report.status === 'error' && !content) {
-    body = `<p class="error-note">${escapeHtml(report.error ?? 'unknown error')}</p>`;
-  } else if (content !== undefined) {
-    const errorBanner =
-      report.status === 'error'
-        ? `<p class="error-note">${escapeHtml(report.error ?? 'unknown error')}</p>`
-        : '';
-    body = `${errorBanner}${renderMarkdown(content)}`;
+  let detail: string;
+  if (report.status === 'error') {
+    detail = `<span class="detail error-text" title="${escapeHtml(flatError(report.error))}">${escapeHtml(compactError(report.error))}</span>`;
   } else {
-    body =
-      '<p class="pending-note">No output file found for this provider.</p>';
+    const fallback = report.fallbackFor
+      ? ` &middot; fallback for ${escapeHtml(report.fallbackFor)}`
+      : '';
+    detail = `<span class="detail">${escapeHtml(countLabel(report))}${fallback}</span>`;
   }
 
-  return `<details class="provider">
-<summary>
+  return `<button class="row" role="tab" id="tab-${index}" aria-controls="panel-${index}" aria-selected="${selected}" tabindex="${selected ? 0 : -1}">
 <span class="glyph ${cls}">${glyph}</span>
 <span class="pid">${escapeHtml(report.id)}</span>
 <span class="tier">${escapeHtml(report.tier)}</span>
 <span class="duration">${duration}</span>
-<span class="count">${escapeHtml(countLabel(report))}</span>
-${usageNote}
-${fallbackNote}
-</summary>
-<div class="provider-body">${body}</div>
-</details>`;
+${detail}
+<span class="usage">${usage ? escapeHtml(usage) : ''}</span>
+</button>`;
+}
+
+/** Panel body for a provider tab. */
+function providerPanelBody(
+  report: ProviderReport,
+  content: string | undefined,
+): string {
+  if (report.status === 'async-pending') {
+    return '<p class="pending-note">Result not retrieved yet. Run <code>librarium status --wait</code> to poll and retrieve, then regenerate this report with <code>librarium html</code>.</p>';
+  }
+  if (report.status === 'skipped') {
+    return `<p class="pending-note">Provider skipped: ${escapeHtml(report.error ?? 'not enabled')}.</p>`;
+  }
+  if (report.status === 'error' && !content) {
+    return `<p class="error-note">${escapeHtml(report.error ?? 'unknown error')}</p>`;
+  }
+  if (content !== undefined) {
+    const errorBanner =
+      report.status === 'error'
+        ? `<p class="error-note">${escapeHtml(report.error ?? 'unknown error')}</p>`
+        : '';
+    return `${errorBanner}${renderMarkdown(content)}`;
+  }
+  return '<p class="pending-note">No output file found for this provider.</p>';
 }
 
 function sourcesSection(sources: DeduplicatedSource[]): string {
@@ -163,7 +198,11 @@ function sourcesSection(sources: DeduplicatedSource[]): string {
       const cited = source.providers.length
         ? `<span class="cited">${escapeHtml(source.providers.join(', '))}</span>`
         : '';
-      return `<li><a href="${escapeHtml(source.url)}" rel="noopener" target="_blank">${escapeHtml(label)}</a> ${cited}</li>`;
+      const href = safeUrl(source.url);
+      if (href === null) {
+        return `<li><span>${escapeHtml(label)}</span> ${cited}</li>`;
+      }
+      return `<li><a href="${escapeHtml(href)}" rel="noopener" target="_blank">${escapeHtml(label)}</a> ${cited}</li>`;
     })
     .join('\n');
   return `<ol class="sources">\n${items}\n</ol>`;
@@ -180,7 +219,7 @@ body {
   font-size: 16px;
   line-height: 1.65;
 }
-code, pre, .mono, .pid, .tier, .duration, .count, .wordmark, .eyebrow, .meta, .cited {
+code, pre, .mono, .pid, .tier, .duration, .detail, .wordmark, .eyebrow, .meta, .cited, .usage {
   font-family: 'IBM Plex Mono', ui-monospace, monospace;
 }
 header {
@@ -192,7 +231,7 @@ header {
 }
 .wordmark { font-weight: 600; letter-spacing: -0.02em; }
 header .meta { color: #525252; font-size: 0.8rem; }
-main { max-width: 72ch; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+main { max-width: 940px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
 h1 {
   font-size: 1.7rem;
   font-weight: 600;
@@ -213,31 +252,45 @@ section { margin-top: 3rem; }
 .meta { color: #525252; font-size: 0.85rem; }
 a { color: #b45309; text-decoration: none; }
 a:hover { text-decoration: underline; }
-details.provider {
+.tabs {
   border: 1px solid rgba(10, 10, 10, 0.1);
   border-radius: 10px;
-  margin: 0.5rem 0;
   overflow: hidden;
 }
-details.provider summary {
+.tabs .row {
   display: grid;
-  grid-template-columns: 1.25rem minmax(11rem, max-content) 8.5rem 4rem 1fr;
+  grid-template-columns: 1.25rem minmax(11rem, max-content) 8.5rem 4.5rem minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: baseline;
-  cursor: pointer;
-  padding: 0.7rem 1rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 1rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(10, 10, 10, 0.08);
+  font: inherit;
   font-size: 0.85rem;
-  list-style: none;
+  color: #525252;
+  cursor: pointer;
 }
-details.provider summary::-webkit-details-marker { display: none; }
-details.provider[open] summary { border-bottom: 1px solid rgba(10, 10, 10, 0.1); }
+.tabs .row:last-child { border-bottom: 0; }
+.tabs .row[aria-selected="true"] { background: rgba(10, 10, 10, 0.04); color: #0a0a0a; }
+.tabs .row > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .glyph.ok { color: #16a34a; }
 .glyph.fail { color: #dc2626; }
 .glyph.pending { color: #d97706; }
 .glyph.muted, .tier, .duration { color: #525252; }
-.count, .cited, .fallback, .usage { color: #525252; font-size: 0.8rem; }
-.provider-body { padding: 0.25rem 1.25rem 1rem; font-size: 0.95rem; }
-.provider-body img { max-width: 100%; }
+.detail, .cited, .usage { color: #525252; font-size: 0.8rem; }
+.detail.error-text { color: #dc2626; }
+.usage { justify-self: end; }
+.panel {
+  border: 1px solid rgba(10, 10, 10, 0.1);
+  border-radius: 10px;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1.5rem 1.25rem;
+  font-size: 0.95rem;
+}
+.panel img { max-width: 100%; }
 pre {
   background: #0a0a0a;
   color: #fafafa;
@@ -273,17 +326,66 @@ footer {
 }
 `;
 
+/** Tiny vanilla tab controller (click + arrow keys, roving tabindex). */
+const SCRIPT = `(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function activate(tab, focus) {
+    for (var i = 0; i < tabs.length; i++) {
+      var t = tabs[i];
+      var selected = t === tab;
+      t.setAttribute('aria-selected', selected ? 'true' : 'false');
+      t.tabIndex = selected ? 0 : -1;
+      var panel = document.getElementById(t.getAttribute('aria-controls'));
+      if (panel) panel.hidden = !selected;
+    }
+    if (focus) tab.focus();
+  }
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener('click', function () { activate(tab, false); });
+    tab.addEventListener('keydown', function (event) {
+      var delta = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1
+        : event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 0;
+      if (delta === 0) return;
+      event.preventDefault();
+      activate(tabs[(index + delta + tabs.length) % tabs.length], true);
+    });
+  });
+})();`;
+
 /** Pure generator: manifest plus file contents in, full HTML document out. */
 export function generateHtmlReport(input: HtmlReportInput): string {
   const { manifest, providerContents, sources } = input;
-  const providerBlocks = manifest.providers
-    .map((report) =>
-      providerDetails(
+  const reports = manifest.providers;
+
+  // Default active tab: first successful provider, else the first row.
+  const firstSuccess = reports.findIndex((r) => r.status === 'success');
+  const activeIndex = firstSuccess === -1 ? 0 : firstSuccess;
+
+  const rows = reports
+    .map((report, index) => providerRow(report, index, index === activeIndex))
+    .join('\n');
+  const sourcesRow = `<button class="row" role="tab" id="tab-sources" aria-controls="panel-sources" aria-selected="false" tabindex="-1">
+<span class="glyph muted">&#9656;</span>
+<span class="pid">sources</span>
+<span class="tier">all providers</span>
+<span class="duration"></span>
+<span class="detail">${sources.length} unique</span>
+<span class="usage"></span>
+</button>`;
+
+  const panels = reports
+    .map((report, index) => {
+      const hidden = index === activeIndex ? '' : ' hidden';
+      const body = providerPanelBody(
         report,
         report.outputFile ? providerContents[report.outputFile] : undefined,
-      ),
-    )
+      );
+      return `<div class="panel" role="tabpanel" id="panel-${index}" aria-labelledby="tab-${index}"${hidden}>${body}</div>`;
+    })
     .join('\n');
+  const sourcesPanel = `<div class="panel" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden>
+${sourcesSection(sources)}
+</div>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -304,18 +406,20 @@ export function generateHtmlReport(input: HtmlReportInput): string {
 <main>
 <p class="eyebrow">query</p>
 <h1>${escapeHtml(manifest.query)}</h1>
-<p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(manifest))}</p>
+<p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(manifest))} &middot; ${sources.length} unique sources after dedupe (${manifest.sources.total} total citations)</p>
 <section>
 <p class="eyebrow">providers</p>
-${providerBlocks}
-</section>
-<section>
-<p class="eyebrow">sources</p>
-<p class="meta">${sources.length} unique sources after dedupe (${manifest.sources.total} total citations)</p>
-${sourcesSection(sources)}
+<div class="tabs" role="tablist" aria-label="Provider results">
+${rows}
+${sourcesRow}
+</div>
+${panels}
+${sourcesPanel}
 </section>
 </main>
 <footer>generated by librarium</footer>
+<script>${SCRIPT}</script>
+<noscript><style>.panel[hidden] { display: block; }</style></noscript>
 </body>
 </html>
 `;

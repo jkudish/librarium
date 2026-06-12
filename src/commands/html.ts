@@ -4,6 +4,7 @@ import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { discoverRuns } from './browse-data.js';
 import { writeHtmlReport } from './html-report.js';
 import { openPath } from './run.js';
+import { fileUrl, hyperlink, isColorEnabled } from './run-format.js';
 
 export function registerHtmlCommand(program: Command): void {
   program
@@ -33,7 +34,13 @@ export function registerHtmlCommand(program: Command): void {
         process.exitCode = 2;
         return;
       }
-      console.log(reportPath);
+      console.log(
+        hyperlink(
+          reportPath,
+          fileUrl(reportPath),
+          isColorEnabled(process.stdout),
+        ),
+      );
       if (opts.open) openPath(reportPath);
     });
 }

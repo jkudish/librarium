@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import type { ProviderReport, ProviderTier, ProviderUsage } from '../types.js';
 
 /**
@@ -192,12 +193,34 @@ export function truncateAnsi(line: string, maxWidth: number): string {
   while (i < line.length) {
     const char = line[i];
     if (char === '\u001b') {
-      // Copy the full escape sequence (ESC [ ... final byte) without counting.
+      // Copy the full escape sequence without counting it as visible width.
       let j = i + 1;
       if (line[j] === '[') {
+        // CSI: ESC [ ... final alphabetic byte.
         j++;
         while (j < line.length && !/[a-zA-Z]/.test(line[j] as string)) j++;
         j++; // include the final byte
+      } else if (
+        line[j] === ']' ||
+        line[j] === 'P' ||
+        line[j] === 'X' ||
+        line[j] === '^' ||
+        line[j] === '_'
+      ) {
+        // OSC/DCS/SOS/PM/APC: runs until ST (ESC \\) or BEL (\u0007). OSC 8
+        // hyperlinks land here; splitting mid-sequence corrupts the line.
+        j++;
+        while (j < line.length) {
+          if (line[j] === '\u0007') {
+            j++;
+            break;
+          }
+          if (line[j] === '\u001b' && line[j + 1] === '\\') {
+            j += 2;
+            break;
+          }
+          j++;
+        }
       }
       out += line.slice(i, j);
       sawAnsi = true;
@@ -226,6 +249,21 @@ export function formatFallbackNotice(
   color: boolean,
 ): string {
   return `    ${paint(`↳ falling back to ${fallbackId}`, ANSI.yellow, color)}`;
+}
+
+/**
+ * OSC 8 terminal hyperlink. When enabled, emits
+ * ESC ] 8 ; ; url ESC backslash text ESC ] 8 ; ; ESC backslash so modern
+ * terminals make the text clickable; plain text otherwise.
+ */
+export function hyperlink(text: string, url: string, enabled: boolean): string {
+  if (!enabled) return text;
+  return `\u001b]8;;${url}\u001b\\${text}\u001b]8;;\u001b\\`;
+}
+
+/** file:// URL for an absolute path (handles Windows paths and encoding). */
+export function fileUrl(absolutePath: string): string {
+  return pathToFileURL(absolutePath).href;
 }
 
 /** Replace the home directory prefix with ~ for display. */
@@ -269,7 +307,13 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
   lines.push(
     `  ▸ ${input.uniqueSources} unique sources after dedupe (${input.totalCitations} total citations)`,
   );
-  lines.push(`  ▸ ${shortenHomePath(input.outputDir, input.home)}/`);
+  lines.push(
+    `  ▸ ${hyperlink(
+      `${shortenHomePath(input.outputDir, input.home)}/`,
+      fileUrl(input.outputDir),
+      input.color,
+    )}`,
+  );
   if (input.reportedCost && input.reportedCost.reporting > 0) {
     lines.push(
       `  ▸ reported cost: ${formatCost(input.reportedCost.totalUsd)} (${input.reportedCost.reporting} of ${input.reportedCost.providers} providers)`,

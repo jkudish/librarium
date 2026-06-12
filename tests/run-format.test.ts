@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   computeLineWidths,
   dimText,
+  fileUrl,
   formatDuration,
   formatFallbackNotice,
   formatPendingLine,
   formatProviderLine,
   formatRunSummary,
+  hyperlink,
   isColorEnabled,
   shortenHomePath,
   truncateAnsi,
@@ -313,6 +315,23 @@ describe('truncateAnsi', () => {
   it('handles zero width', () => {
     expect(truncateAnsi('hello', 0)).toBe('');
   });
+
+  it('does not count or split OSC 8 hyperlink sequences', () => {
+    const line = `]8;;file:///tmp/run\\report]8;;\\ done`;
+    // Visible text is "report done" (11 chars); the OSC payloads are free.
+    expect(truncateAnsi(line, 11)).toBe(line);
+    // Cutting inside the visible text must keep both OSC sequences intact.
+    const cut = truncateAnsi(line, 6);
+    expect(cut).toContain(']8;;file:///tmp/run\\');
+    expect(cut).toContain('report');
+    expect(cut).toContain(']8;;\\');
+    expect(cut).not.toContain('done');
+  });
+
+  it('consumes BEL-terminated OSC sequences', () => {
+    const line = ']0;titlehello';
+    expect(truncateAnsi(line, 5)).toBe(']0;titlehello');
+  });
 });
 
 describe('dimText', () => {
@@ -337,5 +356,42 @@ describe('wall-clock total', () => {
     expect(lines).toContain(
       '  4 succeeded, 0 failed, 0 async pending in 13.3s',
     );
+  });
+});
+
+describe('hyperlink / fileUrl', () => {
+  it('emits an OSC 8 hyperlink when enabled', () => {
+    expect(hyperlink('text', 'file:///tmp/x', true)).toBe(
+      '\u001b]8;;file:///tmp/x\u001b\\text\u001b]8;;\u001b\\',
+    );
+  });
+
+  it('returns plain text when disabled', () => {
+    expect(hyperlink('text', 'file:///tmp/x', false)).toBe('text');
+  });
+
+  it('percent-encodes path segments in file URLs', () => {
+    // On Windows, pathToFileURL prepends the current drive to rootless
+    // paths, so assert on the encoded fragments rather than exact equality.
+    const url = fileUrl('/Users/joey/My Reports/run #1');
+    expect(url).toMatch(/^file:\/\/\//);
+    expect(url).toContain('/Users/joey/My%20Reports/run%20%231');
+    expect(fileUrl('/tmp/plain/path')).toContain('/tmp/plain/path');
+  });
+
+  it('links the output directory in the run summary when color is on', () => {
+    const lines = formatRunSummary({
+      succeeded: 1,
+      failed: 0,
+      pending: 0,
+      uniqueSources: 1,
+      totalCitations: 1,
+      outputDir: '/srv/out dir',
+      color: true,
+    });
+    const joined = lines.join('\n');
+    expect(joined).toContain('\u001b]8;;file://');
+    expect(joined).toContain('/srv/out%20dir\u001b\\');
+    expect(joined).toContain('/srv/out dir/');
   });
 });

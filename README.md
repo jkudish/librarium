@@ -211,7 +211,7 @@ Generate a self-contained `report.html` for a run directory (default: the most r
 librarium html [run-dir] [--open]
 ```
 
-The report contains the query, run metadata, the provider results table as expandable sections with each provider's rendered markdown, and the deduped source list with provider attribution. Provider markdown is HTML-escaped, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
+The report contains the query, run metadata, the provider results table as tabs, with each provider's rendered markdown in a panel below, and the deduped source list with provider attribution. Provider markdown is HTML-escaped, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
 
 ### `refine`
 
@@ -351,9 +351,9 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 | Group | Providers | Use Case |
 |---|---|---|
 | `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Thorough async research |
-| `quick` | perplexity-sonar-pro, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
+| `quick` | gemini-grounded, openrouter-online, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
-| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
+| `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
 | `all` | All 20 providers | Maximum coverage |
 
@@ -382,6 +382,8 @@ Librarium supports three execution modes, configurable via `--mode` or the `defa
 - **`async`** -- Submit deep-research tasks and return immediately. Use `librarium status --wait --retrieve` to poll and fetch results later.
 
 - **`mixed`** (default) -- Run ai-grounded and raw-search providers synchronously. Submit deep-research providers asynchronously. You get fast results right away and can retrieve deep research later.
+
+True background submission depends on the provider's API. `openai-deep`, `openai-deep-o3`, and `perplexity-sonar-deep` (via Perplexity's Async Sonar API) submit and return immediately in `mixed`/`async` mode; poll with `librarium status --wait`. `perplexity-deep-research` and `perplexity-advanced-deep` use Perplexity's Agent API, which has no background mode, so they complete inline even in mixed mode. `gemini-deep` also completes inline.
 
 ## Provider Fallback
 
@@ -790,7 +792,7 @@ Groups:
   deep           — Thorough async research (minutes)
   fast           — Quick results from multiple tiers
   comprehensive  — Deep + AI-grounded combined
-  all            — All 17 providers
+  all            — All 20 providers
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     — Synthesized overview with stats

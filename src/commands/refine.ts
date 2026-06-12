@@ -177,6 +177,16 @@ async function safeBody(response: Response): Promise<string> {
   }
 }
 
+/**
+ * Refine must never block a run: a hung connection counts as a normal refine
+ * failure (cascade to the next client, then fall back to the original query).
+ */
+const REFINE_TIMEOUT_MS = 30_000;
+
+function refineSignal(): AbortSignal {
+  return AbortSignal.timeout(REFINE_TIMEOUT_MS);
+}
+
 async function callOpenAi(
   client: RefineClient,
   prompt: string,
@@ -192,6 +202,7 @@ async function callOpenAi(
       messages: [{ role: 'user', content: prompt }],
       response_format: { type: 'json_object' },
     }),
+    signal: refineSignal(),
   });
   if (!response.ok) {
     throw new Error(
@@ -216,6 +227,7 @@ async function callGemini(
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { responseMimeType: 'application/json' },
     }),
+    signal: refineSignal(),
   });
   if (!response.ok) {
     throw new Error(
@@ -242,6 +254,7 @@ async function callPerplexity(
       model: client.model,
       messages: [{ role: 'user', content: prompt }],
     }),
+    signal: refineSignal(),
   });
   if (!response.ok) {
     throw new Error(

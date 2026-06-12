@@ -55,6 +55,12 @@ export class LiveRunTable {
   private readonly restoreCursorOnExit = (): void => {
     if (this.active) this.stream.write(SHOW_CURSOR);
   };
+  // 'exit' does not fire on an unhandled SIGINT, which would leave the
+  // terminal cursor hidden after Ctrl+C mid-run.
+  private readonly restoreCursorOnSigint = (): void => {
+    if (this.active) this.stream.write(SHOW_CURSOR);
+    process.exit(130);
+  };
 
   constructor(
     private readonly stream: LiveStream,
@@ -70,9 +76,11 @@ export class LiveRunTable {
 
   /** Print the initial block and start the spinner animation. */
   start(): void {
+    if (this.active) return;
     this.active = true;
     this.stream.write(HIDE_CURSOR);
     process.once('exit', this.restoreCursorOnExit);
+    process.once('SIGINT', this.restoreCursorOnSigint);
     this.render();
     this.timer = setInterval(() => {
       this.frameIndex = (this.frameIndex + 1) % SPINNER_FRAMES.length;
@@ -165,6 +173,7 @@ export class LiveRunTable {
     this.stream.write(SHOW_CURSOR);
     this.active = false;
     process.removeListener('exit', this.restoreCursorOnExit);
+    process.removeListener('SIGINT', this.restoreCursorOnSigint);
   }
 
   private findPending(id: string): ProviderRow | undefined {

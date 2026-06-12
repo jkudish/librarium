@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
@@ -11,13 +11,22 @@ import {
   updateAsyncTask,
 } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { normalizeUsage } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
-import type { AsyncTaskHandle, ProviderReport } from '../types.js';
+import { deduplicateSources } from '../core/normalizer.js';
+import type {
+  AsyncTaskHandle,
+  Citation,
+  ProviderReport,
+  RunManifest,
+} from '../types.js';
 import { writeHtmlReport } from './html-report.js';
 import {
   computeLineWidths,
   dimText,
+  fileUrl,
   formatProviderLine,
+  hyperlink,
   isColorEnabled,
   type LineWidths,
 } from './run-format.js';
@@ -49,6 +58,7 @@ async function retrieveTask(
   spinner: ReturnType<typeof ora>,
   widths: LineWidths,
   color: boolean,
+  print: (line: string) => void,
 ): Promise<boolean> {
   const provider = getProvider(task.provider);
   if (!provider?.retrieve) {
@@ -59,9 +69,34 @@ async function retrieveTask(
   try {
     spinner.text = `Retrieving ${task.provider}...`;
     const result = await provider.retrieve(task);
+
+    if (result.error) {
+      // Retrieval failed (transport error, parse failure, provider error):
+      // keep the task on disk so a later --retrieve can try again, and do not
+      // write empty output files over nothing.
+      const failureReport: ProviderReport = {
+        id: task.provider,
+        tier: result.tier,
+        status: 'error',
+        durationMs: result.durationMs,
+        wordCount: 0,
+        citationCount: 0,
+        outputFile: '',
+        metaFile: '',
+        error: result.error,
+      };
+      const wasSpinning = spinner.isSpinning;
+      if (wasSpinning) spinner.stop();
+      print(formatProviderLine(failureReport, widths, color));
+      if (wasSpinning) spinner.start();
+      spinner.text = `Retrieval failed for ${task.provider}: ${result.error}`;
+      return false;
+    }
+
     const safeId = sanitizeId(task.provider);
     const outputFile = `${safeId}.md`;
     const metaFile = `${safeId}.meta.json`;
+    const usage = normalizeUsage(result);
 
     safeWriteFile(join(dir, outputFile), result.content);
     safeWriteFile(
@@ -74,13 +109,32 @@ async function retrieveTask(
           durationMs: result.durationMs,
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
-          usage: result.usage,
+          usage,
           citations: result.citations,
         },
         null,
         2,
       ),
     );
+
+    const words = result.content.split(/\s+/).filter(Boolean).length;
+    const cites = result.citations.length;
+
+    const report: ProviderReport = {
+      id: task.provider,
+      tier: result.tier,
+      status: 'success',
+      durationMs: result.durationMs,
+      wordCount: words,
+      citationCount: cites,
+      outputFile,
+      metaFile,
+      usage,
+    };
+
+    // Fold the retrieved result back into run.json and sources.json so JSON
+    // consumers, browse tallies, and regenerated reports see the final state.
+    updateManifestAfterRetrieve(dir, report);
 
     // Mark as retrieved by removing from async tasks
     const tasks = loadAsyncTasks(dir);
@@ -89,31 +143,21 @@ async function retrieveTask(
 
     // If an HTML report was already generated for this run, regenerate it so
     // the retrieved result fills in.
-    if (existsSync(join(dir, 'report.html'))) {
+    const reportPath = join(dir, 'report.html');
+    if (existsSync(reportPath)) {
       writeHtmlReport(dir);
+      print(
+        `  regenerated ${hyperlink(reportPath, fileUrl(reportPath), color)}`,
+      );
     }
 
-    const words = result.content.split(/\s+/).filter(Boolean).length;
-    const cites = result.citations.length;
     spinner.text = `Retrieved ${task.provider} -> ${outputFile}`;
 
     // Render the retrieved result with the same table line as `librarium run`,
     // with the retrieval details as a dim suffix.
-    const report: ProviderReport = {
-      id: task.provider,
-      tier: result.tier,
-      status: result.error ? 'error' : 'success',
-      durationMs: result.durationMs,
-      wordCount: words,
-      citationCount: cites,
-      outputFile,
-      metaFile,
-      usage: result.usage,
-      error: result.error,
-    };
     const wasSpinning = spinner.isSpinning;
     if (wasSpinning) spinner.stop();
-    console.log(
+    print(
       `${formatProviderLine(report, widths, color)}   ${dimText(
         `${outputFile}, ${words} words`,
         color,
@@ -124,6 +168,55 @@ async function retrieveTask(
   } catch (e) {
     spinner.text = `Error retrieving ${task.provider}: ${e instanceof Error ? e.message : String(e)}`;
     return false;
+  }
+}
+
+/**
+ * After a successful retrieval, update run.json's provider entry and rebuild
+ * sources.json from every .meta.json in the run directory, so the manifest no
+ * longer reports the provider as async-pending.
+ */
+function updateManifestAfterRetrieve(
+  dir: string,
+  report: ProviderReport,
+): void {
+  const manifestPath = join(dir, 'run.json');
+  if (!existsSync(manifestPath)) return;
+
+  try {
+    const manifest = JSON.parse(
+      readFileSync(manifestPath, 'utf8'),
+    ) as RunManifest;
+
+    const index = manifest.providers.findIndex(
+      (p) => p.id === report.id && p.status === 'async-pending',
+    );
+    if (index >= 0) {
+      manifest.providers[index] = report;
+    }
+
+    // Rebuild the deduped source list from all per-provider meta files.
+    const allCitations: Citation[] = [];
+    for (const entry of readdirSync(dir)) {
+      if (!entry.endsWith('.meta.json')) continue;
+      try {
+        const meta = JSON.parse(readFileSync(join(dir, entry), 'utf8')) as {
+          citations?: Citation[];
+        };
+        if (Array.isArray(meta.citations)) allCitations.push(...meta.citations);
+      } catch {}
+    }
+    const sources = deduplicateSources(allCitations);
+    safeWriteFile(join(dir, 'sources.json'), JSON.stringify(sources, null, 2));
+    manifest.sources = {
+      total: allCitations.length,
+      unique: sources.length,
+      file: 'sources.json',
+    };
+
+    safeWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
+  } catch {
+    // A malformed manifest should never block retrieval itself.
   }
 }
 
@@ -147,7 +240,13 @@ export function registerStatusCommand(program: Command): void {
           console.error(`[librarium] warning: ${warning}`);
         }
         const baseDir = resolve(config.defaults.outputDir);
-        const color = isColorEnabled(process.stdout);
+        // In --json mode stdout must stay pure JSON, so all table/progress
+        // lines are routed to stderr (where the ora spinner already lives).
+        const prettyStream = opts.json ? process.stderr : process.stdout;
+        const color = isColorEnabled(prettyStream);
+        const pretty = (line: string): void => {
+          prettyStream.write(`${line}\n`);
+        };
 
         // Gather all async tasks (pending + completed unretrieved)
         const pendingTasks = getPendingTasks(baseDir);
@@ -241,7 +340,7 @@ export function registerStatusCommand(program: Command): void {
                       error: result.message ?? 'task failed',
                     };
                     spinner.stop();
-                    console.log(
+                    pretty(
                       formatProviderLine(
                         failureReport,
                         widthsForTasks(pendingTasks),
@@ -293,6 +392,7 @@ export function registerStatusCommand(program: Command): void {
                 retrieveSpinner,
                 widths,
                 color,
+                pretty,
               );
               if (ok) retrieved++;
             }
@@ -326,7 +426,14 @@ export function registerStatusCommand(program: Command): void {
 
           const widths = widthsForTasks(toRetrieve.map((c) => c.task));
           for (const { task, dir } of toRetrieve) {
-            const ok = await retrieveTask(task, dir, spinner, widths, color);
+            const ok = await retrieveTask(
+              task,
+              dir,
+              spinner,
+              widths,
+              color,
+              pretty,
+            );
             if (ok) retrieved++;
           }
 
