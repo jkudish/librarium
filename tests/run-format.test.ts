@@ -371,10 +371,12 @@ describe('hyperlink / fileUrl', () => {
   });
 
   it('percent-encodes path segments in file URLs', () => {
-    expect(fileUrl('/Users/joey/My Reports/run #1')).toBe(
-      'file:///Users/joey/My%20Reports/run%20%231',
-    );
-    expect(fileUrl('/tmp/plain/path')).toBe('file:///tmp/plain/path');
+    // On Windows, pathToFileURL prepends the current drive to rootless
+    // paths, so assert on the encoded fragments rather than exact equality.
+    const url = fileUrl('/Users/joey/My Reports/run #1');
+    expect(url).toMatch(/^file:\/\/\//);
+    expect(url).toContain('/Users/joey/My%20Reports/run%20%231');
+    expect(fileUrl('/tmp/plain/path')).toContain('/tmp/plain/path');
   });
 
   it('links the output directory in the run summary when color is on', () => {
@@ -388,7 +390,8 @@ describe('hyperlink / fileUrl', () => {
       color: true,
     });
     const joined = lines.join('\n');
-    expect(joined).toContain('\u001b]8;;file:///srv/out%20dir\u001b\\');
+    expect(joined).toContain('\u001b]8;;file://');
+    expect(joined).toContain('/srv/out%20dir\u001b\\');
     expect(joined).toContain('/srv/out dir/');
   });
 });
