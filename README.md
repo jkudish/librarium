@@ -604,7 +604,7 @@ librarium mcp
 
 ## Groups
 
-Groups are named collections of provider IDs. Librarium ships with six default groups:
+Groups are named collections of provider IDs. Librarium ships with seven default groups:
 
 | Group | Providers | Use Case |
 |---|---|---|
