@@ -19,6 +19,7 @@ const PROVIDER_TIER_SCHEMA = z.enum([
   'deep-research',
   'ai-grounded',
   'raw-search',
+  'llm',
 ]);
 
 const CITATION_SCHEMA = z.object({
@@ -575,6 +576,7 @@ function isProviderTier(value: unknown): value is ProviderTier {
   return (
     value === 'deep-research' ||
     value === 'ai-grounded' ||
-    value === 'raw-search'
+    value === 'raw-search' ||
+    value === 'llm'
   );
 }

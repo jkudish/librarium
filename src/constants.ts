@@ -46,6 +46,10 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
   serpapi: 'SERPAPI_API_KEY',
   tavily: 'TAVILY_API_KEY',
   'firecrawl-search': 'FIRECRAWL_API_KEY',
+  claude: 'ANTHROPIC_API_KEY',
+  'openai-chat': 'OPENAI_API_KEY',
+  'gemini-chat': 'GEMINI_API_KEY',
+  'openrouter-chat': 'OPENROUTER_API_KEY',
 };
 
 // Provider display names
@@ -70,6 +74,10 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   serpapi: 'SerpAPI',
   tavily: 'Tavily Search',
   'firecrawl-search': 'Firecrawl Search',
+  claude: 'Claude',
+  'openai-chat': 'OpenAI Chat',
+  'gemini-chat': 'Gemini Chat',
+  'openrouter-chat': 'OpenRouter Chat',
 };
 
 // Backward-compatible provider ID aliases (legacy -> canonical)
@@ -377,6 +385,13 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'you-research',
     'kagi-fastgpt',
   ],
+  // Ungrounded generic LLMs (tier `llm`). Opt-in only: excluded from every
+  // grounded group above and from `all`. Returns the model's direct answer
+  // with no citations -- baseline/contrast alongside grounded research.
+  llm: ['claude', 'openai-chat', 'gemini-chat', 'openrouter-chat'],
+  // `all` is the explicit grounded-all roster (every registered grounded
+  // provider). The `llm` tier is intentionally excluded -- it is opt-in via
+  // `-p`, a custom group, or `--group llm`.
   all: [
     'perplexity-sonar-deep',
     'perplexity-deep-research',
@@ -400,6 +415,60 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'tavily',
   ],
 };
+
+/**
+ * Provider IDs in the ungrounded `llm` tier. These return the model's direct
+ * answer with no web grounding or citations, so they are opt-in only: never
+ * auto-enabled by `init --auto` and never pre-checked in interactive `init`.
+ * The default `run` path (all enabled providers) therefore excludes them
+ * unless the user explicitly enabled them in config.
+ */
+export const LLM_TIER_PROVIDER_IDS: ReadonlySet<string> = new Set(
+  DEFAULT_GROUPS.llm,
+);
+
+/** True when the provider id belongs to the ungrounded `llm` tier. */
+export function isLlmTierProvider(id: string): boolean {
+  return LLM_TIER_PROVIDER_IDS.has(resolveProviderId(id));
+}
+
+/** A provider option presented during `init`. */
+export interface InitProviderChoice {
+  id: string;
+  envVar: string;
+  /** Whether the matching env var is present in the environment. */
+  keyPresent: boolean;
+  /** Whether this provider is in the ungrounded `llm` tier. */
+  isLlm: boolean;
+  /**
+   * Whether `init --auto` should enable this provider, and whether interactive
+   * `init` should pre-check it. True only when the key is present AND the
+   * provider is not in the opt-in `llm` tier.
+   */
+  enableByDefault: boolean;
+}
+
+/**
+ * Compute the per-provider init choices from the environment. Pure helper so
+ * the opt-in policy (llm-tier providers are never enabled/pre-checked by
+ * default) is testable without driving the interactive prompt. Order follows
+ * `PROVIDER_ENV_VARS`.
+ */
+export function computeInitProviderChoices(
+  env: Record<string, string | undefined>,
+): InitProviderChoice[] {
+  return Object.entries(PROVIDER_ENV_VARS).map(([id, envVar]) => {
+    const keyPresent = !!env[envVar];
+    const isLlm = isLlmTierProvider(id);
+    return {
+      id,
+      envVar,
+      keyPresent,
+      isLlm,
+      enableByDefault: keyPresent && !isLlm,
+    };
+  });
+}
 
 // Sanitize ID for filesystem
 export function sanitizeId(id: string): string {

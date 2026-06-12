@@ -96,6 +96,9 @@ function countLabel(report: ProviderReport): string {
   if (report.status === 'async-pending') return 'submitted';
   if (report.status === 'skipped') return 'skipped';
   if (report.status === 'error') return report.error ? 'error' : 'error';
+  // Ungrounded llm-tier providers contribute no sources by design; mirror the
+  // terminal table and render "ungrounded" instead of "0 sources".
+  if (report.tier === 'llm') return 'ungrounded';
   const noun = report.tier === 'raw-search' ? 'results' : 'sources';
   return `${report.citationCount} ${noun}`;
 }

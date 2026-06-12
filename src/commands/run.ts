@@ -324,6 +324,7 @@ export async function executeRun(
           'raw-search',
         ] as const) {
           const variant = refined.tierQueries[tier];
+          if (!variant) continue;
           const shown =
             variant.length > 90 ? `${variant.slice(0, 89)}\u2026` : variant;
           printLine(dimText(`    ${tier}: ${shown}`, color));

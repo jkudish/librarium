@@ -77,7 +77,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 20 built-in provider adapters organized into three tiers:
+Librarium ships with 24 built-in provider adapters organized into four tiers:
 
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
@@ -101,6 +101,10 @@ Librarium ships with 20 built-in provider adapters organized into three tiers:
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
 | Firecrawl Search | `firecrawl-search` | raw-search | `FIRECRAWL_API_KEY` |
+| Claude | `claude` | llm | `ANTHROPIC_API_KEY` |
+| OpenAI Chat | `openai-chat` | llm | `OPENAI_API_KEY` |
+| Gemini Chat | `gemini-chat` | llm | `GEMINI_API_KEY` |
+| OpenRouter Chat | `openrouter-chat` | llm | `OPENROUTER_API_KEY` |
 
 ### Provider ID Migration (Legacy Aliases)
 
@@ -122,13 +126,26 @@ You can also add **custom providers** (npm modules or local scripts) via config.
 
 ## Provider Tiers
 
-Providers are categorized into three tiers based on their capabilities, latency, and depth:
+Providers are categorized into four tiers based on their capabilities, latency, and depth:
 
 - **deep-research** -- Async deep research providers that take minutes to complete but produce comprehensive, multi-source reports. These providers may use a submit/poll/retrieve pattern. Best for thorough research on important topics.
 
 - **ai-grounded** -- AI-powered search with inline citations. Returns results in seconds with good quality and source attribution. A solid middle ground between speed and depth.
 
 - **raw-search** -- Traditional search engine results. Fast responses with many links and snippets, but no AI synthesis. Useful for broad link discovery and verifying specific facts.
+
+- **llm** -- Ungrounded generic LLMs (Claude, OpenAI, Gemini, or anything via OpenRouter). These return the model's direct answer to the research prompt with **no web grounding and no citations**, so they contribute zero sources to the deduplicated source set, `sources.json`, and the report tallies. They exist as an opt-in baseline/contrast layer: run them alongside grounded research to see what the model says on its own versus what grounded providers surface. Because they are ungrounded, they are **excluded from every grounded default group** (`quick`, `fast`, `raw`, `deep`, `comprehensive`, and `all`). Opt in explicitly via `-p claude,openai-chat,...`, a custom group, or `--group llm`. Each provider takes a cheap default model with a per-provider `model` config override.
+
+### The LLM tier (ungrounded baseline / contrast)
+
+The `llm` tier is deliberately kept apart from the grounded tiers. Grounded providers earn their place in the source tallies by citing the web; ungrounded LLMs do not, so librarium never silently folds them into a grounded run. `report.tier === 'llm'` rows render a dim `ungrounded` in place of the source count, and the dedupe pipeline, `sources.json`, and report source totals are completely unaffected by their presence. Use the built-in `llm` group (`--group llm`) to run all four at once.
+
+**Opt-in, never auto-enabled.** Several llm-tier providers share an API key with their grounded counterparts (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; Claude uses `ANTHROPIC_API_KEY`). To keep a plain `librarium run` — which dispatches every *enabled* provider — from silently calling an ungrounded model, `init` treats the llm tier specially:
+
+- `librarium init --auto` **does not** enable llm-tier providers, even when their key is present. It prints them as found-but-ungrounded with a hint to opt in.
+- Interactive `librarium init` **lists** the llm-tier providers but leaves them **unchecked** (with an `[ungrounded]` marker), so you must tick them deliberately.
+
+As a result they stay out of the default run unless you explicitly enable them in config. Reach for them on demand via `-p claude,openai-chat,...`, a custom group, or `--group llm` regardless of your init choices.
 
 ## Commands
 
@@ -490,7 +507,8 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `all` | All 20 providers | Maximum coverage |
+| `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Ungrounded LLM baseline / contrast (no citations) |
+| `all` | All 20 grounded providers | Maximum grounded coverage (excludes the `llm` tier) |
 
 ### Custom Groups
 
@@ -1085,7 +1103,8 @@ Groups:
   deep           — Thorough async research (minutes)
   fast           — Quick results from multiple tiers
   comprehensive  — Deep + AI-grounded combined
-  all            — All 20 providers
+  llm            — Ungrounded LLM baseline / contrast (no citations)
+  all            — All 20 grounded providers (excludes the llm tier)
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     — Synthesized overview with stats
