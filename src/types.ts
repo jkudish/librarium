@@ -173,6 +173,13 @@ export const DefaultsSchema = z.object({
 });
 export type Defaults = z.infer<typeof DefaultsSchema>;
 
+// Refine (LLM query transform) settings
+export const RefineConfigSchema = z.object({
+  provider: z.enum(['openai', 'gemini', 'perplexity']).optional(),
+  model: z.string().optional(),
+});
+export type RefineConfig = z.infer<typeof RefineConfigSchema>;
+
 // Full config schema
 export const ConfigSchema = z.object({
   version: z.literal(1),
@@ -181,6 +188,7 @@ export const ConfigSchema = z.object({
   customProviders: z.record(CustomProviderSourceSchema).default({}),
   trustedProviderIds: z.array(z.string()).default([]),
   groups: z.record(z.array(z.string())).default({}),
+  refine: RefineConfigSchema.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -200,6 +208,7 @@ export const ProjectConfigSchema = z.object({
   customProviders: z.record(CustomProviderSourceSchema).optional(),
   trustedProviderIds: z.array(z.string()).optional(),
   groups: z.record(z.array(z.string())).optional(),
+  refine: RefineConfigSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -215,6 +224,8 @@ export interface RunManifest {
   sources: { total: number; unique: number; file: string };
   asyncTasks: AsyncTaskHandle[];
   exitCode: number;
+  /** Tier-tuned query variants used for dispatch (run --refine). */
+  refinedQueries?: Partial<Record<ProviderTier, string>>;
 }
 
 // Per-provider report in run manifest

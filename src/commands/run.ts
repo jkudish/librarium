@@ -29,6 +29,7 @@ import type {
 } from '../types.js';
 import { writeHtmlReport } from './html-report.js';
 import { LiveRunTable } from './live-table.js';
+import { type RefinedQueries, refineQuery } from './refine.js';
 import {
   computeLineWidths,
   dimText,
@@ -49,6 +50,7 @@ export interface RunOptions {
   json?: boolean;
   open?: boolean;
   html?: boolean;
+  refine?: boolean;
 }
 
 export interface RunOutcome {
@@ -72,6 +74,10 @@ export function registerRunCommand(program: Command): void {
     .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
     .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
     .option('--json', 'Output run.json to stdout')
+    .option(
+      '--refine',
+      'Rewrite the query into tier-tuned variants with one LLM call before dispatch',
+    )
     .option(
       '--html',
       'Generate a self-contained report.html in the run directory',
@@ -176,14 +182,33 @@ export async function executeRun(
         return { exitCode: 2 };
       }
 
+      // Optional one-shot LLM refine: never allowed to break the run.
+      let refined: RefinedQueries | null = null;
+      if (opts.refine) {
+        spinner.start('Refining query...');
+        try {
+          refined = await refineQuery(query, config);
+          spinner.stop();
+        } catch (e) {
+          spinner.stop();
+          console.error(
+            `[librarium] warning: refine failed (${e instanceof Error ? e.message : String(e)}); dispatching the original query`,
+          );
+        }
+      }
+
       // Create output directory
       const slug = generateSlug(query);
       const baseDir = resolve(config.defaults.outputDir);
       const outputDir = resolveOutputDir(baseDir, slug);
       mkdirSync(outputDir, { recursive: true });
 
-      // Write prompt
-      safeWriteFile(join(outputDir, 'prompt.md'), buildPrompt(query));
+      // Write prompt (with refined variants recorded for reproducibility)
+      let promptDoc = buildPrompt(query);
+      if (refined) {
+        promptDoc += `\n\n## Refined Query Variants\n\n- deep-research: ${refined.tierQueries['deep-research']}\n- ai-grounded: ${refined.tierQueries['ai-grounded']}\n- raw-search: ${refined.tierQueries['raw-search']}\n`;
+      }
+      safeWriteFile(join(outputDir, 'prompt.md'), promptDoc);
 
       // Column widths cover both primaries and any configured fallbacks so
       // lines stay aligned if a fallback fires mid-run.
@@ -216,6 +241,18 @@ export async function executeRun(
       spinner.stop();
       printLine('');
       printLine(`  fanning out to ${providerIds.length} providers`);
+      if (refined) {
+        for (const tier of [
+          'deep-research',
+          'ai-grounded',
+          'raw-search',
+        ] as const) {
+          const variant = refined.tierQueries[tier];
+          const shown =
+            variant.length > 90 ? `${variant.slice(0, 89)}\u2026` : variant;
+          printLine(dimText(`    ${tier}: ${shown}`, color));
+        }
+      }
       printLine('');
       if (live) {
         for (const id of providerIds) {
@@ -231,6 +268,7 @@ export async function executeRun(
         config,
         providerIds,
         query,
+        tierQueries: refined?.tierQueries,
         mode: config.defaults.mode,
         credentials,
         onProgress: (event) => {
@@ -349,6 +387,7 @@ export async function executeRun(
         },
         asyncTasks,
         exitCode,
+        refinedQueries: refined?.tierQueries,
       };
       safeWriteFile(
         join(outputDir, 'run.json'),

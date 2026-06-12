@@ -122,6 +122,12 @@ export async function runWizard(): Promise<void> {
   });
   if (p.isCancel(mode)) return cancel();
 
+  const refine = await p.confirm({
+    message: 'Refine the query into tier-tuned variants first (one LLM call)?',
+    initialValue: false,
+  });
+  if (p.isCancel(refine)) return cancel();
+
   const scopeLabel = group
     ? `group "${group}"`
     : providers
@@ -137,6 +143,7 @@ export async function runWizard(): Promise<void> {
   const options: RunOptions = { mode };
   if (providers) options.providers = providers;
   if (group) options.group = group;
+  if (refine) options.refine = true;
   const outcome = await executeRun(query.trim(), options);
 
   if (
