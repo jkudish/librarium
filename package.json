@@ -1,6 +1,6 @@
 {
   "name": "librarium",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Fan out research queries to multiple search and deep-research APIs in parallel",
   "type": "module",
   "main": "./dist/cli.js",
