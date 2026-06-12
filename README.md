@@ -590,7 +590,7 @@ Librarium supports three execution modes, configurable via `--mode` or the `defa
 
 - **`mixed`** (default) -- Run ai-grounded and raw-search providers synchronously. Submit deep-research providers asynchronously. You get fast results right away and can retrieve deep research later.
 
-True background submission depends on the provider's API. `openai-deep`, `openai-deep-o3`, and `perplexity-sonar-deep` (via Perplexity's Async Sonar API) submit and return immediately in `mixed`/`async` mode; poll with `librarium status --wait`. `perplexity-deep-research` and `perplexity-advanced-deep` use Perplexity's Agent API, which has no background mode, so they complete inline even in mixed mode. `gemini-deep` also completes inline.
+True background submission depends on the provider's API. `openai-deep`, `openai-deep-o3`, `perplexity-sonar-deep` (via Perplexity's Async Sonar API), and `gemini-deep` (via Google's Interactions API with `background: true`) submit and return immediately in `mixed`/`async` mode; poll with `librarium status --wait`. `perplexity-deep-research` and `perplexity-advanced-deep` use Perplexity's Agent API, which has no background mode, so they complete inline even in mixed mode.
 
 ## Provider Fallback
 
@@ -691,7 +691,7 @@ The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the 
 
 API keys use the `$ENV_VAR` pattern -- the value `"$PERPLEXITY_API_KEY"` resolves to `process.env.PERPLEXITY_API_KEY` at runtime. Keys are never stored in plaintext.
 
-Some providers support optional model overrides. For example, to override Gemini Deep Research:
+Some providers support optional model overrides. Gemini Deep Research defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier (and more expensive) variant:
 
 ```json
 {
@@ -699,7 +699,7 @@ Some providers support optional model overrides. For example, to override Gemini
     "gemini-deep": {
       "apiKey": "$GEMINI_API_KEY",
       "enabled": true,
-      "model": "gemini-2.5-flash"
+      "model": "deep-research-max-preview-04-2026"
     }
   }
 }

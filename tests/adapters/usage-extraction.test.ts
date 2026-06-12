@@ -155,16 +155,18 @@ describe('usage extraction', () => {
     expect(result.usage?.costUsd).toBeUndefined();
   });
 
-  it('extracts Gemini deep usage metadata', async () => {
-    const usageMetadata = {
-      promptTokenCount: 9,
-      candidatesTokenCount: 21,
-      totalTokenCount: 30,
+  it('extracts Gemini deep Interactions usage', async () => {
+    const usage = {
+      total_input_tokens: 9,
+      total_output_tokens: 21,
+      total_tokens: 30,
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        candidates: [{ content: { parts: [{ text: 'Gemini answer.' }] } }],
-        usageMetadata,
+        id: 'int-1',
+        status: 'completed',
+        output_text: 'Gemini deep findings.',
+        usage,
       }),
     );
 
@@ -172,7 +174,13 @@ describe('usage extraction', () => {
     provider.configure({
       credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
     });
-    const result = await provider.execute('question', { timeout: 10 });
+    const result = await provider.retrieve({
+      provider: 'gemini-deep',
+      taskId: 'int-1',
+      query: 'question',
+      submittedAt: Date.now(),
+      status: 'running',
+    });
 
     expect(result.error).toBeUndefined();
     expect(result.tokenUsage).toEqual({ input: 9, output: 21 });
@@ -180,7 +188,7 @@ describe('usage extraction', () => {
       inputTokens: 9,
       outputTokens: 21,
       totalTokens: 30,
-      raw: usageMetadata,
+      raw: usage,
     });
     expect(result.usage?.costUsd).toBeUndefined();
   });
