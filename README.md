@@ -359,7 +359,8 @@ librarium config --json
 
 ### `cleanup`
 
-Remove old output directories.
+Remove output directories. By default deletes runs older than 30 days; `--all`
+deletes every run regardless of age.
 
 ```bash
 # Delete directories older than 30 days (default)
@@ -368,8 +369,42 @@ librarium cleanup
 # Custom age threshold
 librarium cleanup --days 7
 
-# Preview what would be deleted
+# Preview what would be deleted (count, total size, oldest/newest)
 librarium cleanup --dry-run
+
+# Delete every run directory (interactive confirm in a TTY)
+librarium cleanup --all
+
+# Pick exactly which runs to delete from a checklist
+librarium cleanup -i
+
+# JSON output and an alternate output base dir
+librarium cleanup --all --json -o ./agents/librarium
+```
+
+In a terminal, `--all` prompts for confirmation (showing run count and total
+size on disk) before deleting. In a non-interactive context (pipe, CI), pass
+`--yes` to confirm, otherwise the command refuses to delete. Runs that still
+have pending async tasks are flagged in the list and confirm, since deleting
+them orphans the server-side task handle. The command never deletes anything
+outside the resolved output base directory and refuses to operate if that
+directory resolves to your home directory or a filesystem root.
+
+### `clear`
+
+Alias for `librarium cleanup --all`: deletes every run directory. Same flags
+pass through (`--dry-run`, `-i`/`--interactive`, `--yes`, `-o`/`--output`,
+`--json`).
+
+```bash
+# Delete all runs (interactive confirm in a TTY, --yes required in non-TTY)
+librarium clear
+
+# Preview everything that would be removed
+librarium clear --dry-run
+
+# Interactively pick which runs to clear
+librarium clear -i
 ```
 
 ## Groups
