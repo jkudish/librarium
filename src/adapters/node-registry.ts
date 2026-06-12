@@ -1,5 +1,4 @@
-import type { Config } from '../types.js';
-import { loadCustomProviders } from './custom.js';
+import { registerCustomProviders } from '../node-entry.js';
 import {
   getAllProviders,
   getProvider,
@@ -23,24 +22,20 @@ export async function initializeProviders(
   config: ProviderInitConfig = {},
 ): Promise<ProviderInitResult> {
   const builtinResult = await initializeBuiltinProviders(config);
-  const providerConfig = config.providers ?? {};
   const customProviders = config.customProviders ?? {};
 
   if (Object.keys(customProviders).length === 0) {
     return builtinResult;
   }
 
-  const reservedProviderIds = new Set(getAllProviders().map((p) => p.id));
-  const customResult = await loadCustomProviders({
+  // Reuse the same load-and-register path the library `librarium/node` entry
+  // exposes -- one implementation, two callers. Reserved IDs default to the
+  // built-ins just registered above.
+  const customResult = await registerCustomProviders({
     customProviders,
     trustedProviderIds: config.trustedProviderIds ?? [],
-    providerConfigs: providerConfig as Config['providers'],
-    reservedProviderIds,
+    providers: config.providers ?? {},
   });
-
-  for (const provider of customResult.providers) {
-    registerProvider(provider);
-  }
 
   return {
     warnings: [...builtinResult.warnings, ...customResult.warnings],

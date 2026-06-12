@@ -889,9 +889,136 @@ for (const r of results) {
 Notes:
 
 - **Credential injection.** `CredentialContext` is `{ env?: Record<string, string | undefined>, resolveCredential?: (value: string) => string | undefined }`. `$ENV_VAR` references in provider config resolve against the injected `env`; literal keys pass through. In the CLI, this is backed by `process.env` -- in a Worker, pass your env binding.
-- **Custom providers are CLI-only.** npm- and script-based custom providers require Node (module resolution, child processes) and live behind the CLI boundary. The core registry contains the built-in adapters; you can add your own at runtime with `registerProvider()`.
-- **Async deep-research from the library.** `dispatch` with `mode: 'async'`/`'mixed'` returns `asyncTasks` handles; polling/retrieval is the caller's responsibility (in the CLI, `librarium status` does this).
+- **Custom providers from the library.** Hand-written providers work anywhere via `registerProvider()` (edge included). npm- and script-based custom providers need Node (module resolution, child processes), so they load through the dedicated `librarium/node` entry -- the same loader the CLI uses. See [Custom providers](#custom-providers-librariumnode).
+- **Async deep-research from the library.** `dispatch` with `mode: 'async'`/`'mixed'` returns `asyncTasks` handles; polling/retrieval is the caller's responsibility. See [Async deep-research](#async-deep-research-from-the-library).
 - **Bring your own persistence.** Core returns data; where it goes (D1, R2, files, nowhere) is up to you.
+
+### Custom providers (`librarium/node`)
+
+Three flavors of custom provider:
+
+1. **Hand-written** -- implement the `Provider` interface (fetch-based) and call `registerProvider(provider)` from `librarium/core`. This is edge-safe and works in Workers.
+2. **npm modules** -- a published/local package exporting a provider (or a factory). Requires Node module resolution.
+3. **scripts** -- an external executable that speaks librarium's JSON-over-stdio protocol. Requires child processes.
+
+The last two are Node-only, so they live behind the `librarium/node` entry point (one implementation, shared with the CLI). It exposes:
+
+- `loadCustomProviders(config, options?) -> { providers, loadedIds, skippedIds, warnings }` -- loads (but does not register) the npm/script providers declared in `config.customProviders`, applying the same `trustedProviderIds` gating and reserved-ID protection the CLI uses.
+- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Call it after `initializeProviders()` so reserved-ID detection sees the built-ins. Same return shape.
+
+```ts
+import { dispatch, initializeProviders, getProvider } from 'librarium/core';
+import { registerCustomProviders } from 'librarium/node';
+
+const credentials = { env: process.env };
+await initializeProviders({ credentials });
+
+const config = {
+  version: 1 as const,
+  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync' as const },
+  providers: { 'my-search': { enabled: true } },
+  // npm: { type: 'npm', module: 'my-search-provider', export: 'default' }
+  // script: { type: 'script', command: './providers/my-search.mjs' }
+  customProviders: { 'my-search': { type: 'npm' as const, module: 'my-search-provider' } },
+  trustedProviderIds: ['my-search'], // untrusted IDs are skipped with a warning
+  groups: {},
+};
+
+const { warnings, loadedIds } = await registerCustomProviders(config);
+if (warnings.length) console.warn(warnings.join('\n'));
+
+// Now registered alongside the built-ins -- dispatch sees it.
+console.log(getProvider('my-search')?.source); // 'npm'
+const { results } = await dispatch({
+  config,
+  providerIds: loadedIds,
+  query: 'best wholesale produce supplier in London',
+  mode: 'sync',
+  credentials,
+});
+```
+
+`librarium/core` stays Node-free: edge users never import `librarium/node` and keep using fetch-based `registerProvider()` providers.
+
+### Async deep-research from the library
+
+Deep-research providers can run asynchronously. In `mode: 'mixed'` (or `'async'`), `dispatch` submits each deep-research task and returns an `AsyncTaskHandle` in `asyncTasks` instead of blocking; sync-tier providers still return their results inline. The caller persists the handles, then later polls and retrieves through the registry -- there is no background worker in core.
+
+```ts
+import {
+  dispatch,
+  initializeProviders,
+  getProvider,
+  type AsyncTaskHandle,
+  type Config,
+} from 'librarium/core';
+
+const credentials = { env: process.env };
+await initializeProviders({ credentials });
+
+const config: Config = {
+  version: 1,
+  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'mixed' },
+  providers: {
+    'openai-deep': { enabled: true },        // deep-research -> async
+    'gemini-grounded': { enabled: true },    // ai-grounded -> sync, inline
+  },
+  customProviders: {},
+  trustedProviderIds: [],
+  groups: {},
+};
+
+// 1. Dispatch. Sync results are inline; deep-research tasks come back as handles.
+const { results, asyncTasks } = await dispatch({
+  config,
+  providerIds: ['openai-deep', 'gemini-grounded'],
+  query: 'State of solid-state battery commercialization in 2026',
+  mode: 'mixed',
+  credentials,
+});
+
+for (const r of results) {
+  // r.status is one of: 'success' | 'error' | 'timeout' | 'skipped' | 'async-pending'
+  // Deep-research providers submitted async show up here as 'async-pending'
+  // (empty text); their real payload arrives via retrieve() below.
+  if (r.status === 'success') console.log(r.provider, r.sourceUrls);
+}
+
+// 2. Persist the handles wherever you want (DB, KV, file, queue). They're plain
+//    JSON: { provider, taskId, query, submittedAt, status, ... }.
+await saveHandles(asyncTasks); // your storage
+
+// ...later, in a separate invocation, reload the handles and resolve them:
+const handles: AsyncTaskHandle[] = await loadHandles();
+
+for (const handle of handles) {
+  const provider = getProvider(handle.provider);
+  if (!provider?.poll || !provider.retrieve) continue; // not an async provider
+
+  // 3. Poll for status. AsyncPollResult.status is the AsyncTaskStatus enum:
+  //    'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  const poll = await provider.poll(handle);
+  if (poll.status === 'pending' || poll.status === 'running') {
+    continue; // still cooking -- check again next time
+  }
+  if (poll.status !== 'completed') {
+    console.warn(`${handle.provider} ${poll.status}: ${poll.message ?? ''}`);
+    continue;
+  }
+
+  // 4. Retrieve the finished result. retrieve() returns a ProviderResult:
+  //    { provider, tier, content, citations, durationMs, model?, tokenUsage?, usage?, error? }
+  const result = await provider.retrieve(handle);
+  if (result.error) {
+    console.warn(`${handle.provider} retrieve error: ${result.error}`);
+    continue;
+  }
+  console.log(result.provider, result.content);
+  for (const c of result.citations) console.log(' -', c.title ?? c.url, c.url);
+}
+```
+
+> **Workers note.** A single request can't block for minutes, so split the lifecycle: dispatch on the first request and persist `asyncTasks` (KV, D1, R2, or a Durable Object), then resolve them on a later request, a Cron Trigger, or a Durable Object alarm. `getProvider(handle.provider).poll/retrieve` is pure fetch, so it runs in the same Worker -- just reload the handle from storage between invocations.
 
 ## Using with AI Agents
 

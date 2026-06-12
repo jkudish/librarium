@@ -13,6 +13,10 @@
     "./core": {
       "types": "./dist/core.d.ts",
       "import": "./dist/core.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
     }
   },
   "bin": {
@@ -23,7 +27,7 @@
     "build:sea": "node scripts/build-sea.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
     "test:workers": "npm run build && vitest run --config vitest.workers.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
