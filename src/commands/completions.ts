@@ -12,6 +12,9 @@ interface CommandSpec {
   flags: string[];
 }
 
+/** Commands that accept a -g/--group flag and so get group-name completion. */
+const GROUP_AWARE_COMMANDS = new Set(['run', 'answer']);
+
 const COMMANDS: CommandSpec[] = [
   {
     name: 'run',
@@ -27,6 +30,23 @@ const COMMANDS: CommandSpec[] = [
       '--html',
       '--open',
       '--refine',
+    ],
+  },
+  {
+    name: 'answer',
+    description: 'Synthesize one grounded, cited answer from a fan-out',
+    flags: [
+      '--providers',
+      '--group',
+      '--mode',
+      '--output',
+      '--parallel',
+      '--timeout',
+      '--json',
+      '--refine',
+      '--html',
+      '--jsonl',
+      '--open',
     ],
   },
   {
@@ -81,10 +101,9 @@ export function zshCompletions(): string {
   const cases = COMMANDS.filter((c) => c.flags.length > 0)
     .map((c) => {
       const flagWords = c.flags.join(' ');
-      const groupCase =
-        c.name === 'run'
-          ? `\n      if [[ $words[CURRENT-1] == '-g' || $words[CURRENT-1] == '--group' ]]; then\n        compadd ${GROUP_NAMES.join(' ')}\n        return\n      fi`
-          : '';
+      const groupCase = GROUP_AWARE_COMMANDS.has(c.name)
+        ? `\n      if [[ $words[CURRENT-1] == '-g' || $words[CURRENT-1] == '--group' ]]; then\n        compadd ${GROUP_NAMES.join(' ')}\n        return\n      fi`
+        : '';
       return `    ${c.name})${groupCase}\n      compadd -- ${flagWords}\n      ;;`;
     })
     .join('\n');
@@ -159,7 +178,9 @@ export function fishCompletions(): string {
         `complete -c librarium -n '__fish_seen_subcommand_from ${c.name}' -l ${flag.replace(/^--/, '')}`,
     ),
   ).join('\n');
-  const groupLine = `complete -c librarium -n '__fish_seen_subcommand_from run' -s g -l group -a '${GROUP_NAMES.join(' ')}'`;
+  const groupLine = `complete -c librarium -n '__fish_seen_subcommand_from ${[
+    ...GROUP_AWARE_COMMANDS,
+  ].join(' ')}' -s g -l group -a '${GROUP_NAMES.join(' ')}'`;
 
   return `# librarium fish completions. Install:
 #   librarium completions fish > ~/.config/fish/completions/librarium.fish

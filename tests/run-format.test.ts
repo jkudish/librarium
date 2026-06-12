@@ -10,6 +10,7 @@ import {
   formatRunSummary,
   hyperlink,
   isColorEnabled,
+  sanitizeForTerminal,
   shortenHomePath,
   truncateAnsi,
 } from '../src/commands/run-format.js';

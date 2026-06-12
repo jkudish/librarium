@@ -21,7 +21,7 @@ import {
   type PostDispatchResult,
   type RunOptions,
 } from './run.js';
-import { hyperlink } from './run-format.js';
+import { dimText, hyperlink, sanitizeForTerminal } from './run-format.js';
 
 /**
  * `librarium answer` - a grounded, cited answer synthesized from a fan-out.
@@ -121,13 +121,21 @@ export async function synthesizeAnswer(
     return undefined;
   }
 
-  // Persist answer.md (answer body + numbered source list).
+  // Persist answer.md (answer body + numbered source list). We always write it,
+  // even when citations look off, so the research is never lost.
   const answerMarkdown = renderAnswerMarkdown(
     query,
     synthesis.text,
     answerSources,
   );
   safeWriteFile(join(outputDir, 'answer.md'), answerMarkdown);
+
+  // Fail-open citation sanity check: warn (do not retry) on out-of-range or
+  // missing citations so a bad synthesis is visible without losing the answer.
+  for (const warning of citationWarnings(synthesis.text, answerSources.length)) {
+    printLine('');
+    printLine(dimText(`  ! ${warning}`, color));
+  }
 
   // Print the rendered answer, then a hyperlinked numbered source list.
   printRenderedAnswer(printLine, synthesis.text, answerSources, color);
@@ -176,6 +184,53 @@ async function runSynthesis(
   return { provider: client.provider, model: client.model, text };
 }
 
+/**
+ * Inspect the synthesized answer's inline [n] citations against the available
+ * source count. Returns human-readable warnings (never throws, never retries):
+ * - any bracket index outside 1..sourceCount is flagged as invalid
+ * - if sources exist but the answer cites none, that is flagged too
+ * Returns an empty array when citations look fine or no sources were extracted.
+ */
+export function citationWarnings(
+  answer: string,
+  sourceCount: number,
+): string[] {
+  if (sourceCount <= 0) return [];
+
+  const indices: number[] = [];
+  // Match [1], [12], etc. — a bracketed run of digits.
+  const re = /\[(\d+)\]/g;
+  let match: RegExpExecArray | null = re.exec(answer);
+  while (match !== null) {
+    indices.push(Number.parseInt(match[1] as string, 10));
+    match = re.exec(answer);
+  }
+
+  const warnings: string[] = [];
+
+  if (indices.length === 0) {
+    warnings.push(
+      `the answer cites no sources, but ${sourceCount} ${
+        sourceCount === 1 ? 'source is' : 'sources are'
+      } available; treat its grounding with caution`,
+    );
+    return warnings;
+  }
+
+  const invalid = [...new Set(indices)]
+    .filter((index) => index < 1 || index > sourceCount)
+    .sort((a, b) => a - b);
+  if (invalid.length > 0) {
+    warnings.push(
+      `the answer cites ${
+        invalid.length === 1 ? 'an invalid source index' : 'invalid source indices'
+      } [${invalid.join('], [')}] outside the 1..${sourceCount} range`,
+    );
+  }
+
+  return warnings;
+}
+
 /** Render the answer through markdown-ansi and append a numbered, hyperlinked
  * source list. Width matches the run summary's stream. */
 function printRenderedAnswer(
@@ -195,9 +250,36 @@ function printRenderedAnswer(
     printLine('');
     printLine('  Sources');
     for (const source of sources) {
-      const label = source.title ? source.title : source.url;
-      const linked = hyperlink(label, source.url, color);
-      printLine(`  [${source.index}] ${linked}`);
+      const rawLabel = source.title ? source.title : source.url;
+      printLine(`  [${source.index}] ${renderSourceLink(rawLabel, source.url, color)}`);
     }
   }
+}
+
+/** Schemes safe to make clickable from provider-supplied URLs. Anything else
+ * (javascript:, data:, file:, etc.) is rendered as sanitized plain text. */
+const CLICKABLE_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+
+/**
+ * Render one source as a terminal hyperlink, but ONLY when the provider-supplied
+ * URL uses a known-safe scheme. The display label is always sanitized of
+ * control bytes; for unsafe or unparseable URLs we emit sanitized plain text so
+ * nothing clickable points at a dangerous scheme.
+ */
+export function renderSourceLink(
+  label: string,
+  url: string,
+  color: boolean,
+): string {
+  const safeLabel = sanitizeForTerminal(label);
+  let scheme: string | undefined;
+  try {
+    scheme = new URL(url).protocol;
+  } catch {
+    scheme = undefined;
+  }
+  if (scheme && CLICKABLE_SCHEMES.has(scheme.toLowerCase())) {
+    return hyperlink(safeLabel, url, color);
+  }
+  return safeLabel;
 }
