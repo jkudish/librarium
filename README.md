@@ -2,13 +2,67 @@
   <img src="art/gh-og.png" alt="Librarium" width="100%" />
 </p>
 
-# librarium
+<h1 align="center">librarium</h1>
 
-Fan out research queries to multiple search and deep-research APIs in parallel.
+<p align="center"><strong>The meta harness for research queries.</strong></p>
 
-Inspired by Aaron Francis' [counselors](https://github.com/aarondfrancis/counselors), librarium applies the same fan-out pattern to search APIs. Where counselors fans out prompts to multiple LLM CLIs, librarium fans out research queries to search engines, AI-grounded search, and deep-research APIs -- collecting, normalizing, and deduplicating results into structured output.
+<p align="center">
+  <a href="https://www.npmjs.com/package/librarium"><img src="https://img.shields.io/npm/v/librarium?color=cb3837&label=npm" alt="npm version" /></a>
+  <a href="https://github.com/jkudish/librarium/actions/workflows/ci.yml"><img src="https://github.com/jkudish/librarium/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
+  <a href="https://github.com/jkudish/librarium/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/librarium?color=blue" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/node/v/librarium?color=5fa04e" alt="Node >= 20.12" />
+</p>
 
-Librarium is both a **CLI** and an **embeddable library**: `import { dispatch } from 'librarium/core'` gives you the same provider adapters and fan-out dispatcher as in-memory structured results, with no filesystem or Node-only dependencies -- it runs in Cloudflare Workers and other edge runtimes. See [Library Usage](#library-usage-librariumcore).
+<p align="center">
+  <a href="https://librarium.agentsy.build"><strong>Website</strong></a> &nbsp;·&nbsp;
+  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#commands">Commands</a> &nbsp;·&nbsp;
+  <a href="#library-usage-librariumcore">Library</a> &nbsp;·&nbsp;
+  <a href="#using-with-ai-agents">Agents</a>
+</p>
+
+<p align="center">
+  <img src="art/demo.gif" alt="librarium fanning out a query to multiple providers, resolving the live table, and printing the deduped summary" width="100%" />
+</p>
+
+## What it is
+
+Ask once. Librarium fans your query out to search engines, AI-grounded answers, and deep-research APIs **in parallel**, then merges everything into one structured output -- deduplicating sources across providers and ranking them by how often they were cited.
+
+Inspired by Aaron Francis' [counselors](https://github.com/aarondfrancis/counselors), librarium applies the same fan-out pattern to search. Where counselors fans out prompts to multiple LLM CLIs, librarium fans out research queries to search engines, AI-grounded search, and deep-research APIs -- collecting, normalizing, and deduplicating results into structured output.
+
+Librarium is both a **CLI** and an **embeddable library**: `import { dispatch } from 'librarium/core'` gives you the same provider adapters and fan-out dispatcher with in-memory structured results, no filesystem or Node-only dependencies -- it runs in Cloudflare Workers and other edge runtimes. See [Library Usage](#library-usage-librariumcore).
+
+The full docs live at **[librarium.agentsy.build](https://librarium.agentsy.build)**.
+
+## Quick Start
+
+```bash
+# Install (requires Node.js >= 20.12)
+npm install -g librarium
+
+# Auto-configure: discovers API keys from your environment and enables matching providers
+librarium init --auto
+
+# Fan out a research query across providers (live results table)
+librarium run "PostgreSQL connection pooling best practices"
+
+# Or get one grounded, cited answer synthesized from the results
+librarium answer "what changed in postgres 17 logical replication"
+```
+
+That's it. Output lands in a timestamped run directory you can read, browse, or feed to a pipeline. Run `librarium` with no arguments for an interactive wizard. See the [full command reference](#commands) and [more install methods](#installation) below.
+
+## Features
+
+- **Live fan-out table** -- every provider resolves in place with timing, source counts, and reported cost. Slow ones get highlighted; failures fall back to a configured backup.
+- **Grounded answers** -- [`librarium answer`](#answer) fans out, then synthesizes one cited answer from what actually came back. Every claim maps to a real source.
+- **Reports for humans and machines** -- a tabbed [HTML report](#html) for reading, [`results.jsonl`](#jsonl) with full content for pipelines, and a [browsable run directory](#browse) for everything else.
+- **Tier-tuned queries** -- [`--refine`](#refine) rewrites your query three ways with one LLM call: a brief for deep research, a question for AI answers, keywords for raw search.
+- **Async deep research** -- submit long-running jobs and walk away. [`status --wait --retrieve`](#status) collects the reports when they land.
+- **Built for agents** -- an [agent skill](#option-1-claude-code-skill-recommended), an [MCP server](#option-2-mcp-server), and an [embeddable edge-safe core](#library-usage-librariumcore). Your agents fan out, browse, and cite without screen-scraping a terminal.
+
+Plus provider groups, automatic fallbacks, and custom providers from npm or local scripts.
 
 ## Installation
 
@@ -56,22 +110,19 @@ librarium upgrade
 
 Auto-detects your install method (npm, pnpm, yarn, Homebrew, standalone) and runs the correct upgrade command.
 
-## Quick Start
+### More recipes
 
 ```bash
-# Auto-configure (discovers API keys from environment)
-librarium init --auto
-
-# Run a research query
-librarium run "PostgreSQL connection pooling best practices"
-
-# Use a specific group
+# Use a specific provider group
 librarium run "React Server Components" --group quick
 
-# Check async deep research status
+# Synthesize one cited answer instead of a raw run
+librarium answer "what changed in postgres 17 logical replication"
+
+# Check / wait on async deep research
 librarium status --wait
 
-# Or just run `librarium` with no arguments for an interactive wizard
+# Run `librarium` with no arguments for an interactive wizard
 librarium
 ```
 
@@ -140,7 +191,7 @@ Providers are categorized into four tiers based on their capabilities, latency, 
 
 The `llm` tier is deliberately kept apart from the grounded tiers. Grounded providers earn their place in the source tallies by citing the web; ungrounded LLMs do not, so librarium never silently folds them into a grounded run. `report.tier === 'llm'` rows render a dim `ungrounded` in place of the source count, and the dedupe pipeline, `sources.json`, and report source totals are completely unaffected by their presence. Use the built-in `llm` group (`--group llm`) to run all four at once.
 
-**Opt-in, never auto-enabled.** Several llm-tier providers share an API key with their grounded counterparts (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; Claude uses `ANTHROPIC_API_KEY`). To keep a plain `librarium run` — which dispatches every *enabled* provider — from silently calling an ungrounded model, `init` treats the llm tier specially:
+**Opt-in, never auto-enabled.** Several llm-tier providers share an API key with their grounded counterparts (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; Claude uses `ANTHROPIC_API_KEY`). To keep a plain `librarium run` -- which dispatches every *enabled* provider -- from silently calling an ungrounded model, `init` treats the llm tier specially:
 
 - `librarium init --auto` **does not** enable llm-tier providers, even when their key is present. It prints them as found-but-ungrounded with a hint to opt in.
 - Interactive `librarium init` **lists** the llm-tier providers but leaves them **unchecked** (with an `[ungrounded]` marker), so you must tick them deliberately.
@@ -1157,18 +1208,18 @@ To research a topic, run:
   librarium run "<query>" --group <group>
 
 Groups:
-  quick          — Fast AI-grounded answers (seconds)
-  deep           — Thorough async research (minutes)
-  fast           — Quick results from multiple tiers
-  comprehensive  — Deep + AI-grounded combined
-  llm            — Ungrounded LLM baseline / contrast (no citations)
-  all            — All 20 grounded providers (excludes the llm tier)
+  quick          -- Fast AI-grounded answers (seconds)
+  deep           -- Thorough async research (minutes)
+  fast           -- Quick results from multiple tiers
+  comprehensive  -- Deep + AI-grounded combined
+  llm            -- Ungrounded LLM baseline / contrast (no citations)
+  all            -- All 20 grounded providers (excludes the llm tier)
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
-  summary.md     — Synthesized overview with stats
-  sources.json   — Deduplicated citations ranked by frequency
-  {provider}.md  — Per-provider detailed results
-  run.json       — Machine-readable manifest
+  summary.md     -- Synthesized overview with stats
+  sources.json   -- Deduplicated citations ranked by frequency
+  {provider}.md  -- Per-provider detailed results
+  run.json       -- Machine-readable manifest
 
 For async deep research, check status with:
   librarium status --wait
@@ -1186,7 +1237,7 @@ Add to your project's `CLAUDE.md` for project-scoped research:
 Use `librarium` for research queries. It's installed globally.
 - Quick lookups: `librarium run "query" --group quick`
 - Deep research: `librarium run "query" --group deep --mode sync`
-- Results land in `./agents/librarium/` — read `summary.md` first, then `sources.json` for citations
+- Results land in `./agents/librarium/` -- read `summary.md` first, then `sources.json` for citations
 ```
 
 ### 7-Phase Research Workflow
@@ -1203,7 +1254,7 @@ The skill guides agents through:
 
 ## Publishing
 
-The release workflow at `.github/workflows/release.yml` handles npm publishing via [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (GitHub Actions OIDC) — no token secret required. The trusted publisher is configured in the package settings on npmjs.com (repo `jkudish/librarium`, workflow `release.yml`).
+The release workflow at `.github/workflows/release.yml` handles npm publishing via [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (GitHub Actions OIDC) -- no token secret required. The trusted publisher is configured in the package settings on npmjs.com (repo `jkudish/librarium`, workflow `release.yml`).
 
 ## Sponsoring
 
