@@ -16,6 +16,7 @@ import { registerRefineCommand } from './commands/refine.js';
 import { registerRunCommand } from './commands/run.js';
 import { registerStatusCommand } from './commands/status.js';
 import { registerUpgradeCommand } from './commands/upgrade.js';
+import { registerUsageCommand } from './commands/usage.js';
 import { VERSION } from './constants.js';
 
 const program = new Command();
@@ -30,6 +31,7 @@ program
 registerRunCommand(program);
 registerAnswerCommand(program);
 registerStatusCommand(program);
+registerUsageCommand(program);
 registerBrowseCommand(program);
 registerHtmlCommand(program);
 registerJsonlCommand(program);

@@ -11,6 +11,7 @@ import type {
   ProviderResult,
   ProviderUsage,
 } from '../types.js';
+import { BUDGET_SKIP_REASON, type BudgetTracker } from './budget.js';
 import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
 
@@ -27,6 +28,15 @@ export interface DispatchOptions {
    * Providers receive the variant for their tier, falling back to `query`.
    */
   tierQueries?: Partial<Record<Provider['tier'], string>>;
+  /**
+   * Optional runtime spend circuit breaker. When supplied, each provider's
+   * API-reported cost is folded in as results arrive; once the accumulated
+   * total crosses the budget, providers that have not yet started are skipped
+   * with a budget reason. In-flight requests are allowed to finish (aborting
+   * mid-flight is provider-API-hostile). Additive and edge-safe: omit it and
+   * dispatch behaves exactly as before.
+   */
+  budget?: BudgetTracker;
 }
 
 export interface DispatchResult {
@@ -38,7 +48,8 @@ export interface DispatchResult {
 export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchResult> {
-  const { config, providerIds, query, mode, credentials, onProgress } = options;
+  const { config, providerIds, query, mode, credentials, onProgress, budget } =
+    options;
   const queryForTier = (tier: Provider['tier']): string =>
     options.tierQueries?.[tier] ?? query;
   const limit = pLimit(config.defaults.maxParallel);
@@ -116,6 +127,13 @@ export async function dispatch(
       return null;
     }
 
+    // Fallbacks are API calls too: once the cost budget is exhausted, a
+    // failed primary must not launch its backup.
+    if (budget?.exceeded()) {
+      recordBudgetSkip(fallbackId, fallbackProvider.tier, id);
+      return null;
+    }
+
     // Don't use a fallback that's already running as a primary in this dispatch
     if (providerIds.includes(fallbackId)) return null;
 
@@ -135,6 +153,48 @@ export async function dispatch(
     });
 
     return executeFallback(fallbackId, id, fallbackProvider);
+  }
+
+  // Fold a freshly produced report's reported cost into the budget (if any).
+  // Returns nothing; the tracker is mutated in place.
+  function recordBudget(report: ProviderReport): void {
+    if (budget) budget.record(report.usage);
+  }
+
+  // Emit a budget-skipped report+result for a provider whose start was
+  // suppressed because the accumulated cost crossed the budget.
+  function recordBudgetSkip(
+    id: string,
+    tier: Provider['tier'],
+    fallbackFor?: string,
+  ): void {
+    results.push({
+      provider: id,
+      tier,
+      status: 'skipped',
+      text: '',
+      sourceUrls: [],
+      citations: [],
+      durationMs: 0,
+      error: BUDGET_SKIP_REASON,
+      ...(fallbackFor ? { fallbackFor } : {}),
+    });
+    const report: ProviderReport = {
+      id,
+      tier,
+      status: 'skipped',
+      durationMs: 0,
+      wordCount: 0,
+      citationCount: 0,
+      outputFile: '',
+      metaFile: '',
+      error: BUDGET_SKIP_REASON,
+      ...(fallbackFor ? { fallbackFor } : {}),
+    };
+    reports.push(report);
+    // No progress emit: skipped reports are rendered once by the caller's
+    // final skipped-report pass (and by resolveRemaining in live mode), so
+    // emitting here would double-print them in non-live output.
   }
 
   const tasks = providerIds.map((id) =>
@@ -191,6 +251,16 @@ export async function dispatch(
         return;
       }
 
+      // Budget circuit breaker: once the accumulated API-reported cost has
+      // crossed the budget, do not launch this provider. This check runs at the
+      // moment the scheduler hands the task a slot (after earlier providers'
+      // results have been recorded), so not-yet-started providers are skipped
+      // while in-flight requests are left to finish.
+      if (budget?.exceeded()) {
+        recordBudgetSkip(id, provider.tier);
+        return;
+      }
+
       onProgress?.({ providerId: id, event: 'started' });
 
       // For deep-research providers in async/mixed mode, use submit
@@ -215,12 +285,14 @@ export async function dispatch(
             results.push(structured);
             const report = createReport(id, provider.tier, structured);
             reports.push(report);
+            recordBudget(report);
 
             if (result.error) {
               onProgress?.({ providerId: id, event: 'error', report });
               const fallbackReport = await tryFallback(id, report);
               if (fallbackReport) {
                 reports.push(fallbackReport);
+                recordBudget(fallbackReport);
                 if (fallbackReport.status === 'success') {
                   onProgress?.({
                     providerId: fallbackReport.id,
@@ -287,6 +359,7 @@ export async function dispatch(
         const report = createReport(id, provider.tier, structured);
 
         reports.push(report);
+        recordBudget(report);
 
         // If provider returned an error result (e.g. 401/403), attempt fallback
         if (result.error) {
@@ -294,6 +367,7 @@ export async function dispatch(
           const fallbackReport = await tryFallback(id, report);
           if (fallbackReport) {
             reports.push(fallbackReport);
+            recordBudget(fallbackReport);
             if (fallbackReport.status === 'success') {
               onProgress?.({
                 providerId: fallbackReport.id,
@@ -341,6 +415,7 @@ export async function dispatch(
         const fallbackReport = await tryFallback(id, errorReport);
         if (fallbackReport) {
           reports.push(fallbackReport);
+          recordBudget(fallbackReport);
           if (fallbackReport.status === 'success') {
             onProgress?.({
               providerId: fallbackReport.id,

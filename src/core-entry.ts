@@ -27,6 +27,7 @@ export * from './adapters/serpapi.js';
 export * from './adapters/tavily.js';
 export * from './adapters/you-research.js';
 export * from './constants.js';
+export * from './core/budget.js';
 export * from './core/credentials.js';
 export * from './core/dispatcher.js';
 export * from './core/http-client.js';

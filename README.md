@@ -165,6 +165,8 @@ librarium run <query> [options]
 | `-o, --output <dir>` | Output base directory |
 | `--parallel <n>` | Max parallel requests |
 | `--timeout <n>` | Timeout per provider in seconds |
+| `--max-cost <usd>` | Stop launching providers once API-reported cost crosses this budget (see [Spend guardrails](#spend-guardrails)) |
+| `-y, --yes` | Skip the deep-research pre-flight confirm |
 | `--json` | Output `run.json` to stdout |
 | `--refine` | Rewrite the query into tier-tuned variants with one LLM call before dispatch |
 | `--html` | Generate a self-contained `report.html` in the run directory |
@@ -253,6 +255,26 @@ $ librarium answer "what changed in postgres 17 logical replication"
 ```
 
 The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. (`report.html` / `results.jsonl` regeneration does not yet include `answer.md`, and the interactive wizard does not yet offer synthesis -- both are follow-ups.)
+### Spend guardrails
+
+Two opt-in guardrails help avoid surprise spend on large fan-outs.
+
+**Deep-research pre-flight confirm.** When a run would dispatch three or more deep-research-tier providers, an interactive terminal shows a confirmation first, listing the providers and warning that deep research takes minutes and bills per call. Pass `-y, --yes` to skip it. Non-TTY runs (pipes, CI) never prompt and are never refused, so scripts never hang. The wizard's own confirm counts as consent, so running through the wizard never double-prompts.
+
+**Cost budget (`--max-cost <usd>` or `defaults.maxCostUsd`).** A runtime circuit breaker, not an estimator. As provider results arrive, librarium accumulates the cost each provider's API actually reported. Once the accumulated total crosses the budget, providers that have not started yet are skipped (shown as `skipped` in the table and `run.json`, with a budget reason); in-flight requests are allowed to finish, because aborting a request mid-flight is hostile to most provider APIs and you would be billed anyway. The flag wins over the config key. When the breaker trips, the summary adds a line like:
+
+```
+  ▸ budget reached: $0.48 reported of $0.50 budget, skipped 3 providers
+```
+
+#### What counts toward the budget
+
+The budget is honest, not predictive. Only costs an API actually reports count toward it. A provider that reports no cost contributes `0`, so the accumulated total is always a lower bound on real spend, never an estimate from a pricing table. That has two consequences worth understanding:
+
+- Providers that report nothing can run "for free" as far as the breaker is concerned, even though they may cost real money. The budget cannot stop what it cannot see.
+- Deep-research costs land at *retrieval* (when you run `librarium status --wait`), long after the dispatch that submitted them has returned. Those async costs cannot be pre-metered and so cannot be enforced by `--max-cost` at submit time.
+
+Use `--max-cost` as a backstop against runaway synchronous fan-outs, not as a hard billing cap.
 
 ### Interactive wizard
 
@@ -367,6 +389,38 @@ Retrieved results render with the same table line format as `run`, with the outp
 
 ```
   ✓ openai-deep   deep-research     95.0s    14 sources   openai-deep.md, 2310 words
+```
+
+### `usage`
+
+Aggregate API-reported cost and tokens across past runs.
+
+```bash
+librarium usage [options]
+```
+
+| Flag | Description |
+|---|---|
+| `--days <n>` | Only include runs from the last N days (filtered by manifest timestamp) |
+| `--json` | Output JSON |
+| `-o, --output <dir>` | Output base directory |
+
+`usage` walks the `run.json` manifests under the output base directory and totals up cost and tokens per provider, plus a run count and date range. As with the run summary, only API-reported costs are counted (providers that report nothing contribute `0`), so figures are honest lower bounds, never pricing-table estimates. The output notes how many runs had no reported usage.
+
+```
+$ librarium usage --days 30
+
+Usage (last 30 days):
+
+  provider       cost  tokens  runs
+  -----------  ------  ------  ----
+  openai-deep   $0.50    5.0k     1
+  exa          $0.020    1.5k     1
+
+  runs: 2
+  total reported cost: $0.52
+  date range: 2026-01-14 15:58 to 2026-01-14 16:00
+  1 of 2 runs had no reported usage
 ```
 
 ### `ls`
@@ -593,6 +647,8 @@ Each layer overrides the previous:
 - `trustedProviderIds`: union + dedupe across global and project
 - `groups`: project overrides global group names on conflict
 
+The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the runtime circuit breaker described in [Spend guardrails](#spend-guardrails)). The `--max-cost` flag wins over it. Omit it for no limit.
+
 ### Global Config Example
 
 ```json
@@ -604,7 +660,8 @@ Each layer overrides the previous:
     "timeout": 30,
     "asyncTimeout": 1800,
     "asyncPollInterval": 10,
-    "mode": "mixed"
+    "mode": "mixed",
+    "maxCostUsd": 0.5
   },
   "providers": {
     "perplexity-sonar-pro": {
