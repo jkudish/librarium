@@ -4,6 +4,7 @@ import { registerCleanupCommand } from './commands/cleanup.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerGroupsCommand } from './commands/groups.js';
+import { registerHtmlCommand } from './commands/html.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerInstallSkillCommand } from './commands/install-skill.js';
 import { registerLsCommand } from './commands/ls.js';
@@ -24,6 +25,7 @@ program
 registerRunCommand(program);
 registerStatusCommand(program);
 registerBrowseCommand(program);
+registerHtmlCommand(program);
 registerLsCommand(program);
 registerGroupsCommand(program);
 registerInitCommand(program);

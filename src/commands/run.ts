@@ -27,6 +27,7 @@ import type {
   ProviderTier,
   RunManifest,
 } from '../types.js';
+import { writeHtmlReport } from './html-report.js';
 import { LiveRunTable } from './live-table.js';
 import {
   computeLineWidths,
@@ -34,6 +35,7 @@ import {
   formatProviderLine,
   formatRunSummary,
   isColorEnabled,
+  shortenHomePath,
 } from './run-format.js';
 
 export interface RunOptions {
@@ -45,6 +47,7 @@ export interface RunOptions {
   timeout?: number;
   json?: boolean;
   open?: boolean;
+  html?: boolean;
 }
 
 export interface RunOutcome {
@@ -68,7 +71,14 @@ export function registerRunCommand(program: Command): void {
     .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
     .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
     .option('--json', 'Output run.json to stdout')
-    .option('--open', 'Open the output directory when the run completes')
+    .option(
+      '--html',
+      'Generate a self-contained report.html in the run directory',
+    )
+    .option(
+      '--open',
+      'Open the output directory (or report.html with --html) when the run completes',
+    )
     .action(async (query: string, opts: RunOptions) => {
       await executeRun(query, opts);
     });
@@ -373,12 +383,20 @@ export async function executeRun(
         printLine(line);
       }
 
+      let reportPath: string | null = null;
+      if (opts.html) {
+        reportPath = writeHtmlReport(outputDir);
+        if (reportPath) {
+          printLine(`  \u25b8 ${shortenHomePath(reportPath)}`);
+        }
+      }
+
       if (opts.json) {
         console.log(JSON.stringify(manifest, null, 2));
       }
 
       if (opts.open && exitCode !== 2) {
-        openPath(outputDir);
+        openPath(reportPath ?? outputDir);
       }
 
       process.exitCode = exitCode;
@@ -392,7 +410,7 @@ export async function executeRun(
 }
 
 /** Open a file or directory with the platform opener. Failures are silent. */
-function openPath(target: string): void {
+export function openPath(target: string): void {
   const command =
     process.platform === 'darwin'
       ? 'open'

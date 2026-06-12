@@ -34,6 +34,7 @@
     "@clack/prompts": "^1.5.1",
     "@inquirer/prompts": "^7.0.0",
     "commander": "^13.0.0",
+    "marked": "^18.0.5",
     "ora": "^8.0.0",
     "p-limit": "^6.0.0",
     "strip-ansi": "^7.1.0",

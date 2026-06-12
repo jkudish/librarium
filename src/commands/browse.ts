@@ -12,6 +12,7 @@ import {
   type RunEntry,
   readRunEntry,
 } from './browse-data.js';
+import { writeHtmlReport } from './html-report.js';
 import { computeLineWidths, formatProviderLine } from './run-format.js';
 
 type NavResult = 'back' | 'quit';
@@ -82,7 +83,7 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
   );
 
   for (;;) {
-    type Choice = ProviderReport | 'summary' | 'back' | 'quit';
+    type Choice = ProviderReport | 'summary' | 'html' | 'back' | 'quit';
     const choice = await p.select<Choice>({
       message: entry.manifest.query,
       options: [
@@ -92,6 +93,7 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
           label: formatProviderLine(report, widths, false).trimStart(),
         })),
         { value: 'summary' as const, label: 'open summary.md' },
+        { value: 'html' as const, label: 'export HTML report' },
         { value: 'back' as const, label: 'back' },
         { value: 'quit' as const, label: 'quit' },
       ],
@@ -100,6 +102,15 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
     if (choice === 'back') return 'back';
     if (choice === 'summary') {
       openInPager(join(entry.dir, 'summary.md'));
+      continue;
+    }
+    if (choice === 'html') {
+      const reportPath = writeHtmlReport(entry.dir);
+      if (reportPath) {
+        p.log.success(`Wrote ${reportPath}`);
+      } else {
+        p.log.warn('Could not generate report (missing run.json).');
+      }
       continue;
     }
     const nav = await providerView(entry, choice);
