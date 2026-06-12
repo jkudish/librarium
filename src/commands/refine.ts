@@ -1,6 +1,12 @@
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { Config, ProviderTier } from '../types.js';
+import {
+  callWithCascade,
+  formatLlmHttpError,
+  type LlmClient,
+  resolveLlmClients,
+} from './llm-client.js';
 
 /**
  * One-shot LLM query transform for `run --refine` and `librarium refine`.
@@ -79,20 +85,8 @@ export function parseRefineResponse(text: string): RefinedQueries {
   };
 }
 
-interface RefineClient {
-  provider: 'openai' | 'gemini' | 'perplexity';
-  model: string;
-  apiKey: string;
-}
-
-const CLIENT_DEFAULTS: Record<
-  'openai' | 'gemini' | 'perplexity',
-  { envVar: string; model: string }
-> = {
-  openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
-  gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-2.5-flash' },
-  perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'sonar' },
-};
+/** A resolved refine client (alias of the shared LLM client type). */
+export type RefineClient = LlmClient;
 
 /**
  * Resolve the ordered list of usable refine clients. An explicit
@@ -105,23 +99,7 @@ export function resolveRefineClients(
   config: Config,
   env: NodeJS.ProcessEnv = process.env,
 ): RefineClient[] {
-  const preferred = config.refine?.provider;
-  const order: Array<'openai' | 'gemini' | 'perplexity'> = preferred
-    ? [preferred]
-    : ['openai', 'gemini', 'perplexity'];
-
-  const clients: RefineClient[] = [];
-  for (const provider of order) {
-    const { envVar, model } = CLIENT_DEFAULTS[provider];
-    const apiKey = env[envVar];
-    if (!apiKey) continue;
-    clients.push({
-      provider,
-      model: clients.length === 0 ? (config.refine?.model ?? model) : model,
-      apiKey,
-    });
-  }
-  return clients;
+  return resolveLlmClients(config.refine, env);
 }
 
 /** First usable refine client, or null. */
@@ -142,39 +120,7 @@ export function formatHttpError(
   status: number,
   body: string,
 ): string {
-  let detail = '';
-  try {
-    const parsed = JSON.parse(body) as {
-      error?: {
-        message?: string;
-        code?: unknown;
-        type?: string;
-        status?: string;
-      };
-      message?: string;
-    };
-    const err = parsed.error;
-    const code =
-      (typeof err?.code === 'string' ? err.code : undefined) ??
-      err?.type ??
-      err?.status ??
-      '';
-    const message = String(err?.message ?? parsed.message ?? '');
-    detail = [code, message ? `(${message})` : ''].filter(Boolean).join(' ');
-  } catch {
-    detail = body;
-  }
-  detail = detail.replace(/\s+/g, ' ').trim();
-  if (detail.length > 120) detail = `${detail.slice(0, 119)}\u2026`;
-  return `${label} refine call failed: HTTP ${status}${detail ? ` ${detail}` : ''}`;
-}
-
-async function safeBody(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return '';
-  }
+  return formatLlmHttpError(label, 'refine', status, body);
 }
 
 /**
@@ -182,98 +128,6 @@ async function safeBody(response: Response): Promise<string> {
  * failure (cascade to the next client, then fall back to the original query).
  */
 const REFINE_TIMEOUT_MS = 30_000;
-
-function refineSignal(): AbortSignal {
-  return AbortSignal.timeout(REFINE_TIMEOUT_MS);
-}
-
-async function callOpenAi(
-  client: RefineClient,
-  prompt: string,
-): Promise<string> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${client.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: client.model,
-      messages: [{ role: 'user', content: prompt }],
-      response_format: { type: 'json_object' },
-    }),
-    signal: refineSignal(),
-  });
-  if (!response.ok) {
-    throw new Error(
-      formatHttpError('OpenAI', response.status, await safeBody(response)),
-    );
-  }
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content ?? '';
-}
-
-async function callGemini(
-  client: RefineClient,
-  prompt: string,
-): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${client.model}:generateContent?key=${client.apiKey}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json' },
-    }),
-    signal: refineSignal(),
-  });
-  if (!response.ok) {
-    throw new Error(
-      formatHttpError('Gemini', response.status, await safeBody(response)),
-    );
-  }
-  const data = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-}
-
-async function callPerplexity(
-  client: RefineClient,
-  prompt: string,
-): Promise<string> {
-  const response = await fetch('https://api.perplexity.ai/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${client.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: client.model,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-    signal: refineSignal(),
-  });
-  if (!response.ok) {
-    throw new Error(
-      formatHttpError('Perplexity', response.status, await safeBody(response)),
-    );
-  }
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content ?? '';
-}
-
-function callClient(client: RefineClient, prompt: string): Promise<string> {
-  return client.provider === 'openai'
-    ? callOpenAi(client, prompt)
-    : client.provider === 'gemini'
-      ? callGemini(client, prompt)
-      : callPerplexity(client, prompt);
-}
 
 /**
  * Refine a query into tier-tuned variants. When the first provider fails
@@ -296,23 +150,16 @@ export async function refineQuery(
         : 'no refine provider available (set OPENAI_API_KEY, GEMINI_API_KEY, or PERPLEXITY_API_KEY)',
     );
   }
-  const prompt = `${REFINE_PROMPT}${query}`;
-  let lastError: unknown;
-  for (let index = 0; index < clients.length; index++) {
-    const client = clients[index] as RefineClient;
-    try {
-      const text = await callClient(client, prompt);
-      return parseRefineResponse(text);
-    } catch (e) {
-      lastError = e;
-      const next = clients[index + 1];
-      if (next) {
-        const message = e instanceof Error ? e.message : String(e);
-        onWarning?.(`${message}; trying ${next.provider}`);
-      }
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  const { result } = await callWithCascade<RefinedQueries>({
+    clients,
+    prompt: `${REFINE_PROMPT}${query}`,
+    action: 'refine',
+    timeoutMs: REFINE_TIMEOUT_MS,
+    json: true,
+    onWarning,
+    parse: parseRefineResponse,
+  });
+  return result;
 }
 
 export function registerRefineCommand(program: Command): void {

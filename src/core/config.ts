@@ -153,6 +153,7 @@ export function mergeConfigs(
     trustedProviderIds: [...global.trustedProviderIds],
     groups: { ...global.groups },
     refine: global.refine ? { ...global.refine } : undefined,
+    answer: global.answer ? { ...global.answer } : undefined,
   };
 
   if (project?.defaults) {
@@ -188,6 +189,10 @@ export function mergeConfigs(
 
   if (project?.refine) {
     merged.refine = { ...merged.refine, ...stripUndefined(project.refine) };
+  }
+
+  if (project?.answer) {
+    merged.answer = { ...merged.answer, ...stripUndefined(project.answer) };
   }
 
   if (cliFlags) {

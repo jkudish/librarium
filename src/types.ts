@@ -180,6 +180,14 @@ export const RefineConfigSchema = z.object({
 });
 export type RefineConfig = z.infer<typeof RefineConfigSchema>;
 
+// Answer (LLM grounded synthesis) settings. Same shape as refine; when unset,
+// the `answer` command falls back to the `refine` config, then to defaults.
+export const AnswerConfigSchema = z.object({
+  provider: z.enum(['openai', 'gemini', 'perplexity']).optional(),
+  model: z.string().optional(),
+});
+export type AnswerConfig = z.infer<typeof AnswerConfigSchema>;
+
 // Full config schema
 export const ConfigSchema = z.object({
   version: z.literal(1),
@@ -189,6 +197,7 @@ export const ConfigSchema = z.object({
   trustedProviderIds: z.array(z.string()).default([]),
   groups: z.record(z.array(z.string())).default({}),
   refine: RefineConfigSchema.optional(),
+  answer: AnswerConfigSchema.optional(),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -209,6 +218,7 @@ export const ProjectConfigSchema = z.object({
   trustedProviderIds: z.array(z.string()).optional(),
   groups: z.record(z.array(z.string())).optional(),
   refine: RefineConfigSchema.optional(),
+  answer: AnswerConfigSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -226,6 +236,11 @@ export interface RunManifest {
   exitCode: number;
   /** Tier-tuned query variants used for dispatch (run --refine). */
   refinedQueries?: Partial<Record<ProviderTier, string>>;
+  /**
+   * Grounded synthesis metadata (librarium answer). Records which LLM client
+   * produced answer.md. Absent for plain runs and when synthesis failed.
+   */
+  answer?: { provider: string; model: string };
 }
 
 // Per-provider report in run manifest

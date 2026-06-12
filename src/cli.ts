@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerAnswerCommand } from './commands/answer.js';
 import { registerBrowseCommand } from './commands/browse.js';
 import { registerCleanupCommand } from './commands/cleanup.js';
 import { registerCompletionsCommand } from './commands/completions.js';
@@ -27,6 +28,7 @@ program
   .version(VERSION);
 
 registerRunCommand(program);
+registerAnswerCommand(program);
 registerStatusCommand(program);
 registerBrowseCommand(program);
 registerHtmlCommand(program);

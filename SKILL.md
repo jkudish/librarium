@@ -69,6 +69,7 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium run <query> --group quick` | Fast AI-grounded search |
 | `librarium run <query> --group deep` | Deep research (async) |
 | `librarium run <query> --group all` | All providers |
+| `librarium answer <query>` | Fan out (default `quick`) and synthesize one grounded, cited answer to `answer.md` |
 | `librarium status` | Check async tasks |
 | `librarium status --wait --retrieve` | Wait and fetch async results |
 | `librarium run <query> --html --open` | Run, then open an HTML report |

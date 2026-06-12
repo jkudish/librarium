@@ -195,6 +195,48 @@ $ librarium run "postgres pooling best practices"
 
 Successes are green, failures red with the reason inline, async submissions amber. Durations of 10s or more are highlighted. When a provider's API reports usage, a dim suffix shows it on the line (`· 8.4k tok` or `· $0.012`), and the summary adds a `reported cost` line covering the providers that reported one -- costs are never estimated from pricing tables, only taken from API responses. Piped or CI output degrades to plain append-on-completion lines, and `--json` keeps stdout pure JSON (the table goes to stderr).
 
+### `answer`
+
+Fan out a query and synthesize one grounded, cited answer from the results.
+
+```bash
+librarium answer <query> [options]
+```
+
+`answer` runs the same fan-out as `run` (defaulting to the `quick` group, overridable with `-g`/`-p`/`-m` and the usual run flags), then makes one LLM synthesis call over the successful providers' content plus the deduped source list. The model is instructed to answer only from the findings, cite with inline `[n]` indices that map to the numbered source list, and state what is uncertain rather than invent. The answer is rendered in the terminal followed by a hyperlinked source list, and written to `answer.md` in the run directory.
+
+```
+$ librarium answer "what changed in postgres 17 logical replication"
+
+  fanning out to 4 providers
+
+  ✓ perplexity-sonar-pro   ai-grounded        2.0s    11 sources
+  ✓ gemini-grounded        ai-grounded        2.7s     8 sources
+  ✓ exa                    ai-grounded        1.6s    19 sources
+  ✓ brave-search           raw-search         0.8s    15 results
+
+  Postgres 17 makes logical replication materially easier to operate. Replication
+  slots and subscription state now survive a major-version upgrade with pg_upgrade,
+  so you no longer have to resync subscribers after an upgrade [1] [3]. It also adds
+  failover-aware slots that can follow a promoted standby, closing a long-standing
+  gap for high-availability setups [2].
+
+  What the findings do not settle is exact performance deltas under heavy write load;
+  the sources describe the features but not benchmarked throughput [4].
+
+  Sources
+  [1] PostgreSQL 17 Release Notes
+  [2] Logical replication failover in PG17
+  [3] pg_upgrade and replication slots
+  [4] What's new in Postgres 17
+
+  4 succeeded, 0 failed, 0 async pending in 2.9s
+  ▸ 38 unique sources after dedupe (53 total citations)
+  ▸ ~/research/agents/librarium/1781136000-what-changed-in-postgres-17/
+```
+
+The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. (`report.html` / `results.jsonl` regeneration does not yet include `answer.md`, and the interactive wizard does not yet offer synthesis -- both are follow-ups.)
+
 ### Interactive wizard
 
 Running `librarium` with no arguments in a terminal starts an interactive wizard: enter the query, pick a group (with provider counts and tier breakdowns as hints) or hand-pick providers, choose the mode, confirm, and the run executes with the live table. Afterwards it offers to open the results in the browser below. Non-TTY invocations print help instead, so scripts never hang.
