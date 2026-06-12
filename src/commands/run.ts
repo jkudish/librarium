@@ -28,6 +28,7 @@ import type {
   RunManifest,
 } from '../types.js';
 import { writeHtmlReport } from './html-report.js';
+import { writeJsonlReport } from './jsonl-report.js';
 import { LiveRunTable } from './live-table.js';
 import { type RefinedQueries, refineQuery } from './refine.js';
 import {
@@ -52,6 +53,7 @@ export interface RunOptions {
   json?: boolean;
   open?: boolean;
   html?: boolean;
+  jsonl?: boolean;
   refine?: boolean;
 }
 
@@ -83,6 +85,10 @@ export function registerRunCommand(program: Command): void {
     .option(
       '--html',
       'Generate a self-contained report.html in the run directory',
+    )
+    .option(
+      '--jsonl',
+      'Generate a machine-readable results.jsonl in the run directory',
     )
     .option(
       '--open',
@@ -456,6 +462,15 @@ export async function executeRun(
         if (reportPath) {
           printLine(
             `  \u25b8 ${hyperlink(shortenHomePath(reportPath), fileUrl(reportPath), color)}`,
+          );
+        }
+      }
+
+      if (opts.jsonl) {
+        const jsonlPath = writeJsonlReport(outputDir);
+        if (jsonlPath) {
+          printLine(
+            `  \u25b8 ${hyperlink(shortenHomePath(jsonlPath), fileUrl(jsonlPath), color)}`,
           );
         }
       }

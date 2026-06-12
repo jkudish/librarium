@@ -72,8 +72,10 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium status` | Check async tasks |
 | `librarium status --wait --retrieve` | Wait and fetch async results |
 | `librarium run <query> --html --open` | Run, then open an HTML report |
+| `librarium run <query> --jsonl` | Run, then write machine-readable results.jsonl |
 | `librarium browse` | Browse past runs interactively |
 | `librarium html [run-dir]` | Generate report.html for a run |
+| `librarium jsonl [run-dir]` | Generate results.jsonl for a run |
 | `librarium refine <goal>` | Tier-tuned query variants, no dispatch |
 | `librarium ls` | List providers and status |
 | `librarium doctor` | Health check providers |
