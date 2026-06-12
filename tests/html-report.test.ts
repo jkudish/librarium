@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  answerBody,
   enrichRetrievedReports,
   escapeHtml,
   generateHtmlReport,
@@ -368,6 +369,74 @@ describe('generateHtmlReport', () => {
     });
     expect(html).not.toContain('—');
   });
+
+  it('leads with an Answer section before the providers section when answer present', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest(),
+      providerContents: { 'exa.md': '# x\n\nprovider body' },
+      sources: SOURCES,
+      answer: {
+        content:
+          '# postgres pooling best practices\n\nUse PgBouncer [1].\n\n## Sources\n\n1. PgBouncer docs - https://example.com',
+        provider: 'openai',
+        model: 'gpt-5-mini',
+      },
+    });
+    expect(html).toContain('section class="answer"');
+    expect(html).toContain('Use PgBouncer');
+    expect(html).toContain('synthesized by openai / gpt-5-mini');
+    // Answer section comes before the providers tablist.
+    expect(html.indexOf('section class="answer"')).toBeLessThan(
+      html.indexOf('role="tablist"'),
+    );
+    // The echoed query heading and the trailing Sources list from answer.md are
+    // stripped, so they do not duplicate the report's own H1 / sources tab: the
+    // query only appears once as a heading (the report header), and the answer
+    // body itself does not open with a heading.
+    expect(
+      html.match(/<h1>postgres pooling best practices<\/h1>/g),
+    ).toHaveLength(1);
+    expect(html).toContain('<div class="answer-body"><p>Use PgBouncer');
+  });
+
+  it('omits the Answer section when no answer is provided', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: SOURCES,
+    });
+    expect(html).not.toContain('section class="answer"');
+  });
+
+  it('escapes raw HTML and neutralizes unsafe links in the answer (untrusted)', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: [],
+      answer: {
+        content:
+          '# q\n\n<img src=x onerror=alert(1)> and [evil](javascript:alert(1)) link',
+      },
+    });
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img');
+    expect(html).not.toContain('href="javascript:alert(1)"');
+  });
+});
+
+describe('answerBody', () => {
+  it('strips the leading query heading and trailing Sources section', () => {
+    const body = answerBody(
+      '# the query\n\nThe body text [1].\n\n## Sources\n\n1. A - https://a.test',
+    );
+    expect(body).toBe('The body text [1].');
+  });
+
+  it('passes content through untouched when structure is absent', () => {
+    expect(answerBody('just a body with no heading')).toBe(
+      'just a body with no heading',
+    );
+  });
 });
 
 describe('writeHtmlReport', () => {
@@ -399,6 +468,24 @@ describe('writeHtmlReport', () => {
     const html = readFileSync(reportPath as string, 'utf-8');
     expect(html).toContain('Exa findings');
     expect(html).toContain('PgBouncer docs');
+  });
+
+  it('picks up answer.md and run.json answer metadata automatically', () => {
+    const manifest = makeManifest({
+      answer: { provider: 'openai', model: 'gpt-5-mini' },
+    });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+    writeFileSync(join(dir, 'exa.md'), '# Exa findings\n\nhello');
+    writeFileSync(join(dir, 'sources.json'), JSON.stringify(SOURCES));
+    writeFileSync(
+      join(dir, 'answer.md'),
+      '# postgres pooling best practices\n\nUse PgBouncer [1].\n',
+    );
+
+    const html = readFileSync(writeHtmlReport(dir) as string, 'utf-8');
+    expect(html).toContain('section class="answer"');
+    expect(html).toContain('Use PgBouncer');
+    expect(html).toContain('synthesized by openai / gpt-5-mini');
   });
 
   it('fills in retrieved results for reports still marked async-pending', () => {

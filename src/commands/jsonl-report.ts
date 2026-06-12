@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeWriteFile } from '../core/fs-utils.js';
 import type { DeduplicatedSource, RunManifest } from '../types.js';
+import { readAnswerArtifact } from './answer-synthesis.js';
 import { readRunEntry } from './browse-data.js';
 import { enrichRetrievedReports } from './html-report.js';
 
@@ -19,6 +20,11 @@ export interface JsonlReportInput {
   /** Provider markdown contents keyed by report outputFile. */
   providerContents: Record<string, string>;
   sources: DeduplicatedSource[];
+  /**
+   * The synthesized grounded answer (answer.md body) when the run produced one.
+   * provider/model come from the manifest's additive `answer` metadata.
+   */
+  answer?: { content: string; provider?: string; model?: string };
 }
 
 /** Line 1: run header. */
@@ -35,6 +41,14 @@ interface RunLine {
   uniqueSources: number;
   totalCitations: number;
   refinedQueries?: Partial<Record<string, string>>;
+}
+
+/** Optional line for the grounded synthesized answer (librarium answer). */
+interface AnswerLine {
+  type: 'answer';
+  provider?: string;
+  model?: string;
+  content: string;
 }
 
 /** One line per provider. */
@@ -69,13 +83,15 @@ function replacer(_key: string, value: unknown): unknown {
 }
 
 /** Serialize one JSONL object, dropping undefined-valued keys. */
-function serializeLine(obj: RunLine | ResultLine | SourceLine): string {
+function serializeLine(
+  obj: RunLine | AnswerLine | ResultLine | SourceLine,
+): string {
   return JSON.stringify(obj, replacer);
 }
 
 /** Pure generator: manifest plus file contents in, full JSONL string out. */
 export function generateJsonlReport(input: JsonlReportInput): string {
-  const { manifest, providerContents, sources } = input;
+  const { manifest, providerContents, sources, answer } = input;
   const reports = manifest.providers;
 
   const succeeded = reports.filter((r) => r.status === 'success').length;
@@ -98,6 +114,18 @@ export function generateJsonlReport(input: JsonlReportInput): string {
       ? { refinedQueries: manifest.refinedQueries }
       : {}),
   };
+
+  // The grounded answer (when present) leads the body, right after the run
+  // header. provider/model come from the manifest's additive answer metadata.
+  const answerLine: AnswerLine | null =
+    answer && answer.content.trim().length > 0
+      ? {
+          type: 'answer',
+          provider: answer.provider,
+          model: answer.model,
+          content: answer.content,
+        }
+      : null;
 
   const resultLines: ResultLine[] = reports.map((report) => {
     const content =
@@ -135,6 +163,7 @@ export function generateJsonlReport(input: JsonlReportInput): string {
 
   const lines = [
     serializeLine(runLine),
+    ...(answerLine ? [serializeLine(answerLine)] : []),
     ...resultLines.map((l) => serializeLine(l)),
     ...sourceLines.map((l) => serializeLine(l)),
   ];
@@ -177,10 +206,13 @@ export function writeJsonlReport(runDir: string): string | null {
     }
   }
 
+  const answer = readAnswerArtifact(runDir, entry.manifest);
+
   const jsonl = generateJsonlReport({
     manifest: entry.manifest,
     providerContents,
     sources,
+    ...(answer ? { answer } : {}),
   });
   const reportPath = join(runDir, 'results.jsonl');
   safeWriteFile(reportPath, jsonl);

@@ -111,6 +111,19 @@ export interface ExecuteRunHooks {
   ) => Promise<PostDispatchResult | undefined>;
 }
 
+/**
+ * Strict parser for the shared --max-cost flag. Rejects anything that is not a
+ * finite, positive USD amount so a typo never silently disables the budget
+ * circuit breaker. Shared by `run` and `answer` so both validate identically.
+ */
+export function parseMaxCost(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError('must be a positive number of USD.');
+  }
+  return parsed;
+}
+
 export function registerRunCommand(program: Command): void {
   program
     .command('run')
@@ -129,13 +142,7 @@ export function registerRunCommand(program: Command): void {
     .option(
       '--max-cost <usd>',
       'Stop launching providers once API-reported cost crosses this budget (USD)',
-      (value: string) => {
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          throw new InvalidArgumentError('must be a positive number of USD.');
-        }
-        return parsed;
-      },
+      parseMaxCost,
     )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
     .option('--json', 'Output run.json to stdout')

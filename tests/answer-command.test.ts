@@ -1,8 +1,12 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { synthesizeAnswer } from '../src/commands/answer.js';
+import {
+  registerAnswerCommand,
+  synthesizeAnswer,
+} from '../src/commands/answer.js';
 import type { PostDispatchContext } from '../src/commands/run.js';
 import type {
   Config,
@@ -73,6 +77,32 @@ function makeContext(
   };
   return { context, lines };
 }
+
+describe('answer command --max-cost flag', () => {
+  function parseAnswer(args: string[]): { maxCost?: number } {
+    const program = new Command();
+    program.exitOverride();
+    registerAnswerCommand(program);
+    let parsed: { maxCost?: number } = {};
+    const cmd = program.commands.find((c) => c.name() === 'answer');
+    if (!cmd) throw new Error('answer command not registered');
+    // Capture the parsed options without executing the (async) action.
+    cmd.action(() => {});
+    program.parse(['node', 'librarium', 'answer', ...args]);
+    parsed = cmd.opts();
+    return parsed;
+  }
+
+  it('registers --max-cost and parses a positive USD amount', () => {
+    expect(parseAnswer(['some query', '--max-cost', '2.50']).maxCost).toBe(2.5);
+  });
+
+  it('rejects a non-positive or non-numeric --max-cost', () => {
+    expect(() => parseAnswer(['q', '--max-cost', '0'])).toThrow();
+    expect(() => parseAnswer(['q', '--max-cost', '-1'])).toThrow();
+    expect(() => parseAnswer(['q', '--max-cost', 'abc'])).toThrow();
+  });
+});
 
 describe('synthesizeAnswer', () => {
   let dir: string;

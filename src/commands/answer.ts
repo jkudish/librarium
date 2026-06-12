@@ -19,6 +19,7 @@ import {
   executeRun,
   type PostDispatchContext,
   type PostDispatchResult,
+  parseMaxCost,
   type RunOptions,
 } from './run.js';
 import { dimText, hyperlink, sanitizeForTerminal } from './run-format.js';
@@ -53,6 +54,11 @@ export function registerAnswerCommand(program: Command): void {
     .option('-o, --output <dir>', 'Output base directory')
     .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
     .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
+    .option(
+      '--max-cost <usd>',
+      'Stop launching providers once API-reported cost crosses this budget (USD)',
+      parseMaxCost,
+    )
     .option('--json', 'Output run.json to stdout')
     .option(
       '--refine',

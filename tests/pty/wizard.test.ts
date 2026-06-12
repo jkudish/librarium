@@ -33,9 +33,15 @@ describeMaybe(
       session = null;
     });
 
-    it('drives query → group → mode → confirm → run → decline browse', async () => {
-      // Bare invocation (no args) launches the wizard in a TTY.
-      session = spawnCli({ args: [], config: SINGLE });
+    it('drives query → group → mode → refine → synthesize → confirm → run → decline browse', async () => {
+      // Bare invocation (no args) launches the wizard in a TTY. A mock LLM key
+      // makes the refine + synthesize toggles appear (their gate is only key
+      // presence, not validity); we decline both so no network call happens.
+      session = spawnCli({
+        args: [],
+        config: SINGLE,
+        env: { OPENAI_API_KEY: 'mock-key' },
+      });
 
       // Query prompt.
       await session.waitForText('What do you want to research?');
@@ -53,6 +59,14 @@ describeMaybe(
 
       // Execution mode: accept the default (mixed).
       await session.waitForText('Execution mode');
+      session.write(KEY.ENTER);
+
+      // Refine toggle (shown because a mock LLM key is set): decline (default No).
+      await session.waitForText('Refine the query for each tier first?');
+      session.write(KEY.ENTER);
+
+      // Synthesize toggle (added after refine): decline (default No).
+      await session.waitForText('Synthesize a grounded answer afterwards?');
       session.write(KEY.ENTER);
 
       // Confirm: the summary line must name the smoke group (guards the
