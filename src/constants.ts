@@ -114,7 +114,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'gemini-deep',
   ],
   quick: [
-    'perplexity-sonar-pro',
     'gemini-grounded',
     'openrouter-online',
     'brave-answers',

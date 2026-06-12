@@ -351,9 +351,9 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 | Group | Providers | Use Case |
 |---|---|---|
 | `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Thorough async research |
-| `quick` | perplexity-sonar-pro, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
+| `quick` | gemini-grounded, openrouter-online, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
-| `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
+| `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
 | `all` | All 20 providers | Maximum coverage |
 
