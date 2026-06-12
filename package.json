@@ -31,6 +31,7 @@
     "lint:fix": "biome check --write src/ tests/"
   },
   "dependencies": {
+    "@clack/prompts": "^1.5.1",
     "@inquirer/prompts": "^7.0.0",
     "commander": "^13.0.0",
     "ora": "^8.0.0",

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { registerBrowseCommand } from './commands/browse.js';
 import { registerCleanupCommand } from './commands/cleanup.js';
 import { registerConfigCommand } from './commands/config.js';
 import { registerDoctorCommand } from './commands/doctor.js';
@@ -22,6 +23,7 @@ program
 
 registerRunCommand(program);
 registerStatusCommand(program);
+registerBrowseCommand(program);
 registerLsCommand(program);
 registerGroupsCommand(program);
 registerInitCommand(program);
@@ -31,7 +33,19 @@ registerCleanupCommand(program);
 registerUpgradeCommand(program);
 registerInstallSkillCommand(program);
 
-program.parseAsync(process.argv).catch((err: Error) => {
-  process.stderr.write(`Error: ${err.message}\n`);
-  process.exitCode = 1;
-});
+// Bare `librarium` in an interactive terminal launches the wizard. Non-TTY
+// bare invocations (pipes, CI) keep printing help so scripts never hang.
+const bareInvocation = process.argv.length <= 2;
+if (bareInvocation && process.stdout.isTTY && process.stdin.isTTY) {
+  import('./commands/wizard.js')
+    .then(({ runWizard }) => runWizard())
+    .catch((err: Error) => {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exitCode = 1;
+    });
+} else {
+  program.parseAsync(process.argv).catch((err: Error) => {
+    process.stderr.write(`Error: ${err.message}\n`);
+    process.exitCode = 1;
+  });
+}
