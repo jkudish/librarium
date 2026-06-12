@@ -202,7 +202,18 @@ Browse past runs and their provider results.
 librarium browse [-o <output-dir>]
 ```
 
-Pick a recent run (date, query, status tallies), see its providers rendered in the same table format, and expand any provider for an inline preview of its output. Actions: open the full file in `$PAGER` (fallback `less -R`), open the run's `summary.md`, export an HTML report, back, quit.
+Pick a recent run (date, query, status tallies) and see its providers rendered in the same table format. Selecting a provider (or the run's `summary.md`) opens the full document in a built-in fullscreen reader: markdown rendered with ANSI styling (bold headings, dim code, normalized bullets, clickable links) and hard-wrapped to the terminal width, re-wrapping on resize. Other actions: export an HTML report, back, quit.
+
+Reader key bindings:
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` or arrow down / up | scroll one line |
+| `space` / `PageDown` | next page |
+| `b` / `PageUp` | previous page |
+| `g` / `G` | jump to top / bottom |
+| `o` | open the raw file in `$PAGER` (fallback `less -R`) |
+| `q` / `escape` | back to the provider list |
 
 ### `html`
 
