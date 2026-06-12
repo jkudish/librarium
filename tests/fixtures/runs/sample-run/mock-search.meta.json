@@ -1,0 +1,30 @@
+{
+  "provider": "mock-search",
+  "tier": "raw-search",
+  "model": "mock-model-1",
+  "durationMs": 0,
+  "citationCount": 2,
+  "tokenUsage": {
+    "input": 100,
+    "output": 200
+  },
+  "usage": {
+    "inputTokens": 100,
+    "outputTokens": 200,
+    "totalTokens": 300
+  },
+  "citations": [
+    {
+      "url": "https://example.test/mock-search/0",
+      "title": "mock-search source 0",
+      "snippet": "Synthetic snippet 0 from mock-search.",
+      "provider": "mock-search"
+    },
+    {
+      "url": "https://example.test/mock-search/1",
+      "title": "mock-search source 1",
+      "snippet": "Synthetic snippet 1 from mock-search.",
+      "provider": "mock-search"
+    }
+  ]
+}

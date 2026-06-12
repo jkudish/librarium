@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "timestamp": 1700000000,
+  "slug": "pager-fixture-run",
+  "query": "pager fixture run",
+  "mode": "sync",
+  "outputDir": "/fixtures/sample-run",
+  "providers": [
+    {
+      "id": "mock-grounded",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 0,
+      "wordCount": 2404,
+      "citationCount": 3,
+      "outputFile": "mock-grounded.md",
+      "metaFile": "mock-grounded.meta.json",
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 200,
+        "totalTokens": 300
+      }
+    },
+    {
+      "id": "mock-search",
+      "tier": "raw-search",
+      "status": "success",
+      "durationMs": 0,
+      "wordCount": 208,
+      "citationCount": 2,
+      "outputFile": "mock-search.md",
+      "metaFile": "mock-search.meta.json",
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 200,
+        "totalTokens": 300
+      }
+    }
+  ],
+  "sources": {
+    "total": 5,
+    "unique": 5,
+    "file": "sources.json"
+  },
+  "asyncTasks": [],
+  "exitCode": 0
+}
