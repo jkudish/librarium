@@ -96,7 +96,7 @@ describe('generateHtmlReport', () => {
     expect(html).not.toContain('<title>a <b>');
   });
 
-  it('renders one details block per provider with the table summary', () => {
+  it('renders one tab row and one panel per provider plus a sources tab', () => {
     const manifest = makeManifest({
       providers: [
         makeReport(),
@@ -114,13 +114,99 @@ describe('generateHtmlReport', () => {
       providerContents: { 'exa.md': '# Findings\n\ncontent here' },
       sources: SOURCES,
     });
-    expect(html.match(/<details class="provider">/g)).toHaveLength(2);
+    // 2 providers + sources (the inline script also mentions role="tab")
+    expect(html.match(/<button class="row" role="tab"/g)).toHaveLength(3);
+    expect(html.match(/role="tabpanel"/g)).toHaveLength(3);
+    expect(html).toContain('role="tablist"');
     expect(html).toContain('<span class="pid">exa</span>');
     expect(html).toContain('<span class="tier">ai-grounded</span>');
     expect(html).toContain('25 sources');
-    expect(html).toContain('20 results'.replace('20 results', 'error'));
     expect(html).toContain('HTTP 401');
     expect(html).toContain('content here');
+    expect(html).not.toContain('<details');
+  });
+
+  it('selects the first successful provider by default and hides other panels', () => {
+    const manifest = makeManifest({
+      providers: [
+        makeReport({
+          id: 'brave-search',
+          tier: 'raw-search',
+          status: 'error',
+          error: 'HTTP 401',
+          outputFile: 'brave-search.md',
+        }),
+        makeReport(),
+      ],
+    });
+    const html = generateHtmlReport({
+      manifest,
+      providerContents: { 'exa.md': 'content' },
+      sources: SOURCES,
+    });
+    expect(html).toContain(
+      'id="tab-1" aria-controls="panel-1" aria-selected="true"',
+    );
+    expect(html).toContain(
+      'id="tab-0" aria-controls="panel-0" aria-selected="false"',
+    );
+    expect(html).toContain('id="panel-0" aria-labelledby="tab-0" hidden');
+    expect(html).toContain('id="panel-1" aria-labelledby="tab-1">');
+  });
+
+  it('keeps error reasons on one line with a full title attribute', () => {
+    const longError = `boom ${'x'.repeat(200)}`;
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        providers: [
+          makeReport({ status: 'error', error: longError, outputFile: '' }),
+        ],
+      }),
+      providerContents: {},
+      sources: [],
+    });
+    expect(html).toContain(`title="boom ${'x'.repeat(200)}"`);
+    expect(html).toContain('class="detail error-text"');
+    expect(html).toContain('\u2026');
+  });
+
+  it('puts the deduped sources in a hidden tab panel and keeps counts in the meta line', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: SOURCES,
+    });
+    expect(html).toContain(
+      'id="panel-sources" aria-labelledby="tab-sources" hidden',
+    );
+    expect(html).toContain(
+      '1 unique sources after dedupe (25 total citations)',
+    );
+    expect(html).toContain('<span class="pid">sources</span>');
+  });
+
+  it('includes the tab script and a noscript fallback that shows all panels', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: [],
+    });
+    expect(html).toContain('document.querySelectorAll(\'[role="tab"]\')');
+    expect(html).toContain('ArrowDown');
+    expect(html).toContain(
+      '<noscript><style>.panel[hidden] { display: block; }</style></noscript>',
+    );
+  });
+
+  it('shows the usage label in the row', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        providers: [makeReport({ usage: { costUsd: 0.012 } })],
+      }),
+      providerContents: {},
+      sources: [],
+    });
+    expect(html).toContain('<span class="usage">$0.012</span>');
   });
 
   it('shows a pending note for async-pending providers', () => {

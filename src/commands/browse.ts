@@ -13,7 +13,14 @@ import {
   readRunEntry,
 } from './browse-data.js';
 import { writeHtmlReport } from './html-report.js';
-import { computeLineWidths, formatProviderLine } from './run-format.js';
+import { openPath } from './run.js';
+import {
+  computeLineWidths,
+  fileUrl,
+  formatProviderLine,
+  hyperlink,
+  isColorEnabled,
+} from './run-format.js';
 
 type NavResult = 'back' | 'quit';
 
@@ -107,7 +114,14 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
     if (choice === 'html') {
       const reportPath = writeHtmlReport(entry.dir);
       if (reportPath) {
-        p.log.success(`Wrote ${reportPath}`);
+        p.log.success(
+          `Wrote ${hyperlink(reportPath, fileUrl(reportPath), isColorEnabled(process.stdout))}`,
+        );
+        const open = await p.confirm({
+          message: 'Open it in your browser?',
+          initialValue: true,
+        });
+        if (!p.isCancel(open) && open) openPath(reportPath);
       } else {
         p.log.warn('Could not generate report (missing run.json).');
       }

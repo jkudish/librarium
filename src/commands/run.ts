@@ -33,9 +33,11 @@ import { type RefinedQueries, refineQuery } from './refine.js';
 import {
   computeLineWidths,
   dimText,
+  fileUrl,
   formatFallbackNotice,
   formatProviderLine,
   formatRunSummary,
+  hyperlink,
   isColorEnabled,
   shortenHomePath,
 } from './run-format.js';
@@ -452,7 +454,9 @@ export async function executeRun(
       if (opts.html) {
         reportPath = writeHtmlReport(outputDir);
         if (reportPath) {
-          printLine(`  \u25b8 ${shortenHomePath(reportPath)}`);
+          printLine(
+            `  \u25b8 ${hyperlink(shortenHomePath(reportPath), fileUrl(reportPath), color)}`,
+          );
         }
       }
 

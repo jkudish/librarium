@@ -17,7 +17,9 @@ import { writeHtmlReport } from './html-report.js';
 import {
   computeLineWidths,
   dimText,
+  fileUrl,
   formatProviderLine,
+  hyperlink,
   isColorEnabled,
   type LineWidths,
 } from './run-format.js';
@@ -89,8 +91,12 @@ async function retrieveTask(
 
     // If an HTML report was already generated for this run, regenerate it so
     // the retrieved result fills in.
-    if (existsSync(join(dir, 'report.html'))) {
+    const reportPath = join(dir, 'report.html');
+    if (existsSync(reportPath)) {
       writeHtmlReport(dir);
+      console.log(
+        `  regenerated ${hyperlink(reportPath, fileUrl(reportPath), color)}`,
+      );
     }
 
     const words = result.content.split(/\s+/).filter(Boolean).length;

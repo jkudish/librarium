@@ -228,6 +228,24 @@ export function formatFallbackNotice(
   return `    ${paint(`↳ falling back to ${fallbackId}`, ANSI.yellow, color)}`;
 }
 
+/**
+ * OSC 8 terminal hyperlink. When enabled, emits
+ * ESC ] 8 ; ; url ESC backslash text ESC ] 8 ; ; ESC backslash so modern
+ * terminals make the text clickable; plain text otherwise.
+ */
+export function hyperlink(text: string, url: string, enabled: boolean): string {
+  if (!enabled) return text;
+  return `\u001b]8;;${url}\u001b\\${text}\u001b]8;;\u001b\\`;
+}
+
+/** file:// URL for an absolute path, percent-encoding each segment. */
+export function fileUrl(absolutePath: string): string {
+  return `file://${absolutePath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`;
+}
+
 /** Replace the home directory prefix with ~ for display. */
 export function shortenHomePath(
   path: string,
@@ -269,7 +287,13 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
   lines.push(
     `  ▸ ${input.uniqueSources} unique sources after dedupe (${input.totalCitations} total citations)`,
   );
-  lines.push(`  ▸ ${shortenHomePath(input.outputDir, input.home)}/`);
+  lines.push(
+    `  ▸ ${hyperlink(
+      `${shortenHomePath(input.outputDir, input.home)}/`,
+      fileUrl(input.outputDir),
+      input.color,
+    )}`,
+  );
   if (input.reportedCost && input.reportedCost.reporting > 0) {
     lines.push(
       `  ▸ reported cost: ${formatCost(input.reportedCost.totalUsd)} (${input.reportedCost.reporting} of ${input.reportedCost.providers} providers)`,
