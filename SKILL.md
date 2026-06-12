@@ -80,6 +80,8 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium ls` | List providers and status |
 | `librarium doctor` | Health check providers |
 | `librarium config` | Show resolved config |
+| `librarium cleanup [--days N] [--dry-run]` | Delete run dirs older than N days (default 30) |
+| `librarium clear [--dry-run] [-i] [--yes]` | Delete all run dirs (alias for `cleanup --all`); `-i` to pick interactively |
 
 ## Provider Tiers
 

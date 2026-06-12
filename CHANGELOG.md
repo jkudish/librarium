@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `librarium clear` and `librarium cleanup --all`: delete every run directory regardless of age (one implementation, two names). In a terminal `--all` shows an interactive confirm with run count and total size on disk before deleting; in a non-TTY context it refuses unless `--yes` is passed. `--dry-run` lists what would go (count, total size, oldest/newest) without deleting, and deletion reports a human-readable freed-space figure
+- `librarium clear -i` / `cleanup -i`: interactive multiselect of runs (date, query, size, pending-async marker) to delete exactly the chosen ones with a confirm. Runs with pending async tasks are flagged in the list hint and called out in the confirm, since deleting one orphans the server-side task handle
+- Cleanup safety guards: every candidate path is verified to be strictly inside the resolved output base dir before removal, and the command refuses to operate when the base dir resolves to your home directory or a filesystem root
 - Live per-provider results table for `librarium run`: each provider prints an aligned status line as it finishes (✓ success / ✗ error with reason / ◷ async-submitted), with tier, duration, and source/result counts, plus an indented `↳ falling back to …` notice when a fallback fires
 - Resolve-in-place rendering in interactive terminals: all provider rows print at fan-out with an animated spinner glyph and ticking elapsed time, then update in place as results arrive (non-TTY and NO_COLOR environments keep append-on-completion output)
 - End-of-run summary with `▸` unique-source and output-directory lines, and a `librarium status --wait` hint when async tasks are pending
