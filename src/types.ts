@@ -102,6 +102,8 @@ export interface ProviderMeta {
   source: ProviderSource;
   enabled: boolean;
   hasApiKey: boolean;
+  /** False when the provider has no entry in config (e.g. added after init). */
+  configured?: boolean;
 }
 
 // Config for a single provider

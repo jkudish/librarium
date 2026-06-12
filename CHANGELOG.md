@@ -22,8 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `librarium html [run-dir]`: regenerates the report for any existing run (default: most recent), also available as an "export HTML report" action in `browse`; `status --retrieve` regenerates an existing report.html so retrieved deep-research results fill in
 - Report styling matches the marketing site (inline CSS only): IBM Plex Mono and Geist via Google Fonts with swap fallbacks, white background, neutral text scale, amber accents, dark rounded code blocks. Markdown is rendered with `marked` (CLI-layer dependency) with raw HTML escaped so provider output cannot inject script; external links get `rel="noopener"`
 
+- `librarium ls` dims providers that have no entry in config (API Key shows "Not configured") and suggests `librarium init --auto` when builtins are missing; `librarium doctor` warns about builtin providers absent from config
+- `librarium run --open` now also works on Windows (`cmd /c start`)
+
 ### Changed
 - `librarium run --json` now keeps stdout pure JSON: all pretty/table output is routed to stderr in that mode
+
+### Fixed
+- README groups table said the `all` group covers 18 providers; there are 20 builtin adapters
 
 ## [0.2.0] - 2026-06-11
 

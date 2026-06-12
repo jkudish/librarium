@@ -38,7 +38,7 @@ export function registerInitCommand(program: Command): void {
               if (!existingConfig.providers[id]) {
                 console.log(`  [ ] ${displayName} — ${envVar} not found`);
               } else {
-                console.log(`  [~] ${displayName} — using existing config`);
+                console.log(`  [~] ${displayName}: using existing config`);
               }
             }
           }

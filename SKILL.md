@@ -71,6 +71,9 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium run <query> --group all` | All providers |
 | `librarium status` | Check async tasks |
 | `librarium status --wait --retrieve` | Wait and fetch async results |
+| `librarium run <query> --html --open` | Run, then open an HTML report |
+| `librarium browse` | Browse past runs interactively |
+| `librarium html [run-dir]` | Generate report.html for a run |
 | `librarium ls` | List providers and status |
 | `librarium doctor` | Health check providers |
 | `librarium config` | Show resolved config |

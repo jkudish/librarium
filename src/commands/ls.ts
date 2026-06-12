@@ -4,6 +4,7 @@ import {
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { dimText, isColorEnabled } from './run-format.js';
 
 export function registerLsCommand(program: Command): void {
   program
@@ -52,7 +53,8 @@ export function registerLsCommand(program: Command): void {
           ...meta.map((p) => p.source.length),
         );
         const enabledWidth = Math.max('Enabled'.length, 'Yes'.length);
-        const apiKeyWidth = Math.max('API Key'.length, 'Missing'.length);
+        const apiKeyWidth = Math.max('API Key'.length, 'Not configured'.length);
+        const color = isColorEnabled(process.stdout);
 
         // Table header
         const header = [
@@ -68,8 +70,15 @@ export function registerLsCommand(program: Command): void {
         console.log('-'.repeat(header.length));
 
         for (const p of meta) {
+          // Providers without a config entry (e.g. builtins added after the
+          // user last ran init) are listed but dimmed.
+          const configured = p.configured !== false;
           const enabled = p.enabled ? 'Yes' : 'No';
-          const apiKey = p.hasApiKey ? 'Set' : 'Missing';
+          const apiKey = p.hasApiKey
+            ? 'Set'
+            : configured
+              ? 'Missing'
+              : 'Not configured';
           const row = [
             p.id.padEnd(idWidth),
             p.displayName.padEnd(nameWidth),
@@ -78,7 +87,7 @@ export function registerLsCommand(program: Command): void {
             enabled.padEnd(enabledWidth),
             apiKey.padEnd(apiKeyWidth),
           ].join('  ');
-          console.log(row);
+          console.log(configured ? row : dimText(row, color));
         }
 
         console.log('');
@@ -86,9 +95,15 @@ export function registerLsCommand(program: Command): void {
         // Summary
         const enabledCount = meta.filter((p) => p.enabled).length;
         const keyCount = meta.filter((p) => p.hasApiKey).length;
+        const unconfigured = meta.filter((p) => p.configured === false).length;
         console.log(
           `${meta.length} providers, ${enabledCount} enabled, ${keyCount} with API keys`,
         );
+        if (unconfigured > 0) {
+          console.log(
+            `${unconfigured} provider(s) not in your config yet: run \`librarium init --auto\` to add them`,
+          );
+        }
       } catch (e) {
         console.error(e instanceof Error ? e.message : String(e));
         process.exitCode = 1;

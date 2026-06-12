@@ -114,6 +114,16 @@ export function registerDoctorCommand(program: Command): void {
 
         spinner.stop();
 
+        // Builtin providers with no entry in config at all: usually a config
+        // created before newer adapters shipped.
+        const missingFromConfig = providers
+          .filter(
+            (provider) =>
+              (provider.source ?? 'builtin') === 'builtin' &&
+              config.providers[provider.id] === undefined,
+          )
+          .map((provider) => provider.id);
+
         if (opts.json) {
           console.log(JSON.stringify(results, null, 2));
           return;
@@ -156,6 +166,13 @@ export function registerDoctorCommand(program: Command): void {
           (r) => r.connectivity === 'fail',
         ).length;
         console.log(`\n${passCount} passed, ${failCount} failed\n`);
+
+        if (missingFromConfig.length > 0) {
+          console.log(
+            `[WARN] ${missingFromConfig.length} builtin provider(s) missing from your config: ${missingFromConfig.join(', ')}`,
+          );
+          console.log('       Run `librarium init --auto` to add them.\n');
+        }
 
         if (failCount > 0) {
           process.exitCode = 1;

@@ -70,6 +70,9 @@ librarium run "React Server Components" --group quick
 
 # Check async deep research status
 librarium status --wait
+
+# Or just run `librarium` with no arguments for an interactive wizard
+librarium
 ```
 
 ## Providers
@@ -146,6 +149,8 @@ librarium run <query> [options]
 | `--parallel <n>` | Max parallel requests |
 | `--timeout <n>` | Timeout per provider in seconds |
 | `--json` | Output `run.json` to stdout |
+| `--html` | Generate a self-contained `report.html` in the run directory |
+| `--open` | Open the output directory (or `report.html` with `--html`) when the run completes |
 
 ```bash
 # Run with specific providers
@@ -157,6 +162,55 @@ librarium run "AI agent architectures" --group deep --mode sync
 # Fast results only
 librarium run "Node.js 22 features" --group fast
 ```
+
+In an interactive terminal, `run` shows a live per-provider results table. Every row appears at fan-out with a spinner and ticking elapsed time, then resolves in place as results arrive:
+
+```
+$ librarium run "postgres pooling best practices"
+
+  fanning out to 6 providers
+
+  ✓ perplexity-sonar-pro   ai-grounded        2.1s    12 sources
+  ✓ gemini-grounded        ai-grounded        3.4s     9 sources
+  ✓ exa                    ai-grounded        1.8s    25 sources
+  ✓ brave-search           raw-search         0.9s    20 results
+  ✗ tavily                 raw-search         0.4s   HTTP 401 Unauthorized
+    ↳ falling back to jina-search
+  ✓ jina-search            raw-search         0.7s     8 results   (fallback for tavily)
+  ◷ openai-deep            deep-research   submitted
+
+  5 succeeded, 0 failed, 1 async pending in 3.5s
+  ▸ 74 unique sources after dedupe (74 total citations)
+  ▸ ~/research/agents/librarium/1781136000-postgres-pooling-best-practices/
+
+  ◷ async tasks pending: run `librarium status --wait` to poll and retrieve
+```
+
+Successes are green, failures red with the reason inline, async submissions amber. Durations of 10s or more are highlighted. Piped or CI output degrades to plain append-on-completion lines, and `--json` keeps stdout pure JSON (the table goes to stderr).
+
+### Interactive wizard
+
+Running `librarium` with no arguments in a terminal starts an interactive wizard: enter the query, pick a group (with provider counts and tier breakdowns as hints) or hand-pick providers, choose the mode, confirm, and the run executes with the live table. Afterwards it offers to open the results in the browser below. Non-TTY invocations print help instead, so scripts never hang.
+
+### `browse`
+
+Browse past runs and their provider results.
+
+```bash
+librarium browse [-o <output-dir>]
+```
+
+Pick a recent run (date, query, status tallies), see its providers rendered in the same table format, and expand any provider for an inline preview of its output. Actions: open the full file in `$PAGER` (fallback `less -R`), open the run's `summary.md`, export an HTML report, back, quit.
+
+### `html`
+
+Generate a self-contained `report.html` for a run directory (default: the most recent run).
+
+```bash
+librarium html [run-dir] [--open]
+```
+
+The report contains the query, run metadata, the provider results table as expandable sections with each provider's rendered markdown, and the deduped source list with provider attribution. Provider markdown is HTML-escaped, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
 
 ### `status`
 
@@ -178,6 +232,12 @@ librarium status
 
 # Wait for completion then retrieve results
 librarium status --wait --retrieve
+```
+
+Retrieved results render with the same table line format as `run`, with the output file and word count appended:
+
+```
+  ✓ openai-deep   deep-research     95.0s    14 sources   openai-deep.md, 2310 words
 ```
 
 ### `ls`
@@ -269,7 +329,7 @@ Groups are named collections of provider IDs. Librarium ships with six default g
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `all` | All 18 providers | Maximum coverage |
+| `all` | All 20 providers | Maximum coverage |
 
 ### Custom Groups
 

@@ -411,15 +411,22 @@ export async function executeRun(
 
 /** Open a file or directory with the platform opener. Failures are silent. */
 export function openPath(target: string): void {
-  const command =
-    process.platform === 'darwin'
-      ? 'open'
-      : process.platform === 'linux'
-        ? 'xdg-open'
-        : null;
-  if (!command) return;
+  let command: string;
+  let args: string[];
+  if (process.platform === 'darwin') {
+    command = 'open';
+    args = [target];
+  } else if (process.platform === 'win32') {
+    // `start` is a cmd builtin; the empty string is the window title so
+    // paths containing spaces are not mistaken for it.
+    command = 'cmd';
+    args = ['/c', 'start', '', target];
+  } else {
+    command = 'xdg-open';
+    args = [target];
+  }
   try {
-    const child = spawn(command, [target], {
+    const child = spawn(command, args, {
       stdio: 'ignore',
       detached: true,
     });
