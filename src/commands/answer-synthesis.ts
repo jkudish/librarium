@@ -21,13 +21,12 @@ export const SOURCE_LABEL_MAX_CHARS = 300;
  * findings and source labels flow into the LLM prompt verbatim, so control
  * bytes could otherwise smuggle terminal escapes or confuse delimiter parsing.
  */
+// Strip C0 controls (except tab, newline, CR), DEL, and C1 controls.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control bytes is the intent.
+const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
+
 export function stripControlChars(value: string): string {
-  // Strip C0 controls (except tab, newline, CR), DEL, and C1 controls.
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control bytes is the intent.
-  return value.replace(
-    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g,
-    '',
-  );
+  return value.replace(CONTROL_CHARS, '');
 }
 
 /**
