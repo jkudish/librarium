@@ -149,6 +149,7 @@ librarium run <query> [options]
 | `--parallel <n>` | Max parallel requests |
 | `--timeout <n>` | Timeout per provider in seconds |
 | `--json` | Output `run.json` to stdout |
+| `--refine` | Rewrite the query into tier-tuned variants with one LLM call before dispatch |
 | `--html` | Generate a self-contained `report.html` in the run directory |
 | `--open` | Open the output directory (or `report.html` with `--html`) when the run completes |
 
@@ -186,7 +187,7 @@ $ librarium run "postgres pooling best practices"
   ◷ async tasks pending: run `librarium status --wait` to poll and retrieve
 ```
 
-Successes are green, failures red with the reason inline, async submissions amber. Durations of 10s or more are highlighted. Piped or CI output degrades to plain append-on-completion lines, and `--json` keeps stdout pure JSON (the table goes to stderr).
+Successes are green, failures red with the reason inline, async submissions amber. Durations of 10s or more are highlighted. When a provider's API reports usage, a dim suffix shows it on the line (`· 8.4k tok` or `· $0.012`), and the summary adds a `reported cost` line covering the providers that reported one -- costs are never estimated from pricing tables, only taken from API responses. Piped or CI output degrades to plain append-on-completion lines, and `--json` keeps stdout pure JSON (the table goes to stderr).
 
 ### Interactive wizard
 
@@ -211,6 +212,31 @@ librarium html [run-dir] [--open]
 ```
 
 The report contains the query, run metadata, the provider results table as expandable sections with each provider's rendered markdown, and the deduped source list with provider attribution. Provider markdown is HTML-escaped, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
+
+### `refine`
+
+Rewrite a research goal into tier-tuned query variants without dispatching.
+
+```bash
+librarium refine "figure out how to scale postgres connections" [--json]
+```
+
+Prints a thorough brief for deep-research providers, a focused question for ai-grounded providers, a keyword query for raw-search providers, and a suggested group. The same transform powers `run --refine`, which dispatches each provider with its tier's variant (recorded in `run.json` and `prompt.md` for reproducibility). The LLM call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via a `refine: { provider, model }` config key. If the call fails, the run proceeds with the original query.
+
+### `completions`
+
+Print a static shell completion script covering commands, flags, and the builtin group names.
+
+```bash
+# zsh
+eval "$(librarium completions zsh)"
+
+# bash
+eval "$(librarium completions bash)"
+
+# fish
+librarium completions fish > ~/.config/fish/completions/librarium.fish
+```
 
 ### `status`
 

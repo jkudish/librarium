@@ -74,6 +74,7 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium run <query> --html --open` | Run, then open an HTML report |
 | `librarium browse` | Browse past runs interactively |
 | `librarium html [run-dir]` | Generate report.html for a run |
+| `librarium refine <goal>` | Tier-tuned query variants, no dispatch |
 | `librarium ls` | List providers and status |
 | `librarium doctor` | Health check providers |
 | `librarium config` | Show resolved config |
