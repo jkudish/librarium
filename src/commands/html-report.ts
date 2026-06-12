@@ -8,6 +8,7 @@ import type {
   ProviderReport,
   RunManifest,
 } from '../types.js';
+import { readAnswerArtifact } from './answer-synthesis.js';
 import { readRunEntry } from './browse-data.js';
 import { formatDuration, usageLabel } from './run-format.js';
 
@@ -25,6 +26,12 @@ export interface HtmlReportInput {
   /** Provider markdown contents keyed by report outputFile. */
   providerContents: Record<string, string>;
   sources: DeduplicatedSource[];
+  /**
+   * The synthesized grounded answer (answer.md body) when the run produced one.
+   * Leads the report as an "Answer" section before the provider tabs.
+   * provider/model come from the manifest's additive `answer` metadata.
+   */
+  answer?: { content: string; provider?: string; model?: string };
 }
 
 export function escapeHtml(text: string): string {
@@ -191,6 +198,48 @@ function providerPanelBody(
   return '<p class="pending-note">No output file found for this provider.</p>';
 }
 
+/**
+ * Strip answer.md's leading `# query` heading and its trailing `## Sources`
+ * list so the report renders only the answer body: the query is already the
+ * report's H1 and the deduped sources have their own tab. Defensive: if the
+ * expected structure is absent, the content passes through untouched. Pure
+ * string surgery on already-untrusted markdown; renderMarkdown still escapes
+ * raw HTML and applies safeUrl to links.
+ */
+export function answerBody(content: string): string {
+  let body = content.replace(/\r\n/g, '\n');
+  // Drop a single leading level-1 heading (the echoed query).
+  body = body.replace(/^\s*#[^\S\n]+[^\n]*\n+/, '');
+  // Drop a trailing "## Sources" section through end of file.
+  body = body.replace(/\n#{1,6}[^\S\n]+Sources\b[\s\S]*$/i, '\n');
+  return body.trim();
+}
+
+/**
+ * The "Answer" section that leads the report. Rendered with the same untrusted
+ * handling as provider panels (escaped raw HTML, safeUrl on links). The
+ * provider/model show dimly when recorded in run.json's answer metadata.
+ */
+function answerSection(answer: {
+  content: string;
+  provider?: string;
+  model?: string;
+}): string {
+  const body = answerBody(answer.content);
+  if (body.length === 0) return '';
+  const attribution =
+    answer.provider || answer.model
+      ? `<p class="answer-meta">synthesized by ${escapeHtml(
+          [answer.provider, answer.model].filter(Boolean).join(' / '),
+        )}</p>`
+      : '';
+  return `<section class="answer">
+<p class="eyebrow">answer</p>
+${attribution}
+<div class="answer-body">${renderMarkdown(body)}</div>
+</section>`;
+}
+
 function sourcesSection(sources: DeduplicatedSource[]): string {
   if (sources.length === 0) {
     return '<p class="pending-note">No sources recorded.</p>';
@@ -321,6 +370,15 @@ ol.sources { padding-left: 1.4rem; font-size: 0.9rem; }
 ol.sources li { margin: 0.35rem 0; }
 .error-note { color: #dc2626; font-size: 0.9rem; }
 .pending-note { color: #525252; font-size: 0.9rem; }
+section.answer {
+  margin-top: 2rem;
+  border: 1px solid rgba(10, 10, 10, 0.1);
+  border-radius: 10px;
+  padding: 0.5rem 1.5rem 1.25rem;
+  background: rgba(217, 119, 6, 0.03);
+}
+.answer-meta { color: #a3a3a3; font-size: 0.78rem; margin: 0.25rem 0 0; }
+.answer-body { font-size: 0.97rem; }
 footer {
   border-top: 1px solid rgba(10, 10, 10, 0.1);
   padding: 1.25rem 2rem;
@@ -357,8 +415,11 @@ const SCRIPT = `(function () {
 
 /** Pure generator: manifest plus file contents in, full HTML document out. */
 export function generateHtmlReport(input: HtmlReportInput): string {
-  const { manifest, providerContents, sources } = input;
+  const { manifest, providerContents, sources, answer } = input;
   const reports = manifest.providers;
+
+  const answerHtml =
+    answer && answer.content.trim().length > 0 ? answerSection(answer) : '';
 
   // Default active tab: first successful provider, else the first row.
   const firstSuccess = reports.findIndex((r) => r.status === 'success');
@@ -410,6 +471,7 @@ ${sourcesSection(sources)}
 <p class="eyebrow">query</p>
 <h1>${escapeHtml(manifest.query)}</h1>
 <p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(manifest))} &middot; ${sources.length} unique sources after dedupe (${manifest.sources.total} total citations)</p>
+${answerHtml}
 <section>
 <p class="eyebrow">providers</p>
 <div class="tabs" role="tablist" aria-label="Provider results">
@@ -499,10 +561,13 @@ export function writeHtmlReport(runDir: string): string | null {
     }
   }
 
+  const answer = readAnswerArtifact(runDir, entry.manifest);
+
   const html = generateHtmlReport({
     manifest: entry.manifest,
     providerContents,
     sources,
+    ...(answer ? { answer } : {}),
   });
   const reportPath = join(runDir, 'report.html');
   safeWriteFile(reportPath, html);

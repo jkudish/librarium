@@ -254,7 +254,7 @@ $ librarium answer "what changed in postgres 17 logical replication"
   ▸ ~/research/agents/librarium/1781136000-what-changed-in-postgres-17/
 ```
 
-The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. (`report.html` / `results.jsonl` regeneration does not yet include `answer.md`, and the interactive wizard does not yet offer synthesis -- both are follow-ups.)
+The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--max-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
 ### Spend guardrails
 
 Two opt-in guardrails help avoid surprise spend on large fan-outs.
@@ -309,7 +309,7 @@ Generate a self-contained `report.html` for a run directory (default: the most r
 librarium html [run-dir] [--open]
 ```
 
-The report contains the query, run metadata, the provider results table as tabs, with each provider's rendered markdown in a panel below, and the deduped source list with provider attribution. Provider markdown is HTML-escaped, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
+The report contains the query, run metadata, the provider results table as tabs, with each provider's rendered markdown in a panel below, and the deduped source list with provider attribution. When the run directory contains an `answer.md` (from `librarium answer` or the wizard's synthesis toggle), an Answer section leads the report before the provider tabs, showing the synthesizing provider/model dimly. Answer and provider markdown are HTML-escaped with the same untrusted handling, so untrusted output cannot inject script. Results retrieved after the run (async deep research) fill in when the report is regenerated; `status --retrieve` regenerates an existing `report.html` automatically.
 
 ### `jsonl`
 
@@ -322,6 +322,7 @@ librarium jsonl [run-dir]
 The file contains one JSON object per line (JSONL / newline-delimited JSON). Each line can be parsed independently with `JSON.parse`:
 
 - **Line 1 -- run header** (`"type":"run"`): query, slug, timestamp, mode, succeeded/failed/pending counts, unique source count, total citation count, and optional `refinedQueries` (only present when `--refine` was used).
+- **Optional answer line** (`"type":"answer"`): emitted right after the run header when the run directory contains an `answer.md` (from `librarium answer` or the wizard's synthesis toggle). Carries optional `provider` and `model` (from `run.json`'s `answer` metadata) and `content` (the full `answer.md` body).
 - **One line per provider** (`"type":"result"`): id, tier, status, durationMs, citationCount, optional usage object, optional error string, optional fallbackFor string, and `content` (the full markdown from the provider's `.md` file, or `null` when missing or pending).
 - **One line per deduped source** (`"type":"source"`): url, optional title, providers array, citationCount.
 

@@ -331,6 +331,71 @@ describe('generateJsonlReport -- each line parses independently', () => {
     });
     expect(jsonl).not.toContain('—');
   });
+
+  it('emits an answer line right after the run header when answer present', () => {
+    const jsonl = generateJsonlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: SOURCES,
+      answer: {
+        content: '# q\n\nThe answer is 42 [1].',
+        provider: 'openai',
+        model: 'gpt-5-mini',
+      },
+    });
+    const lines = parseLines(jsonl) as Array<{
+      type: string;
+      provider?: string;
+      model?: string;
+      content?: string;
+    }>;
+    expect(lines[0]?.type).toBe('run');
+    expect(lines[1]?.type).toBe('answer');
+    expect(lines[1]?.provider).toBe('openai');
+    expect(lines[1]?.model).toBe('gpt-5-mini');
+    expect(lines[1]?.content).toContain('The answer is 42');
+    // result/source lines still follow the answer line.
+    expect(lines[2]?.type).toBe('result');
+  });
+
+  it('omits the answer line when no answer is provided', () => {
+    const jsonl = generateJsonlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: SOURCES,
+    });
+    const lines = parseLines(jsonl) as Array<{ type: string }>;
+    expect(lines.some((l) => l.type === 'answer')).toBe(false);
+  });
+
+  it('omits the answer line when answer content is blank', () => {
+    const jsonl = generateJsonlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: SOURCES,
+      answer: { content: '   \n  ', provider: 'openai', model: 'gpt-5-mini' },
+    });
+    const lines = parseLines(jsonl) as Array<{ type: string }>;
+    expect(lines.some((l) => l.type === 'answer')).toBe(false);
+  });
+
+  it('omits provider/model keys from the answer line when not recorded', () => {
+    const jsonl = generateJsonlReport({
+      manifest: makeManifest(),
+      providerContents: {},
+      sources: [],
+      answer: { content: 'grounded answer' },
+    });
+    const lines = parseLines(jsonl) as Array<Record<string, unknown>>;
+    const answerLine = lines.find((l) => l.type === 'answer') as Record<
+      string,
+      unknown
+    >;
+    expect(answerLine).toBeDefined();
+    expect('provider' in answerLine).toBe(false);
+    expect('model' in answerLine).toBe(false);
+    expect(answerLine.content).toBe('grounded answer');
+  });
 });
 
 describe('writeJsonlReport', () => {
@@ -370,6 +435,31 @@ describe('writeJsonlReport', () => {
     expect(runLine?.query).toBe('postgres pooling best practices');
     expect(resultLine?.content).toContain('Exa findings');
     expect(sourceLine?.url).toBe('https://example.com/pgbouncer');
+  });
+
+  it('picks up answer.md and run.json answer metadata automatically', () => {
+    const manifest = makeManifest({
+      answer: { provider: 'gemini', model: 'gemini-2.5-flash' },
+    });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+    writeFileSync(join(dir, 'exa.md'), '# Exa findings\n\nhello');
+    writeFileSync(join(dir, 'sources.json'), JSON.stringify(SOURCES));
+    writeFileSync(
+      join(dir, 'answer.md'),
+      '# postgres pooling best practices\n\nUse PgBouncer [1].\n',
+    );
+
+    const reportPath = writeJsonlReport(dir) as string;
+    const lines = parseLines(readFileSync(reportPath, 'utf-8')) as Array<{
+      type: string;
+      provider?: string;
+      model?: string;
+      content?: string;
+    }>;
+    const answerLine = lines.find((l) => l.type === 'answer');
+    expect(answerLine?.provider).toBe('gemini');
+    expect(answerLine?.model).toBe('gemini-2.5-flash');
+    expect(answerLine?.content).toContain('Use PgBouncer');
   });
 
   it('fills in retrieved results for reports still marked async-pending', () => {

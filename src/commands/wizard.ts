@@ -5,9 +5,10 @@ import {
 } from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { Config, ProviderTier } from '../types.js';
+import { synthesizeAnswer } from './answer.js';
 import { browseRunDir } from './browse.js';
 import { resolveRefineClient } from './refine.js';
-import { executeRun, type RunOptions } from './run.js';
+import { type ExecuteRunHooks, executeRun, type RunOptions } from './run.js';
 
 /**
  * Interactive wizard launched by bare `librarium` in a TTY: prompt for the
@@ -132,8 +133,10 @@ export async function runWizard(): Promise<void> {
   });
   if (p.isCancel(mode)) return cancel();
 
-  // Only offer refine when a refine-capable API key is configured.
+  // Refine and synthesis both need an LLM client key; gate both on the same
+  // check so neither prompt appears when no synthesis-capable key is set.
   let refine: boolean | symbol = false;
+  let synthesize: boolean | symbol = false;
   if (resolveRefineClient(config)) {
     p.log.message(
       'Refine rewrites your query three ways with one quick LLM call: a research brief for deep research, a focused question for AI answers, keywords for raw search.',
@@ -143,6 +146,12 @@ export async function runWizard(): Promise<void> {
       initialValue: false,
     });
     if (p.isCancel(refine)) return cancel();
+
+    synthesize = await p.confirm({
+      message: 'Synthesize a grounded answer afterwards?',
+      initialValue: false,
+    });
+    if (p.isCancel(synthesize)) return cancel();
   }
 
   const scopeLabel = group
@@ -163,7 +172,13 @@ export async function runWizard(): Promise<void> {
   if (providers) options.providers = providers;
   if (group) options.group = group;
   if (refine) options.refine = true;
-  const outcome = await executeRun(query.trim(), options);
+
+  // Reuse the exact postDispatch synthesis hook the answer command uses, so the
+  // wizard path produces the same answer.md, run.json metadata, and output.
+  const hooks: ExecuteRunHooks | undefined = synthesize
+    ? { postDispatch: (context) => synthesizeAnswer(context) }
+    : undefined;
+  const outcome = await executeRun(query.trim(), options, hooks);
 
   if (
     outcome.outputDir &&

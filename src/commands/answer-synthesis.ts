@@ -1,4 +1,10 @@
-import type { DeduplicatedSource, ProviderDispatchResult } from '../types.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type {
+  DeduplicatedSource,
+  ProviderDispatchResult,
+  RunManifest,
+} from '../types.js';
 
 /**
  * Pure (LLM-free) building blocks for `librarium answer`: prompt assembly from
@@ -39,6 +45,43 @@ export function normalizeSourceLabel(value: string): string {
   return flat.length > SOURCE_LABEL_MAX_CHARS
     ? `${flat.slice(0, SOURCE_LABEL_MAX_CHARS - 1)}…`
     : flat;
+}
+
+/** The grounded answer recovered from a run directory, for report generators. */
+export interface AnswerArtifact {
+  /** Raw answer.md contents (answer body plus its numbered Sources section). */
+  content: string;
+  /** Synthesis provider, from the manifest's additive answer metadata. */
+  provider?: string;
+  /** Synthesis model, from the manifest's additive answer metadata. */
+  model?: string;
+}
+
+/**
+ * Read a run directory's grounded answer for report regeneration. Returns the
+ * answer.md body plus the provider/model recorded in run.json's `answer` field,
+ * or null when the run produced no answer.md. Used by the HTML and JSONL
+ * generators so `librarium html`/`librarium jsonl` and status --retrieve pick
+ * the answer up automatically.
+ */
+export function readAnswerArtifact(
+  runDir: string,
+  manifest: RunManifest,
+): AnswerArtifact | null {
+  const answerPath = join(runDir, 'answer.md');
+  if (!existsSync(answerPath)) return null;
+  let content: string;
+  try {
+    content = readFileSync(answerPath, 'utf-8');
+  } catch {
+    return null;
+  }
+  if (content.trim().length === 0) return null;
+  return {
+    content,
+    provider: manifest.answer?.provider,
+    model: manifest.answer?.model,
+  };
 }
 
 export interface AnswerSource {
