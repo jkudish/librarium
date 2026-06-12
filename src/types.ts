@@ -1,7 +1,11 @@
 import { z } from 'zod';
 
 // Provider tiers
-export type ProviderTier = 'deep-research' | 'ai-grounded' | 'raw-search';
+export type ProviderTier =
+  | 'deep-research'
+  | 'ai-grounded'
+  | 'raw-search'
+  | 'llm';
 export type ProviderSource = 'builtin' | 'npm' | 'script';
 
 // Async task status

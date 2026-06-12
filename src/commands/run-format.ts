@@ -85,7 +85,12 @@ export function usageLabel(
   return `${formatTokens(tokens)} tok`;
 }
 
-function citationLabel(report: ProviderReport): string {
+function citationLabel(report: ProviderReport, color = false): string {
+  // Ungrounded LLM providers contribute no sources by design; rendering a
+  // dim "ungrounded" reads better than "0 sources".
+  if (report.tier === 'llm') {
+    return paint('ungrounded'.padStart(11), ANSI.dim, color);
+  }
   const noun = report.tier === 'raw-search' ? 'results' : 'sources';
   return `${String(report.citationCount).padStart(3)} ${noun}`;
 }
@@ -127,7 +132,7 @@ export function formatProviderLine(
   switch (report.status) {
     case 'success': {
       const glyph = paint('✓', ANSI.green, color);
-      return `  ${glyph} ${id}   ${tier}   ${duration}   ${citationLabel(report)}${usageSuffix}${fallbackSuffix}`;
+      return `  ${glyph} ${id}   ${tier}   ${duration}   ${citationLabel(report, color)}${usageSuffix}${fallbackSuffix}`;
     }
     case 'async-pending': {
       const glyph = paint('◷', ANSI.yellow, color);

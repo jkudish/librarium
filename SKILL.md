@@ -23,7 +23,7 @@ Run research queries across 10 search and deep-research APIs in parallel, collec
 ### Phase 1: Query Analysis
 Analyze the user's research question. Determine:
 - Is this a technical, business, or general knowledge query?
-- Which provider group is best suited? (`quick` for fast answers, `deep` for thorough research, `comprehensive` for important decisions, `all` for maximum coverage)
+- Which provider group is best suited? (`quick` for fast answers, `deep` for thorough research, `comprehensive` for important decisions, `all` for maximum grounded coverage, `llm` for an ungrounded baseline/contrast with no citations)
 - What execution mode? (`sync` for quick queries, `mixed` for deep research)
 
 ### Phase 2: Provider Selection
@@ -32,6 +32,9 @@ Select providers based on query type:
 - **Quick facts**: Use `quick` group (AI-grounded only, fast)
 - **Competitive research**: Use `all` group (maximum coverage)
 - **Specific provider**: Use `--providers` flag (accepts canonical IDs or display names, e.g. `-p "Exa Search,brave-search"`)
+- **Competitive research**: Use `all` group (maximum grounded coverage)
+- **Ungrounded baseline / contrast**: Use `llm` group (Claude, OpenAI, Gemini, OpenRouter -- direct model answers, no citations)
+- **Specific provider**: Use `--providers` flag
 
 ### Phase 3: Dispatch
 Run the query:
@@ -95,6 +98,7 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 | deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Minutes | Comprehensive |
 | ai-grounded | perplexity-sonar-pro, brave-answers, exa, you-research, kagi-fastgpt | Seconds | Good |
 | raw-search | perplexity-search, brave-search, jina-search, searchapi, serpapi, tavily | Fast | Links only |
+| llm | claude, openai-chat, gemini-chat, openrouter-chat | Seconds | Ungrounded (no citations) |
 
 ## Output Structure
 

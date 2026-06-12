@@ -46,6 +46,10 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
   serpapi: 'SERPAPI_API_KEY',
   tavily: 'TAVILY_API_KEY',
   'firecrawl-search': 'FIRECRAWL_API_KEY',
+  claude: 'ANTHROPIC_API_KEY',
+  'openai-chat': 'OPENAI_API_KEY',
+  'gemini-chat': 'GEMINI_API_KEY',
+  'openrouter-chat': 'OPENROUTER_API_KEY',
 };
 
 // Provider display names
@@ -70,6 +74,10 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   serpapi: 'SerpAPI',
   tavily: 'Tavily Search',
   'firecrawl-search': 'Firecrawl Search',
+  claude: 'Claude',
+  'openai-chat': 'OpenAI Chat',
+  'gemini-chat': 'Gemini Chat',
+  'openrouter-chat': 'OpenRouter Chat',
 };
 
 // Backward-compatible provider ID aliases (legacy -> canonical)
@@ -377,6 +385,13 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'you-research',
     'kagi-fastgpt',
   ],
+  // Ungrounded generic LLMs (tier `llm`). Opt-in only: excluded from every
+  // grounded group above and from `all`. Returns the model's direct answer
+  // with no citations -- baseline/contrast alongside grounded research.
+  llm: ['claude', 'openai-chat', 'gemini-chat', 'openrouter-chat'],
+  // `all` is the explicit grounded-all roster (every registered grounded
+  // provider). The `llm` tier is intentionally excluded -- it is opt-in via
+  // `-p`, a custom group, or `--group llm`.
   all: [
     'perplexity-sonar-deep',
     'perplexity-deep-research',

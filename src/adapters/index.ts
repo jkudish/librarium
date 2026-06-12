@@ -5,14 +5,18 @@ import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
 import { BaseProvider } from './base.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
+import { ClaudeProvider } from './claude.js';
 import { ExaProvider } from './exa.js';
 import { FirecrawlSearchProvider } from './firecrawl-search.js';
+import { GeminiChatProvider } from './gemini-chat.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { GeminiGroundedProvider } from './gemini-grounded.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
+import { OpenAIChatProvider } from './openai-chat.js';
 import { OpenAIDeepProvider } from './openai-deep.js';
 import { OpenAIDeepO3Provider } from './openai-deep-o3.js';
+import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
@@ -132,6 +136,14 @@ export async function initializeProviders(
     new SearchApiProvider(),
     new SerpApiProvider(),
     new TavilyProvider(),
+
+    // LLM (ungrounded baseline/contrast -- sync, no citations)
+    new ClaudeProvider({ model: providerConfig.claude?.model }),
+    new OpenAIChatProvider({ model: providerConfig['openai-chat']?.model }),
+    new GeminiChatProvider({ model: providerConfig['gemini-chat']?.model }),
+    new OpenRouterChatProvider({
+      model: providerConfig['openrouter-chat']?.model,
+    }),
   ];
 
   for (const provider of builtIns) {

@@ -19,6 +19,7 @@ const TIER_ORDER: ProviderTier[] = [
   'deep-research',
   'ai-grounded',
   'raw-search',
+  'llm',
 ];
 
 /** Summarize a group's members by tier, e.g. "6 providers: 4 ai-grounded, 2 raw-search". */

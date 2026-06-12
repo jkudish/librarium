@@ -120,10 +120,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 20 providers', async () => {
+  it('initializeProviders registers all 24 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(20);
+    expect(all).toHaveLength(24);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -146,6 +146,45 @@ describe('registry', () => {
     expect(ids).toContain('searchapi');
     expect(ids).toContain('serpapi');
     expect(ids).toContain('tavily');
+    expect(ids).toContain('claude');
+    expect(ids).toContain('openai-chat');
+    expect(ids).toContain('gemini-chat');
+    expect(ids).toContain('openrouter-chat');
+  });
+
+  it('registers llm-tier providers with the llm tier', async () => {
+    await initializeProviders();
+    for (const id of [
+      'claude',
+      'openai-chat',
+      'gemini-chat',
+      'openrouter-chat',
+    ]) {
+      expect(getProvider(id)?.tier).toBe('llm');
+    }
+  });
+
+  it('applies model config override to llm-tier providers', async () => {
+    await initializeProviders({
+      providers: {
+        claude: { model: 'claude-opus-4-8' },
+        'openai-chat': { model: 'gpt-4o' },
+        'gemini-chat': { model: 'gemini-2.0-flash' },
+        'openrouter-chat': { model: 'anthropic/claude-3.5-haiku' },
+      },
+    });
+    expect((getProvider('claude') as { model?: string }).model).toBe(
+      'claude-opus-4-8',
+    );
+    expect((getProvider('openai-chat') as { model?: string }).model).toBe(
+      'gpt-4o',
+    );
+    expect((getProvider('gemini-chat') as { model?: string }).model).toBe(
+      'gemini-2.0-flash',
+    );
+    expect((getProvider('openrouter-chat') as { model?: string }).model).toBe(
+      'anthropic/claude-3.5-haiku',
+    );
   });
 
   it('initializeProviders applies gemini model config override', async () => {
