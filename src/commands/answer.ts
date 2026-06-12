@@ -59,6 +59,7 @@ export function registerAnswerCommand(program: Command): void {
       'Stop launching providers once API-reported cost crosses this budget (USD)',
       parseMaxCost,
     )
+    .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
     .option('--json', 'Output run.json to stdout')
     .option(
       '--refine',
