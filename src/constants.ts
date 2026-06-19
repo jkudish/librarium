@@ -385,9 +385,9 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'you-research',
     'kagi-fastgpt',
   ],
-  // Ungrounded generic LLMs (tier `llm`). Opt-in only: excluded from every
-  // grounded group above and from `all`. Returns the model's direct answer
-  // with no citations -- baseline/contrast alongside grounded research.
+  // Generic LLMs (tier `llm`). Opt-in only: excluded from every default
+  // grounded group above and from `all`. They can use provider web search and
+  // citations by default, but remain separate from the grounded provider tier.
   llm: ['claude', 'openai-chat', 'gemini-chat', 'openrouter-chat'],
   // `all` is the explicit grounded-all roster (every registered grounded
   // provider). The `llm` tier is intentionally excluded -- it is opt-in via
@@ -417,17 +417,16 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
 };
 
 /**
- * Provider IDs in the ungrounded `llm` tier. These return the model's direct
- * answer with no web grounding or citations, so they are opt-in only: never
- * auto-enabled by `init --auto` and never pre-checked in interactive `init`.
- * The default `run` path (all enabled providers) therefore excludes them
- * unless the user explicitly enabled them in config.
+ * Provider IDs in the `llm` tier. These are opt-in only: never auto-enabled by
+ * `init --auto` and never pre-checked in interactive `init`. The default `run`
+ * path (all enabled providers) therefore excludes them unless the user
+ * explicitly enabled them in config.
  */
 export const LLM_TIER_PROVIDER_IDS: ReadonlySet<string> = new Set(
   DEFAULT_GROUPS.llm,
 );
 
-/** True when the provider id belongs to the ungrounded `llm` tier. */
+/** True when the provider id belongs to the opt-in `llm` tier. */
 export function isLlmTierProvider(id: string): boolean {
   return LLM_TIER_PROVIDER_IDS.has(resolveProviderId(id));
 }
@@ -438,7 +437,7 @@ export interface InitProviderChoice {
   envVar: string;
   /** Whether the matching env var is present in the environment. */
   keyPresent: boolean;
-  /** Whether this provider is in the ungrounded `llm` tier. */
+  /** Whether this provider is in the opt-in `llm` tier. */
   isLlm: boolean;
   /**
    * Whether `init --auto` should enable this provider, and whether interactive

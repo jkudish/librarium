@@ -4,9 +4,15 @@ import {
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import {
+  providerHasCredential,
+  usableProviderIds,
+} from '../core/provider-selection.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type { Config, ProviderTier } from '../types.js';
 import { synthesizeAnswer } from './answer.js';
 import { browseRunDir } from './browse.js';
+import { runOnboardingWizard } from './onboarding.js';
 import { resolveRefineClient } from './refine.js';
 import { type ExecuteRunHooks, executeRun, type RunOptions } from './run.js';
 
@@ -47,9 +53,10 @@ function enabledProviderIds(config: Config): string[] {
 
 export async function runWizard(): Promise<void> {
   const config = mergeConfigs(loadConfig(), loadProjectConfig(process.cwd()));
+  const credentials = createNodeCredentialContext();
   const initResult = await initializeProviders({
     ...config,
-    credentials: { env: process.env },
+    credentials,
   });
   for (const warning of initResult.warnings) {
     console.error(`[librarium] warning: ${warning}`);
@@ -57,6 +64,12 @@ export async function runWizard(): Promise<void> {
   const tierById = new Map<string, ProviderTier>(
     getAllProviders().map((provider) => [provider.id, provider.tier]),
   );
+  const usable = usableProviderIds(config, getAllProviders(), credentials);
+
+  if (usable.length === 0) {
+    await runOnboardingWizard();
+    return;
+  }
 
   p.intro('librarium');
 
@@ -69,13 +82,15 @@ export async function runWizard(): Promise<void> {
   if (p.isCancel(query)) return cancel();
 
   // Provider scope: enabled set, a group, or hand-picked providers.
-  const enabled = enabledProviderIds(config);
+  const enabled = enabledProviderIds(config).filter((id) =>
+    usable.includes(id),
+  );
   const scope = await p.select<string>({
     message: 'Which providers?',
     options: [
       {
         value: 'enabled',
-        label: 'all enabled providers',
+        label: 'all usable providers',
         hint: groupHint(enabled, tierById),
       },
       ...Object.entries(config.groups).map(([name, ids]) => ({
@@ -100,7 +115,17 @@ export async function runWizard(): Promise<void> {
       options: getAllProviders().map((provider) => ({
         value: provider.id,
         label: provider.id,
-        hint: `${provider.tier}${config.providers[provider.id]?.enabled ? '' : ', not enabled in config'}`,
+        hint: `${provider.tier}${
+          config.providers[provider.id]?.enabled
+            ? providerHasCredential(
+                provider,
+                config.providers[provider.id],
+                credentials,
+              )
+              ? ''
+              : ', missing API key'
+            : ', not enabled in config'
+        }`,
       })),
       required: true,
     });
@@ -137,7 +162,7 @@ export async function runWizard(): Promise<void> {
   // check so neither prompt appears when no synthesis-capable key is set.
   let refine: boolean | symbol = false;
   let synthesize: boolean | symbol = false;
-  if (resolveRefineClient(config)) {
+  if (resolveRefineClient(config, process.env, credentials)) {
     p.log.message(
       'Refine rewrites your query three ways with one quick LLM call: a research brief for deep research, a focused question for AI answers, keywords for raw search.',
     );

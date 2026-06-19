@@ -24,6 +24,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
       asyncTimeout: 1800,
       asyncPollInterval: 10,
       mode: 'mixed',
+      llmWebSearch: true,
     },
     providers: {},
     customProviders: {},

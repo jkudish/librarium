@@ -24,6 +24,7 @@ function makeConfig(
       asyncTimeout: 1800,
       asyncPollInterval: 10,
       mode: 'sync',
+      llmWebSearch: true,
     },
     providers,
     groups: {},

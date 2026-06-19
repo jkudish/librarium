@@ -1,4 +1,5 @@
 import type {
+  Citation,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -9,11 +10,22 @@ import { BaseProvider, type BaseProviderOptions } from './base.js';
 interface AnthropicTextBlock {
   type?: string;
   text?: string;
+  citations?: AnthropicCitation[];
+}
+
+interface AnthropicCitation {
+  type?: string;
+  url?: string;
+  title?: string;
+  cited_text?: string;
 }
 
 interface AnthropicUsage {
   input_tokens?: number;
   output_tokens?: number;
+  server_tool_use?: {
+    web_search_requests?: number;
+  };
 }
 
 interface AnthropicResponse {
@@ -29,6 +41,7 @@ interface AnthropicResponse {
 
 export interface ClaudeProviderOptions extends BaseProviderOptions {
   model?: string;
+  webSearch?: boolean;
 }
 
 const DEFAULT_CLAUDE_MODEL = 'claude-haiku-4-5';
@@ -36,18 +49,20 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const MAX_TOKENS = 4096;
 
 /**
- * Claude (Anthropic) ungrounded LLM provider.
- * Returns the model's direct answer with NO citations -- baseline/contrast.
- * Tier: llm (sync, ungrounded)
+ * Claude LLM provider.
+ * Uses Anthropic web search by default for current answers and citations.
+ * Tier: llm (sync)
  */
 export class ClaudeProvider extends BaseProvider {
   readonly id = 'claude';
   readonly tier: ProviderTier = 'llm';
   readonly model: string;
+  readonly webSearch: boolean;
 
   constructor(options: ClaudeProviderOptions = {}) {
     super(options);
     this.model = options.model?.trim() || DEFAULT_CLAUDE_MODEL;
+    this.webSearch = options.webSearch ?? true;
   }
 
   async execute(
@@ -58,6 +73,21 @@ export class ClaudeProvider extends BaseProvider {
     const apiKey = this.getApiKey();
 
     try {
+      const body: Record<string, unknown> = {
+        model: this.model,
+        max_tokens: MAX_TOKENS,
+        messages: [{ role: 'user', content: query }],
+      };
+      if (this.webSearch) {
+        body.tools = [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: 5,
+          },
+        ];
+      }
+
       const response = await this.request<AnthropicResponse>(
         'https://api.anthropic.com/v1/messages',
         {
@@ -66,11 +96,7 @@ export class ClaudeProvider extends BaseProvider {
             'x-api-key': apiKey,
             'anthropic-version': ANTHROPIC_VERSION,
           },
-          body: {
-            model: this.model,
-            max_tokens: MAX_TOKENS,
-            messages: [{ role: 'user', content: query }],
-          },
+          body,
           timeout: options.timeout * 1000,
           signal: options.signal,
         },
@@ -97,6 +123,7 @@ export class ClaudeProvider extends BaseProvider {
           .filter(Boolean)
           .join('\n')
           .trim() ?? '';
+      const citations = this.extractCitations(data.content);
 
       if (!content) {
         // A 200 with no usable text is not a success: surface the model's
@@ -119,7 +146,7 @@ export class ClaudeProvider extends BaseProvider {
         provider: this.id,
         tier: this.tier,
         content,
-        citations: [],
+        citations,
         durationMs,
         model: data.model ?? this.model,
         tokenUsage: {
@@ -161,5 +188,34 @@ export class ClaudeProvider extends BaseProvider {
           : undefined,
       raw: usage,
     };
+  }
+
+  private extractCitations(blocks?: AnthropicTextBlock[]): Citation[] {
+    if (!Array.isArray(blocks)) return [];
+
+    const seen = new Set<string>();
+    const citations: Citation[] = [];
+
+    for (const block of blocks) {
+      if (block.type !== 'text' || !Array.isArray(block.citations)) continue;
+      for (const citation of block.citations) {
+        if (
+          citation.type !== 'web_search_result_location' ||
+          !citation.url ||
+          seen.has(citation.url)
+        ) {
+          continue;
+        }
+        seen.add(citation.url);
+        citations.push({
+          url: citation.url,
+          title: citation.title,
+          snippet: citation.cited_text,
+          provider: this.id,
+        });
+      }
+    }
+
+    return citations;
   }
 }

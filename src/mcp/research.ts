@@ -4,7 +4,6 @@ import {
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
-import { resolveProviderIds, resolveProviderTokens } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
@@ -17,7 +16,12 @@ import {
   createRunDir,
   generateSlug,
 } from '../core/prompt-builder.js';
+import {
+  ProviderSelectionError,
+  resolveProviderSelection as resolveProviderSelectionCore,
+} from '../core/provider-selection.js';
 import { generateSummary } from '../core/synthesis.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
   Citation,
   Config,
@@ -73,7 +77,7 @@ export interface SilentRunResult {
   totalDurationMs: number;
 }
 
-export class ResearchInputError extends Error {}
+export { ProviderSelectionError as ResearchInputError };
 
 function defaultLoadMergedConfig(cliFlags: Partial<Defaults>): Config {
   const globalConfig = loadConfig();
@@ -98,68 +102,9 @@ export function resolveProviderSelection(
   args: Pick<SilentRunArgs, 'providers' | 'group'>,
   onWarn: (message: string) => void = () => {},
 ): string[] {
-  let providerIds: string[];
-
-  if (args.providers !== undefined) {
-    // Explicitly provided: trim tokens and reject an empty selection rather
-    // than silently falling through to group/defaults.
-    const tokens = args.providers
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0);
-    if (tokens.length === 0) {
-      throw new ResearchInputError(
-        'The `providers` array was provided but contains no usable provider ids. Omit `providers` to use the default enabled set, or pass at least one provider id.',
-      );
-    }
-    const known = getAllProviders().map((provider) => ({
-      id: provider.id,
-      displayName: provider.displayName,
-    }));
-    const resolution = resolveProviderTokens(tokens, known);
-    for (const warning of resolution.warnings) {
-      onWarn(`[librarium] warning: ${warning}`);
-    }
-    if (resolution.errors.length > 0) {
-      throw new ResearchInputError(resolution.errors.join(' '));
-    }
-    providerIds = resolution.ids;
-  } else if (args.group !== undefined) {
-    // Explicitly provided group: empty/whitespace is a caller mistake.
-    const groupName = args.group.trim();
-    if (groupName.length === 0) {
-      throw new ResearchInputError(
-        'The `group` was provided but is empty. Omit `group` to use the default enabled set, or pass a configured group name.',
-      );
-    }
-    const group = config.groups[groupName];
-    if (!group) {
-      throw new ResearchInputError(`Unknown group: ${groupName}`);
-    }
-    providerIds = resolveProviderIds(group);
-  } else {
-    providerIds = resolveProviderIds(
-      Object.entries(config.providers)
-        .filter(([, p]) => p.enabled)
-        .map(([id]) => id),
-    );
-  }
-
-  if (providerIds.length === 0) {
-    throw new ResearchInputError(
-      'No providers selected. Run `librarium init` to configure providers.',
-    );
-  }
-
-  // For group/default selections (already-canonical ids), drop any not present
-  // in the registry. Explicit provider tokens were already validated above.
-  const available = new Set(getAllProviders().map((provider) => provider.id));
-  const filtered = providerIds.filter((id) => available.has(id));
-  if (filtered.length === 0) {
-    throw new ResearchInputError(
-      'No valid providers selected after validation. Check provider availability in config.',
-    );
-  }
-  return filtered;
+  return resolveProviderSelectionCore(config, args, getAllProviders(), {
+    onWarn,
+  });
 }
 
 /** Write per-provider markdown + meta files for a completed dispatch. */
@@ -209,7 +154,7 @@ export async function runResearchSilent(
 ): Promise<SilentRunResult> {
   const onWarn =
     deps.onWarn ?? ((message: string) => process.stderr.write(`${message}\n`));
-  const credentials = deps.credentials ?? { env: process.env };
+  const credentials = deps.credentials ?? createNodeCredentialContext();
 
   const cliFlags: Partial<Defaults> = {};
   if (args.mode) cliFlags.mode = args.mode;
@@ -223,14 +168,28 @@ export async function runResearchSilent(
     onWarn(`[librarium] warning: ${warning}`);
   }
 
-  const providerIds = resolveProviderSelection(config, args, onWarn);
+  const providerIds = resolveProviderSelectionCore(
+    config,
+    args,
+    getAllProviders(),
+    {
+      credentials,
+      requireUsable: true,
+      strictExplicitCredentials: true,
+      onWarn,
+    },
+  );
 
   // Optional one-shot LLM refine. Never allowed to break the run.
   let refined: RefinedQueries | null = null;
   if (args.refine) {
     try {
-      refined = await refineQuery(args.query, config, process.env, (message) =>
-        onWarn(`[librarium] refine: ${message}`),
+      refined = await refineQuery(
+        args.query,
+        config,
+        process.env,
+        (message) => onWarn(`[librarium] refine: ${message}`),
+        credentials,
       );
     } catch (e) {
       onWarn(

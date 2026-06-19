@@ -71,7 +71,6 @@ const markdown = new Marked({
       tokens: unknown;
     }): string {
       const title = token.title ? ` title="${escapeHtml(token.title)}"` : '';
-      // biome-ignore lint/suspicious/noExplicitAny: marked renderer this-binding
       const body = (this as any).parser.parseInline(token.tokens);
       const href = safeUrl(token.href);
       if (href === null) {
@@ -103,9 +102,7 @@ function countLabel(report: ProviderReport): string {
   if (report.status === 'async-pending') return 'submitted';
   if (report.status === 'skipped') return 'skipped';
   if (report.status === 'error') return report.error ? 'error' : 'error';
-  // Ungrounded llm-tier providers contribute no sources by design; mirror the
-  // terminal table and render "ungrounded" instead of "0 sources".
-  if (report.tier === 'llm') return 'ungrounded';
+  if (report.tier === 'llm' && report.citationCount === 0) return 'direct';
   const noun = report.tier === 'raw-search' ? 'results' : 'sources';
   return `${report.citationCount} ${noun}`;
 }

@@ -1,5 +1,7 @@
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import type { CredentialContext, EnvRecord } from '../core/credentials.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type { Config, ProviderTier } from '../types.js';
 import {
   callWithCascade,
@@ -18,7 +20,7 @@ import {
 export interface RefinedQueries {
   // Partial: refine only produces variants for grounded tiers. The `llm` tier
   // has no refined variant -- its providers fall back to the base query in the
-  // dispatcher (ungrounded baseline/contrast uses the prompt as-is).
+  // dispatcher (llm-tier providers use the prompt as-is).
   tierQueries: Partial<Record<ProviderTier, string>>;
   suggestedGroup?: string;
 }
@@ -100,17 +102,19 @@ export type RefineClient = LlmClient;
  */
 export function resolveRefineClients(
   config: Config,
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvRecord = process.env,
+  credentials?: CredentialContext,
 ): RefineClient[] {
-  return resolveLlmClients(config.refine, env);
+  return resolveLlmClients(config.refine, { env, config, credentials });
 }
 
 /** First usable refine client, or null. */
 export function resolveRefineClient(
   config: Config,
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvRecord = process.env,
+  credentials?: CredentialContext,
 ): RefineClient | null {
-  return resolveRefineClients(config, env)[0] ?? null;
+  return resolveRefineClients(config, env, credentials)[0] ?? null;
 }
 
 /**
@@ -142,10 +146,11 @@ const REFINE_TIMEOUT_MS = 30_000;
 export async function refineQuery(
   query: string,
   config: Config,
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvRecord = process.env,
   onWarning?: (message: string) => void,
+  credentials?: CredentialContext,
 ): Promise<RefinedQueries> {
-  const clients = resolveRefineClients(config, env);
+  const clients = resolveRefineClients(config, env, credentials);
   if (clients.length === 0) {
     throw new Error(
       config.refine?.provider
@@ -178,8 +183,13 @@ export function registerRefineCommand(program: Command): void {
           loadConfig(),
           loadProjectConfig(process.cwd()),
         );
-        const refined = await refineQuery(query, config, process.env, (w) =>
-          console.error(`refine: ${w}`),
+        const credentials = createNodeCredentialContext();
+        const refined = await refineQuery(
+          query,
+          config,
+          process.env,
+          (w) => console.error(`refine: ${w}`),
+          credentials,
         );
         if (opts.json) {
           console.log(JSON.stringify(refined, null, 2));

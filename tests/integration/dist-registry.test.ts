@@ -129,6 +129,7 @@ describe('dist registry sharing (core + node)', () => {
           asyncTimeout: 60,
           asyncPollInterval: 1,
           mode: 'sync',
+          llmWebSearch: true,
         },
         providers: { 'dist-lib-provider': { enabled: true } },
         customProviders: {},

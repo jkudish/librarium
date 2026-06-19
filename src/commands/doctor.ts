@@ -4,12 +4,9 @@ import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import {
-  hasApiKey,
-  loadConfig,
-  loadProjectConfig,
-  mergeConfigs,
-} from '../core/config.js';
+import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { providerHasCredential } from '../core/provider-selection.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 
 interface DoctorResult {
   id: string;
@@ -32,7 +29,7 @@ export function registerDoctorCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        const credentials = { env: process.env };
+        const credentials = createNodeCredentialContext();
         const initResult = await initializeProviders({
           ...config,
           credentials,
@@ -49,9 +46,7 @@ export function registerDoctorCommand(program: Command): void {
           const enabled = providerConfig?.enabled ?? false;
           const requiresApiKey = provider.requiresApiKey ?? true;
           const keyPresent = requiresApiKey
-            ? providerConfig
-              ? hasApiKey(providerConfig.apiKey, process.env)
-              : !!process.env[provider.envVar]
+            ? providerHasCredential(provider, providerConfig, credentials)
             : true;
 
           if (!enabled) {

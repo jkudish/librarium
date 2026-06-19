@@ -234,7 +234,6 @@ function deleteCandidates(
     `\nDeleting ${summary.count} ${plural(summary.count, 'directory', 'directories')} (${formatSize(summary.totalSize)})...\n`,
   );
   let freed = 0;
-  let count = 0;
   for (const c of candidates) {
     if (!isInsideBaseDir(baseDir, c.dir)) {
       console.warn(`  Skipped (outside base dir): ${c.dir}`);
@@ -242,7 +241,6 @@ function deleteCandidates(
     }
     rmSync(c.dir, { recursive: true, force: true, maxRetries: 3 });
     freed += c.size;
-    count += 1;
     console.log(`  Deleted: ${c.dir} (${c.ageDays}d old)`);
   }
   console.log(`\nCleanup complete. Freed ${formatSize(freed)}.`);

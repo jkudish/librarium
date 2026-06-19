@@ -41,17 +41,17 @@ The full docs live at **[librarium.agentsy.build](https://librarium.agentsy.buil
 # Install (requires Node.js >= 20.12)
 npm install -g librarium
 
-# Auto-configure: discovers API keys from your environment and enables matching providers
-librarium init --auto
+# Start guided setup if no providers are configured yet
+librarium
 
-# Fan out a research query across providers (live results table)
+# After setup, fan out a research query across providers
 librarium run "PostgreSQL connection pooling best practices"
 
 # Or get one grounded, cited answer synthesized from the results
 librarium answer "what changed in postgres 17 logical replication"
 ```
 
-That's it. Output lands in a timestamped run directory you can read, browse, or feed to a pipeline. Run `librarium` with no arguments for an interactive wizard. See the [full command reference](#commands) and [more install methods](#installation) below.
+On first run, `librarium` opens a guided onboarding wizard: pick providers, choose where API keys should be stored, enter keys with masked prompts, and optionally run a first query. Once at least one usable provider is configured, bare `librarium` opens the research wizard instead. Output lands in a timestamped run directory you can read, browse, or feed to a pipeline. See the [full command reference](#commands) and [more install methods](#installation) below.
 
 ## Features
 
@@ -130,6 +130,17 @@ librarium
 
 Librarium ships with 24 built-in provider adapters organized into four tiers:
 
+The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
+
+| Provider | Good for | API Key Env Var |
+|---|---|---|
+| Brave Web Search | Fast raw web results and broad source discovery | `BRAVE_API_KEY` |
+| Perplexity Sonar Pro | Quick grounded AI answers with citations | `PERPLEXITY_API_KEY` |
+| Exa Search | AI-oriented semantic web search | `EXA_API_KEY` |
+| Tavily Search | Agent-focused search and extraction workflows | `TAVILY_API_KEY` |
+
+Some provider families unlock multiple adapters with one key. For example, `PERPLEXITY_API_KEY` can power Perplexity search, grounded answers, and deep research adapters; onboarding explains that rather than making repeated provider rows look accidental.
+
 | Provider | ID | Tier | API Key Env Var |
 |---|---|---|---|
 | Perplexity Sonar Deep Research | `perplexity-sonar-deep` | deep-research | `PERPLEXITY_API_KEY` |
@@ -185,16 +196,23 @@ Providers are categorized into four tiers based on their capabilities, latency, 
 
 - **raw-search** -- Traditional search engine results. Fast responses with many links and snippets, but no AI synthesis. Useful for broad link discovery and verifying specific facts.
 
-- **llm** -- Ungrounded generic LLMs (Claude, OpenAI, Gemini, or anything via OpenRouter). These return the model's direct answer to the research prompt with **no web grounding and no citations**, so they contribute zero sources to the deduplicated source set, `sources.json`, and the report tallies. They exist as an opt-in baseline/contrast layer: run them alongside grounded research to see what the model says on its own versus what grounded providers surface. Because they are ungrounded, they are **excluded from every grounded default group** (`quick`, `fast`, `raw`, `deep`, `comprehensive`, and `all`). Opt in explicitly via `-p claude,openai-chat,...`, a custom group, or `--group llm`. Each provider takes a cheap default model with a per-provider `model` config override.
+- **llm** -- Generic LLM answers from Claude, OpenAI, Gemini, or OpenRouter. They are provider-style model calls, not dedicated research/search APIs. Web search and citations are **on by default** for these adapters, and you can turn that off globally with `defaults.llmWebSearch: false` or per provider with `options.webSearch: false`. They stay **excluded from every grounded default group** (`quick`, `fast`, `raw`, `deep`, `comprehensive`, and `all`) so a normal grounded run does not silently add extra model calls. Opt in explicitly via `-p claude,openai-chat,...`, a custom group, or `--group llm`. Each provider takes a default model with a per-provider `model` config override.
 
-### The LLM tier (ungrounded baseline / contrast)
+### The LLM tier
 
-The `llm` tier is deliberately kept apart from the grounded tiers. Grounded providers earn their place in the source tallies by citing the web; ungrounded LLMs do not, so librarium never silently folds them into a grounded run. `report.tier === 'llm'` rows render a dim `ungrounded` in place of the source count, and the dedupe pipeline, `sources.json`, and report source totals are completely unaffected by their presence. Use the built-in `llm` group (`--group llm`) to run all four at once.
+The `llm` tier is deliberately kept apart from the grounded tiers. These adapters now use their provider's web-search feature by default where available:
 
-**Opt-in, never auto-enabled.** Several llm-tier providers share an API key with their grounded counterparts (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; Claude uses `ANTHROPIC_API_KEY`). To keep a plain `librarium run` -- which dispatches every *enabled* provider -- from silently calling an ungrounded model, `init` treats the llm tier specially:
+- `claude` uses Anthropic's Messages API web search tool.
+- `openai-chat` uses the OpenAI Responses API with the `web_search` tool.
+- `gemini-chat` uses Gemini Google Search grounding.
+- `openrouter-chat` uses OpenRouter's online/web-search path.
 
-- `librarium init --auto` **does not** enable llm-tier providers, even when their key is present. It prints them as found-but-ungrounded with a hint to opt in.
-- Interactive `librarium init` **lists** the llm-tier providers but leaves them **unchecked** (with an `[ungrounded]` marker), so you must tick them deliberately.
+If you want old-style direct model answers with no web search, set `"llmWebSearch": false` under `defaults`, or set `"options": { "webSearch": false }` on a specific llm provider. When web search is off, llm providers contribute no citations or source URLs.
+
+**Opt-in, never auto-enabled.** Several llm-tier providers share an API key with their grounded counterparts (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`; Claude uses `ANTHROPIC_API_KEY`). To keep a plain `librarium run` -- which dispatches every *enabled* provider -- from silently calling extra LLM APIs, `init` treats the llm tier specially:
+
+- `librarium init --auto` **does not** enable llm-tier providers, even when their key is present. It prints them as found-but-opt-in with a hint to opt in.
+- Interactive setup **lists** the llm-tier providers but does not select them for you, so you must choose them deliberately.
 
 As a result they stay out of the default run unless you explicitly enable them in config. Reach for them on demand via `-p claude,openai-chat,...`, a custom group, or `--group llm` regardless of your init choices.
 
@@ -533,7 +551,7 @@ librarium groups --json
 
 ### `init`
 
-Set up librarium configuration. Auto mode discovers API keys from your environment and enables matching providers.
+Set up librarium configuration. Interactive mode runs the same guided onboarding flow as first-run `librarium`: choose providers, choose credential storage, enter keys, and save only providers with usable credentials. Auto mode remains non-interactive: it discovers API keys from your environment and enables matching grounded providers.
 
 ```bash
 # Auto-discover (non-interactive)
@@ -553,11 +571,14 @@ librarium doctor [--json]
 
 ### `config`
 
-Print the resolved configuration (global merged with project).
+Print the resolved configuration (global merged with project), or open the interactive config menu.
 
 ```bash
 # Show resolved config
 librarium config
+
+# Open provider/settings menu
+librarium config menu
 
 # Show only global config
 librarium config --global
@@ -565,6 +586,8 @@ librarium config --global
 # Output raw JSON
 librarium config --json
 ```
+
+The config menu can configure providers/API keys, credential storage, `defaults.llmWebSearch`, execution mode, output directory, parallelism, and timeouts.
 
 ### `cleanup`
 
@@ -641,7 +664,7 @@ Groups are named collections of provider IDs. Librarium ships with seven default
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
-| `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Ungrounded LLM baseline / contrast (no citations) |
+| `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
 | `all` | All 20 grounded providers | Maximum grounded coverage (excludes the `llm` tier) |
 
 ### Custom Groups
@@ -741,6 +764,7 @@ The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the 
     "asyncTimeout": 1800,
     "asyncPollInterval": 10,
     "mode": "mixed",
+    "llmWebSearch": true,
     "maxCostUsd": 0.5,
     "maxEstimatedCostUsd": 0.25
   },
@@ -770,7 +794,39 @@ The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the 
 }
 ```
 
-API keys use the `$ENV_VAR` pattern -- the value `"$PERPLEXITY_API_KEY"` resolves to `process.env.PERPLEXITY_API_KEY` at runtime. Keys are never stored in plaintext.
+API keys can be stored three ways:
+
+1. **OS keychain**: recommended when available. Config stores a reference such as `"keychain:PERPLEXITY_API_KEY"` and the secret lives outside the config file.
+2. **Shell environment variables**: config stores a reference such as `"$PERPLEXITY_API_KEY"`. The onboarding wizard writes exports to `~/.config/librarium/env` (or `env.fish`) with `0600` permissions and, with confirmation, adds a non-secret source line to your detected shell profile.
+3. **Config file**: explicit fallback. Config stores the literal key in `~/.config/librarium/config.json`, which is written with `0600` permissions.
+
+The CLI cannot change the parent shell's live environment. If you choose shell environment variables, open a new terminal or source your shell profile before expecting the key to exist in future sessions.
+
+LLM providers use web search and citations by default. Turn that off globally with:
+
+```json
+{
+  "defaults": {
+    "llmWebSearch": false
+  }
+}
+```
+
+Or turn it off for one provider:
+
+```json
+{
+  "providers": {
+    "openai-chat": {
+      "apiKey": "$OPENAI_API_KEY",
+      "enabled": true,
+      "options": {
+        "webSearch": false
+      }
+    }
+  }
+}
+```
 
 Some providers support optional model overrides. Gemini Deep Research defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier (and more expensive) variant:
 
@@ -1017,7 +1073,7 @@ await initializeProviders({ credentials });
 
 const config: Config = {
   version: 1,
-  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync' },
+  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync', llmWebSearch: true },
   providers: {
     'gemini-grounded': { enabled: true },
     'openrouter-online': { enabled: true },
@@ -1071,7 +1127,7 @@ await initializeProviders({ credentials });
 
 const config = {
   version: 1 as const,
-  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync' as const },
+  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync' as const, llmWebSearch: true },
   providers: { 'my-search': { enabled: true } },
   // npm: { type: 'npm', module: 'my-search-provider', export: 'default' }
   // script: { type: 'script', command: './providers/my-search.mjs' }
@@ -1114,7 +1170,7 @@ await initializeProviders({ credentials });
 
 const config: Config = {
   version: 1,
-  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'mixed' },
+  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'mixed', llmWebSearch: true },
   providers: {
     'openai-deep': { enabled: true },        // deep-research -> async
     'gemini-grounded': { enabled: true },    // ai-grounded -> sync, inline
@@ -1241,7 +1297,7 @@ Groups:
   deep           -- Thorough async research (minutes)
   fast           -- Quick results from multiple tiers
   comprehensive  -- Deep + AI-grounded combined
-  llm            -- Ungrounded LLM baseline / contrast (no citations)
+  llm            -- Opt-in LLM answers; web search/citations on by default
   all            -- All 20 grounded providers (excludes the llm tier)
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:

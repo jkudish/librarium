@@ -18,7 +18,7 @@ const GROUNDED_GROUPS = [
 ] as const;
 
 describe('default groups -- llm tier', () => {
-  it('defines an llm group with exactly the four ungrounded providers', () => {
+  it('defines an llm group with exactly the four opt-in providers', () => {
     expect(DEFAULT_GROUPS.llm).toEqual([...LLM_PROVIDERS]);
   });
 

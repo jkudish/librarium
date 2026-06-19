@@ -86,10 +86,10 @@ export function usageLabel(
 }
 
 function citationLabel(report: ProviderReport, color = false): string {
-  // Ungrounded LLM providers contribute no sources by design; rendering a
-  // dim "ungrounded" reads better than "0 sources".
-  if (report.tier === 'llm') {
-    return paint('ungrounded'.padStart(11), ANSI.dim, color);
+  // LLM providers can run with web search disabled. In that direct-answer
+  // path, "direct" is clearer than showing "0 sources".
+  if (report.tier === 'llm' && report.citationCount === 0) {
+    return paint('direct'.padStart(11), ANSI.dim, color);
   }
   const noun = report.tier === 'raw-search' ? 'results' : 'sources';
   return `${String(report.citationCount).padStart(3)} ${noun}`;

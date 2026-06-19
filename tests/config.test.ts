@@ -50,6 +50,7 @@ describe('loadConfig', () => {
     expect(config.defaults.asyncTimeout).toBe(1800);
     expect(config.defaults.asyncPollInterval).toBe(10);
     expect(config.defaults.mode).toBe('mixed');
+    expect(config.defaults.llmWebSearch).toBe(true);
     expect(config.customProviders).toEqual({});
     expect(config.trustedProviderIds).toEqual([]);
     expect(config.groups).toHaveProperty('deep');
@@ -84,6 +85,7 @@ describe('loadConfig', () => {
     expect(config.defaults.maxParallel).toBe(4);
     expect(config.defaults.timeout).toBe(60);
     expect(config.defaults.mode).toBe('sync');
+    expect(config.defaults.llmWebSearch).toBe(true);
     expect(config.providers['perplexity-sonar-pro']).toBeDefined();
     expect(config.providers['perplexity-sonar-pro'].enabled).toBe(true);
     // Default groups should be merged in
@@ -144,6 +146,7 @@ describe('mergeConfigs', () => {
       asyncTimeout: 1800,
       asyncPollInterval: 10,
       mode: 'mixed',
+      llmWebSearch: true,
     },
     providers: {
       'perplexity-sonar-pro': {
@@ -314,6 +317,7 @@ describe('validateFallbacks', () => {
       asyncTimeout: 1800,
       asyncPollInterval: 10,
       mode: 'mixed',
+      llmWebSearch: true,
     },
     providers,
     customProviders: {},

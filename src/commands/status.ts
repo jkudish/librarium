@@ -15,6 +15,7 @@ import { normalizeUsage } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import { buildProviderMetering } from '../core/metering.js';
 import { deduplicateSources } from '../core/normalizer.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
   AsyncTaskHandle,
   Citation,
@@ -255,9 +256,10 @@ export function registerStatusCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
+        const credentials = createNodeCredentialContext();
         const initResult = await initializeProviders({
           ...config,
-          credentials: { env: process.env },
+          credentials,
         });
         for (const warning of initResult.warnings) {
           console.error(`[librarium] warning: ${warning}`);
