@@ -272,6 +272,37 @@ describe('generateJsonlReport -- each line parses independently', () => {
     expect(resultLine?.usage).toEqual({ costUsd: 0.012, inputTokens: 500 });
   });
 
+  it('includes metering when present on result line', () => {
+    const manifest = makeManifest({
+      providers: [
+        makeReport({
+          metering: {
+            kind: 'request_priced',
+            pricingVersion: '2026-06',
+            estimate: {
+              estimatedCostUsd: 0.015,
+              billableUnits: 1,
+              unit: 'request',
+              costConfidence: 'estimated',
+            },
+          },
+        }),
+      ],
+    });
+    const jsonl = generateJsonlReport({
+      manifest,
+      providerContents: {},
+      sources: [],
+    });
+    const lines = parseLines(jsonl) as Array<{
+      type: string;
+      metering?: { kind?: string; estimate?: { estimatedCostUsd?: number } };
+    }>;
+    const resultLine = lines.find((l) => l.type === 'result');
+    expect(resultLine?.metering?.kind).toBe('request_priced');
+    expect(resultLine?.metering?.estimate?.estimatedCostUsd).toBe(0.015);
+  });
+
   it('emits source lines with correct fields', () => {
     const jsonl = generateJsonlReport({
       manifest: makeManifest(),

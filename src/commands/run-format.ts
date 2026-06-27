@@ -322,6 +322,20 @@ export interface RunSummaryInput {
    * that crossed it, the budget ceiling, and how many providers were skipped.
    */
   budgetReached?: { reportedUsd: number; budgetUsd: number; skipped: number };
+  /**
+   * Pre-dispatch estimated cost across providers that produced a USD estimate.
+   * A separate lane from reportedCost — estimates are guesses, never facts.
+   */
+  estimatedCost?: { totalUsd: number; estimating: number; providers: number };
+  /**
+   * Present only when the estimated-cost reservation ceiling was reached: the
+   * reserved total that crossed it, the ceiling, and how many were skipped.
+   */
+  estimatedBudgetReached?: {
+    reservedUsd: number;
+    budgetUsd: number;
+    skipped: number;
+  };
 }
 
 /** End-of-run summary block (returned as individual lines). */
@@ -353,11 +367,30 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
       `  ▸ reported cost: ${formatCost(input.reportedCost.totalUsd)} (${input.reportedCost.reporting} of ${input.reportedCost.providers} providers)`,
     );
   }
+  if (input.estimatedCost && input.estimatedCost.estimating > 0) {
+    lines.push(
+      paint(
+        `  ▸ estimated cost: ~${formatCost(input.estimatedCost.totalUsd)} (${input.estimatedCost.estimating} of ${input.estimatedCost.providers} providers, pre-dispatch estimate)`,
+        ANSI.dim,
+        input.color,
+      ),
+    );
+  }
   if (input.budgetReached) {
     const { reportedUsd, budgetUsd, skipped } = input.budgetReached;
     lines.push(
       paint(
         `  ▸ budget reached: ${formatCost(reportedUsd)} reported of ${formatCost(budgetUsd)} budget, skipped ${skipped} ${skipped === 1 ? 'provider' : 'providers'}`,
+        ANSI.yellow,
+        input.color,
+      ),
+    );
+  }
+  if (input.estimatedBudgetReached) {
+    const { reservedUsd, budgetUsd, skipped } = input.estimatedBudgetReached;
+    lines.push(
+      paint(
+        `  ▸ estimated budget reached: ~${formatCost(reservedUsd)} reserved of ${formatCost(budgetUsd)} budget, skipped ${skipped} ${skipped === 1 ? 'provider' : 'providers'}`,
         ANSI.yellow,
         input.color,
       ),

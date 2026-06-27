@@ -48,6 +48,10 @@ export function registerLsCommand(program: Command): void {
           'Tier'.length,
           ...meta.map((p) => p.tier.length),
         );
+        const meteringWidth = Math.max(
+          'Metering'.length,
+          ...meta.map((p) => (p.meteringKind ?? '').length),
+        );
         const sourceWidth = Math.max(
           'Source'.length,
           ...meta.map((p) => p.source.length),
@@ -61,6 +65,7 @@ export function registerLsCommand(program: Command): void {
           'ID'.padEnd(idWidth),
           'Name'.padEnd(nameWidth),
           'Tier'.padEnd(tierWidth),
+          'Metering'.padEnd(meteringWidth),
           'Source'.padEnd(sourceWidth),
           'Enabled'.padEnd(enabledWidth),
           'API Key'.padEnd(apiKeyWidth),
@@ -83,6 +88,7 @@ export function registerLsCommand(program: Command): void {
             p.id.padEnd(idWidth),
             p.displayName.padEnd(nameWidth),
             p.tier.padEnd(tierWidth),
+            (p.meteringKind ?? '').padEnd(meteringWidth),
             p.source.padEnd(sourceWidth),
             enabled.padEnd(enabledWidth),
             apiKey.padEnd(apiKeyWidth),

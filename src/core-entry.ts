@@ -31,6 +31,7 @@ export * from './core/budget.js';
 export * from './core/credentials.js';
 export * from './core/dispatcher.js';
 export * from './core/http-client.js';
+export * from './core/metering.js';
 export * from './core/normalizer.js';
 export * from './core/prompt-builder.js';
 export * from './types.js';

@@ -188,6 +188,7 @@ function writeProviderOutputs(
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
           usage: result.usage,
+          metering: result.metering,
           citations: result.citations,
         },
         null,

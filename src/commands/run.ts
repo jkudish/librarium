@@ -10,7 +10,12 @@ import {
 } from '../adapters/node-registry.js';
 import { resolveProviderIds, resolveProviderTokens } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
-import { BUDGET_SKIP_REASON, createBudgetTracker } from '../core/budget.js';
+import {
+  BUDGET_SKIP_REASON,
+  createBudgetTracker,
+  createEstimateBudgetTracker,
+  ESTIMATE_BUDGET_SKIP_REASON,
+} from '../core/budget.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { dispatch } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
@@ -60,6 +65,7 @@ export interface RunOptions {
   parallel?: number;
   timeout?: number;
   maxCost?: number;
+  maxEstimatedCost?: number;
   json?: boolean;
   open?: boolean;
   html?: boolean;
@@ -144,6 +150,11 @@ export function registerRunCommand(program: Command): void {
       'Stop launching providers once API-reported cost crosses this budget (USD)',
       parseMaxCost,
     )
+    .option(
+      '--max-estimated-cost <usd>',
+      'Reserve each provider’s pre-dispatch estimated cost; skip launches once the estimate crosses this ceiling (USD)',
+      parseMaxCost,
+    )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
     .option('--json', 'Output run.json to stdout')
     .option(
@@ -200,6 +211,9 @@ export async function executeRun(
       if (opts.mode) cliFlags.mode = opts.mode;
       // Flag wins over defaults.maxCostUsd from config.
       if (opts.maxCost !== undefined) cliFlags.maxCostUsd = opts.maxCost;
+      if (opts.maxEstimatedCost !== undefined) {
+        cliFlags.maxEstimatedCostUsd = opts.maxEstimatedCost;
+      }
 
       const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
       const credentials = { env: process.env };
@@ -417,6 +431,11 @@ export async function executeRun(
       // providers that report nothing contribute 0. Undefined budget means no
       // limit, in which case the tracker never trips.
       const budget = createBudgetTracker(config.defaults.maxCostUsd);
+      // Separate pre-dispatch reservation ceiling (estimated cost). Kept fully
+      // independent of the reported-cost budget above; the two never reconcile.
+      const estimatedBudget = createEstimateBudgetTracker(
+        config.defaults.maxEstimatedCostUsd,
+      );
 
       const dispatchStartedAt = Date.now();
       const { reports, results, asyncTasks } = await dispatch({
@@ -427,6 +446,7 @@ export async function executeRun(
         mode: config.defaults.mode,
         credentials,
         budget,
+        estimatedBudget,
         onProgress: (event) => {
           if (live) {
             switch (event.event) {
@@ -628,6 +648,39 @@ export async function executeRun(
             }
           : undefined;
 
+      // Pre-dispatch estimated cost across providers that produced a USD
+      // estimate (separate lane from reported cost; never mixed).
+      const estimateReports = reports.filter(
+        (r) =>
+          typeof r.metering?.estimate?.estimatedCostUsd === 'number' &&
+          Number.isFinite(r.metering.estimate.estimatedCostUsd),
+      );
+      const estimatedCost =
+        estimateReports.length > 0
+          ? {
+              totalUsd: estimateReports.reduce(
+                (sum, r) => sum + (r.metering?.estimate?.estimatedCostUsd ?? 0),
+                0,
+              ),
+              estimating: estimateReports.length,
+              providers: reports.length,
+            }
+          : undefined;
+
+      // Surface the estimated-cost reservation breaker when it tripped.
+      const estimateSkipped = effectiveReports.filter(
+        (r) =>
+          r.status === 'skipped' && r.error === ESTIMATE_BUDGET_SKIP_REASON,
+      ).length;
+      const estimatedBudgetReached =
+        estimatedBudget.limitUsd !== undefined && estimateSkipped > 0
+          ? {
+              reservedUsd: estimatedBudget.reservedUsd,
+              budgetUsd: estimatedBudget.limitUsd,
+              skipped: estimateSkipped,
+            }
+          : undefined;
+
       for (const line of formatRunSummary({
         succeeded: successful.length,
         failed: failed.length,
@@ -639,6 +692,8 @@ export async function executeRun(
         totalDurationMs,
         reportedCost,
         budgetReached,
+        estimatedCost,
+        estimatedBudgetReached,
       })) {
         printLine(line);
       }
@@ -733,6 +788,7 @@ function writeProviderOutputs(
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
           usage: result.usage,
+          metering: result.metering,
           citations: result.citations,
         },
         null,

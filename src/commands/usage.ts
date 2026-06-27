@@ -72,11 +72,13 @@ export function formatUsageReport(
   lines.push(`Usage (${scope}):`);
   lines.push('');
 
-  // Provider table.
-  const header = ['provider', 'cost', 'tokens', 'runs'];
+  // Provider table. "est. cost" is a separate, pre-dispatch estimate lane —
+  // a guess, never mixed with reported cost.
+  const header = ['provider', 'cost', 'est. cost', 'tokens', 'runs'];
   const rows = aggregate.providers.map((p) => [
     p.provider,
     p.reportedCost ? formatCost(p.costUsd) : '-',
+    p.hasEstimate ? `~${formatCost(p.estimatedCostUsd)}` : '-',
     p.totalTokens > 0 ? formatTokens(p.totalTokens) : '-',
     String(p.runCount),
   ]);
@@ -96,6 +98,11 @@ export function formatUsageReport(
   lines.push('');
   lines.push(`  runs: ${aggregate.runCount}`);
   lines.push(`  total reported cost: ${formatCost(aggregate.totalCostUsd)}`);
+  if (aggregate.totalEstimatedCostUsd > 0) {
+    lines.push(
+      `  total estimated cost: ~${formatCost(aggregate.totalEstimatedCostUsd)} (pre-dispatch estimate, not billed)`,
+    );
+  }
   if (aggregate.range) {
     lines.push(
       `  date range: ${formatRunDate(aggregate.range.fromSeconds)} to ${formatRunDate(aggregate.range.toSeconds)}`,
