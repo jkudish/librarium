@@ -174,8 +174,9 @@ export async function dispatch(
       );
       return null;
     }
-    // A fallback is its own billable launch: reserve its estimate first, and
-    // skip it if the estimated budget is already spent.
+    // A fallback is its own billable launch: skip it if the estimated budget is
+    // already spent. (The reservation itself happens only once we've committed
+    // to launching, below, so a fallback we bail on never reserves.)
     if (estimatedBudget?.exceeded()) {
       recordBudgetSkip(
         fallbackId,
@@ -185,7 +186,6 @@ export async function dispatch(
       );
       return null;
     }
-    estimatedBudget?.reserve(meteringFor(fallbackId).estimate);
 
     // Don't use a fallback that's already running as a primary in this dispatch
     if (providerIds.includes(fallbackId)) return null;
@@ -195,6 +195,11 @@ export async function dispatch(
     // same fallback target.
     if (usedFallbacks.has(fallbackId)) return null;
     usedFallbacks.add(fallbackId);
+
+    // Committed to launching this fallback now: reserve its estimate against the
+    // estimated budget. Reserving only after the claim guards means a fallback
+    // we bail on above never leaves a phantom reservation behind.
+    estimatedBudget?.reserve(meteringFor(fallbackId).estimate);
 
     // Note: enabled is intentionally not checked here — fallback providers may
     // be configured with enabled: false so they only activate as backups.

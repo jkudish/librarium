@@ -648,10 +648,12 @@ export async function executeRun(
             }
           : undefined;
 
-      // Pre-dispatch estimated cost across providers that produced a USD
-      // estimate (separate lane from reported cost; never mixed).
+      // Pre-dispatch estimated cost across providers that actually launched and
+      // produced a USD estimate (separate lane from reported cost; never mixed).
+      // Skipped providers never ran, so their estimate is not counted.
       const estimateReports = reports.filter(
         (r) =>
+          r.status !== 'skipped' &&
           typeof r.metering?.estimate?.estimatedCostUsd === 'number' &&
           Number.isFinite(r.metering.estimate.estimatedCostUsd),
       );

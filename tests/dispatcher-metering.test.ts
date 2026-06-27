@@ -199,6 +199,51 @@ describe('dispatcher: estimated budget reservation', () => {
     expect(estimatedBudget.reservedUsd).toBe(0);
   });
 
+  it('does not reserve a fallback that never launches (no phantom reservation)', async () => {
+    // serpapi fails and is configured to fall back to brave-search — but
+    // brave-search is already a primary in this dispatch, so the fallback bails
+    // out without launching. Its estimate must NOT be reserved twice.
+    const failing: Provider = {
+      id: 'serpapi',
+      displayName: 'Mock serpapi',
+      tier: 'raw-search',
+      envVar: 'MOCK_SERPAPI_KEY',
+      execute: async (): Promise<ProviderResult> => ({
+        provider: 'serpapi',
+        tier: 'raw-search',
+        content: '',
+        citations: [],
+        durationMs: 1,
+        error: 'boom',
+      }),
+    };
+    registerProvider(failing);
+    registerProvider(searchProvider('brave-search'));
+
+    const config = makeConfig({
+      serpapi: { apiKey: '$MOCK_SERPAPI_KEY', enabled: true },
+      'brave-search': { apiKey: '$MOCK_BRAVE_SEARCH_KEY', enabled: true },
+    });
+    config.providers.serpapi = {
+      ...config.providers.serpapi,
+      fallback: 'brave-search',
+    } as never;
+
+    const estimatedBudget = createEstimateBudgetTracker(1);
+    await dispatch({
+      config,
+      providerIds: ['serpapi', 'brave-search'],
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: process.env },
+      estimatedBudget,
+    });
+
+    // serpapi (0.015) + brave-search-as-primary (0.005) = 0.02. The bailed
+    // fallback must not add another 0.005.
+    expect(estimatedBudget.reservedUsd).toBeCloseTo(0.02);
+  });
+
   it('does not reserve or skip anything when no estimated budget is supplied', async () => {
     registerProvider(searchProvider('serpapi'));
     registerProvider(searchProvider('searchapi'));

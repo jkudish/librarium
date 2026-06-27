@@ -114,9 +114,12 @@ export function aggregateUsage(
           usage.outputTokens !== undefined ||
           usage.totalTokens !== undefined);
       // Pre-dispatch estimate (a guess) — a separate lane from reported usage.
+      // Skipped providers never launched, so their estimate is not counted.
       const estimateUsd = report.metering?.estimate?.estimatedCostUsd;
       const hasEstimate =
-        typeof estimateUsd === 'number' && Number.isFinite(estimateUsd);
+        report.status !== 'skipped' &&
+        typeof estimateUsd === 'number' &&
+        Number.isFinite(estimateUsd);
       if (!hasCost && !hasTokens && !hasEstimate) continue;
 
       // "Usage" here means actual reported usage; an estimate alone does not

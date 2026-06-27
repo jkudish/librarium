@@ -183,4 +183,32 @@ describe('aggregateUsage', () => {
     // An estimate alone does not count the run as having measured usage.
     expect(agg.runsWithoutUsage).toBe(0); // exa reported real usage this run
   });
+
+  it('excludes skipped providers from estimated cost (never launched)', () => {
+    const skipped: ProviderReport = {
+      id: 'serpapi',
+      tier: 'raw-search',
+      status: 'skipped',
+      durationMs: 0,
+      wordCount: 0,
+      citationCount: 0,
+      outputFile: '',
+      metaFile: '',
+      error: 'skipped: estimated cost budget reached',
+      metering: {
+        kind: 'request_priced',
+        estimate: {
+          estimatedCostUsd: 0.015,
+          billableUnits: 1,
+          unit: 'request',
+          costConfidence: 'estimated',
+        },
+      },
+    };
+    writeManifest(baseDir, nowSec, [report('exa', { costUsd: 0.02 }), skipped]);
+
+    const agg = aggregateUsage(baseDir);
+    expect(agg.totalEstimatedCostUsd).toBe(0);
+    expect(agg.providers.find((p) => p.provider === 'serpapi')).toBeUndefined();
+  });
 });

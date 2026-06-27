@@ -18,6 +18,7 @@ import { deduplicateSources } from '../core/normalizer.js';
 import type {
   AsyncTaskHandle,
   Citation,
+  ProviderConfig,
   ProviderReport,
   RunManifest,
 } from '../types.js';
@@ -61,6 +62,7 @@ async function retrieveTask(
   widths: LineWidths,
   color: boolean,
   print: (line: string) => void,
+  providerConfig?: ProviderConfig,
 ): Promise<boolean> {
   const provider = getProvider(task.provider);
   if (!provider?.retrieve) {
@@ -102,8 +104,12 @@ async function retrieveTask(
     const usage = normalizeUsage(result);
     // Same metering normalization path as sync dispatch, so retrieved
     // async deep-research results carry metering (and provider_reported cost)
-    // just like their sync counterparts.
-    const metering = buildProviderMetering(task.provider, undefined, usage);
+    // just like their sync counterparts, including any configured pricing.
+    const metering = buildProviderMetering(
+      task.provider,
+      providerConfig,
+      usage,
+    );
 
     safeWriteFile(join(dir, outputFile), result.content);
     safeWriteFile(
@@ -411,6 +417,7 @@ export function registerStatusCommand(program: Command): void {
                 widths,
                 color,
                 pretty,
+                config.providers[task.provider],
               );
               if (ok) retrieved++;
             }
@@ -451,6 +458,7 @@ export function registerStatusCommand(program: Command): void {
               widths,
               color,
               pretty,
+              config.providers[task.provider],
             );
             if (ok) retrieved++;
           }
