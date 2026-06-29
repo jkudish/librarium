@@ -190,6 +190,7 @@ Rules:
 
 - `execute` and `retrieve`: `ProviderResult`
   - includes `provider`, `tier`, `content`, `citations`, `durationMs`
+  - optionally `model`, `tokenUsage`, and `usage` (return `usage` to report cost/tokens -- see [Metering and Cost](#metering-and-cost))
 - `submit`: `AsyncTaskHandle`
 - `poll`: `AsyncPollResult`
 - `test`: `{ ok: boolean; error?: string }`
@@ -202,6 +203,32 @@ All responses are validated. Invalid payloads fail the operation.
 - `submit`: uses `options.timeout` seconds (minimum 1s)
 - `describe`, `poll`, `test`: 30s default
 - `retrieve`: 120s default
+
+## Metering and Cost
+
+Librarium tracks per-provider cost through a `metering` object on every result (`kind`, an optional pre-dispatch `estimate`, and an `actual` lane). How a provider participates depends on whether it is custom or built-in.
+
+### Custom providers
+
+- **Report cost via `usage`.** If your `execute`/`retrieve` `ProviderResult` includes a `usage` object with `costUsd` (and/or `inputTokens`/`outputTokens`/`totalTokens`), librarium surfaces it as `metering.actual` with `source: "provider_reported"`, counts it toward the reported-cost `--max-cost` budget, and aggregates it in `librarium usage`. This is taken from your response, never estimated.
+- **Custom providers are `manual_unmetered`.** Metering *kind* and the network-free pre-dispatch *estimate* are a built-in registry concept (`src/core/metering.ts`). Custom providers have no registry entry, so their `metering.kind` is always `manual_unmetered`, they produce no estimate, and they reserve `0` against `--max-estimated-cost` (never skipped by it).
+
+### Built-in adapters
+
+A built-in adapter declares its pricing model in the central registry. The metering kinds are: `native_cost`, `native_tokens`, `request_priced`, `credit_priced`, `api_unit_priced`, `manual_unmetered`. Request- and credit-priced kinds can carry a network-free default estimate (request-priced may include a flat USD figure; plan-dependent credit/unit kinds emit unit metadata only, with a USD figure appearing only when the user configures pricing via provider `options`). Estimates never set `usage.costUsd`.
+
+## Adding a Built-in Adapter
+
+Built-in adapters live in core and must stay runtime-portable (fetch-only HTTP, no `node:*`, no direct `process.env`; a workerd CI suite enforces this). To add one, update **all** of these in lockstep -- several are guarded by tests, so a partial change fails CI:
+
+1. **Adapter** -- `src/adapters/<id>.ts`, extending `BaseProvider` and implementing `execute` (plus `submit`/`poll`/`retrieve` for async deep research). Return `usage` when the API reports cost/tokens.
+2. **Registration** -- add an instance to the `builtIns` array in `src/adapters/index.ts` (`initializeProviders`).
+3. **Constants** (`src/constants.ts`) -- `PROVIDER_ENV_VARS`, `PROVIDER_DISPLAY_NAMES`, and at least one entry in `DEFAULT_GROUPS` (and `all`).
+4. **Metering registry** (`src/core/metering.ts`) -- add a `REGISTRY` entry with the provider's `kind` (and, for priced kinds, `defaultPerRequestUsd` / `defaultUnitsPerRequest` / `unit`). **Required:** the lockstep test in `tests/metering.test.ts` asserts every built-in has a registry entry, so a missing entry fails CI.
+5. **Core export** -- `export * from './adapters/<id>.js'` in `src/core-entry.ts`.
+6. **README** -- bump the "N built-in provider adapters" count; the README-drift test (`tests/readme-drift.test.ts`) tripwires on the provider count, tiers, and group names.
+
+Run `npm run test` (it includes the metering lockstep and README-drift guards) and `npm run test:workers` (the runtime-portability suite) before opening a PR.
 
 ## Error Handling and Loading Behavior
 
