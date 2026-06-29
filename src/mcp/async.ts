@@ -9,6 +9,7 @@ import {
 } from '../core/async-manager.js';
 import { normalizeUsage } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
+import { buildProviderMetering } from '../core/metering.js';
 import { deduplicateSources } from '../core/normalizer.js';
 import type {
   AsyncTaskHandle,
@@ -107,6 +108,9 @@ async function retrieveTaskSilent(
     const outputFile = `${safeId}.md`;
     const metaFile = `${safeId}.meta.json`;
     const usage = normalizeUsage(result);
+    // Same metering normalization path as sync dispatch and `status --retrieve`,
+    // so MCP-retrieved async results carry metering on run.json/.meta.json too.
+    const metering = buildProviderMetering(task.provider, undefined, usage);
 
     safeWriteFile(join(dir, outputFile), result.content);
     safeWriteFile(
@@ -120,6 +124,7 @@ async function retrieveTaskSilent(
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
           usage,
+          metering,
           citations: result.citations,
         },
         null,
@@ -137,6 +142,7 @@ async function retrieveTaskSilent(
       outputFile,
       metaFile,
       usage,
+      metering,
     };
     updateManifestAfterRetrieve(dir, report);
 

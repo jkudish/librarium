@@ -22,6 +22,10 @@ export interface ProviderUsageTotals {
   runCount: number;
   /** Whether any run reported a cost for this provider. */
   reportedCost: boolean;
+  /** Summed pre-dispatch estimated cost (a guess, kept separate from costUsd). */
+  estimatedCostUsd: number;
+  /** Whether any run carried a USD estimate for this provider. */
+  hasEstimate: boolean;
 }
 
 export interface UsageAggregate {
@@ -31,6 +35,8 @@ export interface UsageAggregate {
   totalCostUsd: number;
   /** Number of runs that reported at least one cost figure. */
   runsWithCost: number;
+  /** Summed pre-dispatch estimated cost across all runs (separate lane). */
+  totalEstimatedCostUsd: number;
   providers: ProviderUsageTotals[];
   /** Earliest and latest manifest timestamps (unix seconds), or null when empty. */
   range: { fromSeconds: number; toSeconds: number } | null;
@@ -57,6 +63,7 @@ export function aggregateUsage(
     runsWithoutUsage: 0,
     totalCostUsd: 0,
     runsWithCost: 0,
+    totalEstimatedCostUsd: 0,
     providers: [],
     range: null,
   };
@@ -73,6 +80,7 @@ export function aggregateUsage(
   let runsWithoutUsage = 0;
   let totalCostUsd = 0;
   let runsWithCost = 0;
+  let totalEstimatedCostUsd = 0;
   let fromSeconds = Number.POSITIVE_INFINITY;
   let toSeconds = Number.NEGATIVE_INFINITY;
 
@@ -99,15 +107,24 @@ export function aggregateUsage(
 
     for (const report of manifest.providers) {
       const usage = report.usage;
-      if (!usage) continue;
-      const hasCost = typeof usage.costUsd === 'number';
+      const hasCost = typeof usage?.costUsd === 'number';
       const hasTokens =
-        usage.inputTokens !== undefined ||
-        usage.outputTokens !== undefined ||
-        usage.totalTokens !== undefined;
-      if (!hasCost && !hasTokens) continue;
+        usage !== undefined &&
+        (usage.inputTokens !== undefined ||
+          usage.outputTokens !== undefined ||
+          usage.totalTokens !== undefined);
+      // Pre-dispatch estimate (a guess) — a separate lane from reported usage.
+      // Skipped providers never launched, so their estimate is not counted.
+      const estimateUsd = report.metering?.estimate?.estimatedCostUsd;
+      const hasEstimate =
+        report.status !== 'skipped' &&
+        typeof estimateUsd === 'number' &&
+        Number.isFinite(estimateUsd);
+      if (!hasCost && !hasTokens && !hasEstimate) continue;
 
-      runHadUsage = true;
+      // "Usage" here means actual reported usage; an estimate alone does not
+      // count a run as having usage (it never made a measured call).
+      if (hasCost || hasTokens) runHadUsage = true;
       const totals = byProvider.get(report.id) ?? {
         provider: report.id,
         costUsd: 0,
@@ -116,21 +133,28 @@ export function aggregateUsage(
         totalTokens: 0,
         runCount: 0,
         reportedCost: false,
+        estimatedCostUsd: 0,
+        hasEstimate: false,
       };
       totals.runCount += 1;
       if (hasCost) {
-        const cost = usage.costUsd ?? 0;
+        const cost = usage?.costUsd ?? 0;
         totals.costUsd += cost;
         totals.reportedCost = true;
         totalCostUsd += cost;
         runHadCost = true;
       }
-      const input = usage.inputTokens ?? 0;
-      const output = usage.outputTokens ?? 0;
+      if (hasEstimate) {
+        totals.estimatedCostUsd += estimateUsd;
+        totals.hasEstimate = true;
+        totalEstimatedCostUsd += estimateUsd;
+      }
+      const input = usage?.inputTokens ?? 0;
+      const output = usage?.outputTokens ?? 0;
       totals.inputTokens += input;
       totals.outputTokens += output;
       // Prefer a reported total; otherwise sum input+output.
-      totals.totalTokens += usage.totalTokens ?? input + output;
+      totals.totalTokens += usage?.totalTokens ?? input + output;
       byProvider.set(report.id, totals);
     }
 
@@ -147,6 +171,7 @@ export function aggregateUsage(
     runsWithoutUsage,
     totalCostUsd,
     runsWithCost,
+    totalEstimatedCostUsd,
     providers,
     range: runCount > 0 ? { fromSeconds, toSeconds } : null,
   };

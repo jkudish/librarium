@@ -60,6 +60,7 @@ interface ResultLine {
   durationMs: number;
   citationCount: number;
   usage?: Record<string, unknown>;
+  metering?: Record<string, unknown>;
   error?: string;
   fallbackFor?: string;
   content: string | null;
@@ -144,6 +145,9 @@ export function generateJsonlReport(input: JsonlReportInput): string {
     };
     if (report.usage !== undefined) {
       line.usage = report.usage as unknown as Record<string, unknown>;
+    }
+    if (report.metering !== undefined) {
+      line.metering = report.metering as unknown as Record<string, unknown>;
     }
     if (report.error !== undefined) line.error = report.error;
     if (report.fallbackFor !== undefined) line.fallbackFor = report.fallbackFor;

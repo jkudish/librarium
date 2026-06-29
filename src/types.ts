@@ -24,13 +24,86 @@ export interface ProviderOptions {
 
 // Normalized usage/cost as reported by a provider's API. Honest data only:
 // fields are set when (and only when) the API itself reported them. costUsd
-// is never estimated from a pricing table.
+// is never estimated from a pricing table — estimates live under
+// ProviderMetering.estimate, never here.
 export interface ProviderUsage {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
   costUsd?: number;
   raw?: unknown;
+}
+
+// How a provider is metered/priced. Declared statically per provider in the
+// metering registry (src/core/metering.ts); network-free.
+//   native_cost      — the API returns a real per-call cost (e.g. Perplexity, Exa)
+//   native_tokens    — the API returns token counts but no cost (e.g. Claude, OpenAI)
+//   request_priced   — a deterministic/plan price per request (e.g. SerpAPI, Brave)
+//   credit_priced    — priced in account credits per request (e.g. Tavily, Firecrawl)
+//   api_unit_priced  — priced per API unit/row/token, size known only post-call (e.g. Jina)
+//   manual_unmetered — no reliable per-call metering available
+export type MeteringKind =
+  | 'native_cost'
+  | 'native_tokens'
+  | 'request_priced'
+  | 'credit_priced'
+  | 'api_unit_priced'
+  | 'manual_unmetered';
+
+// Confidence in a cost figure.
+//   reported   — taken straight from the provider API (a fact)
+//   configured — computed from user-supplied pricing in provider options
+//   estimated  — computed from a built-in default pricing snapshot (a guess)
+//   unknown    — no basis to estimate
+export type CostConfidence =
+  | 'reported'
+  | 'configured'
+  | 'estimated'
+  | 'unknown';
+
+// Provenance of an actual (non-estimated) cost figure on normalized output.
+export type ActualCostSource =
+  | 'provider_reported'
+  | 'computed_from_tokens'
+  | 'computed_from_request'
+  | 'computed_from_credits'
+  | 'account_usage_delta'
+  | 'unknown';
+
+// Pre-dispatch cost estimate. Produced WITHOUT any network call so budgets can
+// be reserved before a provider runs. Never folded into ProviderUsage.costUsd.
+export interface MeteringEstimate {
+  /** Estimated USD cost. Omitted when the price is plan-dependent/unknown. */
+  estimatedCostUsd?: number;
+  /** Number of billable units this call is expected to consume. */
+  billableUnits?: number;
+  /** Unit the estimate is denominated in: 'request' | 'credit' | 'token' | ... */
+  unit?: string;
+  /** Version tag for the pricing snapshot behind estimatedCostUsd. */
+  pricingVersion?: string;
+  /** How much to trust estimatedCostUsd (estimated/configured/unknown here). */
+  costConfidence: CostConfidence;
+}
+
+// An actual (post-dispatch) cost figure with its provenance. Kept separate from
+// ProviderUsage so usage.costUsd stays strictly provider-reported.
+export interface MeteringActual {
+  costUsd?: number;
+  source: ActualCostSource;
+  billableUnits?: number;
+}
+
+// Per-provider metering metadata attached to dispatch results/reports. Carries
+// the static capability (kind), a pre-dispatch estimate, and — once a result is
+// in hand — the actual cost lane. Additive: omit it and nothing else changes.
+export interface ProviderMetering {
+  kind: MeteringKind;
+  /** Pricing snapshot version for this provider's defaults, when applicable. */
+  pricingVersion?: string;
+  /** Network-free pre-dispatch estimate (absent for native/unmetered kinds). */
+  estimate?: MeteringEstimate;
+  /** Actual cost lane, populated only when a real figure is known. */
+  actual?: MeteringActual;
 }
 
 // Normalized citation from any provider
@@ -51,6 +124,7 @@ export interface ProviderResult {
   model?: string;
   tokenUsage?: { input?: number; output?: number };
   usage?: ProviderUsage;
+  metering?: ProviderMetering;
   error?: string;
 }
 
@@ -66,6 +140,7 @@ export interface ProviderDispatchResult {
   model?: string;
   tokenUsage?: { input?: number; output?: number };
   usage?: ProviderUsage;
+  metering?: ProviderMetering;
   error?: string;
   fallbackFor?: string;
 }
@@ -121,6 +196,8 @@ export interface ProviderMeta {
   hasApiKey: boolean;
   /** False when the provider has no entry in config (e.g. added after init). */
   configured?: boolean;
+  /** How this provider is metered/priced (from the metering registry). */
+  meteringKind?: MeteringKind;
 }
 
 // Config for a single provider
@@ -177,6 +254,10 @@ export const DefaultsSchema = z.object({
   // Optional runtime spend circuit breaker. Honest budget: only API-reported
   // costs count toward it (see src/core/budget.ts). Unset means no limit.
   maxCostUsd: z.number().optional(),
+  // Optional pre-dispatch reservation ceiling. Reserves each provider's
+  // network-free estimated cost BEFORE it runs (see src/core/budget.ts);
+  // providers with no estimable cost reserve 0. Unset means no limit.
+  maxEstimatedCostUsd: z.number().optional(),
 });
 export type Defaults = z.infer<typeof DefaultsSchema>;
 
@@ -219,6 +300,7 @@ export const ProjectConfigSchema = z.object({
       asyncPollInterval: z.number().optional(),
       mode: z.enum(['sync', 'async', 'mixed']).optional(),
       maxCostUsd: z.number().optional(),
+      maxEstimatedCostUsd: z.number().optional(),
     })
     .optional(),
   providers: z.record(ProjectProviderConfigSchema).optional(),
@@ -262,6 +344,7 @@ export interface ProviderReport {
   outputFile: string;
   metaFile: string;
   usage?: ProviderUsage;
+  metering?: ProviderMetering;
   error?: string;
   fallbackFor?: string;
 }

@@ -67,6 +67,7 @@ describe('aggregateUsage', () => {
       runsWithoutUsage: 0,
       totalCostUsd: 0,
       runsWithCost: 0,
+      totalEstimatedCostUsd: 0,
       providers: [],
       range: null,
     });
@@ -141,5 +142,73 @@ describe('aggregateUsage', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'run.json'), '{ not valid json');
     expect(aggregateUsage(baseDir).runCount).toBe(0);
+  });
+
+  it('aggregates estimated cost separately from reported cost', () => {
+    const reported = report('exa', { costUsd: 0.02 });
+    // A report with only a pre-dispatch estimate and no reported usage.
+    const estimated: ProviderReport = {
+      id: 'serpapi',
+      tier: 'raw-search',
+      status: 'success',
+      durationMs: 50,
+      wordCount: 10,
+      citationCount: 1,
+      outputFile: 'serpapi.md',
+      metaFile: 'serpapi.meta.json',
+      metering: {
+        kind: 'request_priced',
+        estimate: {
+          estimatedCostUsd: 0.015,
+          billableUnits: 1,
+          unit: 'request',
+          costConfidence: 'estimated',
+        },
+      },
+    };
+    writeManifest(baseDir, nowSec, [reported, estimated]);
+
+    const agg = aggregateUsage(baseDir);
+    expect(agg.totalCostUsd).toBeCloseTo(0.02);
+    expect(agg.totalEstimatedCostUsd).toBeCloseTo(0.015);
+    // The estimate-only provider appears with an estimate but no reported cost.
+    const serp = agg.providers.find((p) => p.provider === 'serpapi');
+    expect(serp?.reportedCost).toBe(false);
+    expect(serp?.hasEstimate).toBe(true);
+    expect(serp?.estimatedCostUsd).toBeCloseTo(0.015);
+    // The reported-cost provider carries no estimate.
+    const exa = agg.providers.find((p) => p.provider === 'exa');
+    expect(exa?.reportedCost).toBe(true);
+    expect(exa?.hasEstimate).toBe(false);
+    // An estimate alone does not count the run as having measured usage.
+    expect(agg.runsWithoutUsage).toBe(0); // exa reported real usage this run
+  });
+
+  it('excludes skipped providers from estimated cost (never launched)', () => {
+    const skipped: ProviderReport = {
+      id: 'serpapi',
+      tier: 'raw-search',
+      status: 'skipped',
+      durationMs: 0,
+      wordCount: 0,
+      citationCount: 0,
+      outputFile: '',
+      metaFile: '',
+      error: 'skipped: estimated cost budget reached',
+      metering: {
+        kind: 'request_priced',
+        estimate: {
+          estimatedCostUsd: 0.015,
+          billableUnits: 1,
+          unit: 'request',
+          costConfidence: 'estimated',
+        },
+      },
+    };
+    writeManifest(baseDir, nowSec, [report('exa', { costUsd: 0.02 }), skipped]);
+
+    const agg = aggregateUsage(baseDir);
+    expect(agg.totalEstimatedCostUsd).toBe(0);
+    expect(agg.providers.find((p) => p.provider === 'serpapi')).toBeUndefined();
   });
 });

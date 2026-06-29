@@ -1,6 +1,7 @@
 import { resolveProviderId } from '../constants.js';
 import type { CredentialContext } from '../core/credentials.js';
 import { hasCredential } from '../core/credentials.js';
+import { getMeteringKind } from '../core/metering.js';
 import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
 import { BaseProvider } from './base.js';
 import { BraveAnswersProvider } from './brave-answers.js';
@@ -90,6 +91,7 @@ export function getProviderMeta(
       source: p.source ?? 'builtin',
       enabled: providerConfig?.enabled ?? false,
       configured: providerConfig !== undefined,
+      meteringKind: getMeteringKind(p.id),
       hasApiKey: requiresApiKey
         ? providerConfig
           ? hasCredential(providerConfig.apiKey, credentials)

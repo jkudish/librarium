@@ -217,6 +217,7 @@ librarium run <query> [options]
 | `--parallel <n>` | Max parallel requests |
 | `--timeout <n>` | Timeout per provider in seconds |
 | `--max-cost <usd>` | Stop launching providers once API-reported cost crosses this budget (see [Spend guardrails](#spend-guardrails)) |
+| `--max-estimated-cost <usd>` | Reserve each provider's pre-dispatch *estimated* cost and skip launches once the estimate crosses this ceiling (see [Spend guardrails](#spend-guardrails)) |
 | `-y, --yes` | Skip the deep-research pre-flight confirm |
 | `--json` | Output `run.json` to stdout |
 | `--refine` | Rewrite the query into tier-tuned variants with one LLM call before dispatch |
@@ -305,7 +306,7 @@ $ librarium answer "what changed in postgres 17 logical replication"
   ▸ ~/research/agents/librarium/1781136000-what-changed-in-postgres-17/
 ```
 
-The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--max-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
+The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--max-cost`, `--max-estimated-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
 ### Spend guardrails
 
 Two opt-in guardrails help avoid surprise spend on large fan-outs.
@@ -326,6 +327,31 @@ The budget is honest, not predictive. Only costs an API actually reports count t
 - Deep-research costs land at *retrieval* (when you run `librarium status --wait`), long after the dispatch that submitted them has returned. Those async costs cannot be pre-metered and so cannot be enforced by `--max-cost` at submit time.
 
 Use `--max-cost` as a backstop against runaway synchronous fan-outs, not as a hard billing cap.
+
+#### Metering registry and the estimated budget
+
+`--max-cost` is deliberately reported-only: it never guesses. The gap it leaves — providers that report no cost (most raw-search APIs) run "for free" as far as the breaker is concerned — is filled by a separate, opt-in **estimated** lane.
+
+Every provider declares a **metering kind** in a built-in registry, visible in `librarium ls` (and its `--json`):
+
+| Kind | Meaning | Examples |
+|---|---|---|
+| `native_cost` | API returns a real per-call cost | Perplexity, Exa, OpenRouter |
+| `native_tokens` | API returns token counts but no cost | Claude, OpenAI, Gemini |
+| `request_priced` | Deterministic/plan price per request | SerpAPI, SearchAPI, Brave, Kagi |
+| `credit_priced` | Priced in account credits per request | Tavily, Firecrawl, You.com |
+| `api_unit_priced` | Priced per API unit/token, size known only after the call | Jina |
+| `manual_unmetered` | No reliable per-call metering | custom providers |
+
+For request- and credit-priced providers, librarium can produce a **network-free estimate** *before* a call runs. Estimates are guesses, never facts: they live under each result's `metering.estimate` (never in `usage.costUsd`), carry a `costConfidence` (`estimated` from a built-in default snapshot, `configured` when you supply pricing, `unknown` when there's no basis) and a `pricingVersion`. Plan-dependent credit providers emit unit metadata (`billableUnits`, `unit`) **without** an invented dollar figure until you configure a price via provider `options` (`perRequestUsd`, or `creditUsd` + `creditsPerRequest`).
+
+**Estimated budget (`--max-estimated-cost <usd>` or `defaults.maxEstimatedCostUsd`).** A pre-dispatch *reservation* ceiling, independent of `--max-cost` (the two never reconcile into one number). Before each provider launches, its estimated cost is reserved; once the reservation crosses the ceiling, not-yet-started providers are skipped with an estimated-budget reason. Providers with no estimable cost reserve `0`, so the reserved total is an honest lower bound. This gives products pre-call budget reservation that `--max-cost` (which only learns cost *after* a call) cannot. When it trips, the summary adds a line like:
+
+```
+  ▸ estimated budget reached: ~$0.05 reserved of $0.05 budget, skipped 2 providers
+```
+
+The actual-cost provenance of a reported figure is recorded as `metering.actual.source` (`provider_reported` today; reserved values like `computed_from_tokens`/`computed_from_credits` are defined for future computed lanes).
 
 ### Interactive wizard
 
@@ -457,20 +483,22 @@ librarium usage [options]
 | `--json` | Output JSON |
 | `-o, --output <dir>` | Output base directory |
 
-`usage` walks the `run.json` manifests under the output base directory and totals up cost and tokens per provider, plus a run count and date range. As with the run summary, only API-reported costs are counted (providers that report nothing contribute `0`), so figures are honest lower bounds, never pricing-table estimates. The output notes how many runs had no reported usage.
+`usage` walks the `run.json` manifests under the output base directory and totals up cost and tokens per provider, plus a run count and date range. As with the run summary, only API-reported costs are counted in the `cost` column (providers that report nothing contribute `0`), so figures are honest lower bounds, never pricing-table estimates. A separate `est. cost` column sums any pre-dispatch estimates from the [metering registry](#metering-registry-and-the-estimated-budget) — a guess, never billed, never mixed with reported cost. The output notes how many runs had no reported usage.
 
 ```
 $ librarium usage --days 30
 
 Usage (last 30 days):
 
-  provider       cost  tokens  runs
-  -----------  ------  ------  ----
-  openai-deep   $0.50    5.0k     1
-  exa          $0.020    1.5k     1
+  provider       cost  est. cost  tokens  runs
+  -----------  ------  ---------  ------  ----
+  openai-deep   $0.50          -    5.0k     1
+  exa          $0.020          -    1.5k     1
+  serpapi           -    ~$0.015       -     1
 
   runs: 2
   total reported cost: $0.52
+  total estimated cost: ~$0.015 (pre-dispatch estimate, not billed)
   date range: 2026-01-14 15:58 to 2026-01-14 16:00
   1 of 2 runs had no reported usage
 ```
@@ -699,7 +727,7 @@ Each layer overrides the previous:
 - `trustedProviderIds`: union + dedupe across global and project
 - `groups`: project overrides global group names on conflict
 
-The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the runtime circuit breaker described in [Spend guardrails](#spend-guardrails)). The `--max-cost` flag wins over it. Omit it for no limit.
+The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the runtime circuit breaker described in [Spend guardrails](#spend-guardrails)). The `--max-cost` flag wins over it. Omit it for no limit. The optional `defaults.maxEstimatedCostUsd` key sets a default pre-dispatch reservation ceiling (the estimated budget); the `--max-estimated-cost` flag wins over it.
 
 ### Global Config Example
 
@@ -713,7 +741,8 @@ The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the 
     "asyncTimeout": 1800,
     "asyncPollInterval": 10,
     "mode": "mixed",
-    "maxCostUsd": 0.5
+    "maxCostUsd": 0.5,
+    "maxEstimatedCostUsd": 0.25
   },
   "providers": {
     "perplexity-sonar-pro": {

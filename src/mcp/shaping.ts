@@ -5,6 +5,7 @@ import { loadAsyncTasks } from '../core/async-manager.js';
 import type {
   AsyncTaskHandle,
   DeduplicatedSource,
+  ProviderMetering,
   ProviderReport,
   ProviderUsage,
   RunManifest,
@@ -74,6 +75,7 @@ export interface ShapedProvider {
   citationCount: number;
   wordCount: number;
   usage?: ProviderUsage;
+  metering?: ProviderMetering;
   error?: string;
   fallbackFor?: string;
 }
@@ -117,6 +119,7 @@ function shapeProviders(reports: ProviderReport[]): ShapedProvider[] {
     citationCount: r.citationCount,
     wordCount: r.wordCount,
     ...(r.usage ? { usage: r.usage } : {}),
+    ...(r.metering ? { metering: r.metering } : {}),
     ...(r.error ? { error: r.error } : {}),
     ...(r.fallbackFor ? { fallbackFor: r.fallbackFor } : {}),
   }));
@@ -344,6 +347,7 @@ export function readRunResults(
         citationCount: r.citationCount,
         wordCount: r.wordCount,
         ...(r.usage ? { usage: r.usage } : {}),
+        ...(r.metering ? { metering: r.metering } : {}),
         ...(r.error ? { error: r.error } : {}),
         ...(r.fallbackFor ? { fallbackFor: r.fallbackFor } : {}),
       })),

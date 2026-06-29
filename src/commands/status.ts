@@ -13,10 +13,12 @@ import {
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { normalizeUsage } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
+import { buildProviderMetering } from '../core/metering.js';
 import { deduplicateSources } from '../core/normalizer.js';
 import type {
   AsyncTaskHandle,
   Citation,
+  ProviderConfig,
   ProviderReport,
   RunManifest,
 } from '../types.js';
@@ -60,6 +62,7 @@ async function retrieveTask(
   widths: LineWidths,
   color: boolean,
   print: (line: string) => void,
+  providerConfig?: ProviderConfig,
 ): Promise<boolean> {
   const provider = getProvider(task.provider);
   if (!provider?.retrieve) {
@@ -84,6 +87,7 @@ async function retrieveTask(
         citationCount: 0,
         outputFile: '',
         metaFile: '',
+        metering: buildProviderMetering(task.provider),
         error: result.error,
       };
       const wasSpinning = spinner.isSpinning;
@@ -98,6 +102,14 @@ async function retrieveTask(
     const outputFile = `${safeId}.md`;
     const metaFile = `${safeId}.meta.json`;
     const usage = normalizeUsage(result);
+    // Same metering normalization path as sync dispatch, so retrieved
+    // async deep-research results carry metering (and provider_reported cost)
+    // just like their sync counterparts, including any configured pricing.
+    const metering = buildProviderMetering(
+      task.provider,
+      providerConfig,
+      usage,
+    );
 
     safeWriteFile(join(dir, outputFile), result.content);
     safeWriteFile(
@@ -111,6 +123,7 @@ async function retrieveTask(
           citationCount: result.citations.length,
           tokenUsage: result.tokenUsage,
           usage,
+          metering,
           citations: result.citations,
         },
         null,
@@ -131,6 +144,7 @@ async function retrieveTask(
       outputFile,
       metaFile,
       usage,
+      metering,
     };
 
     // Fold the retrieved result back into run.json and sources.json so JSON
@@ -346,6 +360,7 @@ export function registerStatusCommand(program: Command): void {
                       citationCount: 0,
                       outputFile: '',
                       metaFile: '',
+                      metering: buildProviderMetering(task.provider),
                       error: result.message ?? 'task failed',
                     };
                     spinner.stop();
@@ -402,6 +417,7 @@ export function registerStatusCommand(program: Command): void {
                 widths,
                 color,
                 pretty,
+                config.providers[task.provider],
               );
               if (ok) retrieved++;
             }
@@ -442,6 +458,7 @@ export function registerStatusCommand(program: Command): void {
               widths,
               color,
               pretty,
+              config.providers[task.provider],
             );
             if (ok) retrieved++;
           }

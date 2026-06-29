@@ -98,6 +98,7 @@ describe('librarium/core in workerd', () => {
         durationMs: 5,
         model: 'mock-model',
         tokenUsage: undefined,
+        metering: { kind: 'manual_unmetered' },
         error: undefined,
         fallbackFor: undefined,
       },

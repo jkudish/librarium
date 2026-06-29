@@ -6,14 +6,22 @@ import type {
   Config,
   ProgressEvent,
   Provider,
+  ProviderConfig,
   ProviderDispatchResult,
+  ProviderMetering,
   ProviderReport,
   ProviderResult,
   ProviderUsage,
 } from '../types.js';
-import { BUDGET_SKIP_REASON, type BudgetTracker } from './budget.js';
+import {
+  BUDGET_SKIP_REASON,
+  type BudgetTracker,
+  ESTIMATE_BUDGET_SKIP_REASON,
+  type EstimateBudgetTracker,
+} from './budget.js';
 import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
+import { buildProviderMetering } from './metering.js';
 
 export interface DispatchOptions {
   config: Config;
@@ -37,6 +45,14 @@ export interface DispatchOptions {
    * dispatch behaves exactly as before.
    */
   budget?: BudgetTracker;
+  /**
+   * Optional pre-dispatch reservation circuit breaker. When supplied, each
+   * provider's network-free estimated cost is reserved just before it launches;
+   * once the accumulated reservation crosses the ceiling, not-yet-started
+   * providers are skipped with an estimated-budget reason. Independent of
+   * `budget` (reported cost): the two never reconcile. Additive and edge-safe.
+   */
+  estimatedBudget?: EstimateBudgetTracker;
 }
 
 export interface DispatchResult {
@@ -48,10 +64,23 @@ export interface DispatchResult {
 export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchResult> {
-  const { config, providerIds, query, mode, credentials, onProgress, budget } =
-    options;
+  const {
+    config,
+    providerIds,
+    query,
+    mode,
+    credentials,
+    onProgress,
+    budget,
+    estimatedBudget,
+  } = options;
   const queryForTier = (tier: Provider['tier']): string =>
     options.tierQueries?.[tier] ?? query;
+  // Single metering normalization path: static kind + network-free estimate +
+  // (when a result is in hand) the actual-cost lane, using each provider's
+  // configured pricing overrides.
+  const meteringFor = (id: string, usage?: ProviderUsage): ProviderMetering =>
+    buildProviderMetering(id, config.providers[id], usage);
   const limit = pLimit(config.defaults.maxParallel);
   const reports: ProviderReport[] = [];
   const results: ProviderDispatchResult[] = [];
@@ -81,6 +110,7 @@ export async function dispatch(
         fallbackId,
         fallbackProvider.tier,
         result,
+        config.providers[fallbackId],
         originalId,
       );
       results.push(structured);
@@ -88,6 +118,7 @@ export async function dispatch(
       return createReport(fallbackId, fallbackProvider.tier, structured);
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
+      const metering = meteringFor(fallbackId);
       results.push({
         provider: fallbackId,
         tier: fallbackProvider.tier,
@@ -96,6 +127,7 @@ export async function dispatch(
         sourceUrls: [],
         citations: [],
         durationMs: 0,
+        metering,
         error,
         fallbackFor: originalId,
       });
@@ -108,6 +140,7 @@ export async function dispatch(
         citationCount: 0,
         outputFile: '',
         metaFile: '',
+        metering,
         error,
         fallbackFor: originalId,
       };
@@ -133,7 +166,24 @@ export async function dispatch(
     // Fallbacks are API calls too: once the cost budget is exhausted, a
     // failed primary must not launch its backup.
     if (budget?.exceeded()) {
-      recordBudgetSkip(fallbackId, fallbackProvider.tier, id);
+      recordBudgetSkip(
+        fallbackId,
+        fallbackProvider.tier,
+        BUDGET_SKIP_REASON,
+        id,
+      );
+      return null;
+    }
+    // A fallback is its own billable launch: skip it if the estimated budget is
+    // already spent. (The reservation itself happens only once we've committed
+    // to launching, below, so a fallback we bail on never reserves.)
+    if (estimatedBudget?.exceeded()) {
+      recordBudgetSkip(
+        fallbackId,
+        fallbackProvider.tier,
+        ESTIMATE_BUDGET_SKIP_REASON,
+        id,
+      );
       return null;
     }
 
@@ -145,6 +195,11 @@ export async function dispatch(
     // same fallback target.
     if (usedFallbacks.has(fallbackId)) return null;
     usedFallbacks.add(fallbackId);
+
+    // Committed to launching this fallback now: reserve its estimate against the
+    // estimated budget. Reserving only after the claim guards means a fallback
+    // we bail on above never leaves a phantom reservation behind.
+    estimatedBudget?.reserve(meteringFor(fallbackId).estimate);
 
     // Note: enabled is intentionally not checked here — fallback providers may
     // be configured with enabled: false so they only activate as backups.
@@ -165,12 +220,16 @@ export async function dispatch(
   }
 
   // Emit a budget-skipped report+result for a provider whose start was
-  // suppressed because the accumulated cost crossed the budget.
+  // suppressed because a budget (reported or estimated) was crossed. Metering
+  // is still attached so consumers see the provider's capability even when it
+  // never ran.
   function recordBudgetSkip(
     id: string,
     tier: Provider['tier'],
+    reason: string,
     fallbackFor?: string,
   ): void {
+    const metering = meteringFor(id);
     results.push({
       provider: id,
       tier,
@@ -179,7 +238,8 @@ export async function dispatch(
       sourceUrls: [],
       citations: [],
       durationMs: 0,
-      error: BUDGET_SKIP_REASON,
+      metering,
+      error: reason,
       ...(fallbackFor ? { fallbackFor } : {}),
     });
     const report: ProviderReport = {
@@ -191,7 +251,8 @@ export async function dispatch(
       citationCount: 0,
       outputFile: '',
       metaFile: '',
-      error: BUDGET_SKIP_REASON,
+      metering,
+      error: reason,
       ...(fallbackFor ? { fallbackFor } : {}),
     };
     reports.push(report);
@@ -204,6 +265,7 @@ export async function dispatch(
     limit(async (): Promise<void> => {
       const provider = getProvider(id);
       if (!provider) {
+        const metering = meteringFor(id);
         results.push({
           provider: id,
           tier: 'raw-search',
@@ -212,6 +274,7 @@ export async function dispatch(
           sourceUrls: [],
           citations: [],
           durationMs: 0,
+          metering,
           error: `Provider "${id}" not found`,
         });
         reports.push({
@@ -223,6 +286,7 @@ export async function dispatch(
           citationCount: 0,
           outputFile: '',
           metaFile: '',
+          metering,
           error: `Provider "${id}" not found`,
         });
         return;
@@ -230,6 +294,7 @@ export async function dispatch(
 
       const providerConfig = config.providers[id];
       if (!providerConfig?.enabled) {
+        const metering = meteringFor(id);
         results.push({
           provider: id,
           tier: provider.tier,
@@ -238,6 +303,7 @@ export async function dispatch(
           sourceUrls: [],
           citations: [],
           durationMs: 0,
+          metering,
           error: 'Provider not enabled',
         });
         reports.push({
@@ -249,6 +315,7 @@ export async function dispatch(
           citationCount: 0,
           outputFile: '',
           metaFile: '',
+          metering,
           error: 'Provider not enabled',
         });
         return;
@@ -260,9 +327,19 @@ export async function dispatch(
       // results have been recorded), so not-yet-started providers are skipped
       // while in-flight requests are left to finish.
       if (budget?.exceeded()) {
-        recordBudgetSkip(id, provider.tier);
+        recordBudgetSkip(id, provider.tier, BUDGET_SKIP_REASON);
         return;
       }
+
+      // Estimated-cost reservation: skip if the estimate ceiling is already
+      // spent, otherwise reserve this provider's network-free estimate before
+      // it launches. Reserving only at launch means skipped providers never
+      // leave a phantom reservation behind.
+      if (estimatedBudget?.exceeded()) {
+        recordBudgetSkip(id, provider.tier, ESTIMATE_BUDGET_SKIP_REASON);
+        return;
+      }
+      estimatedBudget?.reserve(meteringFor(id).estimate);
 
       onProgress?.({ providerId: id, event: 'started' });
 
@@ -284,7 +361,12 @@ export async function dispatch(
             provider.retrieve
           ) {
             const result = await provider.retrieve(handle);
-            const structured = createDispatchResult(id, provider.tier, result);
+            const structured = createDispatchResult(
+              id,
+              provider.tier,
+              result,
+              providerConfig,
+            );
             results.push(structured);
             const report = createReport(id, provider.tier, structured);
             reports.push(report);
@@ -321,6 +403,7 @@ export async function dispatch(
           // since there is no synchronous result to evaluate. Fallback only fires
           // when a provider completes immediately with an error (handled above).
           asyncTasks.push(handle);
+          const pendingMetering = meteringFor(id);
           results.push({
             provider: id,
             tier: provider.tier,
@@ -329,6 +412,7 @@ export async function dispatch(
             sourceUrls: [],
             citations: [],
             durationMs: 0,
+            metering: pendingMetering,
           });
           const pendingReport: ProviderReport = {
             id,
@@ -339,6 +423,7 @@ export async function dispatch(
             citationCount: 0,
             outputFile: '',
             metaFile: '',
+            metering: pendingMetering,
           };
           reports.push(pendingReport);
           onProgress?.({
@@ -362,7 +447,12 @@ export async function dispatch(
               ? config.defaults.asyncTimeout
               : config.defaults.timeout,
         });
-        const structured = createDispatchResult(id, provider.tier, result);
+        const structured = createDispatchResult(
+          id,
+          provider.tier,
+          result,
+          providerConfig,
+        );
         results.push(structured);
         const report = createReport(id, provider.tier, structured);
 
@@ -395,6 +485,7 @@ export async function dispatch(
         }
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
+        const metering = meteringFor(id);
         results.push({
           provider: id,
           tier: provider.tier,
@@ -403,6 +494,7 @@ export async function dispatch(
           sourceUrls: [],
           citations: [],
           durationMs: 0,
+          metering,
           error,
         });
         const errorReport: ProviderReport = {
@@ -414,6 +506,7 @@ export async function dispatch(
           citationCount: 0,
           outputFile: '',
           metaFile: '',
+          metering,
           error,
         };
         reports.push(errorReport);
@@ -486,8 +579,10 @@ function createDispatchResult(
   providerId: string,
   tier: Provider['tier'],
   result: ProviderResult,
+  providerConfig: ProviderConfig | undefined,
   fallbackFor?: string,
 ): ProviderDispatchResult {
+  const usage = normalizeUsage(result);
   return {
     provider: providerId,
     tier,
@@ -500,7 +595,8 @@ function createDispatchResult(
     durationMs: result.durationMs,
     model: result.model,
     tokenUsage: result.tokenUsage,
-    usage: normalizeUsage(result),
+    usage,
+    metering: buildProviderMetering(providerId, providerConfig, usage),
     error: result.error,
     fallbackFor,
   };
@@ -528,6 +624,7 @@ function createReport(
         ? `${safeId}.meta.json`
         : '',
     usage: result.usage,
+    metering: result.metering,
     error: result.error,
     fallbackFor: result.fallbackFor,
   };
