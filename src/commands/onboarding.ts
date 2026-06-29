@@ -38,6 +38,8 @@ import {
   writeKeychainCredential,
 } from '../node-credentials.js';
 import type { Config, Provider } from '../types.js';
+import { synthesizeAnswer } from './answer.js';
+import { preferenceFromConfig, resolveLlmClients } from './llm-client.js';
 import { executeRun } from './run.js';
 
 type CredentialStorage = 'keychain' | 'env' | 'config';
@@ -386,27 +388,47 @@ export function reusableCredentialRef(
   return hasCredential(envRef, credentials) ? envRef : undefined;
 }
 
-export function firstQueryGuidance(providerId?: string): string {
+export function firstQueryGuidance(
+  providerId?: string,
+  synthesize = false,
+): string {
   const providerFlag = providerId ? ` -p ${providerId}` : '';
+  const command = synthesize ? 'answer' : 'run';
   return [
     'Run `librarium` any time to open the guided research wizard.',
     '',
     'Or start directly with:',
-    `  librarium run "compare flutter vs react native"${providerFlag}`,
+    `  librarium ${command} "compare flutter vs react native"${providerFlag}`,
   ].join('\n');
 }
 
-function showFirstQueryGuidance(providerId?: string): void {
-  p.note(firstQueryGuidance(providerId), 'Try your first query');
+function showFirstQueryGuidance(providerId?: string, synthesize = false): void {
+  p.note(firstQueryGuidance(providerId, synthesize), 'Try your first query');
+}
+
+function hasSynthesisClient(
+  config: Config,
+  credentials: CredentialContext,
+): boolean {
+  return (
+    resolveLlmClients(preferenceFromConfig(config, 'answer', 'refine'), {
+      env: process.env,
+      config,
+      credentials,
+    }).length > 0
+  );
 }
 
 async function offerFirstQuery(
   usableSelected: string[],
+  config: Config,
+  credentials: CredentialContext,
   offerFirstRun: boolean,
 ): Promise<void> {
   const firstProvider = usableSelected[0];
+  const synthesize = hasSynthesisClient(config, credentials);
   if (!offerFirstRun) {
-    showFirstQueryGuidance(firstProvider);
+    showFirstQueryGuidance(firstProvider, synthesize);
     return;
   }
 
@@ -416,8 +438,18 @@ async function offerFirstQuery(
   });
   if (p.isCancel(firstRun)) return cancel();
   if (!firstRun) {
-    showFirstQueryGuidance(firstProvider);
+    showFirstQueryGuidance(firstProvider, synthesize);
     return;
+  }
+
+  if (synthesize) {
+    p.log.message(
+      'A synthesis key is configured, so Librarium will print a grounded answer after the provider run.',
+    );
+  } else {
+    p.log.message(
+      'No synthesis key is configured yet, so this first query will show the provider run summary. Add OPENAI_API_KEY, GEMINI_API_KEY, or PERPLEXITY_API_KEY later to use `librarium answer`.',
+    );
   }
 
   const query = await p.text({
@@ -426,11 +458,17 @@ async function offerFirstQuery(
     validate: (value) => (value?.trim().length ? undefined : 'Enter a query'),
   });
   if (p.isCancel(query)) return cancel();
-  await executeRun(query.trim(), {
-    providers: [firstProvider],
-    mode: 'sync',
-    skipPreflightConfirm: true,
-  });
+  await executeRun(
+    query.trim(),
+    {
+      providers: [firstProvider],
+      mode: 'sync',
+      skipPreflightConfirm: true,
+    },
+    synthesize
+      ? { postDispatch: (context) => synthesizeAnswer(context) }
+      : undefined,
+  );
 }
 
 export async function runOnboardingWizard(
@@ -522,7 +560,12 @@ export async function runOnboardingWizard(
       .map((provider) => provider.id)
       .filter((id) => usable.includes(id));
     if (usableSelected.length > 0) {
-      await offerFirstQuery(usableSelected, offerFirstRun);
+      await offerFirstQuery(
+        usableSelected,
+        updatedConfig,
+        updatedCredentials,
+        offerFirstRun,
+      );
     } else {
       showFirstQueryGuidance(selected[0]?.id);
     }
@@ -580,7 +623,12 @@ export async function runOnboardingWizard(
     `${usableSelected.length} provider(s) configured: ${usableSelected.join(', ')}`,
   );
 
-  await offerFirstQuery(usableSelected, offerFirstRun);
+  await offerFirstQuery(
+    usableSelected,
+    updatedConfig,
+    updatedCredentials,
+    offerFirstRun,
+  );
 
   p.outro('setup complete');
 }

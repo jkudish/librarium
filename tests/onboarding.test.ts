@@ -85,4 +85,10 @@ describe('onboarding first-query guidance', () => {
   it('includes a provider flag when a usable provider is known', () => {
     expect(firstQueryGuidance('brave-search')).toContain('-p brave-search');
   });
+
+  it('uses the answer command when synthesis is available', () => {
+    expect(firstQueryGuidance('perplexity-sonar-pro', true)).toContain(
+      'librarium answer "compare flutter vs react native" -p perplexity-sonar-pro',
+    );
+  });
 });
