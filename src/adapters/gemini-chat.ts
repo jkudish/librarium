@@ -1,4 +1,5 @@
 import type {
+  Citation,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -14,8 +15,28 @@ interface GeminiChatCandidate {
   content?: {
     parts?: GeminiChatPart[];
   };
+  groundingMetadata?: GeminiGroundingMetadata;
   finishReason?: string;
   finishMessage?: string;
+}
+
+interface GeminiGroundingMetadata {
+  groundingChunks?: GeminiGroundingChunk[];
+  groundingSupports?: GeminiGroundingSupport[];
+}
+
+interface GeminiGroundingChunk {
+  web?: {
+    uri?: string;
+    title?: string;
+  };
+}
+
+interface GeminiGroundingSupport {
+  segment?: {
+    text?: string;
+  };
+  groundingChunkIndices?: number[];
 }
 
 interface GeminiChatPromptFeedback {
@@ -42,24 +63,26 @@ interface GeminiChatResponse {
 
 export interface GeminiChatProviderOptions extends BaseProviderOptions {
   model?: string;
+  webSearch?: boolean;
 }
 
 const DEFAULT_GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
 
 /**
- * Gemini ungrounded LLM provider.
- * Plain generateContent with NO googleSearch tool -- direct answer, no citations.
- * Distinct from gemini-grounded (which grounds via Google Search).
- * Tier: llm (sync, ungrounded)
+ * Gemini LLM provider.
+ * Uses Google Search grounding by default for current answers and citations.
+ * Tier: llm (sync)
  */
 export class GeminiChatProvider extends BaseProvider {
   readonly id = 'gemini-chat';
   readonly tier: ProviderTier = 'llm';
   readonly model: string;
+  readonly webSearch: boolean;
 
   constructor(options: GeminiChatProviderOptions = {}) {
     super(options);
     this.model = options.model?.trim() || DEFAULT_GEMINI_CHAT_MODEL;
+    this.webSearch = options.webSearch ?? true;
   }
 
   async execute(
@@ -70,6 +93,13 @@ export class GeminiChatProvider extends BaseProvider {
     const apiKey = this.getApiKey();
 
     try {
+      const body: Record<string, unknown> = {
+        contents: [{ parts: [{ text: query }] }],
+      };
+      if (this.webSearch) {
+        body.tools = [{ googleSearch: {} }];
+      }
+
       const response = await this.request<GeminiChatResponse>(
         `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
         {
@@ -79,9 +109,7 @@ export class GeminiChatProvider extends BaseProvider {
           headers: {
             'x-goog-api-key': apiKey,
           },
-          body: {
-            contents: [{ parts: [{ text: query }] }],
-          },
+          body,
           timeout: options.timeout * 1000,
           signal: options.signal,
         },
@@ -119,6 +147,7 @@ export class GeminiChatProvider extends BaseProvider {
           .filter(Boolean)
           .join('\n')
           .trim() ?? '';
+      const citations = this.extractCitations(candidate);
 
       if (!content) {
         // A 200 with no usable text is not a success: surface a prompt-level
@@ -155,7 +184,7 @@ export class GeminiChatProvider extends BaseProvider {
         provider: this.id,
         tier: this.tier,
         content,
-        citations: [],
+        citations,
         durationMs,
         model: data.modelVersion ?? this.model,
         tokenUsage: {
@@ -193,5 +222,37 @@ export class GeminiChatProvider extends BaseProvider {
       totalTokens: metadata.totalTokenCount,
       raw: metadata,
     };
+  }
+
+  private extractCitations(candidate?: GeminiChatCandidate): Citation[] {
+    const metadata = candidate?.groundingMetadata;
+    const chunks = metadata?.groundingChunks;
+    if (!Array.isArray(chunks)) return [];
+
+    const snippets = new Map<number, string>();
+    for (const support of metadata?.groundingSupports ?? []) {
+      const snippet = support.segment?.text?.trim();
+      if (!snippet) continue;
+      for (const index of support.groundingChunkIndices ?? []) {
+        if (!snippets.has(index)) snippets.set(index, snippet);
+      }
+    }
+
+    const seen = new Set<string>();
+    const citations: Citation[] = [];
+
+    chunks.forEach((chunk, index) => {
+      const url = chunk.web?.uri;
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      citations.push({
+        url,
+        title: chunk.web?.title,
+        snippet: snippets.get(index),
+        provider: this.id,
+      });
+    });
+
+    return citations;
   }
 }

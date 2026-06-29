@@ -1,4 +1,5 @@
 import type {
+  Citation,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -6,9 +7,19 @@ import type {
 } from '../types.js';
 import { BaseProvider, type BaseProviderOptions } from './base.js';
 
+interface OpenRouterAnnotation {
+  type?: string;
+  url_citation?: {
+    url?: string;
+    title?: string;
+    content?: string;
+  };
+}
+
 interface OpenRouterChatMessage {
   content?: string;
   refusal?: string | null;
+  annotations?: OpenRouterAnnotation[];
 }
 
 interface OpenRouterChatChoice {
@@ -34,25 +45,28 @@ interface OpenRouterChatResponse {
 
 export interface OpenRouterChatProviderOptions extends BaseProviderOptions {
   model?: string;
+  webSearch?: boolean;
 }
 
 // Cheap, capable default. Override via config `model`.
 const DEFAULT_OPENROUTER_CHAT_MODEL = 'openai/gpt-4o-mini';
 
 /**
- * OpenRouter ungrounded LLM provider.
- * Plain chat completions through OpenRouter -- direct answer, no citations.
+ * OpenRouter LLM provider.
+ * Uses OpenRouter web search by default for current answers and citations.
  * Distinct from openrouter-online (which grounds via the `:online` suffix).
- * Tier: llm (sync, ungrounded)
+ * Tier: llm (sync)
  */
 export class OpenRouterChatProvider extends BaseProvider {
   readonly id = 'openrouter-chat';
   readonly tier: ProviderTier = 'llm';
   readonly model: string;
+  readonly webSearch: boolean;
 
   constructor(options: OpenRouterChatProviderOptions = {}) {
     super(options);
     this.model = options.model?.trim() || DEFAULT_OPENROUTER_CHAT_MODEL;
+    this.webSearch = options.webSearch ?? true;
   }
 
   async execute(
@@ -73,7 +87,7 @@ export class OpenRouterChatProvider extends BaseProvider {
             'X-Title': 'librarium',
           },
           body: {
-            model: this.model,
+            model: this.requestModel,
             messages: [{ role: 'user', content: query }],
             // Opt into usage accounting so the response reports cost in USD.
             usage: { include: true },
@@ -99,6 +113,7 @@ export class OpenRouterChatProvider extends BaseProvider {
 
       const choice = data.choices?.[0];
       const content = choice?.message?.content?.trim() ?? '';
+      const citations = this.extractCitations(choice?.message?.annotations);
 
       if (!content) {
         // A 200 with no usable text is not a success: surface a refusal or the
@@ -126,9 +141,9 @@ export class OpenRouterChatProvider extends BaseProvider {
         provider: this.id,
         tier: this.tier,
         content,
-        citations: [],
+        citations,
         durationMs,
-        model: data.model ?? this.model,
+        model: data.model ?? this.requestModel,
         tokenUsage: {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
@@ -163,5 +178,32 @@ export class OpenRouterChatProvider extends BaseProvider {
       costUsd: usage.cost,
       raw: usage,
     };
+  }
+
+  private get requestModel(): string {
+    if (!this.webSearch || this.model.endsWith(':online')) return this.model;
+    return `${this.model}:online`;
+  }
+
+  private extractCitations(annotations?: OpenRouterAnnotation[]): Citation[] {
+    if (!Array.isArray(annotations)) return [];
+
+    const seen = new Set<string>();
+    const citations: Citation[] = [];
+
+    for (const annotation of annotations) {
+      if (annotation.type !== 'url_citation') continue;
+      const citation = annotation.url_citation;
+      if (!citation?.url || seen.has(citation.url)) continue;
+      seen.add(citation.url);
+      citations.push({
+        url: citation.url,
+        title: citation.title,
+        snippet: citation.content,
+        provider: this.id,
+      });
+    }
+
+    return citations;
   }
 }

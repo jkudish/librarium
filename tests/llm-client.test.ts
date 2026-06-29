@@ -18,6 +18,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
       asyncTimeout: 1800,
       asyncPollInterval: 10,
       mode: 'mixed',
+      llmWebSearch: true,
     },
     providers: {},
     customProviders: {},
@@ -59,6 +60,55 @@ describe('resolveLlmClients', () => {
     );
     expect(clients[0]?.model).toBe('custom');
     expect(clients[1]?.model).toBe('gemini-2.5-flash');
+  });
+
+  it('resolves configured provider credentials when env vars are absent', () => {
+    const config = makeConfig({
+      providers: {
+        'openai-chat': {
+          enabled: true,
+          apiKey: 'literal-openai-key',
+        },
+      },
+    });
+
+    const clients = resolveLlmClients(undefined, { env: {}, config });
+
+    expect(clients).toEqual([
+      {
+        provider: 'openai',
+        model: 'gpt-5-mini',
+        apiKey: 'literal-openai-key',
+      },
+    ]);
+  });
+
+  it('resolves keychain-backed provider credentials', () => {
+    const config = makeConfig({
+      providers: {
+        'gemini-grounded': {
+          enabled: true,
+          apiKey: 'keychain:GEMINI_API_KEY',
+        },
+      },
+    });
+
+    const clients = resolveLlmClients(undefined, {
+      env: {},
+      config,
+      credentials: {
+        resolveCredential: (ref) =>
+          ref === 'keychain:GEMINI_API_KEY' ? 'gemini-keychain-key' : undefined,
+      },
+    });
+
+    expect(clients).toEqual([
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        apiKey: 'gemini-keychain-key',
+      },
+    ]);
   });
 });
 

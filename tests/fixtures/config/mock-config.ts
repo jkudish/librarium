@@ -82,6 +82,7 @@ export function buildMockConfig(spec: MockConfigSpec): Record<string, unknown> {
       asyncTimeout: 1800,
       asyncPollInterval: 10,
       mode: spec.mode ?? 'sync',
+      llmWebSearch: true,
     },
     providers,
     customProviders,

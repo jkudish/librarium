@@ -8,7 +8,6 @@ import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import { resolveProviderIds, resolveProviderTokens } from '../constants.js';
 import { saveAsyncTasks } from '../core/async-manager.js';
 import {
   BUDGET_SKIP_REASON,
@@ -25,7 +24,12 @@ import {
   generateSlug,
   resolveOutputDir,
 } from '../core/prompt-builder.js';
+import {
+  ProviderSelectionError,
+  resolveProviderSelection,
+} from '../core/provider-selection.js';
 import { generateSummary } from '../core/synthesis.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
   Citation,
   Config,
@@ -216,7 +220,7 @@ export async function executeRun(
       }
 
       const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
-      const credentials = { env: process.env };
+      const credentials = createNodeCredentialContext();
       const initResult = await initializeProviders({
         ...config,
         credentials,
@@ -225,76 +229,24 @@ export async function executeRun(
         console.error(`[librarium] warning: ${warning}`);
       }
 
-      // Resolve provider list
       let providerIds: string[];
-      if (opts.providers) {
-        // CLI tokens accept canonical IDs, legacy aliases, or display names.
-        // The name index covers registered providers plus any configured
-        // provider keys (e.g. an untrusted custom provider). Configured-only
-        // IDs still resolve so they flow into the existing warn-and-skip path
-        // rather than erroring as unknown here.
-        const nameIndex = getAllProviders().map((provider) => ({
-          id: provider.id,
-          displayName: provider.displayName,
-        }));
-        const registeredIds = new Set(nameIndex.map((entry) => entry.id));
-        for (const configuredId of Object.keys(config.providers)) {
-          if (!registeredIds.has(configuredId)) {
-            nameIndex.push({ id: configuredId, displayName: configuredId });
-          }
-        }
-        const resolution = resolveProviderTokens(opts.providers, nameIndex);
-        for (const warning of resolution.warnings) {
-          console.error(`[librarium] warning: ${warning}`);
-        }
-        if (resolution.errors.length > 0) {
-          spinner.fail(resolution.errors.join('\n'));
-          process.exitCode = 2;
-          return { exitCode: 2 };
-        }
-        providerIds = resolution.ids;
-      } else if (opts.group) {
-        const group = config.groups[opts.group];
-        if (!group) {
-          spinner.fail(`Unknown group: ${opts.group}`);
-          process.exitCode = 2;
-          return { exitCode: 2 };
-        }
-        providerIds = resolveProviderIds(group);
-      } else {
-        // Default: use all enabled providers
-        providerIds = resolveProviderIds(
-          Object.entries(config.providers)
-            .filter(([, p]) => p.enabled)
-            .map(([id]) => id),
-        );
-      }
 
-      if (providerIds.length === 0) {
-        spinner.fail(
-          'No providers selected. Run `librarium init` to configure providers.',
+      try {
+        providerIds = resolveProviderSelection(
+          config,
+          { providers: opts.providers, group: opts.group },
+          getAllProviders(),
+          {
+            includeConfiguredOnly: true,
+            requireUsable: true,
+            strictExplicitCredentials: true,
+            credentials,
+            onWarn: (warning) => console.error(warning),
+          },
         );
-        process.exitCode = 2;
-        return { exitCode: 2 };
-      }
-
-      const availableProviderIds = new Set(
-        getAllProviders().map((provider) => provider.id),
-      );
-      const unavailableProviders = providerIds.filter(
-        (id) => !availableProviderIds.has(id),
-      );
-      if (unavailableProviders.length > 0) {
-        console.error(
-          `[librarium] warning: Provider(s) not registered and will be skipped: ${unavailableProviders.join(', ')}`,
-        );
-        providerIds = providerIds.filter((id) => availableProviderIds.has(id));
-      }
-
-      if (providerIds.length === 0) {
-        spinner.fail(
-          'No valid providers selected after validation. Check provider trust/availability in config.',
-        );
+      } catch (e) {
+        if (!(e instanceof ProviderSelectionError)) throw e;
+        spinner.fail(e.message);
         process.exitCode = 2;
         return { exitCode: 2 };
       }
@@ -350,7 +302,13 @@ export async function executeRun(
           if (wasSpinning) spinner.start();
         };
         try {
-          refined = await refineQuery(query, config, process.env, warn);
+          refined = await refineQuery(
+            query,
+            config,
+            process.env,
+            warn,
+            credentials,
+          );
           spinner.stop();
         } catch (e) {
           spinner.stop();

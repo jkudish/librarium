@@ -34,4 +34,6 @@ export * from './core/http-client.js';
 export * from './core/metering.js';
 export * from './core/normalizer.js';
 export * from './core/prompt-builder.js';
+export * from './core/provider-catalog.js';
+export * from './core/provider-selection.js';
 export * from './types.js';

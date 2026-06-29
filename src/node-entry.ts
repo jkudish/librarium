@@ -19,6 +19,7 @@ import { getAllProviders, registerProvider } from './adapters/index.js';
 import type { Config } from './types.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
+export * from './node-credentials.js';
 
 export interface LoadCustomProvidersOptions {
   /**

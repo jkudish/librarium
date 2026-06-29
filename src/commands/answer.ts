@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { safeWriteFile } from '../core/fs-utils.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type { Config, ProviderDispatchResult } from '../types.js';
 import {
   type AnswerSource,
@@ -170,7 +171,11 @@ async function runSynthesis(
   answerSources: AnswerSource[],
 ): Promise<{ provider: string; model: string; text: string }> {
   const preference = preferenceFromConfig(config, 'answer', 'refine');
-  const clients = resolveLlmClients(preference, process.env);
+  const clients = resolveLlmClients(preference, {
+    env: process.env,
+    config,
+    credentials: createNodeCredentialContext(),
+  });
   if (clients.length === 0) {
     throw new Error(
       preference?.provider

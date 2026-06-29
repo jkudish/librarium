@@ -13,7 +13,7 @@ function jsonResponse(status: number, data: unknown): Response {
   } as Response;
 }
 
-describe('llm providers (ungrounded)', () => {
+describe('llm providers', () => {
   const originalFetch = globalThis.fetch;
 
   afterAll(() => {
@@ -26,12 +26,23 @@ describe('llm providers (ungrounded)', () => {
 
   // --- Claude (Anthropic Messages API) ---
 
-  it('calls the Anthropic Messages API and returns no citations', async () => {
+  it('calls the Anthropic Messages API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         model: 'claude-haiku-4-5',
         content: [
-          { type: 'text', text: 'Direct answer.' },
+          {
+            type: 'text',
+            text: 'Direct answer.',
+            citations: [
+              {
+                type: 'web_search_result_location',
+                url: 'https://example.com/claude',
+                title: 'Claude Source',
+                cited_text: 'Quoted context.',
+              },
+            ],
+          },
           { type: 'text', text: 'Second block.' },
         ],
         usage: { input_tokens: 5, output_tokens: 9 },
@@ -48,7 +59,14 @@ describe('llm providers (ungrounded)', () => {
     expect(result.provider).toBe('claude');
     expect(result.tier).toBe('llm');
     expect(result.content).toBe('Direct answer.\nSecond block.');
-    expect(result.citations).toEqual([]);
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/claude',
+        title: 'Claude Source',
+        snippet: 'Quoted context.',
+        provider: 'claude',
+      },
+    ]);
     expect(result.model).toBe('claude-haiku-4-5');
     expect(result.usage).toMatchObject({
       inputTokens: 5,
@@ -65,6 +83,7 @@ describe('llm providers (ungrounded)', () => {
       model: 'claude-haiku-4-5',
       max_tokens: 4096,
       messages: [{ role: 'user', content: 'what is rust?' }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
     });
   });
 
@@ -105,16 +124,37 @@ describe('llm providers (ungrounded)', () => {
     expect(result.error).toBe('bad model');
   });
 
-  // --- OpenAI chat completions ---
+  // --- OpenAI Responses API / chat completions ---
 
-  it('calls OpenAI chat completions and returns no citations', async () => {
+  it('calls OpenAI Responses API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         model: 'gpt-5-mini',
-        choices: [{ message: { content: 'OpenAI answer.' } }],
+        output: [
+          {
+            type: 'web_search_call',
+            status: 'completed',
+          },
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'OpenAI answer.',
+                annotations: [
+                  {
+                    type: 'url_citation',
+                    url: 'https://example.com/openai',
+                    title: 'OpenAI Source',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
         usage: {
-          prompt_tokens: 4,
-          completion_tokens: 6,
+          input_tokens: 4,
+          output_tokens: 6,
           total_tokens: 10,
         },
       }),
@@ -130,7 +170,13 @@ describe('llm providers (ungrounded)', () => {
     expect(result.provider).toBe('openai-chat');
     expect(result.tier).toBe('llm');
     expect(result.content).toBe('OpenAI answer.');
-    expect(result.citations).toEqual([]);
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/openai',
+        title: 'OpenAI Source',
+        provider: 'openai-chat',
+      },
+    ]);
     expect(result.usage).toMatchObject({
       inputTokens: 4,
       outputTokens: 6,
@@ -138,10 +184,38 @@ describe('llm providers (ungrounded)', () => {
     });
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.openai.com/v1/chat/completions');
+    expect(url).toBe('https://api.openai.com/v1/responses');
     expect((options.headers as Record<string, string>).Authorization).toBe(
       'Bearer openai-key',
     );
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'gpt-5-mini',
+      input: 'hello',
+      tools: [{ type: 'web_search' }],
+      tool_choice: 'auto',
+    });
+  });
+
+  it('can disable OpenAI web search and use chat completions', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'gpt-5-mini',
+        choices: [{ message: { content: 'OpenAI answer.' } }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new OpenAIChatProvider({
+      webSearch: false,
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+    });
+    const result = await provider.execute('hello', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('OpenAI answer.');
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.openai.com/v1/chat/completions');
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'gpt-5-mini',
       messages: [{ role: 'user', content: 'hello' }],
@@ -156,6 +230,7 @@ describe('llm providers (ungrounded)', () => {
     );
 
     const provider = new OpenAIChatProvider({
+      webSearch: false,
       credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
     });
     const result = await provider.execute('hi', { timeout: 10 });
@@ -164,12 +239,32 @@ describe('llm providers (ungrounded)', () => {
     expect(result.error).toBe('unknown model');
   });
 
-  // --- Gemini chat (ungrounded generateContent, no googleSearch tool) ---
+  // --- Gemini chat ---
 
-  it('calls Gemini generateContent without grounding and returns no citations', async () => {
+  it('calls Gemini generateContent with Google Search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        candidates: [{ content: { parts: [{ text: 'Gemini answer.' }] } }],
+        candidates: [
+          {
+            content: { parts: [{ text: 'Gemini answer.' }] },
+            groundingMetadata: {
+              groundingChunks: [
+                {
+                  web: {
+                    uri: 'https://example.com/gemini',
+                    title: 'Gemini Source',
+                  },
+                },
+              ],
+              groundingSupports: [
+                {
+                  segment: { text: 'Gemini answer.' },
+                  groundingChunkIndices: [0],
+                },
+              ],
+            },
+          },
+        ],
         usageMetadata: {
           promptTokenCount: 3,
           candidatesTokenCount: 7,
@@ -189,7 +284,14 @@ describe('llm providers (ungrounded)', () => {
     expect(result.provider).toBe('gemini-chat');
     expect(result.tier).toBe('llm');
     expect(result.content).toBe('Gemini answer.');
-    expect(result.citations).toEqual([]);
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/gemini',
+        title: 'Gemini Source',
+        snippet: 'Gemini answer.',
+        provider: 'gemini-chat',
+      },
+    ]);
     expect(result.usage).toMatchObject({
       inputTokens: 3,
       outputTokens: 7,
@@ -204,9 +306,9 @@ describe('llm providers (ungrounded)', () => {
     expect((options.headers as Record<string, string>)['x-goog-api-key']).toBe(
       'gemini-key',
     );
-    // No googleSearch tool -- this is the ungrounded path.
     expect(JSON.parse(options.body as string)).toEqual({
       contents: [{ parts: [{ text: 'explain x' }] }],
+      tools: [{ googleSearch: {} }],
     });
   });
 
@@ -226,13 +328,29 @@ describe('llm providers (ungrounded)', () => {
     expect(result.error).toContain('API key not valid');
   });
 
-  // --- OpenRouter chat (ungrounded, with cost accounting) ---
+  // --- OpenRouter chat (with cost accounting) ---
 
-  it('calls OpenRouter chat with usage accounting and extracts cost', async () => {
+  it('calls OpenRouter chat with web search, usage accounting, and citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini',
-        choices: [{ message: { content: 'OpenRouter answer.' } }],
+        model: 'openai/gpt-4o-mini:online',
+        choices: [
+          {
+            message: {
+              content: 'OpenRouter answer.',
+              annotations: [
+                {
+                  type: 'url_citation',
+                  url_citation: {
+                    url: 'https://example.com/openrouter',
+                    title: 'OpenRouter Source',
+                    content: 'Source excerpt.',
+                  },
+                },
+              ],
+            },
+          },
+        ],
         usage: {
           prompt_tokens: 4,
           completion_tokens: 8,
@@ -252,7 +370,14 @@ describe('llm providers (ungrounded)', () => {
     expect(result.provider).toBe('openrouter-chat');
     expect(result.tier).toBe('llm');
     expect(result.content).toBe('OpenRouter answer.');
-    expect(result.citations).toEqual([]);
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/openrouter',
+        title: 'OpenRouter Source',
+        snippet: 'Source excerpt.',
+        provider: 'openrouter-chat',
+      },
+    ]);
     expect(result.usage).toMatchObject({
       inputTokens: 4,
       outputTokens: 8,
@@ -266,7 +391,7 @@ describe('llm providers (ungrounded)', () => {
       'Bearer openrouter-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'openai/gpt-4o-mini',
+      model: 'openai/gpt-4o-mini:online',
       messages: [{ role: 'user', content: 'hello' }],
       usage: { include: true },
     });
@@ -346,6 +471,7 @@ describe('llm providers (ungrounded)', () => {
     );
 
     const provider = new OpenAIChatProvider({
+      webSearch: false,
       credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
     });
     const result = await provider.execute('hi', { timeout: 10 });
@@ -369,6 +495,7 @@ describe('llm providers (ungrounded)', () => {
     );
 
     const provider = new OpenAIChatProvider({
+      webSearch: false,
       credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
     });
     const result = await provider.execute('hi', { timeout: 10 });
@@ -382,6 +509,7 @@ describe('llm providers (ungrounded)', () => {
       .mockResolvedValueOnce(jsonResponse(200, { model: 'gpt-5-mini' }));
 
     const provider = new OpenAIChatProvider({
+      webSearch: false,
       credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
     });
     const result = await provider.execute('hi', { timeout: 10 });

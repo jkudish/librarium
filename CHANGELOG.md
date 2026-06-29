@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-29
+
 ### Added
+- **Guided first-run onboarding**: bare `librarium` now starts a setup wizard when no usable providers are configured. The flow explains what Librarium does, links to the docs, recommends starter providers, keeps the full provider list available, shows provider descriptions/setup URLs, prompts for API keys with masked input, and saves only providers with usable credentials.
+- **Credential storage choices**: onboarding and `librarium config` support OS keychain storage, private shell env-file storage (`~/.config/librarium/env` or `env.fish`), and config-file fallback. Keychain/config/env references now resolve through the same credential layer across provider dispatch, `answer`, `refine`, the wizard, and MCP research.
+- **First-query guidance from onboarding**: setup now offers to run a first query immediately. When an OpenAI, Gemini, or Perplexity synthesis key is configured, the first query uses the same grounded synthesis hook as `librarium answer` so the terminal shows the synthesized answer and writes `answer.md`; otherwise it shows the provider run summary and explains how to enable synthesis later.
+- **Provider catalog and config menu**: providers now have catalog metadata for setup URLs, descriptions, family labels, recommendations, and alphabetical browsing. `librarium config` can configure providers/API keys and settings such as `defaults.llmWebSearch`.
+- **LLM web search and citations**: LLM-tier providers can use provider-native web search/citations by default, with opt-out via `defaults.llmWebSearch: false` or per-provider `options.webSearch: false`. LLM providers remain opt-in for normal grounded runs.
 - **Provider metering capability registry** (`librarium/core`): every provider now declares a `metering_kind` (`native_cost`, `native_tokens`, `request_priced`, `credit_priced`, `api_unit_priced`, or `manual_unmetered`), visible in `librarium ls` and `ls --json`. A network-free `estimateMetering()` returns a pre-dispatch estimate (`estimatedCostUsd`, `billableUnits`, `unit`, `pricingVersion`, `costConfidence`) without any API call, and `buildProviderMetering()` is the single normalization path used across sync dispatch, fallback, and async retrieval. New `getMeteringKind()`, `estimateMetering()`, `buildProviderMetering()`, and `createEstimateBudgetTracker()` exports.
 - **`--max-estimated-cost <usd>` flag** (and `defaults.maxEstimatedCostUsd`) on `run` and `answer`: a pre-dispatch *reservation* ceiling that reserves each provider's estimated cost before it launches and skips launches once the estimate crosses the ceiling. Independent of the reported-only `--max-cost` (the two never reconcile); providers with no estimable cost reserve `0`.
 - Metering is exposed through dispatch results, `run.json`, per-provider `.meta.json` (CLI run, MCP `research`, and both async-retrieval paths: `status --retrieve` and the MCP `check_async` tool), `results.jsonl`, MCP shaping, and the `usage` command (a separate `est. cost` lane).
+
+### Changed
+- `librarium init` now routes interactive setup through the onboarding wizard. `init --auto` remains non-interactive, but LLM-tier providers stay opt-in even when their shared API keys are present.
+- Explicit `-p` and `--group` selections can use credentialed providers that are not enabled in config, which lets users opt into LLM providers on demand without making them part of default runs.
 
 ### Notes
 - Honesty preserved: `usage.costUsd` remains provider-reported only. Estimates live under `metering.estimate` and never become facts; plan-dependent credit/API-unit providers emit unit metadata without a fabricated USD figure until pricing is configured via provider `options`. Actual-cost provenance is recorded under `metering.actual.source`.
@@ -151,7 +162,9 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0
 [0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/jkudish/librarium/compare/v0.1.2...v0.1.3
 [0.1.0]: https://github.com/jkudish/librarium/releases/tag/v0.1.0

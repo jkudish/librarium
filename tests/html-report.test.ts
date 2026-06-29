@@ -306,7 +306,7 @@ describe('generateHtmlReport', () => {
     );
   });
 
-  it('labels successful llm-tier rows "ungrounded" instead of "0 sources"', () => {
+  it('labels direct llm-tier rows "direct" instead of "0 sources"', () => {
     const html = generateHtmlReport({
       manifest: makeManifest({
         providers: [
@@ -323,10 +323,30 @@ describe('generateHtmlReport', () => {
       providerContents: {},
       sources: SOURCES,
     });
-    expect(html).toContain('ungrounded');
+    expect(html).toContain('direct');
     expect(html).not.toContain('0 sources');
     // Other tiers keep their counts.
     expect(html).toContain('25 sources');
+  });
+
+  it('shows source counts for cited llm-tier rows', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        providers: [
+          makeReport({
+            id: 'claude',
+            tier: 'llm',
+            citationCount: 2,
+            outputFile: 'claude.md',
+            metaFile: 'claude.meta.json',
+          }),
+        ],
+      }),
+      providerContents: {},
+      sources: SOURCES,
+    });
+    expect(html).toContain('2 sources');
+    expect(html).not.toContain('direct');
   });
 
   it('keeps error/skipped labels for llm-tier rows', () => {
@@ -347,7 +367,7 @@ describe('generateHtmlReport', () => {
       sources: [],
     });
     expect(html).toContain('error');
-    expect(html).not.toContain('ungrounded');
+    expect(html).not.toContain('direct');
   });
 
   it('marks fallback providers in the summary row', () => {

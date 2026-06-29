@@ -1,3 +1,9 @@
+import { PROVIDER_ENV_VARS } from '../constants.js';
+import {
+  type CredentialContext,
+  type EnvRecord,
+  resolveCredential,
+} from '../core/credentials.js';
 import type { Config } from '../types.js';
 
 /**
@@ -25,6 +31,12 @@ export interface LlmClientPreference {
   model?: string;
 }
 
+export interface LlmClientResolutionOptions {
+  env?: EnvRecord;
+  config?: Config;
+  credentials?: CredentialContext;
+}
+
 const CLIENT_DEFAULTS: Record<LlmProvider, { envVar: string; model: string }> =
   {
     openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
@@ -41,8 +53,9 @@ const CLIENT_DEFAULTS: Record<LlmProvider, { envVar: string; model: string }> =
  */
 export function resolveLlmClients(
   preference: LlmClientPreference | undefined,
-  env: NodeJS.ProcessEnv = process.env,
+  envOrOptions: EnvRecord | LlmClientResolutionOptions = process.env,
 ): LlmClient[] {
+  const options = normalizeResolutionOptions(envOrOptions);
   const preferred = preference?.provider;
   const order: LlmProvider[] = preferred
     ? [preferred]
@@ -50,8 +63,8 @@ export function resolveLlmClients(
 
   const clients: LlmClient[] = [];
   for (const provider of order) {
-    const { envVar, model } = CLIENT_DEFAULTS[provider];
-    const apiKey = env[envVar];
+    const { model } = CLIENT_DEFAULTS[provider];
+    const apiKey = resolveLlmApiKey(provider, options);
     if (!apiKey) continue;
     clients.push({
       provider,
@@ -60,6 +73,55 @@ export function resolveLlmClients(
     });
   }
   return clients;
+}
+
+function normalizeResolutionOptions(
+  envOrOptions: EnvRecord | LlmClientResolutionOptions,
+): Required<Pick<LlmClientResolutionOptions, 'env'>> &
+  Omit<LlmClientResolutionOptions, 'env'> {
+  if (isResolutionOptions(envOrOptions)) {
+    return {
+      ...envOrOptions,
+      env: envOrOptions.env ?? process.env,
+    };
+  }
+  return { env: envOrOptions };
+}
+
+function isResolutionOptions(
+  value: EnvRecord | LlmClientResolutionOptions,
+): value is LlmClientResolutionOptions {
+  const candidate = value as LlmClientResolutionOptions;
+  return (
+    candidate.config !== undefined ||
+    candidate.credentials !== undefined ||
+    (candidate.env !== undefined && typeof candidate.env === 'object')
+  );
+}
+
+function resolveLlmApiKey(
+  provider: LlmProvider,
+  options: Required<Pick<LlmClientResolutionOptions, 'env'>> &
+    Omit<LlmClientResolutionOptions, 'env'>,
+): string | undefined {
+  const envVar = CLIENT_DEFAULTS[provider].envVar;
+  const credentials = { ...options.credentials, env: options.env };
+  const envKey = resolveCredential(`$${envVar}`, credentials);
+  if (envKey) return envKey;
+
+  if (!options.config) return undefined;
+
+  for (const [providerId, providerEnvVar] of Object.entries(
+    PROVIDER_ENV_VARS,
+  )) {
+    if (providerEnvVar !== envVar) continue;
+    const apiKeyRef = options.config.providers[providerId]?.apiKey;
+    if (!apiKeyRef) continue;
+    const resolved = resolveCredential(apiKeyRef, credentials);
+    if (resolved) return resolved;
+  }
+
+  return undefined;
 }
 
 /**

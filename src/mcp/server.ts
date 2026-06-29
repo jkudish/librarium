@@ -8,6 +8,7 @@ import {
 } from '../adapters/node-registry.js';
 import { VERSION } from '../constants.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import type { Config } from '../types.js';
 import { checkAsyncTasks } from './async.js';
 import {
@@ -199,7 +200,8 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     async (args): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
-        await initialize({ ...config, credentials: { env: process.env } });
+        const credentials = createNodeCredentialContext();
+        await initialize({ ...config, credentials });
         const baseDir = resolve(config.defaults.outputDir);
         const runDir = resolveRunDir(baseDir, args.runDir);
         if (!runDir) {
@@ -229,7 +231,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     async (): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
-        const credentials = { env: process.env };
+        const credentials = createNodeCredentialContext();
         const initResult = await initialize({ ...config, credentials });
         for (const warning of initResult.warnings) {
           onWarn(`[librarium] warning: ${warning}`);
@@ -243,6 +245,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
             source: p.source,
             enabled: p.enabled,
             keyConfigured: p.hasApiKey,
+            credentialSource: p.credentialSource,
             configured: p.configured !== false,
           })),
         });

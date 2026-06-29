@@ -4,6 +4,7 @@ import {
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { createNodeCredentialContext } from '../node-credentials.js';
 import { dimText, isColorEnabled } from './run-format.js';
 
 export function registerLsCommand(program: Command): void {
@@ -16,7 +17,7 @@ export function registerLsCommand(program: Command): void {
         const globalConfig = loadConfig();
         const projectConfig = loadProjectConfig(process.cwd());
         const config = mergeConfigs(globalConfig, projectConfig);
-        const credentials = { env: process.env };
+        const credentials = createNodeCredentialContext();
         const initResult = await initializeProviders({
           ...config,
           credentials,
@@ -58,6 +59,13 @@ export function registerLsCommand(program: Command): void {
         );
         const enabledWidth = Math.max('Enabled'.length, 'Yes'.length);
         const apiKeyWidth = Math.max('API Key'.length, 'Not configured'.length);
+        const credentialSourceWidth = Math.max(
+          'Credential'.length,
+          'Keychain'.length,
+          'Environment'.length,
+          'Config file'.length,
+          'Missing'.length,
+        );
         const color = isColorEnabled(process.stdout);
 
         // Table header
@@ -69,6 +77,7 @@ export function registerLsCommand(program: Command): void {
           'Source'.padEnd(sourceWidth),
           'Enabled'.padEnd(enabledWidth),
           'API Key'.padEnd(apiKeyWidth),
+          'Credential'.padEnd(credentialSourceWidth),
         ].join('  ');
 
         console.log(`\n${header}`);
@@ -84,6 +93,14 @@ export function registerLsCommand(program: Command): void {
             : configured
               ? 'Missing'
               : 'Not configured';
+          const credentialSource =
+            p.credentialSource === 'keychain'
+              ? 'Keychain'
+              : p.credentialSource === 'env'
+                ? 'Environment'
+                : p.credentialSource === 'literal'
+                  ? 'Config file'
+                  : 'Missing';
           const row = [
             p.id.padEnd(idWidth),
             p.displayName.padEnd(nameWidth),
@@ -92,6 +109,7 @@ export function registerLsCommand(program: Command): void {
             p.source.padEnd(sourceWidth),
             enabled.padEnd(enabledWidth),
             apiKey.padEnd(apiKeyWidth),
+            credentialSource.padEnd(credentialSourceWidth),
           ].join('  ');
           console.log(configured ? row : dimText(row, color));
         }

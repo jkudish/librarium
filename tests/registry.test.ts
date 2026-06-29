@@ -187,6 +187,37 @@ describe('registry', () => {
     );
   });
 
+  it('enables llm web search by default and allows global/provider overrides', async () => {
+    await initializeProviders();
+    expect((getProvider('claude') as { webSearch?: boolean }).webSearch).toBe(
+      true,
+    );
+    expect(
+      (getProvider('openai-chat') as { webSearch?: boolean }).webSearch,
+    ).toBe(true);
+
+    await initializeProviders({
+      defaults: {
+        outputDir: './agents/librarium',
+        maxParallel: 6,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'mixed',
+        llmWebSearch: false,
+      },
+      providers: {
+        'openai-chat': { options: { webSearch: true } },
+      },
+    });
+    expect((getProvider('claude') as { webSearch?: boolean }).webSearch).toBe(
+      false,
+    );
+    expect(
+      (getProvider('openai-chat') as { webSearch?: boolean }).webSearch,
+    ).toBe(true);
+  });
+
   it('initializeProviders applies gemini model config override', async () => {
     await initializeProviders({
       providers: {

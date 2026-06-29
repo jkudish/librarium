@@ -21,6 +21,7 @@ function makeConfig(): Config {
       asyncTimeout: 60,
       asyncPollInterval: 1,
       mode: 'sync',
+      llmWebSearch: true,
     },
     providers: {
       'worker-mock': {

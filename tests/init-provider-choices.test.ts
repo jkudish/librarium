@@ -14,7 +14,7 @@ const LLM_PROVIDERS = [
 ] as const;
 
 describe('isLlmTierProvider', () => {
-  it('identifies the four ungrounded llm providers', () => {
+  it('identifies the four opt-in llm providers', () => {
     for (const id of LLM_PROVIDERS) {
       expect(isLlmTierProvider(id)).toBe(true);
     }

@@ -1,7 +1,13 @@
 import { resolveProviderId } from '../constants.js';
-import type { CredentialContext } from '../core/credentials.js';
-import { hasCredential } from '../core/credentials.js';
+import {
+  type CredentialContext,
+  describeCredentialReference,
+} from '../core/credentials.js';
 import { getMeteringKind } from '../core/metering.js';
+import {
+  providerCredentialRef,
+  providerHasCredential,
+} from '../core/provider-selection.js';
 import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
 import { BaseProvider } from './base.js';
 import { BraveAnswersProvider } from './brave-answers.js';
@@ -32,7 +38,10 @@ import { YouResearchProvider } from './you-research.js';
 const providers = new Map<string, Provider>();
 
 export type ProviderInitConfig = Partial<
-  Pick<Config, 'providers' | 'customProviders' | 'trustedProviderIds'>
+  Pick<
+    Config,
+    'defaults' | 'providers' | 'customProviders' | 'trustedProviderIds'
+  >
 > & {
   credentials?: CredentialContext;
 };
@@ -83,6 +92,13 @@ export function getProviderMeta(
   return getAllProviders().map((p) => {
     const providerConfig = config[p.id];
     const requiresApiKey = p.requiresApiKey ?? true;
+    const credentialRef = providerCredentialRef(p, providerConfig);
+    const credentialInfo = describeCredentialReference(
+      requiresApiKey ? credentialRef : undefined,
+    );
+    const hasApiKey = requiresApiKey
+      ? providerHasCredential(p, providerConfig, credentials)
+      : true;
     return {
       id: p.id,
       displayName: p.displayName,
@@ -92,11 +108,12 @@ export function getProviderMeta(
       enabled: providerConfig?.enabled ?? false,
       configured: providerConfig !== undefined,
       meteringKind: getMeteringKind(p.id),
-      hasApiKey: requiresApiKey
-        ? providerConfig
-          ? hasCredential(providerConfig.apiKey, credentials)
-          : hasCredential(p.envVar ? `$${p.envVar}` : undefined, credentials)
-        : true,
+      hasApiKey,
+      credentialSource: requiresApiKey
+        ? hasApiKey
+          ? credentialInfo.source
+          : 'missing'
+        : 'literal',
     };
   });
 }
@@ -111,6 +128,7 @@ export async function initializeProviders(
   providers.clear();
   const providerConfig = config.providers ?? {};
   const credentials = config.credentials ?? {};
+  const llmWebSearch = config.defaults?.llmWebSearch ?? true;
 
   const builtIns: Provider[] = [
     // Deep Research (async capable)
@@ -139,12 +157,27 @@ export async function initializeProviders(
     new SerpApiProvider(),
     new TavilyProvider(),
 
-    // LLM (ungrounded baseline/contrast -- sync, no citations)
-    new ClaudeProvider({ model: providerConfig.claude?.model }),
-    new OpenAIChatProvider({ model: providerConfig['openai-chat']?.model }),
-    new GeminiChatProvider({ model: providerConfig['gemini-chat']?.model }),
+    // LLM (sync). Providers are opt-in, and web search/citations are on by
+    // default unless disabled globally or per-provider via options.webSearch.
+    new ClaudeProvider({
+      model: providerConfig.claude?.model,
+      webSearch: providerWebSearch('claude', providerConfig, llmWebSearch),
+    }),
+    new OpenAIChatProvider({
+      model: providerConfig['openai-chat']?.model,
+      webSearch: providerWebSearch('openai-chat', providerConfig, llmWebSearch),
+    }),
+    new GeminiChatProvider({
+      model: providerConfig['gemini-chat']?.model,
+      webSearch: providerWebSearch('gemini-chat', providerConfig, llmWebSearch),
+    }),
     new OpenRouterChatProvider({
       model: providerConfig['openrouter-chat']?.model,
+      webSearch: providerWebSearch(
+        'openrouter-chat',
+        providerConfig,
+        llmWebSearch,
+      ),
     }),
   ];
 
@@ -165,4 +198,13 @@ export async function initializeProviders(
     loadedCustomProviders: [],
     skippedCustomProviders: [],
   };
+}
+
+function providerWebSearch(
+  id: string,
+  providers: NonNullable<Config['providers']>,
+  fallback: boolean,
+): boolean {
+  const configured = providers[id]?.options?.webSearch;
+  return typeof configured === 'boolean' ? configured : fallback;
 }
