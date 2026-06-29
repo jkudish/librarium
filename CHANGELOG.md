@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Provider metering capability registry** (`librarium/core`): every provider now declares a `metering_kind` (`native_cost`, `native_tokens`, `request_priced`, `credit_priced`, `api_unit_priced`, or `manual_unmetered`), visible in `librarium ls` and `ls --json`. A network-free `estimateMetering()` returns a pre-dispatch estimate (`estimatedCostUsd`, `billableUnits`, `unit`, `pricingVersion`, `costConfidence`) without any API call, and `buildProviderMetering()` is the single normalization path used across sync dispatch, fallback, and async retrieval. New `getMeteringKind()`, `estimateMetering()`, `buildProviderMetering()`, and `createEstimateBudgetTracker()` exports.
+- **`--max-estimated-cost <usd>` flag** (and `defaults.maxEstimatedCostUsd`) on `run` and `answer`: a pre-dispatch *reservation* ceiling that reserves each provider's estimated cost before it launches and skips launches once the estimate crosses the ceiling. Independent of the reported-only `--max-cost` (the two never reconcile); providers with no estimable cost reserve `0`.
+- Metering is exposed through dispatch results, `run.json`, per-provider `.meta.json` (CLI run, MCP `research`, and both async-retrieval paths: `status --retrieve` and the MCP `check_async` tool), `results.jsonl`, MCP shaping, and the `usage` command (a separate `est. cost` lane).
+
+### Notes
+- Honesty preserved: `usage.costUsd` remains provider-reported only. Estimates live under `metering.estimate` and never become facts; plan-dependent credit/API-unit providers emit unit metadata without a fabricated USD figure until pricing is configured via provider `options`. Actual-cost provenance is recorded under `metering.actual.source`.
+
 ## [1.0.0] - 2026-06-12
 
 The first stable release: the 0.1.x research fan-out core plus a complete interactive and agent-integration layer shipped in one release -- live per-provider results table, interactive wizard, results browser with a fullscreen reader, HTML and JSONL reports, grounded `answer` synthesis, an MCP server, an `llm` provider tier, spend guardrails, true async deep research on Perplexity and Gemini, and committed PTY test coverage.
