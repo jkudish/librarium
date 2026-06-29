@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { reusableCredentialRef } from '../src/commands/onboarding.js';
+import {
+  firstQueryGuidance,
+  reusableCredentialRef,
+} from '../src/commands/onboarding.js';
 import type { Config, Provider } from '../src/types.js';
 
 function provider(id: string, envVar: string): Provider {
@@ -68,5 +71,18 @@ describe('onboarding credential reuse', () => {
     );
 
     expect(ref).toBeUndefined();
+  });
+});
+
+describe('onboarding first-query guidance', () => {
+  it('shows the guided wizard and a direct first query command', () => {
+    expect(firstQueryGuidance()).toContain('librarium`');
+    expect(firstQueryGuidance()).toContain(
+      'librarium run "compare flutter vs react native"',
+    );
+  });
+
+  it('includes a provider flag when a usable provider is known', () => {
+    expect(firstQueryGuidance('brave-search')).toContain('-p brave-search');
   });
 });

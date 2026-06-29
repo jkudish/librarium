@@ -386,6 +386,53 @@ export function reusableCredentialRef(
   return hasCredential(envRef, credentials) ? envRef : undefined;
 }
 
+export function firstQueryGuidance(providerId?: string): string {
+  const providerFlag = providerId ? ` -p ${providerId}` : '';
+  return [
+    'Run `librarium` any time to open the guided research wizard.',
+    '',
+    'Or start directly with:',
+    `  librarium run "compare flutter vs react native"${providerFlag}`,
+  ].join('\n');
+}
+
+function showFirstQueryGuidance(providerId?: string): void {
+  p.note(firstQueryGuidance(providerId), 'Try your first query');
+}
+
+async function offerFirstQuery(
+  usableSelected: string[],
+  offerFirstRun: boolean,
+): Promise<void> {
+  const firstProvider = usableSelected[0];
+  if (!offerFirstRun) {
+    showFirstQueryGuidance(firstProvider);
+    return;
+  }
+
+  const firstRun = await p.confirm({
+    message: 'Run a first query now?',
+    initialValue: true,
+  });
+  if (p.isCancel(firstRun)) return cancel();
+  if (!firstRun) {
+    showFirstQueryGuidance(firstProvider);
+    return;
+  }
+
+  const query = await p.text({
+    message: 'What should Librarium research first?',
+    placeholder: 'e.g. compare flutter vs react native',
+    validate: (value) => (value?.trim().length ? undefined : 'Enter a query'),
+  });
+  if (p.isCancel(query)) return cancel();
+  await executeRun(query.trim(), {
+    providers: [firstProvider],
+    mode: 'sync',
+    skipPreflightConfirm: true,
+  });
+}
+
 export async function runOnboardingWizard(
   options: OnboardingWizardOptions = {},
 ): Promise<void> {
@@ -460,6 +507,25 @@ export async function runOnboardingWizard(
     }
     saveConfig(globalConfig);
     p.log.success('Selected providers were already configured.');
+    const updatedConfig = loadMergedConfig();
+    const updatedCredentials = createNodeCredentialContext();
+    await initializeProviders({
+      ...updatedConfig,
+      credentials: updatedCredentials,
+    });
+    const usable = usableProviderIds(
+      updatedConfig,
+      getAllProviders(),
+      updatedCredentials,
+    );
+    const usableSelected = selected
+      .map((provider) => provider.id)
+      .filter((id) => usable.includes(id));
+    if (usableSelected.length > 0) {
+      await offerFirstQuery(usableSelected, offerFirstRun);
+    } else {
+      showFirstQueryGuidance(selected[0]?.id);
+    }
     p.outro('setup complete');
     return;
   }
@@ -514,28 +580,7 @@ export async function runOnboardingWizard(
     `${usableSelected.length} provider(s) configured: ${usableSelected.join(', ')}`,
   );
 
-  if (offerFirstRun) {
-    const firstRun = await p.confirm({
-      message: 'Run a first query now?',
-      initialValue: true,
-    });
-    if (p.isCancel(firstRun)) return cancel();
-    if (!firstRun) {
-      p.outro('setup complete');
-      return;
-    }
-    const query = await p.text({
-      message: 'What should Librarium research first?',
-      placeholder: 'e.g. compare flutter vs react native',
-      validate: (value) => (value?.trim().length ? undefined : 'Enter a query'),
-    });
-    if (p.isCancel(query)) return cancel();
-    await executeRun(query.trim(), {
-      providers: [usableSelected[0]],
-      mode: 'sync',
-      skipPreflightConfirm: true,
-    });
-  }
+  await offerFirstQuery(usableSelected, offerFirstRun);
 
   p.outro('setup complete');
 }
