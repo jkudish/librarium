@@ -1,14 +1,10 @@
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { cloudflarePool } from '@cloudflare/vitest-pool-workers';
+import { defineConfig } from 'vitest/config';
 
-export default defineWorkersConfig({
+export default defineConfig({
   test: {
     include: ['tests/workers/**/*.test.ts'],
-    pool: '@cloudflare/vitest-pool-workers',
-    poolOptions: {
-      workers: {
-        singleWorker: true,
-      },
-    },
+    pool: cloudflarePool({}),
     testTimeout: 30_000,
   },
 });

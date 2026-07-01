@@ -20,9 +20,7 @@ export default defineConfig({
     hookTimeout: 30_000,
     // Drive terminals one at a time for deterministic output capture.
     pool: 'forks',
-    poolOptions: {
-      forks: { singleFork: true },
-    },
+    forks: { singleFork: true },
     fileParallelism: false,
   },
 });
