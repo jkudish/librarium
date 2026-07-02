@@ -36,27 +36,32 @@
     "lint:fix": "biome check --write src/ tests/"
   },
   "dependencies": {
-    "@clack/prompts": "^1.5.1",
-    "@inquirer/prompts": "^7.0.0",
+    "@clack/prompts": "^1.6.0",
+    "@inquirer/prompts": "^7.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "commander": "^13.0.0",
+    "commander": "^14.0.3",
     "marked": "^18.0.5",
-    "ora": "^8.0.0",
-    "p-limit": "^6.0.0",
-    "strip-ansi": "^7.1.0",
-    "zod": "^3.24.0"
+    "ora": "^9.4.1",
+    "p-limit": "^7.3.0",
+    "strip-ansi": "^7.2.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.3.14",
-    "@cloudflare/vitest-pool-workers": "^0.12.21",
-    "@types/node": "^22.0.0",
-    "esbuild": "^0.24.0",
+    "@biomejs/biome": "^2.5.1",
+    "@cloudflare/vitest-pool-workers": "^0.16.20",
+    "@types/node": "^22.20.0",
+    "esbuild": "^0.28.1",
     "node-pty": "^1.1.0",
     "postject": "^1.0.0-alpha.6",
-    "tsup": "^8.0.0",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "wrangler": "^4.100.0"
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.105.0"
+  },
+  "overrides": {
+    "tsup": {
+      "esbuild": "0.28.1"
+    }
   },
   "engines": {
     "node": ">=20.12"
