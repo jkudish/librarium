@@ -36,7 +36,7 @@
     "lint:fix": "biome check --write src/ tests/"
   },
   "dependencies": {
-    "@clack/prompts": "^1.6.0",
+    "@clack/prompts": "^1.7.0",
     "@inquirer/prompts": "^7.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^14.0.3",
@@ -48,19 +48,22 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
-    "@cloudflare/vitest-pool-workers": "^0.16.20",
+    "@cloudflare/vitest-pool-workers": "^0.17.0",
     "@types/node": "^22.20.0",
     "esbuild": "^0.28.1",
     "node-pty": "^1.1.0",
     "postject": "^1.0.0-alpha.6",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.9",
-    "wrangler": "^4.105.0"
+    "vitest": "^4.1.10",
+    "wrangler": "^4.107.0"
   },
   "overrides": {
     "tsup": {
       "esbuild": "0.28.1"
+    },
+    "vite": {
+      "rolldown": "1.1.4"
     }
   },
   "engines": {
