@@ -40,23 +40,23 @@
     "@inquirer/prompts": "^7.10.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "commander": "^14.0.3",
-    "marked": "^18.0.5",
+    "marked": "^18.0.6",
     "ora": "^9.4.1",
     "p-limit": "^7.3.0",
     "strip-ansi": "^7.2.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@cloudflare/vitest-pool-workers": "^0.17.0",
-    "@types/node": "^22.20.0",
+    "@biomejs/biome": "^2.5.3",
+    "@cloudflare/vitest-pool-workers": "^0.18.4",
+    "@types/node": "^22.20.1",
     "esbuild": "^0.28.1",
     "node-pty": "^1.1.0",
     "postject": "^1.0.0-alpha.6",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",
-    "wrangler": "^4.107.0"
+    "wrangler": "^4.110.0"
   },
   "overrides": {
     "tsup": {
