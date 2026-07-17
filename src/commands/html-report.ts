@@ -4,9 +4,11 @@ import { Marked } from 'marked';
 import { sanitizeId } from '../constants.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import type {
+  ClaimSupport,
   DeduplicatedSource,
   ProviderReport,
   RunManifest,
+  VerificationMetadata,
 } from '../types.js';
 import { readAnswerArtifact } from './answer-synthesis.js';
 import { readRunEntry } from './browse-data.js';
@@ -237,6 +239,43 @@ ${attribution}
 </section>`;
 }
 
+function verificationStatusClass(status: ClaimSupport['status']): string {
+  return status === 'supported'
+    ? 'ok'
+    : status === 'conflicting'
+      ? 'conflict'
+      : 'muted';
+}
+
+/** Human-readable companion to the full structured verification JSON/JSONL. */
+function verificationSection(verification: VerificationMetadata): string {
+  const rows = verification.matrix
+    .map((claim) => {
+      const urls = claim.sourceUrls.length
+        ? claim.sourceUrls
+            .map((url) => {
+              const href = safeUrl(url);
+              return href === null
+                ? escapeHtml(url)
+                : `<a href="${escapeHtml(href)}" rel="noopener" target="_blank">evidence</a>`;
+            })
+            .join(', ')
+        : 'none';
+      return `<tr><td>${escapeHtml(claim.claim)}</td><td><span class="verification-status ${verificationStatusClass(claim.status)}">${escapeHtml(claim.status)}</span></td><td>${urls}</td><td>${escapeHtml(claim.reason ?? '')}</td></tr>`;
+    })
+    .join('');
+  const reasons = verification.reasons.length
+    ? `<p class="verification-reasons">${escapeHtml(verification.reasons.join('; '))}</p>`
+    : '';
+  const usage = `verification ${verification.status}: ${verification.usage.providerAttempts} provider attempts, $${verification.usage.reportedCostUsd.toFixed(3)} reported, $${verification.usage.estimatedCostUsd.toFixed(3)} estimated, ${verification.usage.llmCalls} LLM calls`;
+  return `<section class="verification">
+<p class="eyebrow">claim verification</p>
+<p class="verification-meta">${escapeHtml(usage)}</p>
+${reasons}
+<table><thead><tr><th>Claim</th><th>Status</th><th>Independent evidence</th><th>Reason</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No material claims were selected.</td></tr>'}</tbody></table>
+</section>`;
+}
+
 function sourcesSection(sources: DeduplicatedSource[]): string {
   if (sources.length === 0) {
     return '<p class="pending-note">No sources recorded.</p>';
@@ -376,6 +415,11 @@ section.answer {
 }
 .answer-meta { color: #a3a3a3; font-size: 0.78rem; margin: 0.25rem 0 0; }
 .answer-body { font-size: 0.97rem; }
+.verification-meta, .verification-reasons { color: #525252; font-size: 0.85rem; }
+.verification-status { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.8rem; }
+.verification-status.ok { color: #16a34a; }
+.verification-status.conflict { color: #dc2626; }
+.verification-status.muted { color: #525252; }
 footer {
   border-top: 1px solid rgba(10, 10, 10, 0.1);
   padding: 1.25rem 2rem;
@@ -417,6 +461,9 @@ export function generateHtmlReport(input: HtmlReportInput): string {
 
   const answerHtml =
     answer && answer.content.trim().length > 0 ? answerSection(answer) : '';
+  const verificationHtml = manifest.verification
+    ? verificationSection(manifest.verification)
+    : '';
 
   // Default active tab: first successful provider, else the first row.
   const firstSuccess = reports.findIndex((r) => r.status === 'success');
@@ -469,6 +516,7 @@ ${sourcesSection(sources)}
 <h1>${escapeHtml(manifest.query)}</h1>
 <p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(manifest))} &middot; ${sources.length} unique sources after dedupe (${manifest.sources.total} total citations)</p>
 ${answerHtml}
+${verificationHtml}
 <section>
 <p class="eyebrow">providers</p>
 <div class="tabs" role="tablist" aria-label="Provider results">

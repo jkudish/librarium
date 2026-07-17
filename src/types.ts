@@ -334,6 +334,70 @@ export interface RunManifest {
    * produced answer.md. Absent for plain runs and when synthesis failed.
    */
   answer?: { provider: string; model: string };
+  /**
+   * Additive, opt-in claim verification data produced by `answer --verify`.
+   * Kept separate from the initial provider fan-out so consumers can account
+   * for verification evidence and spend independently.
+   */
+  verification?: VerificationMetadata;
+}
+
+export type ClaimSupportStatus = 'supported' | 'conflicting' | 'insufficient';
+
+export interface ClaimSupport {
+  id: string;
+  claim: string;
+  category:
+    | 'date'
+    | 'number'
+    | 'quotation'
+    | 'compatibility'
+    | 'causal'
+    | 'comparison';
+  status: ClaimSupportStatus;
+  /** URLs of independent source evidence, never a list of provider names. */
+  sourceUrls: string[];
+  reason?: string;
+}
+
+export interface VerificationAttempt {
+  provider: string;
+  tier: 'ai-grounded' | 'raw-search';
+  status: 'success' | 'error' | 'skipped';
+  durationMs: number;
+  error?: string;
+  usage?: ProviderUsage;
+  metering?: ProviderMetering;
+}
+
+export interface VerificationFollowUp {
+  claimId: string;
+  query: string;
+  attempts: VerificationAttempt[];
+  sourceUrls: string[];
+}
+
+export interface VerificationLlmCall {
+  stage: 'claims' | 'initial-assessment' | 'follow-up-assessment' | 'revision';
+  provider: string;
+  model: string;
+}
+
+export interface VerificationMetadata {
+  status: 'complete' | 'partial' | 'incomplete';
+  matrixFile: string;
+  matrix: ClaimSupport[];
+  followUps: VerificationFollowUp[];
+  reasons: string[];
+  usage: {
+    providerAttempts: number;
+    successfulProviderAttempts: number;
+    reportedCostUsd: number;
+    estimatedCostUsd: number;
+    llmCalls: number;
+  };
+  llm: VerificationLlmCall[];
+  revised: boolean;
 }
 
 // Per-provider report in run manifest

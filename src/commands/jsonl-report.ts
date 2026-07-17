@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeWriteFile } from '../core/fs-utils.js';
-import type { DeduplicatedSource, RunManifest } from '../types.js';
+import type {
+  DeduplicatedSource,
+  RunManifest,
+  VerificationMetadata,
+} from '../types.js';
 import { readAnswerArtifact } from './answer-synthesis.js';
 import { readRunEntry } from './browse-data.js';
 import { enrichRetrievedReports } from './html-report.js';
@@ -51,6 +55,12 @@ interface AnswerLine {
   content: string;
 }
 
+/** Optional auditable claim verification record from `answer --verify`. */
+interface VerificationLine {
+  type: 'verification';
+  verification: VerificationMetadata;
+}
+
 /** One line per provider. */
 interface ResultLine {
   type: 'result';
@@ -85,7 +95,7 @@ function replacer(_key: string, value: unknown): unknown {
 
 /** Serialize one JSONL object, dropping undefined-valued keys. */
 function serializeLine(
-  obj: RunLine | AnswerLine | ResultLine | SourceLine,
+  obj: RunLine | AnswerLine | VerificationLine | ResultLine | SourceLine,
 ): string {
   return JSON.stringify(obj, replacer);
 }
@@ -127,6 +137,9 @@ export function generateJsonlReport(input: JsonlReportInput): string {
           content: answer.content,
         }
       : null;
+  const verificationLine: VerificationLine | null = manifest.verification
+    ? { type: 'verification', verification: manifest.verification }
+    : null;
 
   const resultLines: ResultLine[] = reports.map((report) => {
     const content =
@@ -168,6 +181,7 @@ export function generateJsonlReport(input: JsonlReportInput): string {
   const lines = [
     serializeLine(runLine),
     ...(answerLine ? [serializeLine(answerLine)] : []),
+    ...(verificationLine ? [serializeLine(verificationLine)] : []),
     ...resultLines.map((l) => serializeLine(l)),
     ...sourceLines.map((l) => serializeLine(l)),
   ];

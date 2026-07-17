@@ -172,6 +172,40 @@ describe('generateJsonlReport -- each line parses independently', () => {
     expect(resultLine?.content).toBe(content);
   });
 
+  it('emits the full claim verification matrix as a separate structured line', () => {
+    const manifest = makeManifest({
+      verification: {
+        status: 'partial',
+        matrixFile: 'verification.json',
+        matrix: [
+          {
+            id: 'claim-1',
+            claim: 'The release was published in 2025.',
+            category: 'date',
+            status: 'supported',
+            sourceUrls: ['https://example.com/release'],
+          },
+        ],
+        followUps: [],
+        reasons: ['insufficient independent evidence for one or more claims'],
+        usage: {
+          providerAttempts: 1,
+          successfulProviderAttempts: 1,
+          reportedCostUsd: 0.004,
+          estimatedCostUsd: 0.01,
+          llmCalls: 2,
+        },
+        llm: [{ stage: 'claims', provider: 'openai', model: 'gpt-5-mini' }],
+        revised: false,
+      },
+    });
+    const lines = parseLines(
+      generateJsonlReport({ manifest, providerContents: {}, sources: [] }),
+    ) as Array<{ type: string; verification?: { matrix?: unknown[] } }>;
+    const verification = lines.find((line) => line.type === 'verification');
+    expect(verification?.verification?.matrix).toHaveLength(1);
+  });
+
   it('sets content to null for pending providers', () => {
     const manifest = makeManifest({
       providers: [

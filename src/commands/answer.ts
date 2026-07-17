@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { safeWriteFile } from '../core/fs-utils.js';
@@ -9,6 +10,7 @@ import {
   buildSynthesisPrompt,
   renderAnswerMarkdown,
 } from './answer-synthesis.js';
+import { verifyAnswer } from './claim-verification.js';
 import {
   callWithCascade,
   preferenceFromConfig,
@@ -72,6 +74,10 @@ export function registerAnswerCommand(program: Command): void {
       'Rewrite the query into tier-tuned variants with one LLM call before dispatch',
     )
     .option(
+      '--verify',
+      'Verify material factual claims with bounded follow-up evidence searches',
+    )
+    .option(
       '--html',
       'Generate a self-contained report.html in the run directory',
     )
@@ -90,10 +96,86 @@ export function registerAnswerCommand(program: Command): void {
         runOpts.group = 'quick';
       }
       const hooks: ExecuteRunHooks = {
-        postDispatch: (context) => synthesizeAnswer(context),
+        postDispatch: (context) =>
+          opts.verify
+            ? synthesizeAndVerifyAnswer(context)
+            : synthesizeAnswer(context),
       };
       await executeRun(query, runOpts, hooks);
     });
+}
+
+/**
+ * Opt-in verification wrapper. The normal `synthesizeAnswer` path is kept
+ * untouched so `librarium answer` remains byte/behavior compatible without
+ * `--verify`. Verification only ever replaces answer.md after a complete,
+ * evidence-backed revision; all partial failures preserve the original file.
+ */
+export async function synthesizeAndVerifyAnswer(
+  context: PostDispatchContext,
+): Promise<PostDispatchResult | undefined> {
+  const synthesis = await synthesizeAnswer(context);
+  if (!synthesis?.manifestExtra?.answer) return synthesis;
+
+  let originalAnswer: string;
+  try {
+    originalAnswer = readFileSync(
+      join(context.outputDir, 'answer.md'),
+      'utf-8',
+    );
+  } catch (error) {
+    context.printLine(
+      `  ! answer verification skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return synthesis;
+  }
+
+  const answerBody = originalAnswer
+    .replace(/^\s*#[^\S\n]+[^\n]*\n+/, '')
+    .replace(/\n#{1,6}[^\S\n]+Sources\b[\s\S]*$/i, '\n')
+    .trim();
+  const verification = await verifyAnswer({
+    query: context.query,
+    answer: answerBody,
+    config: context.config,
+    results: context.results,
+    reports: context.reports,
+    sources: context.sources,
+  });
+  safeWriteFile(
+    join(context.outputDir, verification.metadata.matrixFile),
+    `${JSON.stringify(verification.metadata, null, 2)}\n`,
+  );
+
+  let answer = synthesis.manifestExtra.answer;
+  if (verification.revisedAnswer && verification.revision) {
+    safeWriteFile(
+      join(context.outputDir, 'answer.md'),
+      renderAnswerMarkdown(
+        context.query,
+        verification.revisedAnswer,
+        buildAnswerSources(context.sources),
+      ),
+    );
+    answer = verification.revision;
+    context.printLine('');
+    context.printLine(
+      '  verification complete; revised answer written to answer.md',
+    );
+  } else {
+    context.printLine('');
+    context.printLine(
+      `  verification ${verification.metadata.status}; original grounded answer preserved`,
+    );
+  }
+
+  return {
+    manifestExtra: {
+      ...synthesis.manifestExtra,
+      answer,
+      verification: verification.metadata,
+    },
+  };
 }
 
 /**

@@ -419,6 +419,45 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('<div class="answer-body"><p>Use PgBouncer');
   });
 
+  it('renders the auditable claim-support matrix when verification is present', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        verification: {
+          status: 'partial',
+          matrixFile: 'verification.json',
+          matrix: [
+            {
+              id: 'claim-1',
+              claim: 'The release was published in 2025.',
+              category: 'date',
+              status: 'conflicting',
+              sourceUrls: ['https://example.com/release'],
+              reason: 'The release note gives a different date.',
+            },
+          ],
+          followUps: [],
+          reasons: ['insufficient independent evidence for one or more claims'],
+          usage: {
+            providerAttempts: 1,
+            successfulProviderAttempts: 1,
+            reportedCostUsd: 0.004,
+            estimatedCostUsd: 0.01,
+            llmCalls: 2,
+          },
+          llm: [],
+          revised: false,
+        },
+      }),
+      providerContents: {},
+      sources: [],
+    });
+    expect(html).toContain('claim verification');
+    expect(html).toContain('The release was published in 2025.');
+    expect(html).toContain('conflicting');
+    expect(html).toContain('https://example.com/release');
+    expect(html).toContain('verification partial: 1 provider attempts');
+  });
+
   it('omits the Answer section when no answer is provided', () => {
     const html = generateHtmlReport({
       manifest: makeManifest(),

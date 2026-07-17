@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   registerAnswerCommand,
+  synthesizeAndVerifyAnswer,
   synthesizeAnswer,
 } from '../src/commands/answer.js';
 import type { PostDispatchContext } from '../src/commands/run.js';
@@ -80,7 +81,7 @@ function makeContext(
 }
 
 describe('answer command --max-cost flag', () => {
-  function parseAnswer(args: string[]): { maxCost?: number } {
+  function parseAnswer(args: string[]): { maxCost?: number; verify?: boolean } {
     const program = new Command();
     program.exitOverride();
     registerAnswerCommand(program);
@@ -102,6 +103,11 @@ describe('answer command --max-cost flag', () => {
     expect(() => parseAnswer(['q', '--max-cost', '0'])).toThrow();
     expect(() => parseAnswer(['q', '--max-cost', '-1'])).toThrow();
     expect(() => parseAnswer(['q', '--max-cost', 'abc'])).toThrow();
+  });
+
+  it('keeps verification opt-in', () => {
+    expect(parseAnswer(['some query']).verify).toBeUndefined();
+    expect(parseAnswer(['some query', '--verify']).verify).toBe(true);
   });
 });
 
@@ -197,5 +203,44 @@ describe('synthesizeAnswer', () => {
     expect(
       lines.some((l) => l.includes('no synthesis provider available')),
     ).toBe(true);
+  });
+
+  it('fails open during opt-in verification and preserves the original answer', async () => {
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        calls++;
+        return calls === 1
+          ? new Response(
+              JSON.stringify({
+                choices: [
+                  { message: { content: 'Original grounded answer [1].' } },
+                ],
+              }),
+              { status: 200 },
+            )
+          : new Response(
+              JSON.stringify({
+                error: { message: 'verification unavailable' },
+              }),
+              {
+                status: 500,
+              },
+            );
+      }),
+    );
+    const { context } = makeContext(
+      dir,
+      [makeResult('openai', 'a finding about x')],
+      makeConfig(),
+    );
+    const out = await synthesizeAndVerifyAnswer(context);
+    expect(readFileSync(join(dir, 'answer.md'), 'utf8')).toContain(
+      'Original grounded answer [1].',
+    );
+    expect(out?.manifestExtra?.verification?.status).toBe('incomplete');
+    expect(out?.manifestExtra?.verification?.revised).toBe(false);
+    expect(existsSync(join(dir, 'verification.json'))).toBe(true);
   });
 });

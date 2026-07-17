@@ -49,6 +49,9 @@ librarium run "PostgreSQL connection pooling best practices"
 
 # Or get one grounded, cited answer synthesized from the results
 librarium answer "what changed in postgres 17 logical replication"
+
+# Opt in to bounded claim verification for material factual claims
+librarium answer "what changed in postgres 17 logical replication" --verify
 ```
 
 On first run, `librarium` opens a guided onboarding wizard: pick providers, choose where API keys should be stored, enter keys with masked prompts, and optionally run a first query. Once at least one usable provider is configured, bare `librarium` opens the research wizard instead. Output lands in a timestamped run directory you can read, browse, or feed to a pipeline. See the [full command reference](#commands) and [more install methods](#installation) below.
@@ -326,6 +329,8 @@ $ librarium answer "what changed in postgres 17 logical replication"
 ```
 
 The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--max-cost`, `--max-estimated-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
+
+Pass `--verify` to add a bounded, opt-in evidence pass after synthesis. Librarium selects up to eight material factual claims, checks the independent source evidence already returned by the fan-out, and only then issues up to three targeted searches for unresolved claims. Follow-ups use only eligible `ai-grounded` and `raw-search` providers from the original run; deep-research providers are never used. Each query has at most three provider attempts, honoring configured fallbacks, eligible alternates, timeouts, and both cost ceilings. `verification.json`, `run.json`, `results.jsonl` (a `"type":"verification"` line), and `report.html` carry the claim-support matrix and verification-only usage. Verification fails open: any incomplete evidence, budget exhaustion, provider failure, or LLM failure leaves the original grounded `answer.md` intact.
 ### Spend guardrails
 
 Two opt-in guardrails help avoid surprise spend on large fan-outs.
@@ -419,6 +424,7 @@ The file contains one JSON object per line (JSONL / newline-delimited JSON). Eac
 
 - **Line 1 -- run header** (`"type":"run"`): query, slug, timestamp, mode, succeeded/failed/pending counts, unique source count, total citation count, and optional `refinedQueries` (only present when `--refine` was used).
 - **Optional answer line** (`"type":"answer"`): emitted right after the run header when the run directory contains an `answer.md` (from `librarium answer` or the wizard's synthesis toggle). Carries optional `provider` and `model` (from `run.json`'s `answer` metadata) and `content` (the full `answer.md` body).
+- **Optional verification line** (`"type":"verification"`): emitted after the answer line for `librarium answer --verify`. Carries the full claim-support matrix, follow-up attempts, actual LLM provider/model records, incomplete reasons, and verification-only usage/cost totals.
 - **One line per provider** (`"type":"result"`): id, tier, status, durationMs, citationCount, optional usage object, optional error string, optional fallbackFor string, and `content` (the full markdown from the provider's `.md` file, or `null` when missing or pending).
 - **One line per deduped source** (`"type":"source"`): url, optional title, providers array, citationCount.
 
