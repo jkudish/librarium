@@ -124,7 +124,9 @@ including raw artifacts; do not hand-edit scores or omit failed cases.
 
 Before publishing a run:
 
-1. Revalidate every selected live question and update its evidence metadata.
+1. Have a maintainer audit the initial corpus (and every contributed question),
+   then revalidate every selected live question and update its evidence
+   metadata.
 2. Complete the full bounded target matrix or explain exclusions in review.
 3. Audit a sample of deterministic checks and raw judge judgments manually.
 4. Review unknown costs and provider/model version metadata.

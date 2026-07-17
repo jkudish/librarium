@@ -141,11 +141,7 @@ export function validateCorpus(stable, live) {
     ['live', live],
   ]) {
     requiredString(dataset?.version, `${name}.version`, errors);
-    requiredString(
-      dataset?.maintainerValidatedAt,
-      `${name}.maintainerValidatedAt`,
-      errors,
-    );
+    requiredString(dataset?.curatedAt, `${name}.curatedAt`, errors);
   }
   requiredString(stable?.frozenAt, 'stable.frozenAt', errors);
   if (

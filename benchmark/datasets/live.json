@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "track": "live",
   "version": "2026-07-16.v1",
-  "maintainerValidatedAt": "2026-07-16",
+  "curatedAt": "2026-07-16",
   "questions": [
     {
       "id": "live-node-current",
