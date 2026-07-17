@@ -286,6 +286,10 @@ function verificationDuration(durationMs: unknown): string {
   return finiteNumber(durationMs) ? formatDuration(durationMs) : 'unknown';
 }
 
+function verificationCount(value: unknown): string {
+  return finiteNumber(value) ? String(Math.trunc(value)) : '0';
+}
+
 function verificationUsageDetail(usage: ProviderUsage | undefined): string {
   if (!usage) return 'not reported';
   const fields: string[] = [];
@@ -395,7 +399,7 @@ function verificationSection(verification: VerificationMetadata): string {
   ]
     .map(
       ({ lane, attempts, successful, summary }) =>
-        `<tr><td>${lane}</td><td>${attempts}</td><td>${successful}</td><td>${escapeHtml(summaryTokenDetail(summary))}</td><td>${escapeHtml(summaryCost(summary.reportedCostUsd, summary.reportedCostIsLowerBound))}</td><td>${escapeHtml(summaryCost(summary.estimatedCostUsd, summary.estimatedCostIsLowerBound))}</td></tr>`,
+        `<tr><td>${lane}</td><td>${verificationCount(attempts)}</td><td>${verificationCount(successful)}</td><td>${escapeHtml(summaryTokenDetail(summary))}</td><td>${escapeHtml(summaryCost(summary.reportedCostUsd, summary.reportedCostIsLowerBound))}</td><td>${escapeHtml(summaryCost(summary.estimatedCostUsd, summary.estimatedCostIsLowerBound))}</td></tr>`,
     )
     .join('');
   const followUps = verification.followUps.length
@@ -432,7 +436,7 @@ function verificationSection(verification: VerificationMetadata): string {
   );
   return `<section class="verification">
 <p class="eyebrow">claim verification</p>
-<p class="verification-meta">verification ${escapeHtml(verification.status)}: ${verification.usage.providerAttempts} provider attempts (${verification.usage.successfulProviderAttempts} successful), ${verification.usage.llmCalls} LLM calls (${successfulLlmCalls} successful); ${escapeHtml(totalReported)} reported total, ${escapeHtml(totalEstimated)} estimated total; revised: ${verification.revised ? 'yes' : 'no'}</p>
+<p class="verification-meta">verification ${escapeHtml(verification.status)}: ${verificationCount(verification.usage.providerAttempts)} provider attempts (${verificationCount(verification.usage.successfulProviderAttempts)} successful), ${verificationCount(verification.usage.llmCalls)} LLM calls (${verificationCount(successfulLlmCalls)} successful); ${escapeHtml(totalReported)} reported total, ${escapeHtml(totalEstimated)} estimated total; revised: ${verification.revised ? 'yes' : 'no'}</p>
 ${reasons}
 <h3>Verification-only usage</h3>
 <table><thead><tr><th>Lane</th><th>Attempts</th><th>Successful</th><th>Tokens</th><th>Reported cost</th><th>Estimated cost</th></tr></thead><tbody>${usageRows}</tbody></table>

@@ -538,7 +538,8 @@ describe('generateHtmlReport', () => {
           ],
           reasons: ['<script>alert("reason-list")</script>'],
           usage: {
-            providerAttempts: 1,
+            providerAttempts:
+              '"><iframe srcdoc="counter-injection">' as unknown as number,
             successfulProviderAttempts: 0,
             reportedCostUsd: 0.006,
             reportedCostIsLowerBound: true,
@@ -592,6 +593,8 @@ describe('generateHtmlReport', () => {
 
     expect(html).toContain('Follow-up queries and attempts');
     expect(html).toContain('Verification LLM calls');
+    expect(html).not.toContain('<iframe');
+    expect(html).not.toContain('counter-injection');
     expect(html).toContain('evil&quot;&gt;&lt;img');
     expect(html).toContain('&lt;script&gt;alert(&quot;query&quot;)');
     expect(html).toContain('1.3s');

@@ -427,6 +427,9 @@ describe('claim verification boundaries', () => {
     expect(result.metadata.followUps[0]?.attempts).toHaveLength(
       MAX_VERIFICATION_ATTEMPTS,
     );
+    expect(result.metadata.followUps[0]?.attempts[2]?.sourceUrls).toEqual([
+      'https://alternate.example/evidence',
+    ]);
   });
 
   it('does not spend the evidence-query budget on transport failures', async () => {
@@ -711,6 +714,11 @@ describe('claim verification boundaries', () => {
                 },
               },
             ],
+            usageMetadata: {
+              promptTokenCount: 2,
+              candidatesTokenCount: 1,
+              totalTokenCount: 3,
+            },
           }),
           { status: 200 },
         );
@@ -733,6 +741,11 @@ describe('claim verification boundaries', () => {
     expect(timeoutSpy.mock.calls.every(([timeout]) => timeout === 17_000)).toBe(
       true,
     );
+    expect(result.metadata.usage.llm).toMatchObject({
+      inputTokens: 8,
+      outputTokens: 4,
+      totalTokens: 12,
+    });
     expect(result.metadata.llm.map((call) => call.stage)).toEqual([
       'claims',
       'claims',
