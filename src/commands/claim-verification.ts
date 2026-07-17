@@ -27,6 +27,7 @@ import {
 } from './llm-client.js';
 
 export const MAX_VERIFICATION_CLAIMS = 8;
+/** Successful evidence-producing queries; failed queries do not consume this. */
 export const MAX_VERIFICATION_QUERIES = 3;
 export const MAX_VERIFICATION_ATTEMPTS = 3;
 const VERIFICATION_LLM_TIMEOUT_MS = 90_000;
@@ -383,7 +384,20 @@ async function runFollowup(
   for (const id of attemptIds.slice(0, MAX_VERIFICATION_ATTEMPTS)) {
     const provider = getProvider(id);
     if (!provider) continue;
-    if (reportedBudget.exceeded() || estimatedBudget.exceeded()) {
+    const metering = buildProviderMetering(id, config.providers[id]);
+    const nextEstimatedCostUsd = metering.estimate?.estimatedCostUsd;
+    const nextEstimateExceedsBudget =
+      estimatedBudget.limitUsd !== undefined &&
+      typeof nextEstimatedCostUsd === 'number' &&
+      Number.isFinite(nextEstimatedCostUsd) &&
+      nextEstimatedCostUsd > 0 &&
+      estimatedBudget.reservedUsd + nextEstimatedCostUsd >
+        estimatedBudget.limitUsd;
+    if (
+      reportedBudget.exceeded() ||
+      estimatedBudget.exceeded() ||
+      nextEstimateExceedsBudget
+    ) {
       attempts.push({
         provider: id,
         tier: provider.tier as VerificationAttempt['tier'],
@@ -395,7 +409,6 @@ async function runFollowup(
       });
       break;
     }
-    const metering = buildProviderMetering(id, config.providers[id]);
     estimatedBudget.reserve(metering.estimate);
     const started = Date.now();
     try {
@@ -565,11 +578,9 @@ export async function verifyAnswer(
   for (const claim of targets) {
     // A provider transport/API failure is retried through this query's bounded
     // fallback/alternate attempts; it never consumes a separate evidence-query
-    // slot. Distinct generated query strings themselves stay capped at three.
-    if (
-      successfulEvidenceQueries >= MAX_VERIFICATION_QUERIES ||
-      followUps.length >= MAX_VERIFICATION_QUERIES
-    ) {
+    // slot. Total work remains bounded by the eight selected claims, with at
+    // most three provider attempts per claim.
+    if (successfulEvidenceQueries >= MAX_VERIFICATION_QUERIES) {
       break;
     }
     if (attemptIds.length === 0) {

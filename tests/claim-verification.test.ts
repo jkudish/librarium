@@ -387,39 +387,37 @@ describe('claim verification boundaries', () => {
     registerProvider(
       provider('primary', async (query) => {
         calls.push(query);
-        if (query.includes('2025-01-01')) throw new Error('network down');
+        if (!query.includes('4 regions')) throw new Error('network down');
         return successResult('primary');
       }),
     );
-    const secondClaim = {
+    const claims = Array.from({ length: 4 }, (_, index) => ({
       ...CLAIM,
-      id: 'claim-2',
-      claim: 'The API supports 12 regions.',
+      id: `claim-${index + 1}`,
+      claim: `The API supports ${index + 1} regions.`,
       category: 'number',
-    };
+    }));
     llmResponses(
-      { claims: [CLAIM, secondClaim] },
+      { claims },
       {
-        assessments: [
-          { id: 'claim-1', status: 'insufficient', sourceUrls: [] },
-          { id: 'claim-2', status: 'insufficient', sourceUrls: [] },
-        ],
+        assessments: claims.map((claim) => ({
+          id: claim.id,
+          status: 'insufficient',
+          sourceUrls: [],
+        })),
       },
       {
-        assessments: [
-          { id: 'claim-1', status: 'insufficient', sourceUrls: [] },
-          {
-            id: 'claim-2',
-            status: 'supported',
-            sourceUrls: ['https://primary.example/evidence'],
-          },
-        ],
+        assessments: claims.map((claim) => ({
+          id: claim.id,
+          status: claim.id === 'claim-4' ? 'supported' : 'insufficient',
+          sourceUrls:
+            claim.id === 'claim-4' ? ['https://primary.example/evidence'] : [],
+        })),
       },
     );
     const result = await verifyAnswer({
-      query: 'release',
-      answer:
-        'The release was published on 2025-01-01. The API supports 12 regions.',
+      query: 'regions',
+      answer: claims.map((claim) => claim.claim).join(' '),
       config: config({
         primary: { apiKey: '$VERIFY_PRIMARY_KEY', enabled: true },
       }),
@@ -427,18 +425,14 @@ describe('claim verification boundaries', () => {
       reports: [],
       sources: [],
     });
-    expect(calls).toHaveLength(2);
-    expect(result.metadata.followUps).toHaveLength(2);
+    expect(calls).toHaveLength(4);
+    expect(result.metadata.followUps).toHaveLength(4);
     expect(result.metadata.usage.successfulProviderAttempts).toBe(1);
-    expect(MAX_VERIFICATION_QUERIES).toBe(3);
   });
 
-  it('caps distinct targeted follow-up queries at three', async () => {
-    registerProvider(
-      provider('primary', async () => {
-        throw new Error('transport down');
-      }),
-    );
+  it('caps successful evidence queries at three', async () => {
+    const execute = vi.fn(async () => successResult('primary'));
+    registerProvider(provider('primary', execute));
     const claims = Array.from({ length: 5 }, (_, index) => ({
       ...CLAIM,
       id: `claim-${index + 1}`,
@@ -454,6 +448,17 @@ describe('claim verification boundaries', () => {
           sourceUrls: [],
         })),
       },
+      {
+        assessments: claims.map((claim, index) => ({
+          id: claim.id,
+          status:
+            index < MAX_VERIFICATION_QUERIES ? 'supported' : 'insufficient',
+          sourceUrls:
+            index < MAX_VERIFICATION_QUERIES
+              ? ['https://primary.example/evidence']
+              : [],
+        })),
+      },
     );
     const result = await verifyAnswer({
       query: 'regions',
@@ -465,7 +470,11 @@ describe('claim verification boundaries', () => {
       reports: [],
       sources: [],
     });
+    expect(execute).toHaveBeenCalledTimes(MAX_VERIFICATION_QUERIES);
     expect(result.metadata.followUps).toHaveLength(MAX_VERIFICATION_QUERIES);
+    expect(result.metadata.usage.successfulProviderAttempts).toBe(
+      MAX_VERIFICATION_QUERIES,
+    );
   });
 
   it('honors inherited reported and estimated cost ceilings and fails open', async () => {
@@ -510,5 +519,57 @@ describe('claim verification boundaries', () => {
     expect(result.metadata.status).toBe('partial');
     expect(result.revisedAnswer).toBeUndefined();
     expect(result.metadata.reasons).toContain('verification budget exhausted');
+  });
+
+  it('skips a follow-up before dispatch when its estimate would cross the budget', async () => {
+    const execute = vi.fn(async () => successResult('serpapi'));
+    registerProvider(provider('serpapi', execute, 'raw-search'));
+    llmResponses(
+      { claims: [CLAIM] },
+      {
+        assessments: [
+          { id: 'claim-1', status: 'insufficient', sourceUrls: [] },
+        ],
+      },
+    );
+    const result = await verifyAnswer({
+      query: 'release',
+      answer: 'The release was published on 2025-01-01.',
+      config: config(
+        {
+          serpapi: {
+            apiKey: 'test-key',
+            enabled: true,
+            options: { perRequestUsd: 0.015 },
+          },
+        },
+        { maxEstimatedCostUsd: 0.02 },
+      ),
+      results: [initialResult('serpapi')],
+      reports: [
+        {
+          id: 'serpapi',
+          tier: 'raw-search',
+          status: 'success',
+          durationMs: 1,
+          wordCount: 1,
+          citationCount: 1,
+          outputFile: 'serpapi.md',
+          metaFile: 'serpapi.meta.json',
+          metering: {
+            kind: 'request_priced',
+            estimate: { estimatedCostUsd: 0.01, costConfidence: 'estimated' },
+          },
+        },
+      ],
+      sources: [],
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.metadata.followUps[0]?.attempts[0]).toMatchObject({
+      provider: 'serpapi',
+      status: 'skipped',
+      error: 'skipped: estimated cost budget reached',
+    });
+    expect(result.metadata.usage.estimatedCostUsd).toBe(0);
   });
 });
