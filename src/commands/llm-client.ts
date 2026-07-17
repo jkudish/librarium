@@ -4,7 +4,7 @@ import {
   type EnvRecord,
   resolveCredential,
 } from '../core/credentials.js';
-import type { Config } from '../types.js';
+import type { Config, ProviderUsage } from '../types.js';
 
 /**
  * Shared CLI-layer LLM client used by `refine` and `answer`.
@@ -182,11 +182,56 @@ interface CallContext {
   json: boolean;
 }
 
+interface LlmHttpResponse {
+  text: string;
+  usage?: ProviderUsage;
+}
+
+function finiteNonNegative(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function normalizedUsage(
+  raw: unknown,
+  keys: {
+    input: string;
+    output: string;
+    total: string;
+    nestedCost?: boolean;
+  },
+): ProviderUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const nestedCost =
+    keys.nestedCost && record.cost && typeof record.cost === 'object'
+      ? finiteNonNegative((record.cost as Record<string, unknown>).total_cost)
+      : undefined;
+  const directCost =
+    finiteNonNegative(record.costUsd) ??
+    finiteNonNegative(record.cost_usd) ??
+    finiteNonNegative(record.total_cost) ??
+    (typeof record.cost === 'number'
+      ? finiteNonNegative(record.cost)
+      : undefined);
+  const usage: ProviderUsage = { raw };
+  const inputTokens = finiteNonNegative(record[keys.input]);
+  const outputTokens = finiteNonNegative(record[keys.output]);
+  const totalTokens = finiteNonNegative(record[keys.total]);
+  const costUsd = nestedCost ?? directCost;
+  if (inputTokens !== undefined) usage.inputTokens = inputTokens;
+  if (outputTokens !== undefined) usage.outputTokens = outputTokens;
+  if (totalTokens !== undefined) usage.totalTokens = totalTokens;
+  if (costUsd !== undefined) usage.costUsd = costUsd;
+  return usage;
+}
+
 async function callOpenAi(
   client: LlmClient,
   prompt: string,
   ctx: CallContext,
-): Promise<string> {
+): Promise<LlmHttpResponse> {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -212,15 +257,23 @@ async function callOpenAi(
   }
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: unknown;
   };
-  return data.choices?.[0]?.message?.content ?? '';
+  return {
+    text: data.choices?.[0]?.message?.content ?? '',
+    usage: normalizedUsage(data.usage, {
+      input: 'prompt_tokens',
+      output: 'completion_tokens',
+      total: 'total_tokens',
+    }),
+  };
 }
 
 async function callGemini(
   client: LlmClient,
   prompt: string,
   ctx: CallContext,
-): Promise<string> {
+): Promise<LlmHttpResponse> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${client.model}:generateContent?key=${client.apiKey}`;
   const response = await fetch(url, {
     method: 'POST',
@@ -245,15 +298,23 @@ async function callGemini(
   }
   const data = (await response.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: unknown;
   };
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  return {
+    text: data.candidates?.[0]?.content?.parts?.[0]?.text ?? '',
+    usage: normalizedUsage(data.usageMetadata, {
+      input: 'promptTokenCount',
+      output: 'candidatesTokenCount',
+      total: 'totalTokenCount',
+    }),
+  };
 }
 
 async function callPerplexity(
   client: LlmClient,
   prompt: string,
   ctx: CallContext,
-): Promise<string> {
+): Promise<LlmHttpResponse> {
   const response = await fetch('https://api.perplexity.ai/chat/completions', {
     method: 'POST',
     headers: {
@@ -278,15 +339,24 @@ async function callPerplexity(
   }
   const data = (await response.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: unknown;
   };
-  return data.choices?.[0]?.message?.content ?? '';
+  return {
+    text: data.choices?.[0]?.message?.content ?? '',
+    usage: normalizedUsage(data.usage, {
+      input: 'prompt_tokens',
+      output: 'completion_tokens',
+      total: 'total_tokens',
+      nestedCost: true,
+    }),
+  };
 }
 
 function callClient(
   client: LlmClient,
   prompt: string,
   ctx: CallContext,
-): Promise<string> {
+): Promise<LlmHttpResponse> {
   return client.provider === 'openai'
     ? callOpenAi(client, prompt, ctx)
     : client.provider === 'gemini'
@@ -301,12 +371,24 @@ export interface CallWithCascadeOptions<T> {
   timeoutMs: number;
   json: boolean;
   onWarning?: (message: string) => void;
+  /** Runs immediately before each network attempt; a throw aborts the cascade. */
+  beforeAttempt?: (client: LlmClient, index: number) => void | Promise<void>;
+  /** Receives every dispatched attempt, including parse failures with usage. */
+  onAttempt?: (attempt: LlmCascadeAttempt) => void;
   /**
    * Map the raw text response to a result. A throw here counts as a failure
    * for that client and cascades to the next (so a bad/unparseable response
    * is treated the same as an HTTP error). Defaults to returning the raw text.
    */
   parse?: (text: string) => T;
+}
+
+export interface LlmCascadeAttempt {
+  client: LlmClient;
+  status: 'success' | 'error';
+  durationMs: number;
+  usage?: ProviderUsage;
+  error?: string;
 }
 
 /**
@@ -316,19 +398,45 @@ export interface CallWithCascadeOptions<T> {
  */
 export async function callWithCascade<T = string>(
   options: CallWithCascadeOptions<T>,
-): Promise<{ client: LlmClient; result: T }> {
-  const { clients, prompt, action, timeoutMs, json, onWarning, parse } =
-    options;
+): Promise<{ client: LlmClient; result: T; usage?: ProviderUsage }> {
+  const {
+    clients,
+    prompt,
+    action,
+    timeoutMs,
+    json,
+    onWarning,
+    beforeAttempt,
+    onAttempt,
+    parse,
+  } = options;
   const ctx: CallContext = { action, timeoutMs, json };
   const mapText = parse ?? ((text: string) => text as unknown as T);
   let lastError: unknown;
   for (let index = 0; index < clients.length; index++) {
     const client = clients[index] as LlmClient;
+    await beforeAttempt?.(client, index);
+    const started = Date.now();
+    let response: LlmHttpResponse | undefined;
     try {
-      const text = await callClient(client, prompt, ctx);
-      return { client, result: mapText(text) };
+      response = await callClient(client, prompt, ctx);
+      const result = mapText(response.text);
+      onAttempt?.({
+        client,
+        status: 'success',
+        durationMs: Date.now() - started,
+        ...(response.usage ? { usage: response.usage } : {}),
+      });
+      return { client, result, usage: response.usage };
     } catch (e) {
       lastError = e;
+      onAttempt?.({
+        client,
+        status: 'error',
+        durationMs: Date.now() - started,
+        ...(response?.usage ? { usage: response.usage } : {}),
+        error: e instanceof Error ? e.message : String(e),
+      });
       const next = clients[index + 1];
       if (next) {
         const message = e instanceof Error ? e.message : String(e);

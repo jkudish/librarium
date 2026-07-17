@@ -75,6 +75,8 @@ export interface RunOptions {
   html?: boolean;
   jsonl?: boolean;
   refine?: boolean;
+  /** Opt-in answer-only claim verification. Ignored by plain `run`. */
+  verify?: boolean;
   yes?: boolean;
   fallback?: boolean;
   /**
