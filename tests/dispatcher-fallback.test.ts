@@ -161,6 +161,44 @@ describe('dispatcher fallback', () => {
     expect(fallbackReport!.citationCount).toBe(1);
   });
 
+  it('does not trigger a configured fallback when the caller disables it', async () => {
+    process.env.MOCK_PRIMARY_KEY = 'key-primary';
+    process.env.MOCK_FALLBACK_KEY = 'key-fallback';
+
+    registerProvider(createFailingProvider('primary', 'primary boom'));
+    registerProvider(createSuccessProvider('fallback'));
+
+    const config = makeConfig({
+      primary: {
+        apiKey: '$MOCK_PRIMARY_KEY',
+        enabled: true,
+        fallback: 'fallback',
+      },
+      fallback: {
+        apiKey: '$MOCK_FALLBACK_KEY',
+        enabled: true,
+      },
+    });
+
+    const { reports } = await dispatch({
+      config,
+      providerIds: ['primary'],
+      query: 'benchmark query',
+      outputDir: tmpDir,
+      mode: 'sync',
+      credentials: { env: process.env },
+      allowFallbacks: false,
+    });
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      id: 'primary',
+      status: 'error',
+      error: 'primary boom',
+    });
+    expect(reports[0].fallbackFor).toBeUndefined();
+  });
+
   it('does NOT trigger fallback when primary provider succeeds', async () => {
     process.env.MOCK_PRIMARY_KEY = 'key-primary';
     process.env.MOCK_FALLBACK_KEY = 'key-fallback';

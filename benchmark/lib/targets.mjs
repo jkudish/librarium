@@ -151,21 +151,46 @@ export function selectTargets(catalog, selection = {}) {
   return selected;
 }
 
-export function buildPreflight({ questions, targets, catalog, config, env }) {
+export function buildPreflight({
+  questions,
+  targets,
+  catalog,
+  config,
+  env,
+  cases,
+  providerConfiguration = [],
+}) {
   const providerById = new Map(
     catalog.providers.map((provider) => [provider.id, provider]),
+  );
+  const plannedCases =
+    cases ??
+    questions.flatMap((question) =>
+      targets.map((target) => ({ question, target, stage: 'full' })),
+    );
+  const resolvedProviderById = new Map(
+    providerConfiguration.map((provider) => [provider.id, provider]),
   );
   let knownEstimateUsd = 0;
   const knownOperations = new Map();
   const unknownOperations = new Map();
   const credentialRefs = new Map();
 
-  for (const target of targets) {
-    for (const member of target.members) {
+  for (const plannedCase of plannedCases) {
+    if (plannedCase.stage !== 'full') continue;
+    for (const member of plannedCase.target.members) {
       const provider = providerById.get(member);
-      credentialRefs.set(provider.envVar, Boolean(env[provider.envVar]));
+      const credentialEnvironmentVariable =
+        resolvedProviderById.get(member)?.credentialEnvironmentVariable ??
+        provider.envVar;
+      if (credentialEnvironmentVariable) {
+        credentialRefs.set(
+          credentialEnvironmentVariable,
+          Boolean(env[credentialEnvironmentVariable]),
+        );
+      }
       if (typeof provider.estimatedCostUsd === 'number') {
-        knownEstimateUsd += provider.estimatedCostUsd * questions.length;
+        knownEstimateUsd += provider.estimatedCostUsd;
         const operation = `provider:${member}`;
         const existing = knownOperations.get(operation) ?? {
           operation,
@@ -174,12 +199,12 @@ export function buildPreflight({ questions, targets, catalog, config, env }) {
           costConfidence: provider.costConfidence,
           pricingVersion: provider.pricingVersion ?? null,
         };
-        existing.count += questions.length;
+        existing.count += 1;
         knownOperations.set(operation, existing);
       } else {
         unknownOperations.set(
           `provider:${member}`,
-          (unknownOperations.get(`provider:${member}`) ?? 0) + questions.length,
+          (unknownOperations.get(`provider:${member}`) ?? 0) + 1,
         );
       }
     }
@@ -187,22 +212,39 @@ export function buildPreflight({ questions, targets, catalog, config, env }) {
 
   for (const lane of ['synthesis', 'judge']) {
     const llm = config[lane];
+    const count = plannedCases.filter(
+      (plannedCase) => lane === 'judge' || plannedCase.stage === 'full',
+    ).length;
+    if (count === 0) continue;
     credentialRefs.set(llm.envVar, Boolean(env[llm.envVar]));
-    unknownOperations.set(
-      `${lane}:${llm.provider}/${llm.model}`,
-      questions.length * targets.length,
-    );
+    unknownOperations.set(`${lane}:${llm.provider}/${llm.model}`, count);
   }
+
+  const remainingQuestionIds = new Set(
+    plannedCases.map((plannedCase) => plannedCase.question.id),
+  );
+  const remainingTargetIds = new Set(
+    plannedCases.map((plannedCase) => plannedCase.target.id),
+  );
 
   return {
     schemaVersion: 1,
     paidCalls: true,
-    questionCount: questions.length,
-    targetCount: targets.length,
-    caseCount: questions.length * targets.length,
-    providerDispatchCount:
-      questions.length *
-      targets.reduce((total, target) => total + target.members.length, 0),
+    questionCount: remainingQuestionIds.size,
+    targetCount: remainingTargetIds.size,
+    caseCount: plannedCases.length,
+    fullCaseCount: plannedCases.filter(
+      (plannedCase) => plannedCase.stage === 'full',
+    ).length,
+    judgeOnlyCaseCount: plannedCases.filter(
+      (plannedCase) => plannedCase.stage === 'judge',
+    ).length,
+    providerDispatchCount: plannedCases
+      .filter((plannedCase) => plannedCase.stage === 'full')
+      .reduce(
+        (total, plannedCase) => total + plannedCase.target.members.length,
+        0,
+      ),
     knownEstimateUsd: round(knownEstimateUsd, 6),
     knownEstimateIsPartial: unknownOperations.size > 0,
     knownCostOperations: [...knownOperations.values()].map((operation) => ({

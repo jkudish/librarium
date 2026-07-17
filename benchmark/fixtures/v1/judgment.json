@@ -2,6 +2,7 @@
   "provider": "openai",
   "model": "gpt-5-mini-2025-08-07",
   "modelVersion": "2025-08-07",
+  "promptVersion": "v2",
   "usage": { "prompt_tokens": 240, "completion_tokens": 48 },
   "rawResponse": { "fixture": true },
   "rawText": "{\"correctness\":1,\"completeness\":1,\"evidenceSupport\":1,\"rationale\":\"The answer matches the frozen facts and is supported by the cited evidence.\",\"unsupportedClaims\":[]}",

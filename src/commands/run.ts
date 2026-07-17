@@ -76,6 +76,7 @@ export interface RunOptions {
   jsonl?: boolean;
   refine?: boolean;
   yes?: boolean;
+  fallback?: boolean;
   /**
    * Set by the wizard, whose own confirm step already counts as consent, so
    * the deep-research pre-flight confirm does not double-prompt. Not a CLI flag.
@@ -160,6 +161,10 @@ export function registerRunCommand(program: Command): void {
       parseMaxCost,
     )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
+    .option(
+      '--no-fallback',
+      'Disable configured provider fallbacks for an exact provider matrix',
+    )
     .option('--json', 'Output run.json to stdout')
     .option(
       '--refine',
@@ -405,6 +410,7 @@ export async function executeRun(
         credentials,
         budget,
         estimatedBudget,
+        allowFallbacks: opts.fallback !== false,
         onProgress: (event) => {
           if (live) {
             switch (event.event) {

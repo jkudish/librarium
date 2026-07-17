@@ -1,14 +1,63 @@
-import { cpSync, existsSync, readFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { cpSync, existsSync, readFileSync, realpathSync } from 'node:fs';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 import { canonicalUrl, readJson } from './io.mjs';
 
 function readOptional(path) {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 }
 
+function isContained(root, candidate) {
+  const pathFromRoot = relative(root, candidate);
+  return (
+    pathFromRoot === '' ||
+    (!isAbsolute(pathFromRoot) &&
+      pathFromRoot !== '..' &&
+      !pathFromRoot.startsWith(`..${sep}`))
+  );
+}
+
+export function resolveArtifactReference(root, reference, label) {
+  if (typeof reference !== 'string' || reference.trim() === '') {
+    throw new Error(`${label} must be a non-empty relative path`);
+  }
+  if (isAbsolute(reference)) {
+    throw new Error(`${label} must be relative to its artifact root`);
+  }
+  return resolveWithinArtifactRoot(root, resolve(root, reference), label);
+}
+
+function resolveWithinArtifactRoot(root, candidate, label) {
+  const resolvedRoot = resolve(root);
+  const lexicalCandidate = resolve(candidate);
+  if (!isContained(resolvedRoot, lexicalCandidate)) {
+    throw new Error(`${label} must stay within its artifact root`);
+  }
+  let realRoot;
+  let realCandidate;
+  try {
+    realRoot = realpathSync(resolvedRoot);
+    realCandidate = realpathSync(lexicalCandidate);
+  } catch {
+    throw new Error(`${label} does not reference an existing artifact`);
+  }
+  if (!isContained(realRoot, realCandidate)) {
+    throw new Error(`${label} escapes its artifact root through a symlink`);
+  }
+  return realCandidate;
+}
+
 export function parseLibrariumRun(runDirectory) {
   const runDir = resolve(runDirectory);
-  const manifest = readJson(join(runDir, 'run.json'));
+  const manifest = readJson(
+    resolveArtifactReference(runDir, 'run.json', 'run manifest'),
+  );
   if (manifest.version !== 1 || !Array.isArray(manifest.providers)) {
     throw new Error(`${runDir} is not a Librarium v1 run artifact`);
   }
@@ -20,9 +69,31 @@ export function parseLibrariumRun(runDirectory) {
       `Deep-research output is not comparable until completed and retrieved: ${pending.map((item) => item.id).join(', ')}`,
     );
   }
+  const fallbacks = manifest.providers.filter(
+    (provider) => provider.fallbackFor,
+  );
+  if (fallbacks.length > 0) {
+    throw new Error(
+      `Benchmark artifacts must not contain provider fallbacks: ${fallbacks.map((item) => `${item.id} for ${item.fallbackFor}`).join(', ')}`,
+    );
+  }
 
   const providerOutputs = manifest.providers.map((report) => {
-    const meta = report.metaFile ? readJson(join(runDir, report.metaFile)) : {};
+    const metaPath = report.metaFile
+      ? resolveArtifactReference(
+          runDir,
+          report.metaFile,
+          `provider ${report.id} metaFile`,
+        )
+      : null;
+    const outputPath = report.outputFile
+      ? resolveArtifactReference(
+          runDir,
+          report.outputFile,
+          `provider ${report.id} outputFile`,
+        )
+      : null;
+    const meta = metaPath ? readJson(metaPath) : {};
     return {
       provider: report.id,
       tier: report.tier,
@@ -30,9 +101,7 @@ export function parseLibrariumRun(runDirectory) {
       durationMs: report.durationMs,
       error: report.error,
       model: meta.model ?? null,
-      content: report.outputFile
-        ? readOptional(join(runDir, report.outputFile))
-        : '',
+      content: outputPath ? readOptional(outputPath) : '',
       citations: Array.isArray(meta.citations) ? meta.citations : [],
       usage: report.usage ?? meta.usage ?? null,
       metering: report.metering ?? meta.metering ?? null,
@@ -42,7 +111,11 @@ export function parseLibrariumRun(runDirectory) {
       },
     };
   });
-  const sourcesPath = join(runDir, manifest.sources?.file ?? 'sources.json');
+  const sourcesPath = resolveArtifactReference(
+    runDir,
+    manifest.sources?.file ?? 'sources.json',
+    'sources file',
+  );
   const sources = existsSync(sourcesPath) ? readJson(sourcesPath) : [];
   for (const source of sources) {
     source.validUrl = canonicalUrl(source.url) !== null;
@@ -66,10 +139,26 @@ export function loadFixturePack(path) {
   for (const item of fixture.cases) {
     const key = `${item.questionId}::${item.targetId}`;
     if (cases.has(key)) throw new Error(`Duplicate fixture case ${key}`);
-    const runDir = join(root, item.runDirectory);
-    const judgmentPath = join(root, item.judgmentFile);
-    const answerPath = join(root, item.answerFile);
-    const synthesisPath = join(root, item.synthesisFile);
+    const runDir = resolveArtifactReference(
+      root,
+      item.runDirectory,
+      `fixture ${key} runDirectory`,
+    );
+    const judgmentPath = resolveArtifactReference(
+      root,
+      item.judgmentFile,
+      `fixture ${key} judgmentFile`,
+    );
+    const answerPath = resolveArtifactReference(
+      root,
+      item.answerFile,
+      `fixture ${key} answerFile`,
+    );
+    const synthesisPath = resolveArtifactReference(
+      root,
+      item.synthesisFile,
+      `fixture ${key} synthesisFile`,
+    );
     cases.set(key, {
       ...item,
       parsedRun: parseLibrariumRun(runDir),
@@ -90,12 +179,23 @@ export function copyFixtureRun(caseFixture, destination) {
 }
 
 export function findRunDirectory(outputBase, manifest) {
-  if (manifest?.outputDir && existsSync(join(manifest.outputDir, 'run.json'))) {
-    return manifest.outputDir;
+  if (manifest?.outputDir) {
+    const candidate = resolveWithinArtifactRoot(
+      outputBase,
+      isAbsolute(manifest.outputDir)
+        ? manifest.outputDir
+        : resolve(outputBase, manifest.outputDir),
+      'Librarium manifest outputDir',
+    );
+    if (existsSync(resolve(candidate, 'run.json'))) return candidate;
   }
   if (manifest?.slug) {
-    const candidate = join(outputBase, manifest.slug);
-    if (existsSync(join(candidate, 'run.json'))) return candidate;
+    const candidate = resolveArtifactReference(
+      outputBase,
+      manifest.slug,
+      'Librarium manifest slug',
+    );
+    if (existsSync(resolve(candidate, 'run.json'))) return candidate;
   }
   throw new Error(
     `Librarium did not produce a readable run directory under ${basename(outputBase)}`,

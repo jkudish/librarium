@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
   "artifactVersion": 1,
-  "corpusVersion": "2026-07-16.v1",
+  "corpusVersion": "2026-07-16.v2",
   "synthesis": {
     "provider": "openai",
     "model": "gpt-5-mini-2025-08-07",
     "modelVersion": "2025-08-07",
     "envVar": "OPENAI_API_KEY",
-    "promptVersion": "v1"
+    "promptVersion": "v2"
   },
   "judge": {
     "provider": "openai",
     "model": "gpt-5-mini-2025-08-07",
     "modelVersion": "2025-08-07",
     "envVar": "OPENAI_API_KEY",
-    "promptVersion": "v1"
+    "promptVersion": "v2"
   },
   "execution": {
     "providerTimeoutSeconds": 60,

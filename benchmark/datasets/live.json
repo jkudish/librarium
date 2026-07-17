@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "track": "live",
-  "version": "2026-07-16.v1",
+  "version": "2026-07-16.v2",
   "curatedAt": "2026-07-16",
   "questions": [
     {
@@ -156,18 +156,18 @@
       "category": "freshness-sensitive",
       "difficulty": "medium",
       "expected": {
-        "answers": ["Go 1.26.4"],
-        "aliases": ["go1.26.4", "1.26.4"],
+        "answers": ["Go 1.26.5"],
+        "aliases": ["go1.26.5", "1.26.5"],
         "requiredFacts": [
           {
             "id": "version",
-            "text": "Go 1.26.4 is the latest stable release in the Go 1.26 line",
-            "aliases": ["latest Go 1.26 release is 1.26.4"]
+            "text": "Go 1.26.5 is the latest stable release in the Go 1.26 line",
+            "aliases": ["latest Go 1.26 release is 1.26.5"]
           },
           {
             "id": "date",
-            "text": "Go 1.26.4 was released on 2 June 2026",
-            "aliases": ["June 2, 2026"]
+            "text": "Go 1.26.5 was released on 7 July 2026",
+            "aliases": ["July 7, 2026"]
           }
         ],
         "requiredSources": [
@@ -175,7 +175,7 @@
             "url": "https://go.dev/doc/devel/release",
             "title": "Go Release History",
             "publisher": "Go",
-            "evidence": "go1.26.4 was released 2026-06-02."
+            "evidence": "go1.26.5 was released 2026-07-07."
           }
         ]
       },

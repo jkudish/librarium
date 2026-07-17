@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  assertOfflineCi,
   installNetworkGuard,
   secretEnvironmentVariables,
 } from './lib/guard.mjs';
@@ -14,6 +15,7 @@ const fixture = fileURLToPath(
 );
 const output = mkdtempSync(join(tmpdir(), 'librarium-benchmark-ci-'));
 const ciEnvironment = { ...process.env, CI: 'true' };
+assertOfflineCi({ fixture, env: ciEnvironment });
 for (const key of secretEnvironmentVariables) delete ciEnvironment[key];
 const restoreNetwork = installNetworkGuard();
 try {

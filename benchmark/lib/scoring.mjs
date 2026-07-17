@@ -181,7 +181,7 @@ export function scoreCase({ question, target, run, answer, judge }) {
   const answerQuality = mean([deterministicAnswerQuality, semanticQuality]);
   const latencyMs =
     successful.length === 0
-      ? 0
+      ? null
       : Math.max(...successful.map((output) => output.durationMs ?? 0));
   const cost = costMetrics(run.providerOutputs, answer, judge);
   const costWithinBudget =
@@ -226,7 +226,8 @@ export function scoreCase({ question, target, run, answer, judge }) {
     endToEndQuality: round(mean([retrievalQuality, answerQuality])),
     performance: {
       latencyMs,
-      latencyWithinBudget: latencyMs <= question.budgets.maxLatencyMs,
+      latencyWithinBudget:
+        latencyMs === null ? null : latencyMs <= question.budgets.maxLatencyMs,
       cost,
       costWithinBudget,
       failureCount: run.providerOutputs.length - successful.length,

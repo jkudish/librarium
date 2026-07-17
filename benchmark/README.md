@@ -6,6 +6,10 @@ latency, cost, and reliability without adding a command to the shipped
 runtime code comes only from `dist`, and the build has no benchmark entry
 point.
 
+Generated `benchmark/results/` directories are ignored by default. Publishing
+a reviewed run is deliberate: force-add the complete timestamped directory so
+the confirmation, failures, raw artifacts, scores, and report stay together.
+
 ## Tracks and coverage
 
 - `stable`: 28 curated regression questions with frozen answers, facts, and
@@ -68,6 +72,11 @@ and type `RUN`. There is no non-interactive confirmation bypass. The pinned
 judge and synthesis clients never cascade to another provider or model.
 Unknown cost is recorded as unknown, never as zero or free.
 
+Every live invocation, including `--resume`, requires a new confirmation tied
+to the unchanged configuration fingerprint and the remaining operations. The
+benchmark invokes Librarium with configured fallbacks disabled and rejects any
+fallback-marked or out-of-matrix provider artifact.
+
 Deep-research targets run in synchronous completion mode. The artifact parser
 also refuses any manifest that still contains `async-pending` reports or
 unretrieved async tasks, so incomplete deep-research output cannot be scored as
@@ -94,6 +103,8 @@ groups separately. Pareto flags use quality, known provider-call cost, and
 latency. Evaluation overhead from synthesis and judging is preserved in each
 case's total-cost evidence but excluded from provider comparisons. Rows with
 unknown provider cost are explicitly ineligible for a cost Pareto conclusion.
+Failed cases count as zero in target quality aggregates, and incomplete targets
+are visibly marked and excluded from Pareto comparisons.
 The report does not choose a simplistic cross-tier winner and cannot change
 Librarium defaults.
 

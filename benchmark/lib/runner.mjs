@@ -8,6 +8,7 @@ import {
   findRunDirectory,
   loadFixturePack,
   parseLibrariumRun,
+  resolveArtifactReference,
 } from './artifacts.mjs';
 import {
   assertLiveQuestionsFresh,
@@ -70,12 +71,24 @@ function resolvedProviderConfiguration(targets, catalog) {
       const globalProvider = globalConfig.providers?.[provider.id] ?? {};
       const projectProvider = projectConfig.providers?.[provider.id] ?? {};
       const model = projectProvider.model ?? globalProvider.model ?? null;
+      const credentialReference =
+        projectProvider.apiKey ??
+        globalProvider.apiKey ??
+        `$${provider.envVar}`;
+      const credentialEnvironmentVariable = credentialReference.startsWith('$')
+        ? credentialReference.slice(1).trim() || null
+        : null;
       return {
         id: provider.id,
         tier: provider.tier,
         model,
         modelSource: model ? 'configured' : 'provider-response-after-call',
-        credentialEnvironmentVariable: provider.envVar,
+        credentialEnvironmentVariable,
+        credentialSource: credentialEnvironmentVariable
+          ? 'environment'
+          : credentialReference.startsWith('keychain:')
+            ? 'keychain'
+            : 'config-literal',
       };
     });
   const globalDefaults = globalConfig.defaults ?? {};
@@ -87,10 +100,36 @@ function resolvedProviderConfiguration(targets, catalog) {
   };
 }
 
-function runLibrarium(args) {
+const runtimeEnvironmentVariables = [
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'SystemRoot',
+  'ComSpec',
+  'PATHEXT',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+];
+
+export function buildLiveChildEnvironment(env, credentialEnvironmentVariables) {
+  const childEnvironment = { NO_COLOR: '1' };
+  for (const key of [
+    ...runtimeEnvironmentVariables,
+    ...credentialEnvironmentVariables,
+  ]) {
+    if (typeof env[key] === 'string' && env[key] !== '') {
+      childEnvironment[key] = env[key];
+    }
+  }
+  return childEnvironment;
+}
+
+function runLibrarium(args, childEnvironment) {
   return new Promise((resolvePromise, reject) => {
-    const childEnvironment = { ...process.env, NO_COLOR: '1' };
-    delete childEnvironment.PLANMODE_TOKEN;
     const child = spawn(process.execPath, args, {
       cwd: repositoryRoot,
       env: childEnvironment,
@@ -111,16 +150,14 @@ function runLibrarium(args) {
   });
 }
 
-async function executeLiveCase({ question, target, rawDirectory, config }) {
-  const cli = join(repositoryRoot, 'dist', 'cli.js');
-  if (!existsSync(cli)) {
-    throw new Error(
-      'dist/cli.js is missing; run npm run build before a live benchmark',
-    );
-  }
-  const outputBase = join(rawDirectory, 'librarium');
-  mkdirSync(outputBase, { recursive: true });
-  const result = await runLibrarium([
+export function buildLiveCaseArguments({
+  cli,
+  question,
+  target,
+  outputBase,
+  config,
+}) {
+  return [
     cli,
     'run',
     question.question,
@@ -132,9 +169,52 @@ async function executeLiveCase({ question, target, rawDirectory, config }) {
     outputBase,
     '--timeout',
     String(config.execution.providerTimeoutSeconds),
+    '--no-fallback',
     '--json',
     '--yes',
-  ]);
+  ];
+}
+
+function assertExactTargetRun(parsedRun, target) {
+  const expected = [...target.members].sort();
+  const actual = parsedRun.providerOutputs
+    .map((output) => output.provider)
+    .sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `Benchmark provider matrix mismatch for ${target.id}: expected ${expected.join(', ')}, received ${actual.join(', ') || 'none'}`,
+    );
+  }
+}
+
+async function executeLiveCase({
+  question,
+  target,
+  rawDirectory,
+  config,
+  env,
+  providerConfiguration,
+}) {
+  const cli = join(repositoryRoot, 'dist', 'cli.js');
+  if (!existsSync(cli)) {
+    throw new Error(
+      'dist/cli.js is missing; run npm run build before a live benchmark',
+    );
+  }
+  const outputBase = join(rawDirectory, 'librarium');
+  mkdirSync(outputBase, { recursive: true });
+  const credentialEnvironmentVariables = providerConfiguration
+    .filter((provider) => target.members.includes(provider.id))
+    .map((provider) => provider.credentialEnvironmentVariable)
+    .filter(Boolean);
+  const childEnvironment = buildLiveChildEnvironment(
+    env,
+    credentialEnvironmentVariables,
+  );
+  const result = await runLibrarium(
+    buildLiveCaseArguments({ cli, question, target, outputBase, config }),
+    childEnvironment,
+  );
   writeFileSync(
     join(rawDirectory, 'librarium.stdout.log'),
     result.stdout,
@@ -154,7 +234,9 @@ async function executeLiveCase({ question, target, rawDirectory, config }) {
     );
   }
   const runDir = findRunDirectory(outputBase, manifest);
-  return parseLibrariumRun(runDir);
+  const parsedRun = parseLibrariumRun(runDir);
+  assertExactTargetRun(parsedRun, target);
+  return parsedRun;
 }
 
 function fixtureSelection(fixturePack, corpus, catalog) {
@@ -291,7 +373,13 @@ function resolveNewRun(options, dependencies) {
 
 function resolveResume(options, dependencies) {
   const outputDirectory = resolve(options.resume);
-  const resolvedConfig = readJson(join(outputDirectory, 'config.json'));
+  const resolvedConfig = readJson(
+    resolveArtifactReference(
+      outputDirectory,
+      'config.json',
+      'resume config.json',
+    ),
+  );
   const corpus = dependencies.corpus ?? loadCorpus();
   const catalog = dependencies.catalog ?? loadTargetCatalog();
   const config =
@@ -317,6 +405,9 @@ function resolveResume(options, dependencies) {
   const fixturePack = resolvedConfig.fixture
     ? loadFixturePack(resolvedConfig.fixture)
     : null;
+  if (!fixturePack) {
+    assertLiveQuestionsFresh(questions, dependencies.now?.() ?? new Date());
+  }
   const librariumConfiguration = resolvedProviderConfiguration(
     targets,
     catalog,
@@ -392,13 +483,48 @@ function checkpoint(path, state, key, update) {
 }
 
 function readRecoveredCase(outputDirectory, entry) {
-  const run = parseLibrariumRun(join(outputDirectory, entry.rawRunDirectory));
-  const synthesis = readJson(join(outputDirectory, entry.synthesisFile));
+  const run = parseLibrariumRun(
+    resolveArtifactReference(
+      outputDirectory,
+      entry.rawRunDirectory,
+      'resume rawRunDirectory',
+    ),
+  );
+  const synthesis = readJson(
+    resolveArtifactReference(
+      outputDirectory,
+      entry.synthesisFile,
+      'resume synthesisFile',
+    ),
+  );
   return {
     run,
     synthesis,
-    answer: readFileSync(join(outputDirectory, entry.answerFile), 'utf8'),
+    answer: readFileSync(
+      resolveArtifactReference(
+        outputDirectory,
+        entry.answerFile,
+        'resume answerFile',
+      ),
+      'utf8',
+    ),
   };
+}
+
+function remainingCases(run, state) {
+  const cases = [];
+  for (const question of run.questions) {
+    for (const target of run.targets) {
+      const entry = state.entries[`${question.id}::${target.id}`];
+      if (!entry || entry.status === 'scored') continue;
+      cases.push({
+        question,
+        target,
+        stage: entry.status === 'retrieved' ? 'judge' : 'full',
+      });
+    }
+  }
+  return cases;
 }
 
 function writeResults(outputDirectory, scores) {
@@ -423,14 +549,34 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
     ? resolveResume(options, dependencies)
     : resolveNewRun(options, dependencies);
   assertOfflineCi({ fixture: run.fixturePack?.manifestPath, env });
+  const statePath = join(run.outputDirectory, 'state.json');
+  const state = options.resume
+    ? readJson(
+        resolveArtifactReference(
+          run.outputDirectory,
+          'state.json',
+          'resume state.json',
+        ),
+      )
+    : initialState(run);
+  if (state.configFingerprint !== run.resolvedConfig.fingerprint) {
+    throw new Error(
+      'Cannot resume: benchmark state does not match the resolved configuration fingerprint',
+    );
+  }
+  const plannedCases = remainingCases(run, state);
   const preflight = run.fixturePack
     ? {
         schemaVersion: 1,
         paidCalls: false,
         mode: 'offline-fixture',
-        questionCount: run.questions.length,
-        targetCount: run.targets.length,
-        caseCount: run.questions.length * run.targets.length,
+        questionCount: new Set(
+          plannedCases.map((plannedCase) => plannedCase.question.id),
+        ).size,
+        targetCount: new Set(
+          plannedCases.map((plannedCase) => plannedCase.target.id),
+        ).size,
+        caseCount: plannedCases.length,
         knownEstimateUsd: 0,
         knownEstimateIsPartial: false,
         unknownCostOperations: [],
@@ -443,46 +589,76 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
         catalog: run.catalog,
         config: run.config,
         env,
+        cases: plannedCases,
+        providerConfiguration: run.resolvedConfig.providerConfiguration,
       });
 
   if (options.dryRun) {
     return { dryRun: true, preflight, resolvedConfig: run.resolvedConfig };
   }
 
+  if (!run.fixturePack) {
+    const missingCredentials = [];
+    if (preflight.fullCaseCount > 0 && !env[run.config.synthesis.envVar]) {
+      missingCredentials.push(run.config.synthesis.envVar);
+    }
+    if (preflight.caseCount > 0 && !env[run.config.judge.envVar]) {
+      missingCredentials.push(run.config.judge.envVar);
+    }
+    const uniqueMissingCredentials = [...new Set(missingCredentials)];
+    if (uniqueMissingCredentials.length > 0) {
+      throw new Error(
+        `Pinned synthesis/judge credential${uniqueMissingCredentials.length === 1 ? '' : 's'} ${uniqueMissingCredentials.join(', ')} ${uniqueMissingCredentials.length === 1 ? 'is' : 'are'} unavailable; no substitute will be used`,
+      );
+    }
+    const confirmed = await dependencies.confirm?.({
+      resumed: Boolean(options.resume),
+      resolvedConfig: run.resolvedConfig,
+      remainingOperations: preflight,
+    });
+    if (confirmed !== true)
+      throw new Error('Paid benchmark run was not confirmed');
+  }
+
   if (!options.resume) {
     mkdirSync(run.outputDirectory, { recursive: true });
     writeJson(join(run.outputDirectory, 'config.json'), run.resolvedConfig);
     writeJson(join(run.outputDirectory, 'preflight.json'), preflight);
-    writeJson(join(run.outputDirectory, 'state.json'), initialState(run));
+    writeJson(statePath, state);
   }
   if (!run.fixturePack) {
-    if (!env[run.config.synthesis.envVar] || !env[run.config.judge.envVar]) {
-      throw new Error(
-        `Pinned synthesis/judge credential ${run.config.judge.envVar} is unavailable; no substitute will be used`,
+    if (
+      options.resume &&
+      existsSync(join(run.outputDirectory, 'confirmation.json'))
+    ) {
+      resolveArtifactReference(
+        run.outputDirectory,
+        'confirmation.json',
+        'resume confirmation.json',
       );
     }
-    if (!options.resume) {
-      const confirmed = await dependencies.confirm?.({
-        resolvedConfig: run.resolvedConfig,
-        preflight,
-      });
-      if (confirmed !== true)
-        throw new Error('Paid benchmark run was not confirmed');
-      writeJson(join(run.outputDirectory, 'confirmation.json'), {
-        confirmedAt: new Date().toISOString(),
-        configFingerprint: run.resolvedConfig.fingerprint,
-        knownEstimateUsd: preflight.knownEstimateUsd,
-        unknownCostOperations: preflight.unknownCostOperations,
-      });
-    }
+    writeJson(join(run.outputDirectory, 'confirmation.json'), {
+      schemaVersion: 1,
+      confirmedAt: (dependencies.now?.() ?? new Date()).toISOString(),
+      resumed: Boolean(options.resume),
+      configFingerprint: run.resolvedConfig.fingerprint,
+      preflightFingerprint: fingerprint(preflight),
+      remainingOperations: preflight,
+    });
   }
 
-  const statePath = join(run.outputDirectory, 'state.json');
-  const state = readJson(statePath);
   const scores = [];
   for (const entry of Object.values(state.entries)) {
     if (entry.status === 'scored' && entry.scoreFile) {
-      scores.push(readJson(join(run.outputDirectory, entry.scoreFile)));
+      scores.push(
+        readJson(
+          resolveArtifactReference(
+            run.outputDirectory,
+            entry.scoreFile,
+            'resume scoreFile',
+          ),
+        ),
+      );
     }
   }
 
@@ -504,6 +680,7 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
         let caseData;
         if (entry.status === 'retrieved') {
           caseData = readRecoveredCase(run.outputDirectory, entry);
+          assertExactTargetRun(caseData.run, target);
         } else {
           checkpoint(statePath, state, key, {
             status: 'running',
@@ -517,7 +694,9 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
               fixture.synthesis.provider !== run.config.synthesis.provider ||
               fixture.synthesis.model !== run.config.synthesis.model ||
               fixture.synthesis.modelVersion !==
-                run.config.synthesis.modelVersion
+                run.config.synthesis.modelVersion ||
+              fixture.synthesis.promptVersion !==
+                run.config.synthesis.promptVersion
             ) {
               throw new Error(
                 'Fixture synthesis configuration does not match the pinned synthesis configuration',
@@ -525,6 +704,7 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
             }
             const destination = join(caseRoot, 'librarium-run');
             const parsedRun = copyFixtureRun(fixture, destination);
+            assertExactTargetRun(parsedRun, target);
             const answer = fixture.answer;
             const synthesis = fixture.synthesis;
             writeFileSync(join(caseRoot, 'answer.md'), answer, 'utf8');
@@ -538,6 +718,8 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
               target,
               rawDirectory: caseRoot,
               config: run.config,
+              env,
+              providerConfiguration: run.resolvedConfig.providerConfiguration,
             });
             const synthesis = await synthesizeAnswer(
               question,
@@ -653,6 +835,7 @@ export async function executeBenchmark(options = {}, dependencies = {}) {
     state: finalState,
     summary,
     preflight,
+    expected: Object.values(finalState.entries).length,
     completed: Object.values(finalState.entries).filter(
       (entry) => entry.status === 'scored',
     ).length,

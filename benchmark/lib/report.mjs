@@ -1,8 +1,20 @@
 import { mean, round } from './io.mjs';
 
-function aggregateTarget(target, scores) {
+function qualityIncludingFailedCases(cases, expectedCaseCount, selector) {
+  if (expectedCaseCount === 0) return null;
+  return (
+    cases.reduce((total, score) => total + (selector(score) ?? 0), 0) /
+    expectedCaseCount
+  );
+}
+
+function aggregateTarget(target, scores, expectedCaseCount) {
   const cases = scores.filter((score) => score.target.id === target.id);
+  const completedCaseCount = cases.length;
+  const failedCaseCount = Math.max(0, expectedCaseCount - completedCaseCount);
+  const complete = failedCaseCount === 0;
   const costKnown =
+    complete &&
     cases.length > 0 &&
     cases.every(
       (score) => score.performance.cost.providerComparableUsd !== null,
@@ -13,12 +25,32 @@ function aggregateTarget(target, scores) {
     type: target.type,
     tier: target.tier,
     members: target.members,
-    caseCount: cases.length,
+    caseCount: completedCaseCount,
+    expectedCaseCount,
+    completedCaseCount,
+    failedCaseCount,
+    complete,
     retrievalQuality: round(
-      mean(cases.map((score) => score.retrieval.qualityScore)),
+      qualityIncludingFailedCases(
+        cases,
+        expectedCaseCount,
+        (score) => score.retrieval.qualityScore,
+      ),
     ),
-    answerQuality: round(mean(cases.map((score) => score.answer.qualityScore))),
-    endToEndQuality: round(mean(cases.map((score) => score.endToEndQuality))),
+    answerQuality: round(
+      qualityIncludingFailedCases(
+        cases,
+        expectedCaseCount,
+        (score) => score.answer.qualityScore,
+      ),
+    ),
+    endToEndQuality: round(
+      qualityIncludingFailedCases(
+        cases,
+        expectedCaseCount,
+        (score) => score.endToEndQuality,
+      ),
+    ),
     latencyMs: round(
       mean(cases.map((score) => score.performance.latencyMs)),
       1,
@@ -33,25 +65,43 @@ function aggregateTarget(target, scores) {
           8,
         )
       : null,
-    unknownCostCases: cases.filter(
-      (score) => score.performance.cost.providerComparableUsd === null,
-    ).length,
+    unknownCostCases:
+      failedCaseCount +
+      cases.filter(
+        (score) => score.performance.cost.providerComparableUsd === null,
+      ).length,
     failureRate: round(
-      mean(cases.map((score) => score.performance.failureRate)),
+      expectedCaseCount === 0
+        ? null
+        : (cases.reduce(
+            (total, score) => total + score.performance.failureRate,
+            0,
+          ) +
+            failedCaseCount) /
+            expectedCaseCount,
     ),
   };
 }
 
 function paretoFlags(rows) {
   return rows.map((row) => {
-    if (row.costUsd === null || row.endToEndQuality === null) {
-      return { ...row, pareto: null };
+    if (!row.complete) {
+      return { ...row, pareto: null, paretoEligibility: 'incomplete' };
+    }
+    if (
+      row.costUsd === null ||
+      row.endToEndQuality === null ||
+      row.latencyMs === null
+    ) {
+      return { ...row, pareto: null, paretoEligibility: 'insufficient-data' };
     }
     const dominated = rows.some((other) => {
       if (
         other.id === row.id ||
+        !other.complete ||
         other.costUsd === null ||
-        other.endToEndQuality === null
+        other.endToEndQuality === null ||
+        other.latencyMs === null
       ) {
         return false;
       }
@@ -65,12 +115,23 @@ function paretoFlags(rows) {
         other.latencyMs < row.latencyMs;
       return noWorse && strictlyBetter;
     });
-    return { ...row, pareto: !dominated };
+    return { ...row, pareto: !dominated, paretoEligibility: 'eligible' };
   });
 }
 
 export function buildSummary({ run, targets, scores }) {
-  const aggregates = targets.map((target) => aggregateTarget(target, scores));
+  const expectedCaseCount =
+    run.questions?.length ??
+    Math.max(
+      0,
+      ...targets.map(
+        (target) =>
+          scores.filter((score) => score.target.id === target.id).length,
+      ),
+    );
+  const aggregates = targets.map((target) =>
+    aggregateTarget(target, scores, expectedCaseCount),
+  );
   const individualByTier = {};
   for (const tier of ['deep-research', 'ai-grounded', 'raw-search', 'llm']) {
     individualByTier[tier] = paretoFlags(
@@ -89,6 +150,8 @@ export function buildSummary({ run, targets, scores }) {
       paretoDimensions: ['endToEndQuality', 'costUsd', 'latencyMs'],
       costDimension: 'providerComparableUsd',
       unknownCostsExcludedFromPareto: true,
+      incompleteTargetsExcludedFromPareto: true,
+      failedCasesScoreAsZeroInQualityAggregates: true,
     },
     individualProvidersByTier: individualByTier,
     builtInGroups: paretoFlags(
@@ -107,10 +170,10 @@ function formatNumber(value, digits = 3) {
 function table(rows) {
   if (rows.length === 0) return '_No results in this run._\n';
   const header =
-    '| Target | Retrieval | Answer | End-to-end | Provider cost USD | Latency ms | Failure rate | Pareto |\n|---|---:|---:|---:|---:|---:|---:|:---:|';
+    '| Target | Cases | Failed | Retrieval | Answer | End-to-end | Provider cost USD | Latency ms | Failure rate | Pareto |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|:---:|';
   const body = rows.map(
     (row) =>
-      `| ${row.name} | ${formatNumber(row.retrievalQuality)} | ${formatNumber(row.answerQuality)} | ${formatNumber(row.endToEndQuality)} | ${formatNumber(row.costUsd, 6)} | ${formatNumber(row.latencyMs, 1)} | ${formatNumber(row.failureRate)} | ${row.pareto === null ? 'unknown cost' : row.pareto ? 'yes' : 'no'} |`,
+      `| ${row.name} | ${row.completedCaseCount}/${row.expectedCaseCount} | ${row.failedCaseCount} | ${formatNumber(row.retrievalQuality)} | ${formatNumber(row.answerQuality)} | ${formatNumber(row.endToEndQuality)} | ${formatNumber(row.costUsd, 6)} | ${formatNumber(row.latencyMs, 1)} | ${formatNumber(row.failureRate)} | ${row.paretoEligibility === 'incomplete' ? 'incomplete' : row.pareto === null ? 'insufficient data' : row.pareto ? 'yes' : 'no'} |`,
   );
   return `${header}\n${body.join('\n')}\n`;
 }
@@ -122,7 +185,7 @@ export function renderMarkdownReport(summary) {
     `Run: \`${summary.runId}\`  `,
     `Generated: ${summary.generatedAt}`,
     '',
-    'Retrieval and answer quality are independent metrics. End-to-end quality is a summary only. Providers are compared within tier; this report intentionally does not name a cross-tier winner. Provider cost marked `unknown` is not treated as zero or free. Synthesis and judge costs remain preserved separately in case artifacts and total-cost fields.',
+    'Retrieval and answer quality are independent metrics. End-to-end quality is a summary only. Failed cases count as zero in quality aggregates, and incomplete targets are excluded from Pareto comparison. Providers are compared within tier; this report intentionally does not name a cross-tier winner. Provider cost marked `unknown` is not treated as zero or free. Synthesis and judge costs remain preserved separately in case artifacts and total-cost fields.',
     '',
   ];
   for (const [tier, rows] of Object.entries(
