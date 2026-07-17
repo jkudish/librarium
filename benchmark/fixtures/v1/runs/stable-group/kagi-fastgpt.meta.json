@@ -1,0 +1,20 @@
+{
+  "provider": "kagi-fastgpt",
+  "tier": "ai-grounded",
+  "model": "fastgpt",
+  "durationMs": 680,
+  "citationCount": 1,
+  "metering": {
+    "kind": "request_priced",
+    "pricingVersion": "2026-06",
+    "estimate": { "estimatedCostUsd": 0.015, "costConfidence": "estimated" }
+  },
+  "citations": [
+    {
+      "url": "https://www.australia.gov.au/about-australia/facts-and-figures",
+      "title": "Facts and figures",
+      "snippet": "Canberra is the national capital.",
+      "provider": "kagi-fastgpt"
+    }
+  ]
+}

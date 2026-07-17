@@ -1,0 +1,268 @@
+{
+  "schemaVersion": 1,
+  "providers": [
+    {
+      "id": "perplexity-sonar-deep",
+      "tier": "deep-research",
+      "envVar": "PERPLEXITY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "perplexity-deep-research",
+      "tier": "deep-research",
+      "envVar": "PERPLEXITY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "perplexity-advanced-deep",
+      "tier": "deep-research",
+      "envVar": "PERPLEXITY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "openai-deep",
+      "tier": "deep-research",
+      "envVar": "OPENAI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "openai-deep-o3",
+      "tier": "deep-research",
+      "envVar": "OPENAI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "gemini-deep",
+      "tier": "deep-research",
+      "envVar": "GEMINI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "perplexity-sonar-pro",
+      "tier": "ai-grounded",
+      "envVar": "PERPLEXITY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "gemini-grounded",
+      "tier": "ai-grounded",
+      "envVar": "GEMINI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "openrouter-online",
+      "tier": "ai-grounded",
+      "envVar": "OPENROUTER_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "you-research",
+      "tier": "ai-grounded",
+      "envVar": "YOU_COM_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "kagi-fastgpt",
+      "tier": "ai-grounded",
+      "envVar": "KAGI_API_KEY",
+      "estimatedCostUsd": 0.015,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-06"
+    },
+    {
+      "id": "brave-answers",
+      "tier": "ai-grounded",
+      "envVar": "BRAVE_API_KEY",
+      "estimatedCostUsd": 0.009,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-06"
+    },
+    {
+      "id": "exa",
+      "tier": "ai-grounded",
+      "envVar": "EXA_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "perplexity-search",
+      "tier": "raw-search",
+      "envVar": "PERPLEXITY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "jina-search",
+      "tier": "raw-search",
+      "envVar": "JINA_AI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "firecrawl-search",
+      "tier": "raw-search",
+      "envVar": "FIRECRAWL_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "brave-search",
+      "tier": "raw-search",
+      "envVar": "BRAVE_API_KEY",
+      "estimatedCostUsd": 0.005,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-06"
+    },
+    {
+      "id": "searchapi",
+      "tier": "raw-search",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.004,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-06"
+    },
+    {
+      "id": "serpapi",
+      "tier": "raw-search",
+      "envVar": "SERPAPI_API_KEY",
+      "estimatedCostUsd": 0.015,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-06"
+    },
+    {
+      "id": "tavily",
+      "tier": "raw-search",
+      "envVar": "TAVILY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "claude",
+      "tier": "llm",
+      "envVar": "ANTHROPIC_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "openai-chat",
+      "tier": "llm",
+      "envVar": "OPENAI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "gemini-chat",
+      "tier": "llm",
+      "envVar": "GEMINI_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "openrouter-chat",
+      "tier": "llm",
+      "envVar": "OPENROUTER_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    }
+  ],
+  "builtInGroups": {
+    "deep": [
+      "perplexity-sonar-deep",
+      "perplexity-deep-research",
+      "perplexity-advanced-deep",
+      "openai-deep",
+      "openai-deep-o3",
+      "gemini-deep"
+    ],
+    "quick": [
+      "gemini-grounded",
+      "openrouter-online",
+      "brave-answers",
+      "exa",
+      "kagi-fastgpt"
+    ],
+    "raw": [
+      "perplexity-search",
+      "brave-search",
+      "jina-search",
+      "firecrawl-search",
+      "searchapi",
+      "serpapi",
+      "tavily"
+    ],
+    "fast": [
+      "perplexity-sonar-pro",
+      "gemini-grounded",
+      "openrouter-online",
+      "perplexity-search",
+      "brave-answers",
+      "exa",
+      "kagi-fastgpt",
+      "jina-search",
+      "brave-search",
+      "firecrawl-search",
+      "tavily"
+    ],
+    "comprehensive": [
+      "perplexity-sonar-deep",
+      "perplexity-deep-research",
+      "perplexity-advanced-deep",
+      "openai-deep",
+      "openai-deep-o3",
+      "gemini-deep",
+      "perplexity-sonar-pro",
+      "gemini-grounded",
+      "openrouter-online",
+      "brave-answers",
+      "exa",
+      "you-research",
+      "kagi-fastgpt"
+    ],
+    "llm": ["claude", "openai-chat", "gemini-chat", "openrouter-chat"],
+    "all": [
+      "perplexity-sonar-deep",
+      "perplexity-deep-research",
+      "perplexity-advanced-deep",
+      "openai-deep",
+      "openai-deep-o3",
+      "gemini-deep",
+      "perplexity-sonar-pro",
+      "gemini-grounded",
+      "openrouter-online",
+      "brave-answers",
+      "exa",
+      "you-research",
+      "kagi-fastgpt",
+      "jina-search",
+      "firecrawl-search",
+      "perplexity-search",
+      "brave-search",
+      "searchapi",
+      "serpapi",
+      "tavily"
+    ]
+  },
+  "candidateGroups": {
+    "candidate-independent-search": ["brave-search", "exa", "tavily"],
+    "candidate-grounded-balance": [
+      "perplexity-sonar-pro",
+      "gemini-grounded",
+      "brave-search"
+    ],
+    "candidate-depth-triad": [
+      "openai-deep",
+      "gemini-deep",
+      "perplexity-sonar-deep"
+    ]
+  }
+}

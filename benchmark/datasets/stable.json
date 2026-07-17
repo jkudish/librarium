@@ -1,0 +1,841 @@
+{
+  "schemaVersion": 1,
+  "track": "stable",
+  "version": "2026-07-16.v1",
+  "frozenAt": "2026-07-16",
+  "maintainerValidatedAt": "2026-07-16",
+  "questions": [
+    {
+      "id": "stable-capital-australia",
+      "question": "What is the capital city of Australia?",
+      "category": "factual-lookup",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Canberra"],
+        "aliases": ["Canberra, ACT"],
+        "requiredFacts": [
+          {
+            "id": "capital",
+            "text": "Canberra is Australia's capital",
+            "aliases": ["capital is Canberra", "Australian capital of Canberra"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.australia.gov.au/about-australia/facts-and-figures",
+            "title": "Facts and figures",
+            "publisher": "Australian Government",
+            "evidence": "Canberra is the national capital."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-largest-planet",
+      "question": "Which planet is the largest in our solar system?",
+      "category": "factual-lookup",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Jupiter"],
+        "aliases": [],
+        "requiredFacts": [
+          {
+            "id": "largest",
+            "text": "Jupiter is the largest planet",
+            "aliases": ["largest planet is Jupiter"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://science.nasa.gov/jupiter/facts/",
+            "title": "Jupiter Facts",
+            "publisher": "NASA",
+            "evidence": "Jupiter is the largest planet in our solar system."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-http-404",
+      "question": "What does the HTTP status code 404 mean?",
+      "category": "technical-versioned",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Not Found"],
+        "aliases": ["404 Not Found"],
+        "requiredFacts": [
+          {
+            "id": "meaning",
+            "text": "the origin server did not find a current representation for the target resource",
+            "aliases": [
+              "resource was not found",
+              "requested resource could not be found"
+            ]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.rfc-editor.org/rfc/rfc9110.html#name-404-not-found",
+            "title": "HTTP Semantics: 404 Not Found",
+            "publisher": "RFC Editor",
+            "evidence": "The origin server did not find a current representation for the target resource."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-dns-port",
+      "question": "Which port is assigned to DNS?",
+      "category": "technical-versioned",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["53"],
+        "aliases": ["port 53", "TCP/UDP 53"],
+        "requiredFacts": [
+          {
+            "id": "port",
+            "text": "DNS uses port 53",
+            "aliases": ["domain name service uses port 53"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml",
+            "title": "Service Name and Transport Protocol Port Number Registry",
+            "publisher": "IANA",
+            "evidence": "domain 53 tcp and udp Domain Name Server."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-sha256-size",
+      "question": "How many bits are in a SHA-256 message digest?",
+      "category": "technical-versioned",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["256 bits"],
+        "aliases": ["256-bit", "32 bytes"],
+        "requiredFacts": [
+          {
+            "id": "digest",
+            "text": "SHA-256 produces a 256-bit message digest",
+            "aliases": ["digest size is 256 bits", "32-byte digest"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://csrc.nist.gov/pubs/fips/180-4/upd1/final",
+            "title": "Secure Hash Standard",
+            "publisher": "NIST",
+            "evidence": "SHA-256 produces a 256-bit message digest."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-git-default-branch-config",
+      "question": "Which Git configuration key sets the initial branch name for newly created repositories?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["init.defaultBranch"],
+        "aliases": ["git config init.defaultBranch"],
+        "requiredFacts": [
+          {
+            "id": "key",
+            "text": "init.defaultBranch overrides the default initial branch name",
+            "aliases": ["set init.defaultBranch"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://git-scm.com/docs/git-config#Documentation/git-config.txt-initdefaultBranch",
+            "title": "git-config",
+            "publisher": "Git",
+            "evidence": "init.defaultBranch allows overriding the default branch name."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-semver-major",
+      "question": "Under Semantic Versioning 2.0.0, when must the major version be incremented?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["when incompatible API changes are made"],
+        "aliases": ["for breaking changes", "backward-incompatible changes"],
+        "requiredFacts": [
+          {
+            "id": "major",
+            "text": "the major version increments for incompatible API changes",
+            "aliases": ["breaking API changes increment major"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://semver.org/spec/v2.0.0.html",
+            "title": "Semantic Versioning 2.0.0",
+            "publisher": "Semantic Versioning",
+            "evidence": "MAJOR version when you make incompatible API changes."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-css-border-box",
+      "question": "With CSS box-sizing: border-box, what does the declared width include?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["content, padding, and border"],
+        "aliases": ["padding and border are included in the width"],
+        "requiredFacts": [
+          {
+            "id": "included",
+            "text": "the specified width includes padding and border",
+            "aliases": ["border and padding are inside the declared width"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/box-sizing",
+            "title": "box-sizing",
+            "publisher": "MDN Web Docs",
+            "evidence": "border-box tells the browser to account for border and padding in the specified width and height."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-js-strict-equality",
+      "question": "How does JavaScript strict equality differ from loose equality with respect to type coercion?",
+      "category": "comparison",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["strict equality does not perform type coercion"],
+        "aliases": ["=== does not coerce types"],
+        "requiredFacts": [
+          {
+            "id": "strict",
+            "text": "strict equality compares without converting operands",
+            "aliases": ["no type conversion for strict equality"]
+          },
+          {
+            "id": "loose",
+            "text": "loose equality may convert operands of different types",
+            "aliases": ["abstract equality performs coercion"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Strict_equality",
+            "title": "Strict equality",
+            "publisher": "MDN Web Docs",
+            "evidence": "Strict equality always considers operands of different types to be different."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-postgresql-mvcc",
+      "question": "What concurrency-control model does PostgreSQL use so reads do not conflict with writes in the usual case?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["Multiversion Concurrency Control"],
+        "aliases": ["MVCC", "multi-version concurrency control"],
+        "requiredFacts": [
+          {
+            "id": "model",
+            "text": "PostgreSQL uses multiversion concurrency control",
+            "aliases": ["PostgreSQL uses MVCC"]
+          },
+          {
+            "id": "benefit",
+            "text": "reading does not block writing and writing does not block reading",
+            "aliases": ["readers and writers do not block each other"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.postgresql.org/docs/current/mvcc-intro.html",
+            "title": "Introduction to MVCC",
+            "publisher": "PostgreSQL",
+            "evidence": "Each SQL statement sees a snapshot of data; reading never blocks writing and writing never blocks reading."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-rust-ownership",
+      "question": "What are the three core ownership rules in Rust?",
+      "category": "technical-versioned",
+      "difficulty": "hard",
+      "expected": {
+        "answers": [
+          "each value has one owner; only one owner at a time; the value is dropped when its owner leaves scope"
+        ],
+        "aliases": [],
+        "requiredFacts": [
+          {
+            "id": "one-owner",
+            "text": "each value has an owner",
+            "aliases": ["every value has an owner"]
+          },
+          {
+            "id": "single-owner",
+            "text": "there can only be one owner at a time",
+            "aliases": ["one owner at a time"]
+          },
+          {
+            "id": "drop",
+            "text": "the value is dropped when the owner goes out of scope",
+            "aliases": ["owner leaves scope and value is dropped"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html",
+            "title": "What Is Ownership?",
+            "publisher": "The Rust Programming Language",
+            "evidence": "Each value has an owner, there can only be one owner at a time, and the value is dropped when the owner goes out of scope."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.15 }
+    },
+    {
+      "id": "stable-go-goroutine",
+      "question": "What is a goroutine in Go?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": [
+          "a lightweight thread of execution managed by the Go runtime"
+        ],
+        "aliases": ["lightweight concurrent function execution"],
+        "requiredFacts": [
+          {
+            "id": "execution",
+            "text": "a goroutine is a lightweight thread of execution",
+            "aliases": ["lightweight execution thread"]
+          },
+          {
+            "id": "runtime",
+            "text": "goroutines are managed by the Go runtime",
+            "aliases": ["multiplexed by the Go runtime"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://go.dev/tour/concurrency/1",
+            "title": "Goroutines",
+            "publisher": "Go",
+            "evidence": "A goroutine is a lightweight thread managed by the Go runtime."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-python-tuple",
+      "question": "Are Python tuples mutable or immutable?",
+      "category": "technical-versioned",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["immutable"],
+        "aliases": ["tuples are immutable"],
+        "requiredFacts": [
+          {
+            "id": "immutable",
+            "text": "tuple elements cannot be assigned after creation",
+            "aliases": ["tuples are immutable sequences"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://docs.python.org/3/library/stdtypes.html#tuple",
+            "title": "Tuple",
+            "publisher": "Python Documentation",
+            "evidence": "Tuples are immutable sequences."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-react-effect-timing",
+      "question": "In React, when does an Effect declared with useEffect run relative to rendering?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["after React commits the rendered update to the screen"],
+        "aliases": ["after render", "after the component renders"],
+        "requiredFacts": [
+          {
+            "id": "timing",
+            "text": "Effects run after rendering is committed",
+            "aliases": ["useEffect runs after render"]
+          },
+          {
+            "id": "external",
+            "text": "Effects synchronize with external systems",
+            "aliases": ["connect a component to an external system"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://react.dev/learn/synchronizing-with-effects",
+            "title": "Synchronizing with Effects",
+            "publisher": "React",
+            "evidence": "Effects run at the end of a commit after the screen updates."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-tls13-rfc",
+      "question": "Which RFC specifies TLS 1.3?",
+      "category": "technical-versioned",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["RFC 8446"],
+        "aliases": ["8446"],
+        "requiredFacts": [
+          {
+            "id": "rfc",
+            "text": "TLS 1.3 is specified by RFC 8446",
+            "aliases": ["RFC 8446 defines TLS 1.3"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.rfc-editor.org/rfc/rfc8446",
+            "title": "The Transport Layer Security (TLS) Protocol Version 1.3",
+            "publisher": "RFC Editor",
+            "evidence": "RFC 8446 specifies version 1.3 of TLS."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-webauthn-body",
+      "question": "Which standards body publishes the Web Authentication (WebAuthn) specification?",
+      "category": "factual-lookup",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["World Wide Web Consortium"],
+        "aliases": ["W3C"],
+        "requiredFacts": [
+          {
+            "id": "publisher",
+            "text": "WebAuthn is a W3C Recommendation",
+            "aliases": ["published by W3C"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.w3.org/TR/webauthn-3/",
+            "title": "Web Authentication: An API for accessing Public Key Credentials",
+            "publisher": "W3C",
+            "evidence": "The specification is published on the W3C Technical Reports site."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-gdpr-application-date",
+      "question": "On what date did the EU General Data Protection Regulation become applicable?",
+      "category": "factual-lookup",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["25 May 2018"],
+        "aliases": ["May 25, 2018", "2018-05-25"],
+        "requiredFacts": [
+          {
+            "id": "date",
+            "text": "the GDPR became applicable on 25 May 2018",
+            "aliases": ["applies from 25 May 2018"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://eur-lex.europa.eu/eli/reg/2016/679/oj",
+            "title": "Regulation (EU) 2016/679",
+            "publisher": "EUR-Lex",
+            "evidence": "It shall apply from 25 May 2018."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-apollo-11",
+      "question": "Which mission first landed humans on the Moon, and in what year?",
+      "category": "multi-hop",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Apollo 11 in 1969"],
+        "aliases": ["Apollo 11, July 1969"],
+        "requiredFacts": [
+          {
+            "id": "mission",
+            "text": "Apollo 11 was the first crewed lunar landing",
+            "aliases": ["first Moon landing was Apollo 11"]
+          },
+          {
+            "id": "year",
+            "text": "the landing occurred in 1969",
+            "aliases": ["landed in July 1969"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.nasa.gov/mission/apollo-11/",
+            "title": "Apollo 11",
+            "publisher": "NASA",
+            "evidence": "Apollo 11 landed the first humans on the Moon in July 1969."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-original-nobel-categories",
+      "question": "Which five prize categories were established by Alfred Nobel's will?",
+      "category": "multi-hop",
+      "difficulty": "medium",
+      "expected": {
+        "answers": [
+          "physics, chemistry, physiology or medicine, literature, and peace"
+        ],
+        "aliases": ["physics; chemistry; medicine; literature; peace"],
+        "requiredFacts": [
+          { "id": "physics", "text": "physics", "aliases": [] },
+          { "id": "chemistry", "text": "chemistry", "aliases": [] },
+          {
+            "id": "medicine",
+            "text": "physiology or medicine",
+            "aliases": ["medicine"]
+          },
+          { "id": "literature", "text": "literature", "aliases": [] },
+          { "id": "peace", "text": "peace", "aliases": [] }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.nobelprize.org/alfred-nobel/alfred-nobels-will/",
+            "title": "Alfred Nobel's will",
+            "publisher": "Nobel Prize",
+            "evidence": "The will specifies physics, chemistry, physiology or medicine, literature, and peace."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.15 }
+    },
+    {
+      "id": "stable-everest-height",
+      "question": "What official height did Nepal and China jointly announce for Mount Everest in 2020?",
+      "category": "factual-lookup",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["8,848.86 metres"],
+        "aliases": ["8848.86 meters", "29,031.69 feet"],
+        "requiredFacts": [
+          {
+            "id": "height",
+            "text": "Mount Everest's jointly announced height is 8,848.86 metres",
+            "aliases": ["8848.86 m"]
+          },
+          {
+            "id": "announcement",
+            "text": "Nepal and China jointly announced the height in 2020",
+            "aliases": ["joint Nepal-China measurement"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.gov.uk/government/news/new-height-for-mount-everest-announced",
+            "title": "New height for Mount Everest announced",
+            "publisher": "UK Government",
+            "evidence": "Nepal and China announced a new official height of 8,848.86 metres."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-tcp-udp",
+      "question": "Compare TCP and UDP on connection setup, delivery guarantees, and ordering.",
+      "category": "comparison",
+      "difficulty": "medium",
+      "expected": {
+        "answers": [
+          "TCP is connection-oriented with reliable ordered delivery; UDP is connectionless without delivery or ordering guarantees"
+        ],
+        "aliases": [],
+        "requiredFacts": [
+          {
+            "id": "tcp-connection",
+            "text": "TCP is connection-oriented",
+            "aliases": ["TCP establishes a connection"]
+          },
+          {
+            "id": "tcp-reliable",
+            "text": "TCP provides reliable ordered delivery",
+            "aliases": ["TCP guarantees ordering and retransmits loss"]
+          },
+          {
+            "id": "udp",
+            "text": "UDP is connectionless and does not guarantee delivery or ordering",
+            "aliases": ["UDP has no reliability or order guarantee"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.rfc-editor.org/rfc/rfc9293",
+            "title": "Transmission Control Protocol",
+            "publisher": "RFC Editor",
+            "evidence": "TCP provides a reliable, in-order, byte-stream service."
+          },
+          {
+            "url": "https://www.rfc-editor.org/rfc/rfc768",
+            "title": "User Datagram Protocol",
+            "publisher": "RFC Editor",
+            "evidence": "UDP is transaction oriented and delivery and duplicate protection are not guaranteed."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.15 }
+    },
+    {
+      "id": "stable-linux-git-creator",
+      "question": "Who created both the Linux kernel and Git?",
+      "category": "multi-hop",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["Linus Torvalds"],
+        "aliases": ["Linus Benedict Torvalds"],
+        "requiredFacts": [
+          {
+            "id": "linux",
+            "text": "Linus Torvalds created Linux",
+            "aliases": ["creator of the Linux kernel"]
+          },
+          {
+            "id": "git",
+            "text": "Linus Torvalds created Git",
+            "aliases": ["initial author of Git"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.kernel.org/linux.html",
+            "title": "What is Linux?",
+            "publisher": "Linux Kernel Archives",
+            "evidence": "Linux was created by Linus Torvalds."
+          },
+          {
+            "url": "https://git-scm.com/book/en/v2/Getting-Started-A-Short-History-of-Git",
+            "title": "A Short History of Git",
+            "publisher": "Git",
+            "evidence": "Linus Torvalds developed Git in 2005."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.15 }
+    },
+    {
+      "id": "stable-es2020-bigint",
+      "question": "Which ECMAScript edition standardized the BigInt primitive?",
+      "category": "technical-versioned",
+      "difficulty": "hard",
+      "expected": {
+        "answers": ["ECMAScript 2020"],
+        "aliases": ["ES2020", "ECMA-262 11th edition"],
+        "requiredFacts": [
+          {
+            "id": "edition",
+            "text": "BigInt was standardized in ECMAScript 2020",
+            "aliases": ["ES2020 added BigInt"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://262.ecma-international.org/11.0/",
+            "title": "ECMAScript 2020 Language Specification",
+            "publisher": "Ecma International",
+            "evidence": "The 11th edition defines the BigInt type."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.15 }
+    },
+    {
+      "id": "stable-sqlite-serverless",
+      "question": "What does SQLite mean by describing itself as serverless?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": [
+          "applications read and write the database file directly without a separate database server process"
+        ],
+        "aliases": ["no separate server process"],
+        "requiredFacts": [
+          {
+            "id": "direct",
+            "text": "the application accesses the database file directly",
+            "aliases": ["reads and writes the database file directly"]
+          },
+          {
+            "id": "no-server",
+            "text": "there is no intermediary database server process",
+            "aliases": ["no separate server"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.sqlite.org/serverless.html",
+            "title": "SQLite Is Serverless",
+            "publisher": "SQLite",
+            "evidence": "The process that wants to access the database reads and writes directly from the database files on disk."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-image-container",
+      "question": "What is the difference between a Docker image and a container?",
+      "category": "comparison",
+      "difficulty": "medium",
+      "expected": {
+        "answers": [
+          "an image is an immutable template; a container is a runnable instance of an image"
+        ],
+        "aliases": [],
+        "requiredFacts": [
+          {
+            "id": "image",
+            "text": "an image is a read-only template",
+            "aliases": ["immutable image template"]
+          },
+          {
+            "id": "container",
+            "text": "a container is a runnable instance of an image",
+            "aliases": ["running instance of an image"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://docs.docker.com/get-started/docker-concepts/the-basics/what-is-an-image/",
+            "title": "What is an image?",
+            "publisher": "Docker",
+            "evidence": "An image is a standardized package; a container is an isolated process created from an image."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-kubernetes-deployment",
+      "question": "What Kubernetes resource does a Deployment manage to maintain desired Pods?",
+      "category": "technical-versioned",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["ReplicaSets"],
+        "aliases": ["a ReplicaSet"],
+        "requiredFacts": [
+          {
+            "id": "resource",
+            "text": "a Deployment manages ReplicaSets",
+            "aliases": ["Deployment provides updates for Pods and ReplicaSets"]
+          },
+          {
+            "id": "pods",
+            "text": "the ReplicaSet maintains the desired number of Pods",
+            "aliases": ["ReplicaSet ensures Pod replicas"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/",
+            "title": "Deployments",
+            "publisher": "Kubernetes",
+            "evidence": "A Deployment provides declarative updates for Pods and ReplicaSets."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-ipv6-bits",
+      "question": "How many bits long is an IPv6 address?",
+      "category": "technical-versioned",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["128 bits"],
+        "aliases": ["128-bit"],
+        "requiredFacts": [
+          {
+            "id": "length",
+            "text": "IPv6 addresses are 128 bits long",
+            "aliases": ["IPv6 address length is 128 bits"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.rfc-editor.org/rfc/rfc4291",
+            "title": "IP Version 6 Addressing Architecture",
+            "publisher": "RFC Editor",
+            "evidence": "IPv6 addresses are 128-bit identifiers."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "stable-utc-dst",
+      "question": "Does Coordinated Universal Time observe daylight saving time?",
+      "category": "factual-lookup",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["No"],
+        "aliases": [
+          "UTC does not observe daylight saving time",
+          "UTC has no DST"
+        ],
+        "requiredFacts": [
+          {
+            "id": "no-dst",
+            "text": "UTC does not change for daylight saving time",
+            "aliases": ["UTC remains constant year-round"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.nist.gov/pml/time-and-frequency-division/popular-links/frequently-asked-questions",
+            "title": "Time and Frequency FAQ",
+            "publisher": "NIST",
+            "evidence": "UTC is an international atomic time scale and does not observe daylight saving time."
+          }
+        ]
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    }
+  ]
+}

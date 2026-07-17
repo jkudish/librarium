@@ -1,0 +1,20 @@
+{
+  "provider": "exa",
+  "tier": "ai-grounded",
+  "model": "exa-answer",
+  "durationMs": 410,
+  "citationCount": 1,
+  "usage": { "costUsd": 0.0031 },
+  "metering": {
+    "kind": "native_cost",
+    "actual": { "costUsd": 0.0031, "source": "provider_reported" }
+  },
+  "citations": [
+    {
+      "url": "https://nodejs.org/en/download/archive/v26.5.0",
+      "title": "Node.js v26.5.0",
+      "snippet": "v26.5.0 Latest Release",
+      "provider": "exa"
+    }
+  ]
+}

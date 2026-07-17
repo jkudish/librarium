@@ -1,0 +1,15 @@
+[
+  {
+    "url": "https://nodejs.org/en/download/archive/v26.5.0",
+    "normalizedUrl": "https://nodejs.org/en/download/archive/v26.5.0",
+    "title": "Node.js v26.5.0",
+    "providers": [
+      "gemini-grounded",
+      "openrouter-online",
+      "brave-answers",
+      "exa",
+      "kagi-fastgpt"
+    ],
+    "citationCount": 5
+  }
+]

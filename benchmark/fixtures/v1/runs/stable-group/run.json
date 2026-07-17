@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "timestamp": 1784203200,
+  "slug": "capital-australia",
+  "query": "What is the capital city of Australia?",
+  "mode": "sync",
+  "outputDir": ".",
+  "providers": [
+    {
+      "id": "gemini-grounded",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 610,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "gemini-grounded.meta.json",
+      "metering": { "kind": "native_tokens" }
+    },
+    {
+      "id": "openrouter-online",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 720,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "openrouter-online.meta.json",
+      "usage": { "costUsd": 0.0021 },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.0021, "source": "provider_reported" }
+      }
+    },
+    {
+      "id": "brave-answers",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 500,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "brave-answers.meta.json",
+      "metering": {
+        "kind": "request_priced",
+        "pricingVersion": "2026-06",
+        "estimate": {
+          "estimatedCostUsd": 0.009,
+          "billableUnits": 1,
+          "unit": "request",
+          "pricingVersion": "2026-06",
+          "costConfidence": "estimated"
+        }
+      }
+    },
+    {
+      "id": "exa",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 390,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "exa.meta.json",
+      "usage": { "costUsd": 0.003 },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.003, "source": "provider_reported" }
+      }
+    },
+    {
+      "id": "kagi-fastgpt",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 680,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "kagi-fastgpt.meta.json",
+      "metering": {
+        "kind": "request_priced",
+        "pricingVersion": "2026-06",
+        "estimate": {
+          "estimatedCostUsd": 0.015,
+          "billableUnits": 1,
+          "unit": "request",
+          "pricingVersion": "2026-06",
+          "costConfidence": "estimated"
+        }
+      }
+    }
+  ],
+  "sources": { "total": 5, "unique": 1, "file": "sources.json" },
+  "asyncTasks": [],
+  "exitCode": 0
+}

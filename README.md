@@ -1337,6 +1337,13 @@ The skill guides agents through:
 6. **Analyze** -- Read `summary.md`, `sources.json`, and per-provider output files
 7. **Synthesize** -- Cross-reference multi-provider findings, weight by citation frequency
 
+## Provider Benchmark
+
+The repository includes a local-only, reproducible provider benchmark with
+curated stable/live datasets and offline CI fixture replay. See
+[`benchmark/README.md`](benchmark/README.md) for commands, scoring methodology,
+artifact formats, and paid-call safety.
+
 ## Publishing
 
 The release workflow at `.github/workflows/release.yml` handles npm publishing via [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (GitHub Actions OIDC) -- no token secret required. The trusted publisher is configured in the package settings on npmjs.com (repo `jkudish/librarium`, workflow `release.yml`).

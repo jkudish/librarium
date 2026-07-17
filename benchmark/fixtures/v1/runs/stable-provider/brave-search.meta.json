@@ -1,0 +1,26 @@
+{
+  "provider": "brave-search",
+  "tier": "raw-search",
+  "model": "brave-web",
+  "durationMs": 420,
+  "citationCount": 1,
+  "metering": {
+    "kind": "request_priced",
+    "pricingVersion": "2026-06",
+    "estimate": {
+      "estimatedCostUsd": 0.005,
+      "billableUnits": 1,
+      "unit": "request",
+      "pricingVersion": "2026-06",
+      "costConfidence": "estimated"
+    }
+  },
+  "citations": [
+    {
+      "url": "https://www.australia.gov.au/about-australia/facts-and-figures",
+      "title": "Facts and figures",
+      "snippet": "Canberra is the national capital.",
+      "provider": "brave-search"
+    }
+  ]
+}
