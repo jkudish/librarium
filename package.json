@@ -25,6 +25,9 @@
   "scripts": {
     "build": "tsup",
     "build:sea": "node scripts/build-sea.mjs",
+    "benchmark": "node benchmark/cli.mjs",
+    "benchmark:validate": "node benchmark/validate.mjs",
+    "benchmark:ci": "node benchmark/ci.mjs",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
@@ -32,8 +35,8 @@
     "test:pty": "npm run build && vitest run --config vitest.pty.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/ tests/",
-    "lint:fix": "biome check --write src/ tests/"
+    "lint": "biome check src/ tests/ benchmark/",
+    "lint:fix": "biome check --write src/ tests/ benchmark/"
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",

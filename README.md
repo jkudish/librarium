@@ -236,6 +236,7 @@ librarium run <query> [options]
 | `--timeout <n>` | Timeout per provider in seconds |
 | `--max-cost <usd>` | Stop launching providers once API-reported cost crosses this budget (see [Spend guardrails](#spend-guardrails)) |
 | `--max-estimated-cost <usd>` | Reserve each provider's pre-dispatch *estimated* cost and skip launches once the estimate crosses this ceiling (see [Spend guardrails](#spend-guardrails)) |
+| `--no-fallback` | Disable configured provider fallbacks for an exact provider matrix |
 | `-y, --yes` | Skip the deep-research pre-flight confirm |
 | `--json` | Output `run.json` to stdout |
 | `--refine` | Rewrite the query into tier-tuned variants with one LLM call before dispatch |
@@ -1336,6 +1337,13 @@ The skill guides agents through:
 5. **Retrieve** -- Fetch completed async results
 6. **Analyze** -- Read `summary.md`, `sources.json`, and per-provider output files
 7. **Synthesize** -- Cross-reference multi-provider findings, weight by citation frequency
+
+## Provider Benchmark
+
+The repository includes a local-only, reproducible provider benchmark with
+curated stable/live datasets and offline CI fixture replay. See
+[`benchmark/README.md`](benchmark/README.md) for commands, scoring methodology,
+artifact formats, and paid-call safety.
 
 ## Publishing
 

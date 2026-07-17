@@ -1,0 +1,15 @@
+[
+  {
+    "url": "https://www.australia.gov.au/about-australia/facts-and-figures",
+    "normalizedUrl": "https://www.australia.gov.au/about-australia/facts-and-figures",
+    "title": "Facts and figures",
+    "providers": [
+      "gemini-grounded",
+      "openrouter-online",
+      "brave-answers",
+      "exa",
+      "kagi-fastgpt"
+    ],
+    "citationCount": 5
+  }
+]

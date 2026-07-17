@@ -1,0 +1,10 @@
+{
+  "provider": "openai",
+  "model": "gpt-5-mini-2025-08-07",
+  "modelVersion": "2025-08-07",
+  "promptVersion": "v2",
+  "usage": { "prompt_tokens": 120, "completion_tokens": 32 },
+  "costUsd": null,
+  "costConfidence": "unknown",
+  "rawResponse": { "fixture": true }
+}

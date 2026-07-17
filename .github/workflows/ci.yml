@@ -28,7 +28,7 @@ jobs:
         run: npm ci
 
       - name: Auto-fix formatting
-        run: npx biome check --write src/ tests/
+        run: npx biome check --write src/ tests/ benchmark/
 
       - name: Commit formatting fixes
         run: |
@@ -93,6 +93,10 @@ jobs:
 
       - name: Unit tests
         run: npm run test
+
+      - name: Offline benchmark fixture replay
+        if: matrix.run-integration
+        run: npm run benchmark:ci
 
       - name: Workers compatibility tests
         if: matrix.run-integration

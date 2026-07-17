@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "timestamp": 1784203200,
+  "slug": "latest-current-node",
+  "query": "What is the latest Current Node.js release?",
+  "mode": "sync",
+  "outputDir": ".",
+  "providers": [
+    {
+      "id": "gemini-grounded",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 640,
+      "wordCount": 16,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "gemini-grounded.meta.json",
+      "metering": { "kind": "native_tokens" }
+    },
+    {
+      "id": "openrouter-online",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 750,
+      "wordCount": 16,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "openrouter-online.meta.json",
+      "usage": { "costUsd": 0.0022 },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.0022, "source": "provider_reported" }
+      }
+    },
+    {
+      "id": "brave-answers",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 520,
+      "wordCount": 16,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "brave-answers.meta.json",
+      "metering": {
+        "kind": "request_priced",
+        "pricingVersion": "2026-06",
+        "estimate": { "estimatedCostUsd": 0.009, "costConfidence": "estimated" }
+      }
+    },
+    {
+      "id": "exa",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 410,
+      "wordCount": 16,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "exa.meta.json",
+      "usage": { "costUsd": 0.0031 },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.0031, "source": "provider_reported" }
+      }
+    },
+    {
+      "id": "kagi-fastgpt",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 700,
+      "wordCount": 16,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "kagi-fastgpt.meta.json",
+      "metering": {
+        "kind": "request_priced",
+        "pricingVersion": "2026-06",
+        "estimate": { "estimatedCostUsd": 0.015, "costConfidence": "estimated" }
+      }
+    }
+  ],
+  "sources": { "total": 5, "unique": 1, "file": "sources.json" },
+  "asyncTasks": [],
+  "exitCode": 0
+}

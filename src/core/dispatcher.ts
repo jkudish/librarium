@@ -53,6 +53,12 @@ export interface DispatchOptions {
    * `budget` (reported cost): the two never reconcile. Additive and edge-safe.
    */
   estimatedBudget?: EstimateBudgetTracker;
+  /**
+   * Whether configured provider fallbacks may run. Defaults to true for normal
+   * Librarium use. Callers that require an exact provider matrix, such as the
+   * repository benchmark, can disable fallback dispatch explicitly.
+   */
+  allowFallbacks?: boolean;
 }
 
 export interface DispatchResult {
@@ -152,6 +158,7 @@ export async function dispatch(
     id: string,
     errorReport: ProviderReport,
   ): Promise<ProviderReport | null> {
+    if (options.allowFallbacks === false) return null;
     const fallbackId = config.providers[id]?.fallback;
     if (!fallbackId) return null;
 

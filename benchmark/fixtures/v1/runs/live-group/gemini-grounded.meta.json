@@ -1,0 +1,16 @@
+{
+  "provider": "gemini-grounded",
+  "tier": "ai-grounded",
+  "model": "gemini-2.5-flash",
+  "durationMs": 640,
+  "citationCount": 1,
+  "metering": { "kind": "native_tokens" },
+  "citations": [
+    {
+      "url": "https://nodejs.org/en/download/archive/v26.5.0",
+      "title": "Node.js v26.5.0",
+      "snippet": "v26.5.0 Latest Release",
+      "provider": "gemini-grounded"
+    }
+  ]
+}
