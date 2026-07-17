@@ -18,10 +18,13 @@ import type {
   VerificationFollowUp,
   VerificationLlmCall,
   VerificationMetadata,
+  VerificationUsageSummary,
 } from '../types.js';
 import { stripControlChars } from './answer-synthesis.js';
 import {
   callWithCascade,
+  type LlmCascadeAttempt,
+  type LlmClient,
   preferenceFromConfig,
   resolveLlmClients,
 } from './llm-client.js';
@@ -30,7 +33,6 @@ export const MAX_VERIFICATION_CLAIMS = 8;
 /** Successful evidence-producing queries; failed queries do not consume this. */
 export const MAX_VERIFICATION_QUERIES = 3;
 export const MAX_VERIFICATION_ATTEMPTS = 3;
-const VERIFICATION_LLM_TIMEOUT_MS = 90_000;
 
 type ClaimCategory = ClaimSupport['category'];
 
@@ -53,6 +55,11 @@ interface RawAssessment {
 interface LlmResult<T> {
   value: T;
   call: VerificationLlmCall;
+}
+
+interface VerificationBudgets {
+  reported: ReturnType<typeof createBudgetTracker>;
+  estimated: ReturnType<typeof createEstimateBudgetTracker>;
 }
 
 export interface VerificationInput {
@@ -109,10 +116,9 @@ export function selectMaterialClaims(raw: unknown): ClaimSupport[] {
     }
     seen.add(claim.toLowerCase());
     claims.push({
-      id:
-        typeof candidate.id === 'string' && candidate.id.trim()
-          ? candidate.id.trim()
-          : `claim-${claims.length + 1}`,
+      // Model-provided ids are untrusted. Positional ids are deterministic and
+      // unique, so duplicate/adversarial ids cannot cross-assign evidence.
+      id: `claim-${claims.length + 1}`,
       claim,
       category: category as ClaimCategory,
       status: 'insufficient',
@@ -121,6 +127,81 @@ export function selectMaterialClaims(raw: unknown): ClaimSupport[] {
     if (claims.length === MAX_VERIFICATION_CLAIMS) break;
   }
   return claims;
+}
+
+function verificationTimeoutMs(config: Config): number {
+  const seconds = config.defaults.timeout;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0
+    ? Math.max(1, Math.round(seconds * 1000))
+    : 30_000;
+}
+
+function llmMetering(
+  client: LlmClient,
+  config: Config,
+  usage?: VerificationLlmCall['usage'],
+): VerificationLlmCall['metering'] {
+  const providerId =
+    client.provider === 'openai'
+      ? 'openai-chat'
+      : client.provider === 'gemini'
+        ? 'gemini-chat'
+        : 'perplexity-sonar-pro';
+  return buildProviderMetering(providerId, config.providers[providerId], usage);
+}
+
+function budgetBlockReason(
+  budgets: VerificationBudgets,
+  nextEstimate?: number,
+): string | undefined {
+  if (budgets.reported.exceeded()) return 'reported cost budget reached';
+  if (budgets.estimated.exceeded()) return 'estimated cost budget reached';
+  if (
+    budgets.estimated.limitUsd !== undefined &&
+    typeof nextEstimate === 'number' &&
+    Number.isFinite(nextEstimate) &&
+    nextEstimate > 0 &&
+    budgets.estimated.reservedUsd + nextEstimate > budgets.estimated.limitUsd
+  ) {
+    return 'estimated cost budget reached';
+  }
+  return undefined;
+}
+
+function beforeLlmAttempt(
+  client: LlmClient,
+  config: Config,
+  budgets: VerificationBudgets,
+): void {
+  const metering = llmMetering(client, config);
+  const reason = budgetBlockReason(
+    budgets,
+    metering?.estimate?.estimatedCostUsd,
+  );
+  if (reason) throw new Error(`verification ${reason}`);
+  budgets.estimated.reserve(metering?.estimate);
+}
+
+function recordLlmAttempt(
+  stage: VerificationLlmCall['stage'],
+  attempt: LlmCascadeAttempt,
+  config: Config,
+  budgets: VerificationBudgets,
+  calls: VerificationLlmCall[],
+): VerificationLlmCall {
+  budgets.reported.record(attempt.usage);
+  const call: VerificationLlmCall = {
+    stage,
+    provider: attempt.client.provider,
+    model: attempt.client.model,
+    status: attempt.status,
+    durationMs: attempt.durationMs,
+    ...(attempt.error ? { error: attempt.error } : {}),
+    ...(attempt.usage ? { usage: attempt.usage } : {}),
+    metering: llmMetering(attempt.client, config, attempt.usage),
+  };
+  calls.push(call);
+  return call;
 }
 
 function isExplicitlyUncertain(claim: string): boolean {
@@ -145,6 +226,8 @@ async function runLlmJson<T>(
   config: Config,
   stage: VerificationLlmCall['stage'],
   prompt: string,
+  budgets: VerificationBudgets,
+  calls: VerificationLlmCall[],
 ): Promise<LlmResult<T>> {
   const preference = preferenceFromConfig(config, 'answer', 'refine');
   const clients = resolveLlmClients(preference, {
@@ -155,18 +238,25 @@ async function runLlmJson<T>(
   if (clients.length === 0) {
     throw new Error('no verification LLM provider available');
   }
-  const { client, result } = await callWithCascade<T>({
+  let successfulCall: VerificationLlmCall | undefined;
+  const { result } = await callWithCascade<T>({
     clients,
     prompt,
     action: `claim verification ${stage}`,
-    timeoutMs: VERIFICATION_LLM_TIMEOUT_MS,
+    timeoutMs: verificationTimeoutMs(config),
     json: true,
     parse: (text) => parseJson(text) as T,
+    beforeAttempt: (client) => beforeLlmAttempt(client, config, budgets),
+    onAttempt: (attempt) => {
+      const call = recordLlmAttempt(stage, attempt, config, budgets, calls);
+      if (attempt.status === 'success') successfulCall = call;
+    },
     onWarning: (message) => console.error(`[librarium] verify: ${message}`),
   });
+  if (!successfulCall) throw new Error(`claim verification ${stage} failed`);
   return {
     value: result,
-    call: { stage, provider: client.provider, model: client.model },
+    call: successfulCall,
   };
 }
 
@@ -174,6 +264,8 @@ async function runLlmText(
   config: Config,
   stage: VerificationLlmCall['stage'],
   prompt: string,
+  budgets: VerificationBudgets,
+  calls: VerificationLlmCall[],
 ): Promise<LlmResult<string>> {
   const preference = preferenceFromConfig(config, 'answer', 'refine');
   const clients = resolveLlmClients(preference, {
@@ -184,17 +276,24 @@ async function runLlmText(
   if (clients.length === 0) {
     throw new Error('no verification LLM provider available');
   }
-  const { client, result } = await callWithCascade<string>({
+  let successfulCall: VerificationLlmCall | undefined;
+  const { result } = await callWithCascade<string>({
     clients,
     prompt,
     action: `claim verification ${stage}`,
-    timeoutMs: VERIFICATION_LLM_TIMEOUT_MS,
+    timeoutMs: verificationTimeoutMs(config),
     json: false,
+    beforeAttempt: (client) => beforeLlmAttempt(client, config, budgets),
+    onAttempt: (attempt) => {
+      const call = recordLlmAttempt(stage, attempt, config, budgets, calls);
+      if (attempt.status === 'success') successfulCall = call;
+    },
     onWarning: (message) => console.error(`[librarium] verify: ${message}`),
   });
+  if (!successfulCall) throw new Error(`claim verification ${stage} failed`);
   return {
     value: result,
-    call: { stage, provider: client.provider, model: client.model },
+    call: successfulCall,
   };
 }
 
@@ -434,6 +533,7 @@ async function runFollowup(
         status: success ? 'success' : 'error',
         durationMs: result.durationMs || Date.now() - started,
         ...(result.error ? { error: result.error } : {}),
+        ...(sourceUrls.length > 0 ? { sourceUrls } : {}),
         ...(usage ? { usage } : {}),
         metering: actualMetering,
       });
@@ -471,26 +571,90 @@ function initialEvidence(
     }));
 }
 
-function usageFromFollowups(
+interface UsageRecord {
+  usage?: VerificationLlmCall['usage'];
+  metering?: VerificationLlmCall['metering'];
+}
+
+function finiteUsageNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function usageSummary(records: UsageRecord[]): VerificationUsageSummary {
+  const sum = (key: 'inputTokens' | 'outputTokens' | 'totalTokens') => {
+    const values = records
+      .map((record) => record.usage?.[key])
+      .filter(finiteUsageNumber);
+    return values.length > 0
+      ? values.reduce((total, value) => total + value, 0)
+      : undefined;
+  };
+  const reportedCostUsd = records.reduce(
+    (total, record) =>
+      total +
+      (finiteUsageNumber(record.usage?.costUsd) ? record.usage.costUsd : 0),
+    0,
+  );
+  const estimatedCostUsd = records.reduce((total, record) => {
+    const estimate = record.metering?.estimate?.estimatedCostUsd;
+    return total + (finiteUsageNumber(estimate) ? estimate : 0);
+  }, 0);
+  const inputTokens = sum('inputTokens');
+  const outputTokens = sum('outputTokens');
+  const totalTokens = sum('totalTokens');
+  return {
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(totalTokens !== undefined ? { totalTokens } : {}),
+    tokenCountsAreLowerBound:
+      records.length > 0 &&
+      records.some(
+        (record) =>
+          !finiteUsageNumber(record.usage?.inputTokens) ||
+          !finiteUsageNumber(record.usage?.outputTokens) ||
+          !finiteUsageNumber(record.usage?.totalTokens),
+      ),
+    reportedCostUsd,
+    reportedCostIsLowerBound:
+      records.length > 0 &&
+      records.some((record) => !finiteUsageNumber(record.usage?.costUsd)),
+    estimatedCostUsd,
+    estimatedCostIsLowerBound:
+      records.length > 0 &&
+      records.some(
+        (record) =>
+          !finiteUsageNumber(record.metering?.estimate?.estimatedCostUsd),
+      ),
+  };
+}
+
+function verificationUsage(
   followUps: VerificationFollowUp[],
+  llm: VerificationLlmCall[],
 ): VerificationMetadata['usage'] {
   const attempts = followUps.flatMap((followUp) => followUp.attempts);
+  const providerRecords = attempts.filter(
+    (attempt) => attempt.status !== 'skipped',
+  );
+  const llmRecords = llm.filter((call) => call.status !== undefined);
+  const provider = usageSummary(providerRecords);
+  const llmUsage = usageSummary(llmRecords);
   return {
-    providerAttempts: attempts.filter((attempt) => attempt.status !== 'skipped')
-      .length,
+    providerAttempts: providerRecords.length,
     successfulProviderAttempts: attempts.filter(
       (attempt) => attempt.status === 'success',
     ).length,
-    reportedCostUsd: attempts.reduce(
-      (sum, attempt) => sum + (attempt.usage?.costUsd ?? 0),
-      0,
-    ),
-    estimatedCostUsd: attempts.reduce(
-      (sum, attempt) =>
-        sum + (attempt.metering?.estimate?.estimatedCostUsd ?? 0),
-      0,
-    ),
-    llmCalls: 0,
+    reportedCostUsd: provider.reportedCostUsd + llmUsage.reportedCostUsd,
+    reportedCostIsLowerBound:
+      provider.reportedCostIsLowerBound || llmUsage.reportedCostIsLowerBound,
+    estimatedCostUsd: provider.estimatedCostUsd + llmUsage.estimatedCostUsd,
+    estimatedCostIsLowerBound:
+      provider.estimatedCostIsLowerBound || llmUsage.estimatedCostIsLowerBound,
+    llmCalls: llmRecords.length,
+    successfulLlmCalls: llmRecords.filter((call) => call.status === 'success')
+      .length,
+    provider,
+    llm: llmUsage,
   };
 }
 
@@ -504,6 +668,18 @@ export async function verifyAnswer(
 ): Promise<VerificationResult> {
   const llm: VerificationLlmCall[] = [];
   const reasons: string[] = [];
+  const budgets: VerificationBudgets = {
+    reported: createBudgetTracker(input.config.defaults.maxCostUsd),
+    estimated: createEstimateBudgetTracker(
+      input.config.defaults.maxEstimatedCostUsd,
+    ),
+  };
+  for (const report of input.reports) {
+    budgets.reported.record(report.usage);
+    if (report.status !== 'skipped') {
+      budgets.estimated.reserve(report.metering?.estimate);
+    }
+  }
   const empty = (
     matrix: ClaimSupport[] = [],
     followUps: VerificationFollowUp[] = [],
@@ -514,11 +690,16 @@ export async function verifyAnswer(
       matrix,
       followUps,
       reasons,
-      usage: { ...usageFromFollowups(followUps), llmCalls: llm.length },
+      usage: verificationUsage(followUps, llm),
       llm,
       revised: false,
     },
   });
+
+  if (budgetBlockReason(budgets)) {
+    reasons.push('verification budget exhausted before verification started');
+    return empty();
+  }
 
   let claims: ClaimSupport[];
   try {
@@ -526,8 +707,9 @@ export async function verifyAnswer(
       input.config,
       'claims',
       claimsPrompt(input.answer),
+      budgets,
+      llm,
     );
-    llm.push(extraction.call);
     claims = selectMaterialClaims(extraction.value.claims);
   } catch (error) {
     reasons.push(
@@ -549,8 +731,9 @@ export async function verifyAnswer(
       input.config,
       'initial-assessment',
       evidencePrompt(claims, initialEvidence(input.results)),
+      budgets,
+      llm,
     );
-    llm.push(assessment.call);
     matrix = normalizeAssessment(claims, assessment.value, sourceUrls);
   } catch (error) {
     reasons.push(
@@ -559,16 +742,6 @@ export async function verifyAnswer(
     return empty(claims);
   }
 
-  const reportedBudget = createBudgetTracker(input.config.defaults.maxCostUsd);
-  const estimatedBudget = createEstimateBudgetTracker(
-    input.config.defaults.maxEstimatedCostUsd,
-  );
-  for (const report of input.reports) {
-    reportedBudget.record(report.usage);
-    if (report.status !== 'skipped') {
-      estimatedBudget.reserve(report.metering?.estimate);
-    }
-  }
   const eligibleIds = eligibleProviderIds(input.results, input.config);
   const attemptIds = followupAttemptOrder(eligibleIds, input.config);
   const followUps: VerificationFollowUp[] = [];
@@ -593,8 +766,8 @@ export async function verifyAnswer(
       claim,
       attemptIds,
       input.config,
-      reportedBudget,
-      estimatedBudget,
+      budgets.reported,
+      budgets.estimated,
     );
     followUps.push(outcome.followUp);
     if (outcome.evidence) {
@@ -620,8 +793,9 @@ export async function verifyAnswer(
         input.config,
         'follow-up-assessment',
         evidencePrompt(claims, evidence),
+        budgets,
+        llm,
       );
-      llm.push(assessment.call);
       matrix = normalizeAssessment(claims, assessment.value, sourceUrls);
     } catch (error) {
       reasons.push(
@@ -643,7 +817,7 @@ export async function verifyAnswer(
         matrix,
         followUps,
         reasons: Array.from(new Set(reasons)),
-        usage: { ...usageFromFollowups(followUps), llmCalls: llm.length },
+        usage: verificationUsage(followUps, llm),
         llm,
         revised: false,
       },
@@ -655,8 +829,9 @@ export async function verifyAnswer(
       input.config,
       'revision',
       revisionPrompt(input.answer, matrix),
+      budgets,
+      llm,
     );
-    llm.push(revision.call);
     const revisedAnswer =
       typeof revision.value === 'string' ? revision.value.trim() : '';
     if (!revisedAnswer) throw new Error('revision returned an empty answer');
@@ -667,7 +842,7 @@ export async function verifyAnswer(
         matrix,
         followUps,
         reasons: [],
-        usage: { ...usageFromFollowups(followUps), llmCalls: llm.length },
+        usage: verificationUsage(followUps, llm),
         llm,
         revised: true,
       },
@@ -688,7 +863,7 @@ export async function verifyAnswer(
         matrix,
         followUps,
         reasons,
-        usage: { ...usageFromFollowups(followUps), llmCalls: llm.length },
+        usage: verificationUsage(followUps, llm),
         llm,
         revised: false,
       },

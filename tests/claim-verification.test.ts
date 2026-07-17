@@ -114,6 +114,8 @@ const CLAIM = {
 describe('claim verification boundaries', () => {
   beforeEach(() => {
     process.env.OPENAI_API_KEY = 'test-key';
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.PERPLEXITY_API_KEY;
     process.env.VERIFY_PRIMARY_KEY = 'primary-key';
     process.env.VERIFY_FALLBACK_KEY = 'fallback-key';
     process.env.VERIFY_ALTERNATE_KEY = 'alternate-key';
@@ -124,6 +126,8 @@ describe('claim verification boundaries', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     delete process.env.OPENAI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.PERPLEXITY_API_KEY;
     delete process.env.VERIFY_PRIMARY_KEY;
     delete process.env.VERIFY_FALLBACK_KEY;
     delete process.env.VERIFY_ALTERNATE_KEY;
@@ -149,6 +153,48 @@ describe('claim verification boundaries', () => {
     expect(selected.map((claim) => claim.claim)).not.toContain(
       'The release may be delayed.',
     );
+  });
+
+  it('assigns deterministic unique ids regardless of duplicate or adversarial model ids', () => {
+    const selected = selectMaterialClaims([
+      { ...CLAIM, id: 'claim-2' },
+      {
+        ...CLAIM,
+        id: 'claim-1',
+        claim: 'The API supports two regions.',
+        category: 'number',
+      },
+      {
+        ...CLAIM,
+        id: 'claim-1',
+        claim: 'The API is compatible with v2.',
+        category: 'compatibility',
+      },
+    ]);
+
+    expect(selected.map((claim) => claim.id)).toEqual([
+      'claim-1',
+      'claim-2',
+      'claim-3',
+    ]);
+    const matrix = normalizeAssessment(
+      selected,
+      {
+        assessments: [
+          {
+            id: 'claim-2',
+            status: 'supported',
+            sourceUrls: ['https://two.example'],
+          },
+        ],
+      },
+      new Set(['https://two.example']),
+    );
+    expect(matrix.map((claim) => claim.status)).toEqual([
+      'insufficient',
+      'supported',
+      'insufficient',
+    ]);
   });
 
   it('never upgrades provider agreement without an independent source URL', () => {
@@ -293,10 +339,11 @@ describe('claim verification boundaries', () => {
     expect(order.indexOf('provider:17')).toBeGreaterThan(
       order.lastIndexOf('llm', 1),
     );
-    expect(result.metadata.llm[0]).toEqual({
+    expect(result.metadata.llm[0]).toMatchObject({
       stage: 'claims',
       provider: 'openai',
       model: 'gpt-5-mini',
+      status: 'success',
     });
     expect(result.metadata.status).toBe('complete');
     expect(result.revisedAnswer).toBe('Revised answer [1].');
@@ -480,14 +527,8 @@ describe('claim verification boundaries', () => {
   it('honors inherited reported and estimated cost ceilings and fails open', async () => {
     const execute = vi.fn(async () => successResult('primary'));
     registerProvider(provider('primary', execute));
-    llmResponses(
-      { claims: [CLAIM] },
-      {
-        assessments: [
-          { id: 'claim-1', status: 'insufficient', sourceUrls: [] },
-        ],
-      },
-    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
     const result = await verifyAnswer({
       query: 'release',
       answer: 'The release was published on 2025-01-01.',
@@ -515,10 +556,282 @@ describe('claim verification boundaries', () => {
       ],
       sources: [],
     });
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
-    expect(result.metadata.status).toBe('partial');
+    expect(result.metadata.status).toBe('incomplete');
     expect(result.revisedAnswer).toBeUndefined();
-    expect(result.metadata.reasons).toContain('verification budget exhausted');
+    expect(result.metadata.reasons).toContain(
+      'verification budget exhausted before verification started',
+    );
+    expect(result.metadata.usage.llmCalls).toBe(0);
+    expect(result.metadata.usage.providerAttempts).toBe(0);
+  });
+
+  it('makes no verification call when the inherited estimated ceiling alone is exhausted', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await verifyAnswer({
+      query: 'release',
+      answer: 'The release was published on 2025-01-01.',
+      config: config({}, { maxEstimatedCostUsd: 0.02 }),
+      results: [initialResult()],
+      reports: [
+        {
+          id: 'primary',
+          tier: 'ai-grounded',
+          status: 'success',
+          durationMs: 1,
+          wordCount: 1,
+          citationCount: 1,
+          outputFile: 'primary.md',
+          metaFile: 'primary.meta.json',
+          metering: {
+            kind: 'request_priced',
+            estimate: {
+              estimatedCostUsd: 0.02,
+              costConfidence: 'estimated',
+            },
+          },
+        },
+      ],
+      sources: [],
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.metadata.status).toBe('incomplete');
+    expect(result.metadata.usage).toMatchObject({
+      providerAttempts: 0,
+      llmCalls: 0,
+      reportedCostUsd: 0,
+      estimatedCostUsd: 0,
+    });
+  });
+
+  it('checks the reported budget before every LLM cascade attempt', async () => {
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: 'not-json' } }],
+            usage: {
+              prompt_tokens: 10,
+              completion_tokens: 2,
+              total_tokens: 12,
+              cost: 0.005,
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await verifyAnswer({
+      query: 'release',
+      answer: 'The release was published on 2025-01-01.',
+      config: config({}, { maxCostUsd: 0.01 }),
+      results: [initialResult()],
+      reports: [
+        {
+          id: 'primary',
+          tier: 'ai-grounded',
+          status: 'success',
+          durationMs: 1,
+          wordCount: 1,
+          citationCount: 1,
+          outputFile: 'primary.md',
+          metaFile: 'primary.meta.json',
+          usage: { costUsd: 0.005 },
+        },
+      ],
+      sources: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.metadata.status).toBe('incomplete');
+    expect(result.metadata.usage.llmCalls).toBe(1);
+    expect(result.metadata.usage.llm?.reportedCostUsd).toBe(0.005);
+    expect(result.metadata.llm[0]).toMatchObject({
+      provider: 'openai',
+      status: 'error',
+      usage: { costUsd: 0.005, totalTokens: 12 },
+    });
+  });
+
+  it('propagates the inherited seconds timeout to every LLM cascade attempt and stage', async () => {
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    const execute = vi.fn(async () => successResult('primary'));
+    registerProvider(provider('primary', execute));
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    let geminiCall = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('openai.com')) {
+          return new Response(
+            JSON.stringify({ error: { message: 'cascade' } }),
+            { status: 500 },
+          );
+        }
+        geminiCall++;
+        const value =
+          geminiCall === 1
+            ? { claims: [CLAIM] }
+            : geminiCall === 2
+              ? {
+                  assessments: [
+                    { id: 'claim-1', status: 'insufficient', sourceUrls: [] },
+                  ],
+                }
+              : geminiCall === 3
+                ? {
+                    assessments: [
+                      {
+                        id: 'claim-1',
+                        status: 'supported',
+                        sourceUrls: ['https://primary.example/evidence'],
+                      },
+                    ],
+                  }
+                : 'Revised answer.';
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text:
+                        typeof value === 'string'
+                          ? value
+                          : JSON.stringify(value),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const result = await verifyAnswer({
+      query: 'release',
+      answer: 'The release was published on 2025-01-01.',
+      config: config({
+        primary: { apiKey: '$VERIFY_PRIMARY_KEY', enabled: true },
+      }),
+      results: [initialResult()],
+      reports: [],
+      sources: [],
+    });
+
+    expect(result.metadata.status).toBe('complete');
+    expect(timeoutSpy).toHaveBeenCalledTimes(8);
+    expect(timeoutSpy.mock.calls.every(([timeout]) => timeout === 17_000)).toBe(
+      true,
+    );
+    expect(result.metadata.llm.map((call) => call.stage)).toEqual([
+      'claims',
+      'claims',
+      'initial-assessment',
+      'initial-assessment',
+      'follow-up-assessment',
+      'follow-up-assessment',
+      'revision',
+      'revision',
+    ]);
+  });
+
+  it('persists normalized verification LLM usage and provider-reported cost separately', async () => {
+    delete process.env.OPENAI_API_KEY;
+    process.env.PERPLEXITY_API_KEY = 'perplexity-key';
+    const responses = [
+      {
+        content: JSON.stringify({ claims: [CLAIM] }),
+        input: 10,
+        output: 5,
+        cost: 0.001,
+      },
+      {
+        content: JSON.stringify({
+          assessments: [
+            {
+              id: 'claim-1',
+              status: 'supported',
+              sourceUrls: ['https://initial.example/release'],
+            },
+          ],
+        }),
+        input: 20,
+        output: 10,
+        cost: 0.002,
+      },
+      { content: 'Revised answer.', input: 30, output: 15, cost: 0.003 },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const next = responses.shift();
+        if (!next) throw new Error('unexpected LLM call');
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: next.content } }],
+            usage: {
+              prompt_tokens: next.input,
+              completion_tokens: next.output,
+              total_tokens: next.input + next.output,
+              cost: { total_cost: next.cost },
+            },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const runConfig = config({});
+    runConfig.answer = { provider: 'perplexity' };
+
+    const result = await verifyAnswer({
+      query: 'release',
+      answer: 'The release was published on 2025-01-01.',
+      config: runConfig,
+      results: [initialResult()],
+      reports: [],
+      sources: [
+        {
+          url: 'https://initial.example/release',
+          normalizedUrl: 'initial.example/release',
+          providers: ['primary'],
+          citationCount: 1,
+        },
+      ],
+    });
+
+    expect(result.metadata.usage).toMatchObject({
+      providerAttempts: 0,
+      successfulProviderAttempts: 0,
+      llmCalls: 3,
+      successfulLlmCalls: 3,
+      reportedCostUsd: 0.006,
+      reportedCostIsLowerBound: false,
+      estimatedCostUsd: 0,
+      estimatedCostIsLowerBound: true,
+      llm: {
+        inputTokens: 60,
+        outputTokens: 30,
+        totalTokens: 90,
+        tokenCountsAreLowerBound: false,
+        reportedCostUsd: 0.006,
+        reportedCostIsLowerBound: false,
+        estimatedCostUsd: 0,
+        estimatedCostIsLowerBound: true,
+      },
+    });
+    expect(result.metadata.llm.map((call) => call.usage?.costUsd)).toEqual([
+      0.001, 0.002, 0.003,
+    ]);
   });
 
   it('skips a follow-up before dispatch when its estimate would cross the budget', async () => {

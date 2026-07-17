@@ -366,6 +366,8 @@ export interface VerificationAttempt {
   status: 'success' | 'error' | 'skipped';
   durationMs: number;
   error?: string;
+  /** Source URLs returned by this specific attempt, when any. */
+  sourceUrls?: string[];
   usage?: ProviderUsage;
   metering?: ProviderMetering;
 }
@@ -381,6 +383,29 @@ export interface VerificationLlmCall {
   stage: 'claims' | 'initial-assessment' | 'follow-up-assessment' | 'revision';
   provider: string;
   model: string;
+  /** Additive fields are optional so older persisted manifests remain readable. */
+  status?: 'success' | 'error';
+  durationMs?: number;
+  error?: string;
+  usage?: ProviderUsage;
+  metering?: ProviderMetering;
+}
+
+/** Verification-only aggregate for one paid-call lane. */
+export interface VerificationUsageSummary {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  /** True when at least one dispatched call did not report complete token data. */
+  tokenCountsAreLowerBound: boolean;
+  /** Sum of costs explicitly reported by APIs. */
+  reportedCostUsd: number;
+  /** True when at least one dispatched call did not report cost. */
+  reportedCostIsLowerBound: boolean;
+  /** Sum of network-free estimates reserved before dispatch. */
+  estimatedCostUsd: number;
+  /** True when at least one dispatched call had no USD estimate. */
+  estimatedCostIsLowerBound: boolean;
 }
 
 export interface VerificationMetadata {
@@ -392,9 +417,17 @@ export interface VerificationMetadata {
   usage: {
     providerAttempts: number;
     successfulProviderAttempts: number;
+    /** Total verification-only reported spend: provider follow-ups plus LLMs. */
     reportedCostUsd: number;
+    reportedCostIsLowerBound?: boolean;
+    /** Total verification-only estimated spend: provider follow-ups plus LLMs. */
     estimatedCostUsd: number;
+    estimatedCostIsLowerBound?: boolean;
     llmCalls: number;
+    successfulLlmCalls?: number;
+    /** Separate provider and LLM lanes; absent only on older persisted runs. */
+    provider?: VerificationUsageSummary;
+    llm?: VerificationUsageSummary;
   };
   llm: VerificationLlmCall[];
   revised: boolean;

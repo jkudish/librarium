@@ -134,14 +134,24 @@ export async function synthesizeAndVerifyAnswer(
     .replace(/^\s*#[^\S\n]+[^\n]*\n+/, '')
     .replace(/\n#{1,6}[^\S\n]+Sources\b[\s\S]*$/i, '\n')
     .trim();
-  const verification = await verifyAnswer({
-    query: context.query,
-    answer: answerBody,
-    config: context.config,
-    results: context.results,
-    reports: context.reports,
-    sources: context.sources,
-  });
+  let verification;
+  try {
+    verification = await verifyAnswer({
+      query: context.query,
+      answer: answerBody,
+      config: context.config,
+      results: context.results,
+      reports: context.reports,
+      sources: context.sources,
+    });
+  } catch (error) {
+    context.printLine('');
+    context.printLine(
+      `  ! answer verification failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    context.printLine('  original grounded answer preserved');
+    return synthesis;
+  }
   safeWriteFile(
     join(context.outputDir, verification.metadata.matrixFile),
     `${JSON.stringify(verification.metadata, null, 2)}\n`,

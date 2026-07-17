@@ -441,8 +441,31 @@ describe('generateHtmlReport', () => {
             providerAttempts: 1,
             successfulProviderAttempts: 1,
             reportedCostUsd: 0.004,
+            reportedCostIsLowerBound: true,
             estimatedCostUsd: 0.01,
+            estimatedCostIsLowerBound: true,
             llmCalls: 2,
+            successfulLlmCalls: 1,
+            provider: {
+              inputTokens: 20,
+              outputTokens: 5,
+              totalTokens: 25,
+              tokenCountsAreLowerBound: false,
+              reportedCostUsd: 0.004,
+              reportedCostIsLowerBound: false,
+              estimatedCostUsd: 0.01,
+              estimatedCostIsLowerBound: false,
+            },
+            llm: {
+              inputTokens: 100,
+              outputTokens: 20,
+              totalTokens: 120,
+              tokenCountsAreLowerBound: true,
+              reportedCostUsd: 0,
+              reportedCostIsLowerBound: true,
+              estimatedCostUsd: 0,
+              estimatedCostIsLowerBound: true,
+            },
           },
           llm: [],
           revised: false,
@@ -456,6 +479,131 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('conflicting');
     expect(html).toContain('https://example.com/release');
     expect(html).toContain('verification partial: 1 provider attempts');
+    expect(html).toContain('revised: no');
+    expect(html).toContain('Verification-only usage');
+    expect(html).toContain('1 successful');
+  });
+
+  it('renders the complete verification audit trail and neutralizes hostile strings and URLs', () => {
+    const html = generateHtmlReport({
+      manifest: makeManifest({
+        verification: {
+          status: 'partial',
+          matrixFile: 'verification.json',
+          matrix: [
+            {
+              id: 'claim-1"><img src=x onerror=alert(1)>',
+              claim: '<script>alert("claim")</script>',
+              category: 'date',
+              status: 'conflicting',
+              sourceUrls: [
+                'javascript:alert(1)',
+                'https://safe.example/evidence?q="x"',
+              ],
+              reason: '<img src=x onerror=alert("reason")>',
+            },
+          ],
+          followUps: [
+            {
+              claimId: 'claim-1"><svg onload=alert(1)>',
+              query: '<script>alert("query")</script>',
+              sourceUrls: ['data:text/html,boom', 'https://safe.example/all'],
+              attempts: [
+                {
+                  provider: 'evil"><img src=x onerror=alert(1)>',
+                  tier: 'ai-grounded',
+                  status: 'error',
+                  durationMs: 1250,
+                  error: '<script>alert("attempt")</script>',
+                  sourceUrls: [
+                    'file:///etc/passwd',
+                    'https://safe.example/attempt',
+                  ],
+                  usage: {
+                    inputTokens: 11,
+                    outputTokens: 4,
+                    totalTokens: 15,
+                    costUsd: 0.004,
+                  },
+                  metering: {
+                    kind: 'request_priced',
+                    estimate: {
+                      estimatedCostUsd: 0.01,
+                      costConfidence: 'configured',
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+          reasons: ['<script>alert("reason-list")</script>'],
+          usage: {
+            providerAttempts: 1,
+            successfulProviderAttempts: 0,
+            reportedCostUsd: 0.006,
+            reportedCostIsLowerBound: true,
+            estimatedCostUsd: 0.01,
+            estimatedCostIsLowerBound: true,
+            llmCalls: 1,
+            successfulLlmCalls: 1,
+            provider: {
+              inputTokens: 11,
+              outputTokens: 4,
+              totalTokens: 15,
+              tokenCountsAreLowerBound: false,
+              reportedCostUsd: 0.004,
+              reportedCostIsLowerBound: false,
+              estimatedCostUsd: 0.01,
+              estimatedCostIsLowerBound: false,
+            },
+            llm: {
+              inputTokens: 20,
+              outputTokens: 5,
+              totalTokens: 25,
+              tokenCountsAreLowerBound: false,
+              reportedCostUsd: 0.002,
+              reportedCostIsLowerBound: false,
+              estimatedCostUsd: 0,
+              estimatedCostIsLowerBound: true,
+            },
+          },
+          llm: [
+            {
+              stage: 'claims',
+              provider: 'openai"><img src=x onerror=alert(1)>',
+              model: '<script>alert("model")</script>',
+              status: 'success',
+              durationMs: 250,
+              usage: {
+                inputTokens: 20,
+                outputTokens: 5,
+                totalTokens: 25,
+                costUsd: 0.002,
+              },
+              metering: { kind: 'native_cost' },
+            },
+          ],
+          revised: false,
+        },
+      }),
+      providerContents: {},
+      sources: [],
+    });
+
+    expect(html).toContain('Follow-up queries and attempts');
+    expect(html).toContain('Verification LLM calls');
+    expect(html).toContain('evil&quot;&gt;&lt;img');
+    expect(html).toContain('&lt;script&gt;alert(&quot;query&quot;)');
+    expect(html).toContain('1.3s');
+    expect(html).toContain('input 11, output 4, total 15');
+    expect(html).toContain('estimate $0.010000 (configured)');
+    expect(html).toContain('https://safe.example/attempt');
+    expect(html).toContain('revised: no');
+    expect(html).not.toContain('<script>alert');
+    expect(html).not.toContain('<img src=x');
+    expect(html).not.toContain('href="javascript:');
+    expect(html).not.toContain('href="data:');
+    expect(html).not.toContain('href="file:');
   });
 
   it('omits the Answer section when no answer is provided', () => {

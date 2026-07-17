@@ -6,9 +6,12 @@ import { safeWriteFile } from '../core/fs-utils.js';
 import type {
   ClaimSupport,
   DeduplicatedSource,
+  ProviderMetering,
   ProviderReport,
+  ProviderUsage,
   RunManifest,
   VerificationMetadata,
+  VerificationUsageSummary,
 } from '../types.js';
 import { readAnswerArtifact } from './answer-synthesis.js';
 import { readRunEntry } from './browse-data.js';
@@ -51,10 +54,26 @@ export function escapeHtml(text: string): string {
  */
 export function safeUrl(url: string): string | null {
   const trimmed = url.trim();
-  if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed;
-  if (/^[#/]/.test(trimmed)) return trimmed;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed; // relative path
-  return null; // javascript:, data:, vbscript:, file:, etc.
+  if (
+    !trimmed ||
+    Array.from(trimmed).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 || character === '\\';
+    })
+  )
+    return null;
+  if (/^\/\//.test(trimmed)) return null;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' ||
+      parsed.protocol === 'https:' ||
+      parsed.protocol === 'mailto:'
+      ? trimmed
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -247,32 +266,182 @@ function verificationStatusClass(status: ClaimSupport['status']): string {
       : 'muted';
 }
 
+function verificationUrls(urls: string[]): string {
+  if (urls.length === 0) return 'none';
+  return urls
+    .map((url) => {
+      const href = safeUrl(url);
+      return href === null
+        ? `<span class="unsafe-url">${escapeHtml(url)}</span>`
+        : `<a href="${escapeHtml(href)}" rel="noopener" target="_blank">${escapeHtml(url)}</a>`;
+    })
+    .join('<br>');
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function verificationDuration(durationMs: unknown): string {
+  return finiteNumber(durationMs) ? formatDuration(durationMs) : 'unknown';
+}
+
+function verificationUsageDetail(usage: ProviderUsage | undefined): string {
+  if (!usage) return 'not reported';
+  const fields: string[] = [];
+  if (finiteNumber(usage.inputTokens))
+    fields.push(`input ${usage.inputTokens}`);
+  if (finiteNumber(usage.outputTokens))
+    fields.push(`output ${usage.outputTokens}`);
+  if (finiteNumber(usage.totalTokens))
+    fields.push(`total ${usage.totalTokens}`);
+  if (finiteNumber(usage.costUsd))
+    fields.push(`reported $${usage.costUsd.toFixed(6)}`);
+  return fields.length > 0 ? fields.join(', ') : 'not reported';
+}
+
+function verificationMeteringDetail(
+  metering: ProviderMetering | undefined,
+): string {
+  if (!metering) return 'unknown';
+  const fields = [`kind ${metering.kind}`];
+  const estimate = metering.estimate;
+  if (finiteNumber(estimate?.estimatedCostUsd)) {
+    fields.push(
+      `estimate $${estimate.estimatedCostUsd.toFixed(6)} (${estimate.costConfidence})`,
+    );
+  } else if (estimate) {
+    fields.push(`estimate unknown (${estimate.costConfidence})`);
+  } else {
+    fields.push('estimate unavailable');
+  }
+  if (finiteNumber(estimate?.billableUnits)) {
+    fields.push(`${estimate.billableUnits} ${estimate.unit ?? 'units'}`);
+  }
+  if (finiteNumber(metering.actual?.costUsd)) {
+    fields.push(
+      `actual $${metering.actual.costUsd.toFixed(6)} (${metering.actual.source})`,
+    );
+  }
+  return fields.join(', ');
+}
+
+function legacyUsageSummary(
+  verification: VerificationMetadata,
+  lane: 'provider' | 'llm',
+): VerificationUsageSummary {
+  const present =
+    lane === 'provider'
+      ? verification.usage.providerAttempts > 0
+      : verification.usage.llmCalls > 0;
+  return {
+    tokenCountsAreLowerBound: present,
+    reportedCostUsd:
+      lane === 'provider' ? verification.usage.reportedCostUsd : 0,
+    reportedCostIsLowerBound: present,
+    estimatedCostUsd:
+      lane === 'provider' ? verification.usage.estimatedCostUsd : 0,
+    estimatedCostIsLowerBound: present,
+  };
+}
+
+function summaryTokenDetail(summary: VerificationUsageSummary): string {
+  const fields: string[] = [];
+  if (finiteNumber(summary.inputTokens))
+    fields.push(`input ${summary.inputTokens}`);
+  if (finiteNumber(summary.outputTokens))
+    fields.push(`output ${summary.outputTokens}`);
+  if (finiteNumber(summary.totalTokens))
+    fields.push(`total ${summary.totalTokens}`);
+  if (fields.length === 0) return 'not reported';
+  return `${summary.tokenCountsAreLowerBound ? 'at least ' : ''}${fields.join(', ')}`;
+}
+
+function summaryCost(value: number, lowerBound: boolean): string {
+  return `${lowerBound ? 'at least ' : ''}$${finiteNumber(value) ? value.toFixed(6) : '0.000000'}`;
+}
+
 /** Human-readable companion to the full structured verification JSON/JSONL. */
 function verificationSection(verification: VerificationMetadata): string {
   const rows = verification.matrix
     .map((claim) => {
-      const urls = claim.sourceUrls.length
-        ? claim.sourceUrls
-            .map((url) => {
-              const href = safeUrl(url);
-              return href === null
-                ? escapeHtml(url)
-                : `<a href="${escapeHtml(href)}" rel="noopener" target="_blank">evidence</a>`;
-            })
-            .join(', ')
-        : 'none';
+      const urls = verificationUrls(claim.sourceUrls);
       return `<tr><td>${escapeHtml(claim.claim)}</td><td><span class="verification-status ${verificationStatusClass(claim.status)}">${escapeHtml(claim.status)}</span></td><td>${urls}</td><td>${escapeHtml(claim.reason ?? '')}</td></tr>`;
     })
     .join('');
   const reasons = verification.reasons.length
-    ? `<p class="verification-reasons">${escapeHtml(verification.reasons.join('; '))}</p>`
-    : '';
-  const usage = `verification ${verification.status}: ${verification.usage.providerAttempts} provider attempts, $${verification.usage.reportedCostUsd.toFixed(3)} reported, $${verification.usage.estimatedCostUsd.toFixed(3)} estimated, ${verification.usage.llmCalls} LLM calls`;
+    ? `<ul class="verification-reasons">${verification.reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>`
+    : '<p class="verification-reasons">No verification warnings recorded.</p>';
+  const providerUsage =
+    verification.usage.provider ?? legacyUsageSummary(verification, 'provider');
+  const llmUsage =
+    verification.usage.llm ?? legacyUsageSummary(verification, 'llm');
+  const successfulLlmCalls =
+    verification.usage.successfulLlmCalls ??
+    verification.llm.filter((call) => call.status === 'success').length;
+  const usageRows = [
+    {
+      lane: 'Provider follow-ups',
+      attempts: verification.usage.providerAttempts,
+      successful: verification.usage.successfulProviderAttempts,
+      summary: providerUsage,
+    },
+    {
+      lane: 'Verification LLM',
+      attempts: verification.usage.llmCalls,
+      successful: successfulLlmCalls,
+      summary: llmUsage,
+    },
+  ]
+    .map(
+      ({ lane, attempts, successful, summary }) =>
+        `<tr><td>${lane}</td><td>${attempts}</td><td>${successful}</td><td>${escapeHtml(summaryTokenDetail(summary))}</td><td>${escapeHtml(summaryCost(summary.reportedCostUsd, summary.reportedCostIsLowerBound))}</td><td>${escapeHtml(summaryCost(summary.estimatedCostUsd, summary.estimatedCostIsLowerBound))}</td></tr>`,
+    )
+    .join('');
+  const followUps = verification.followUps.length
+    ? verification.followUps
+        .map((followUp) => {
+          const attemptRows = followUp.attempts
+            .map(
+              (attempt) =>
+                `<tr><td>${escapeHtml(attempt.provider)}</td><td>${escapeHtml(attempt.tier)}</td><td>${escapeHtml(attempt.status)}</td><td>${escapeHtml(verificationDuration(attempt.durationMs))}</td><td>${escapeHtml(verificationUsageDetail(attempt.usage))}</td><td>${escapeHtml(verificationMeteringDetail(attempt.metering))}</td><td>${escapeHtml(attempt.error ?? '')}</td><td>${verificationUrls(attempt.sourceUrls ?? [])}</td></tr>`,
+            )
+            .join('');
+          return `<article class="verification-follow-up">
+<h4>Claim ${escapeHtml(followUp.claimId)}</h4>
+<p><strong>Query:</strong> ${escapeHtml(followUp.query)}</p>
+<p><strong>Collected source URLs:</strong><br>${verificationUrls(followUp.sourceUrls)}</p>
+<table><thead><tr><th>Provider</th><th>Tier</th><th>Status</th><th>Duration</th><th>Usage</th><th>Metering</th><th>Error</th><th>Source URLs</th></tr></thead><tbody>${attemptRows || '<tr><td colspan="8">No attempts recorded.</td></tr>'}</tbody></table>
+</article>`;
+        })
+        .join('')
+    : '<p class="verification-meta">No follow-up queries were dispatched.</p>';
+  const llmRows = verification.llm
+    .map(
+      (call) =>
+        `<tr><td>${escapeHtml(call.stage)}</td><td>${escapeHtml(call.provider)}</td><td>${escapeHtml(call.model)}</td><td>${escapeHtml(call.status ?? 'legacy')}</td><td>${escapeHtml(verificationDuration(call.durationMs))}</td><td>${escapeHtml(verificationUsageDetail(call.usage))}</td><td>${escapeHtml(verificationMeteringDetail(call.metering))}</td><td>${escapeHtml(call.error ?? '')}</td></tr>`,
+    )
+    .join('');
+  const totalReported = summaryCost(
+    verification.usage.reportedCostUsd,
+    verification.usage.reportedCostIsLowerBound ?? false,
+  );
+  const totalEstimated = summaryCost(
+    verification.usage.estimatedCostUsd,
+    verification.usage.estimatedCostIsLowerBound ?? false,
+  );
   return `<section class="verification">
 <p class="eyebrow">claim verification</p>
-<p class="verification-meta">${escapeHtml(usage)}</p>
+<p class="verification-meta">verification ${escapeHtml(verification.status)}: ${verification.usage.providerAttempts} provider attempts (${verification.usage.successfulProviderAttempts} successful), ${verification.usage.llmCalls} LLM calls (${successfulLlmCalls} successful); ${escapeHtml(totalReported)} reported total, ${escapeHtml(totalEstimated)} estimated total; revised: ${verification.revised ? 'yes' : 'no'}</p>
 ${reasons}
+<h3>Verification-only usage</h3>
+<table><thead><tr><th>Lane</th><th>Attempts</th><th>Successful</th><th>Tokens</th><th>Reported cost</th><th>Estimated cost</th></tr></thead><tbody>${usageRows}</tbody></table>
+<h3>Claim-support matrix</h3>
 <table><thead><tr><th>Claim</th><th>Status</th><th>Independent evidence</th><th>Reason</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No material claims were selected.</td></tr>'}</tbody></table>
+<h3>Follow-up queries and attempts</h3>
+${followUps}
+<h3>Verification LLM calls</h3>
+<table><thead><tr><th>Stage</th><th>Provider</th><th>Model</th><th>Status</th><th>Duration</th><th>Usage</th><th>Metering</th><th>Error</th></tr></thead><tbody>${llmRows || '<tr><td colspan="8">No verification LLM calls recorded.</td></tr>'}</tbody></table>
 </section>`;
 }
 
@@ -416,6 +585,9 @@ section.answer {
 .answer-meta { color: #a3a3a3; font-size: 0.78rem; margin: 0.25rem 0 0; }
 .answer-body { font-size: 0.97rem; }
 .verification-meta, .verification-reasons { color: #525252; font-size: 0.85rem; }
+.verification-follow-up { margin: 1.25rem 0; }
+.verification-follow-up h4 { margin-bottom: 0.3rem; }
+.unsafe-url { overflow-wrap: anywhere; }
 .verification-status { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.8rem; }
 .verification-status.ok { color: #16a34a; }
 .verification-status.conflict { color: #dc2626; }

@@ -186,24 +186,93 @@ describe('generateJsonlReport -- each line parses independently', () => {
             sourceUrls: ['https://example.com/release'],
           },
         ],
-        followUps: [],
+        followUps: [
+          {
+            claimId: 'claim-1',
+            query: 'release primary source evidence',
+            sourceUrls: ['https://example.com/release'],
+            attempts: [
+              {
+                provider: 'exa',
+                tier: 'ai-grounded',
+                status: 'success',
+                durationMs: 12,
+                sourceUrls: ['https://example.com/release'],
+                usage: { costUsd: 0.004, totalTokens: 10 },
+                metering: { kind: 'native_cost' },
+              },
+            ],
+          },
+        ],
         reasons: ['insufficient independent evidence for one or more claims'],
         usage: {
           providerAttempts: 1,
           successfulProviderAttempts: 1,
-          reportedCostUsd: 0.004,
+          reportedCostUsd: 0.006,
+          reportedCostIsLowerBound: false,
           estimatedCostUsd: 0.01,
-          llmCalls: 2,
+          estimatedCostIsLowerBound: true,
+          llmCalls: 1,
+          successfulLlmCalls: 1,
+          provider: {
+            totalTokens: 10,
+            tokenCountsAreLowerBound: true,
+            reportedCostUsd: 0.004,
+            reportedCostIsLowerBound: false,
+            estimatedCostUsd: 0.01,
+            estimatedCostIsLowerBound: false,
+          },
+          llm: {
+            inputTokens: 20,
+            outputTokens: 5,
+            totalTokens: 25,
+            tokenCountsAreLowerBound: false,
+            reportedCostUsd: 0.002,
+            reportedCostIsLowerBound: false,
+            estimatedCostUsd: 0,
+            estimatedCostIsLowerBound: true,
+          },
         },
-        llm: [{ stage: 'claims', provider: 'openai', model: 'gpt-5-mini' }],
+        llm: [
+          {
+            stage: 'claims',
+            provider: 'openai',
+            model: 'gpt-5-mini',
+            status: 'success',
+            durationMs: 20,
+            usage: {
+              inputTokens: 20,
+              outputTokens: 5,
+              totalTokens: 25,
+              costUsd: 0.002,
+            },
+            metering: { kind: 'native_cost' },
+          },
+        ],
         revised: false,
       },
     });
     const lines = parseLines(
       generateJsonlReport({ manifest, providerContents: {}, sources: [] }),
-    ) as Array<{ type: string; verification?: { matrix?: unknown[] } }>;
+    ) as Array<{
+      type: string;
+      verification?: {
+        matrix?: unknown[];
+        followUps?: unknown[];
+        llm?: unknown[];
+        usage?: Record<string, unknown>;
+      };
+    }>;
     const verification = lines.find((line) => line.type === 'verification');
     expect(verification?.verification?.matrix).toHaveLength(1);
+    expect(verification?.verification?.followUps).toHaveLength(1);
+    expect(verification?.verification?.llm).toHaveLength(1);
+    expect(verification?.verification?.usage).toMatchObject({
+      reportedCostUsd: 0.006,
+      llmCalls: 1,
+      successfulLlmCalls: 1,
+      llm: { totalTokens: 25, reportedCostUsd: 0.002 },
+    });
   });
 
   it('sets content to null for pending providers', () => {
