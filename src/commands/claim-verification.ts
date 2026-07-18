@@ -69,6 +69,8 @@ export interface VerificationInput {
   results: ProviderDispatchResult[];
   reports: ProviderReport[];
   sources: DeduplicatedSource[];
+  /** Sink for cascade fallback warnings. Defaults to a stderr line. */
+  warn?: (message: string) => void;
 }
 
 export interface VerificationResult {
@@ -204,9 +206,18 @@ function recordLlmAttempt(
   return call;
 }
 
+/**
+ * Bare modals ("may", "could") also appear in checkable factual claims
+ * ("may require SNI", "could negotiate"), so a modal only counts as
+ * uncertainty when followed by be/have/not — the usual epistemic hedge shape.
+ * The model's own explicitUncertainty flag is still honored before this
+ * backstop runs.
+ */
 function isExplicitlyUncertain(claim: string): boolean {
-  return /\b(?:unknown|unclear|uncertain|unconfirmed|not confirmed|may|might|could)\b/i.test(
-    claim,
+  return (
+    /\b(?:unknown|unclear|uncertain|unconfirmed|not (?:yet )?confirmed|possibly|perhaps|reportedly|allegedly|apparently|seemingly|supposedly|purportedly|may or may not)\b/i.test(
+      claim,
+    ) || /\b(?:may|might|could)\s+(?:\w+\s+)?(?:be|have|not)\b/i.test(claim)
   );
 }
 
@@ -222,12 +233,18 @@ function parseJson(text: string): unknown {
   return JSON.parse(fenced?.[1] ?? trimmed);
 }
 
-async function runLlmJson<T>(
-  config: Config,
+interface LlmRunContext {
+  config: Config;
+  warn: (message: string) => void;
+}
+
+async function runLlm<T>(
+  { config, warn }: LlmRunContext,
   stage: VerificationLlmCall['stage'],
   prompt: string,
   budgets: VerificationBudgets,
   calls: VerificationLlmCall[],
+  parse?: (text: string) => T,
 ): Promise<LlmResult<T>> {
   const preference = preferenceFromConfig(config, 'answer', 'refine');
   const clients = resolveLlmClients(preference, {
@@ -244,14 +261,14 @@ async function runLlmJson<T>(
     prompt,
     action: `claim verification ${stage}`,
     timeoutMs: verificationTimeoutMs(config),
-    json: true,
-    parse: (text) => parseJson(text) as T,
+    json: Boolean(parse),
+    parse,
     beforeAttempt: (client) => beforeLlmAttempt(client, config, budgets),
     onAttempt: (attempt) => {
       const call = recordLlmAttempt(stage, attempt, config, budgets, calls);
       if (attempt.status === 'success') successfulCall = call;
     },
-    onWarning: (message) => console.error(`[librarium] verify: ${message}`),
+    onWarning: warn,
   });
   if (!successfulCall) throw new Error(`claim verification ${stage} failed`);
   return {
@@ -260,41 +277,31 @@ async function runLlmJson<T>(
   };
 }
 
-async function runLlmText(
-  config: Config,
+function runLlmJson<T>(
+  context: LlmRunContext,
+  stage: VerificationLlmCall['stage'],
+  prompt: string,
+  budgets: VerificationBudgets,
+  calls: VerificationLlmCall[],
+): Promise<LlmResult<T>> {
+  return runLlm<T>(
+    context,
+    stage,
+    prompt,
+    budgets,
+    calls,
+    (text) => parseJson(text) as T,
+  );
+}
+
+function runLlmText(
+  context: LlmRunContext,
   stage: VerificationLlmCall['stage'],
   prompt: string,
   budgets: VerificationBudgets,
   calls: VerificationLlmCall[],
 ): Promise<LlmResult<string>> {
-  const preference = preferenceFromConfig(config, 'answer', 'refine');
-  const clients = resolveLlmClients(preference, {
-    env: process.env,
-    config,
-    credentials: createNodeCredentialContext(),
-  });
-  if (clients.length === 0) {
-    throw new Error('no verification LLM provider available');
-  }
-  let successfulCall: VerificationLlmCall | undefined;
-  const { result } = await callWithCascade<string>({
-    clients,
-    prompt,
-    action: `claim verification ${stage}`,
-    timeoutMs: verificationTimeoutMs(config),
-    json: false,
-    beforeAttempt: (client) => beforeLlmAttempt(client, config, budgets),
-    onAttempt: (attempt) => {
-      const call = recordLlmAttempt(stage, attempt, config, budgets, calls);
-      if (attempt.status === 'success') successfulCall = call;
-    },
-    onWarning: (message) => console.error(`[librarium] verify: ${message}`),
-  });
-  if (!successfulCall) throw new Error(`claim verification ${stage} failed`);
-  return {
-    value: result,
-    call: successfulCall,
-  };
+  return runLlm<string>(context, stage, prompt, budgets, calls);
 }
 
 function untrusted(value: string): string {
@@ -668,6 +675,12 @@ export async function verifyAnswer(
 ): Promise<VerificationResult> {
   const llm: VerificationLlmCall[] = [];
   const reasons: string[] = [];
+  const llmContext: LlmRunContext = {
+    config: input.config,
+    warn:
+      input.warn ??
+      ((message) => console.error(`[librarium] verify: ${message}`)),
+  };
   const budgets: VerificationBudgets = {
     reported: createBudgetTracker(input.config.defaults.maxCostUsd),
     estimated: createEstimateBudgetTracker(
@@ -704,7 +717,7 @@ export async function verifyAnswer(
   let claims: ClaimSupport[];
   try {
     const extraction = await runLlmJson<{ claims?: unknown }>(
-      input.config,
+      llmContext,
       'claims',
       claimsPrompt(input.answer),
       budgets,
@@ -728,7 +741,7 @@ export async function verifyAnswer(
     // This initial assessment is deliberately before any follow-up provider
     // call; the order is part of the product contract and testable via mocks.
     const assessment = await runLlmJson<{ assessments?: unknown }>(
-      input.config,
+      llmContext,
       'initial-assessment',
       evidencePrompt(claims, initialEvidence(input.results)),
       budgets,
@@ -790,7 +803,7 @@ export async function verifyAnswer(
   ) {
     try {
       const assessment = await runLlmJson<{ assessments?: unknown }>(
-        input.config,
+        llmContext,
         'follow-up-assessment',
         evidencePrompt(claims, evidence),
         budgets,
@@ -826,7 +839,7 @@ export async function verifyAnswer(
 
   try {
     const revision = await runLlmText(
-      input.config,
+      llmContext,
       'revision',
       revisionPrompt(input.answer, matrix),
       budgets,

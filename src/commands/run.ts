@@ -111,6 +111,11 @@ export interface PostDispatchContext {
 export interface PostDispatchResult {
   /** Additive fields merged into the run manifest before it is written. */
   manifestExtra?: Partial<RunManifest>;
+  /**
+   * Raw synthesized answer body for downstream hook stages (verification).
+   * Never merged into the manifest or persisted.
+   */
+  answerText?: string;
 }
 
 export interface ExecuteRunHooks {

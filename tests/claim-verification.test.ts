@@ -155,6 +155,50 @@ describe('claim verification boundaries', () => {
     );
   });
 
+  it('keeps modal claims with active verbs checkable while excluding hedges', () => {
+    const selected = selectMaterialClaims([
+      {
+        ...CLAIM,
+        claim: 'TLS 1.3 servers may require SNI.',
+        category: 'compatibility',
+      },
+      {
+        ...CLAIM,
+        claim: 'Clients could negotiate the extension since v2.',
+        category: 'compatibility',
+      },
+      {
+        ...CLAIM,
+        claim: 'The maintainers might have merged the fix already.',
+        category: 'date',
+      },
+      {
+        ...CLAIM,
+        claim: 'The date is reportedly 2025-03-01.',
+        category: 'date',
+      },
+      {
+        ...CLAIM,
+        claim: 'The rollout may be postponed.',
+        category: 'date',
+      },
+      {
+        ...CLAIM,
+        claim: 'The launch might well be delayed again.',
+        category: 'date',
+      },
+      {
+        ...CLAIM,
+        claim: 'The cutoff is apparently 2025-06-01.',
+        category: 'date',
+      },
+    ]);
+    expect(selected.map((claim) => claim.claim)).toEqual([
+      'TLS 1.3 servers may require SNI.',
+      'Clients could negotiate the extension since v2.',
+    ]);
+  });
+
   it('assigns deterministic unique ids regardless of duplicate or adversarial model ids', () => {
     const selected = selectMaterialClaims([
       { ...CLAIM, id: 'claim-2' },

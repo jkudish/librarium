@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Command } from 'commander';
 import { safeWriteFile } from '../core/fs-utils.js';
@@ -117,23 +116,17 @@ export async function synthesizeAndVerifyAnswer(
   const synthesis = await synthesizeAnswer(context);
   if (!synthesis?.manifestExtra?.answer) return synthesis;
 
-  let originalAnswer: string;
-  try {
-    originalAnswer = readFileSync(
-      join(context.outputDir, 'answer.md'),
-      'utf-8',
-    );
-  } catch (error) {
+  // The raw body comes straight from the synthesis stage rather than being
+  // re-parsed out of answer.md, so verification never depends on the rendered
+  // file format.
+  const answerBody = synthesis.answerText?.trim();
+  if (!answerBody) {
     context.printLine(
-      `  ! answer verification skipped: ${error instanceof Error ? error.message : String(error)}`,
+      '  ! answer verification skipped: synthesized answer body unavailable',
     );
     return synthesis;
   }
 
-  const answerBody = originalAnswer
-    .replace(/^\s*#[^\S\n]+[^\n]*\n+/, '')
-    .replace(/\n#{1,6}[^\S\n]+Sources\b[\s\S]*$/i, '\n')
-    .trim();
   let verification;
   try {
     verification = await verifyAnswer({
@@ -143,6 +136,7 @@ export async function synthesizeAndVerifyAnswer(
       results: context.results,
       reports: context.reports,
       sources: context.sources,
+      warn: (message) => console.error(`[librarium] verify: ${message}`),
     });
   } catch (error) {
     context.printLine('');
@@ -252,6 +246,7 @@ export async function synthesizeAnswer(
     manifestExtra: {
       answer: { provider: synthesis.provider, model: synthesis.model },
     },
+    answerText: synthesis.text,
   };
 }
 
