@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-18
+
 ### Added
 - **Opt-in claim verification**: `librarium answer --verify` extracts up to eight
   material factual claims from the synthesized answer, checks them against the
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cost per attempt.
 - Claim selection treats modal statements with active verbs ("may require X")
   as checkable claims; only explicit hedges are excluded from verification.
+
 
 ## [1.1.0] - 2026-06-29
 
@@ -188,7 +191,7 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v1.3.0...HEAD
 [1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0
 [0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
@@ -196,3 +199,4 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 [0.1.0]: https://github.com/jkudish/librarium/releases/tag/v0.1.0
 [0.1.1]: https://github.com/jkudish/librarium/compare/v0.1.0...v0.1.1
 [0.1.2]: https://github.com/jkudish/librarium/compare/v0.1.1...v0.1.2
+[1.3.0]: https://github.com/jkudish/librarium/releases/tag/v1.3.0
