@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Opt-in claim verification**: `librarium answer --verify` extracts up to eight
+  material factual claims from the synthesized answer, checks them against the
+  fan-out's independent source evidence, runs at most three successful follow-up
+  evidence queries (three provider attempts each, fast tiers only), and revises
+  the answer only after a complete evidence-backed verification. Fails open: any
+  incomplete evidence, budget exhaustion, or provider/LLM failure preserves the
+  original grounded answer. A full audit trail lands in `verification.json`, the
+  run manifest, `results.jsonl` (a `"type":"verification"` line), and
+  `report.html`, with provider and verification-LLM spend accounted separately
+  and unknown costs flagged as explicit lower bounds.
+- `--no-fallback` flag on `librarium run` and `librarium answer`: disables
+  configured provider fallbacks for an exact provider matrix.
+- Repo-local, reproducible provider benchmark under `benchmark/` (not part of
+  the npm package): curated stable and freshness-sensitive corpora, offline
+  fixture replay in CI, pinned synthesis/judge configuration, resumable runs,
+  and interactive confirmation before any paid call.
+
+### Changed
+- HTML report link sanitization hardened: URL-parse-based scheme allowlist,
+  rejecting protocol-relative URLs, control characters, and backslashes.
+- The answer/refine LLM cascade now records normalized token usage and reported
+  cost per attempt.
+- Claim selection treats modal statements with active verbs ("may require X")
+  as checkable claims; only explicit hedges are excluded from verification.
+
 ## [1.1.0] - 2026-06-29
 
 ### Added
