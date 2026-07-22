@@ -151,7 +151,10 @@ export class BraveAnswersProvider extends BaseProvider {
     }
   }
 
-  private async readBounded(response: Response, limit: number): Promise<string> {
+  private async readBounded(
+    response: Response,
+    limit: number,
+  ): Promise<string> {
     if (!response.body) return '';
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

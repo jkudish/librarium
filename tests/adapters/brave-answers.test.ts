@@ -326,7 +326,9 @@ describe('Brave Answers provider — stream robustness', () => {
       .fn()
       .mockResolvedValueOnce(
         sseResponse([
-          streamEvent('Answer text. <citation>{"url":"https://example.com/x","snippet":"trunca'),
+          streamEvent(
+            'Answer text. <citation>{"url":"https://example.com/x","snippet":"trunca',
+          ),
           'data: [DONE]\n\n',
         ]),
       );
@@ -339,14 +341,16 @@ describe('Brave Answers provider — stream robustness', () => {
   });
 
   it('skips a malformed stream frame without discarding the rest of the answer', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValueOnce(
-      sseResponse([
-        streamEvent('First part. '),
-        'data: {broken json\n\n',
-        streamEvent('Second part.'),
-        'data: [DONE]\n\n',
-      ]),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          streamEvent('First part. '),
+          'data: {broken json\n\n',
+          streamEvent('Second part.'),
+          'data: [DONE]\n\n',
+        ]),
+      );
 
     const result = await provider().execute('q', { timeout: 10 });
 
@@ -356,9 +360,7 @@ describe('Brave Answers provider — stream robustness', () => {
 
   it('fails with a normalized error when the stream exceeds the response size cap', async () => {
     const oversized = `data: ${'x'.repeat(10 * 1024 * 1024 + 64)}`;
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(sseResponse([oversized]));
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(sseResponse([oversized]));
 
     const result = await provider().execute('q', { timeout: 10 });
 

@@ -340,7 +340,11 @@ describe('GrokProvider — live-verified edge cases', () => {
       globalThis.fetch = vi.fn().mockResolvedValueOnce(
         jsonResponse(200, {
           ...outputResponse(),
-          usage: { input_tokens: 10, output_tokens: 5, cost_in_usd_ticks: ticks },
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            cost_in_usd_ticks: ticks,
+          },
         }),
       );
 
@@ -363,7 +367,12 @@ describe('GrokProvider — live-verified edge cases', () => {
                 type: 'output_text',
                 text: 'Answer.',
                 annotations: [
-                  { type: 'url_citation', start_index: 0, end_index: 5, title: '1' },
+                  {
+                    type: 'url_citation',
+                    start_index: 0,
+                    end_index: 5,
+                    title: '1',
+                  },
                   {
                     type: 'url_citation',
                     url: 'https://example.com/ok',
