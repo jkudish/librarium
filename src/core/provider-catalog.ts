@@ -169,6 +169,15 @@ const entries: ProviderCatalogInput[] = [
     order: 150,
   },
   {
+    id: 'grok',
+    family: 'xAI',
+    tier: 'ai-grounded',
+    description: 'Grok Responses API answers grounded with xAI web search.',
+    bestFor: 'Comparing Grok’s cited web-grounded answer visibility.',
+    setupUrl: 'https://console.x.ai',
+    order: 155,
+  },
+  {
     id: 'openrouter-chat',
     family: 'OpenRouter',
     tier: 'llm',

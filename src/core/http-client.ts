@@ -102,10 +102,12 @@ export async function httpRequest<T = unknown>(
 
       // Retry on 5xx and 429
       if (response.status >= 500 || response.status === 429) {
-        lastError = new Error(
-          `HTTP ${response.status}: ${response.statusText}`,
-        );
-        if (attempt < MAX_RETRIES) continue;
+        if (attempt < MAX_RETRIES) {
+          lastError = new Error(
+            `HTTP ${response.status}: ${response.statusText}`,
+          );
+          continue;
+        }
       }
 
       const text = await response.text();

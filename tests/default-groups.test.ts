@@ -31,4 +31,11 @@ describe('default groups -- llm tier', () => {
       }
     }
   });
+
+  it('includes Grok only in the comprehensive and all grounded groups', () => {
+    expect(DEFAULT_GROUPS.comprehensive).toContain('grok');
+    expect(DEFAULT_GROUPS.all).toContain('grok');
+    expect(DEFAULT_GROUPS.quick).not.toContain('grok');
+    expect(DEFAULT_GROUPS.fast).not.toContain('grok');
+  });
 });

@@ -7,6 +7,7 @@ export * from './adapters/firecrawl-search.js';
 export * from './adapters/gemini-chat.js';
 export * from './adapters/gemini-deep.js';
 export * from './adapters/gemini-grounded.js';
+export * from './adapters/grok.js';
 export * from './adapters/index.js';
 export * from './adapters/jina-search.js';
 export * from './adapters/kagi-fastgpt.js';
