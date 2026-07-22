@@ -16,6 +16,7 @@ export const secretEnvironmentVariables = [
   'SEARCHAPI_API_KEY',
   'SERPAPI_API_KEY',
   'TAVILY_API_KEY',
+  'XAI_API_KEY',
   'YOU_COM_API_KEY',
 ];
 

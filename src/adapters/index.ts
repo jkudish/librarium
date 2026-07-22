@@ -18,6 +18,7 @@ import { FirecrawlSearchProvider } from './firecrawl-search.js';
 import { GeminiChatProvider } from './gemini-chat.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { GeminiGroundedProvider } from './gemini-grounded.js';
+import { GrokProvider } from './grok.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
 import { OpenAIChatProvider } from './openai-chat.js';
@@ -142,6 +143,7 @@ export async function initializeProviders(
     // AI-Grounded Search (sync)
     new PerplexitySonarProProvider(),
     new GeminiGroundedProvider(),
+    new GrokProvider({ model: providerConfig.grok?.model }),
     new OpenRouterOnlineProvider(),
     new BraveAnswersProvider(),
     new ExaProvider(),

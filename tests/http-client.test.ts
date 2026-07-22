@@ -131,6 +131,22 @@ describe('httpRequest', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('returns the final 429 response body after exhausting retries', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 429,
+      statusText: 'Too Many Requests',
+      headers: new Headers({}),
+      text: async () => JSON.stringify({ error: 'Rate limited' }),
+    });
+    globalThis.fetch = fetchMock;
+
+    const response = await httpRequest('https://api.example.com/data');
+
+    expect(response.status).toBe(429);
+    expect(response.data).toEqual({ error: 'Rate limited' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('does not retry on 400 client error', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       status: 400,

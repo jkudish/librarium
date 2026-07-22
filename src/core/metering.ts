@@ -28,14 +28,15 @@ import type {
  */
 
 /** Pricing snapshot tag for the built-in default estimates below. */
-export const PRICING_VERSION = '2026-06';
+export const PRICING_VERSION = '2026-07';
 
 interface MeteringCapability {
   kind: MeteringKind;
   /**
-   * Built-in deterministic per-request price (USD) for request_priced
-   * providers with a published flat rate. Plan-dependent rates are omitted so
-   * the estimate carries unit metadata without a misleading dollar figure.
+   * Built-in per-request estimate (USD) for request-priced providers, or a
+   * documented baseline for native-token providers with extra tool-call fees.
+   * Plan-dependent rates are omitted so the estimate carries unit metadata
+   * without a misleading dollar figure.
    */
   defaultPerRequestUsd?: number;
   /** Default billable units consumed per request (credit_priced/api_unit). */
@@ -65,13 +66,23 @@ const REGISTRY: Record<string, MeteringCapability> = {
   // AI-grounded.
   'perplexity-sonar-pro': { kind: 'native_cost' },
   'gemini-grounded': { kind: 'native_tokens' },
+  // xAI reports tokens plus an actual dollar total (cost_in_usd_ticks), which
+  // the adapter surfaces as reported costUsd. Kind stays native_tokens so the
+  // pre-dispatch estimate (a baseline Grok 4.5 request with one web search)
+  // keeps powering --max-estimated-cost reservations.
+  grok: {
+    kind: 'native_tokens',
+    defaultPerRequestUsd: 0.015,
+    unit: 'request',
+  },
   'openrouter-online': { kind: 'native_cost' },
   exa: { kind: 'native_cost' },
-  // Brave AI answers — request-priced (Data-for-AI plan), deterministic-ish.
+  // Brave AI Answers — billed for searches and input/output tokens. The
+  // billable mix is only known after the API returns its usage headers, so no
+  // pre-dispatch USD estimate would be honest.
   'brave-answers': {
-    kind: 'request_priced',
-    defaultPerRequestUsd: 0.009,
-    unit: 'request',
+    kind: 'api_unit_priced',
+    unit: 'search + token',
   },
   // You.com — priced per query, plan-dependent: units only, no default USD.
   'you-research': {
@@ -172,8 +183,8 @@ function readPricingOverride(config?: ProviderPricingConfig): {
 
 /**
  * Network-free pre-dispatch cost estimate for a provider. Returns undefined for
- * kinds whose cost is only known from the API response (native_cost,
- * native_tokens) and for manual_unmetered providers.
+ * kinds whose cost is only known from the API response (native_cost), native
+ * token providers without a documented baseline, and manual_unmetered providers.
  */
 export function estimateMetering(
   providerId: string,
@@ -182,7 +193,10 @@ export function estimateMetering(
   const cap = getCapability(providerId);
   const override = readPricingOverride(config);
 
-  if (cap.kind === 'request_priced') {
+  if (
+    cap.kind === 'request_priced' ||
+    (cap.kind === 'native_tokens' && cap.defaultPerRequestUsd !== undefined)
+  ) {
     const perRequest = override.perRequestUsd ?? cap.defaultPerRequestUsd;
     const confidence: CostConfidence =
       override.perRequestUsd !== undefined ? 'configured' : 'estimated';
@@ -225,7 +239,7 @@ export function estimateMetering(
     return estimate;
   }
 
-  // native_cost, native_tokens, manual_unmetered: no pre-dispatch estimate.
+  // native_cost, native_tokens without a baseline, manual_unmetered: no estimate.
   return undefined;
 }
 

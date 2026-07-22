@@ -34,7 +34,7 @@ import { DEFAULT_GROUPS, PROVIDER_ENV_VARS } from '../src/constants.js';
  * When this fails, the message names exactly what to add to README.md -- treat
  * it as a checklist, not a puzzle. If a command/flag/provider/group was
  * intentionally added or renamed, update README.md (and, if the count changed,
- * the "24 built-in provider adapters" / tier / group prose) to match.
+ * the "25 built-in provider adapters" / tier / group prose) to match.
  */
 
 const README = readFileSync(
@@ -125,7 +125,7 @@ describe('README drift: command flags', () => {
 describe('README drift: providers, tiers, and groups', () => {
   it('states the correct built-in provider count', () => {
     const providerCount = Object.keys(PROVIDER_ENV_VARS).length;
-    expect(providerCount).toBe(24); // tripwire: bump the prose below if this changes
+    expect(providerCount).toBe(25); // tripwire: bump the prose below if this changes
     expect(
       README.includes(`${providerCount} built-in provider adapters`),
       `README.md should say "${providerCount} built-in provider adapters" in the Providers intro.`,

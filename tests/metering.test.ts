@@ -19,12 +19,14 @@ describe('metering registry: kinds', () => {
     expect(getMeteringKind('openrouter-chat')).toBe('native_cost');
     expect(getMeteringKind('claude')).toBe('native_tokens');
     expect(getMeteringKind('gemini-deep')).toBe('native_tokens');
+    expect(getMeteringKind('grok')).toBe('native_tokens');
     expect(getMeteringKind('serpapi')).toBe('request_priced');
     expect(getMeteringKind('brave-search')).toBe('request_priced');
     expect(getMeteringKind('kagi-fastgpt')).toBe('request_priced');
     expect(getMeteringKind('tavily')).toBe('credit_priced');
     expect(getMeteringKind('firecrawl-search')).toBe('credit_priced');
     expect(getMeteringKind('jina-search')).toBe('api_unit_priced');
+    expect(getMeteringKind('brave-answers')).toBe('api_unit_priced');
   });
 
   it('resolves legacy aliases to the canonical kind', () => {
@@ -89,15 +91,32 @@ describe('metering registry: estimates', () => {
     expect(est?.estimatedCostUsd).toBeUndefined();
   });
 
+  it('does not fabricate a pre-dispatch estimate for Brave Answers search-plus-token pricing', () => {
+    const est = estimateMetering('brave-answers');
+    expect(est?.unit).toBe('search + token');
+    expect(est?.estimatedCostUsd).toBeUndefined();
+  });
+
   it('produces no estimate for native or unmetered providers', () => {
     expect(estimateMetering('claude')).toBeUndefined();
     expect(estimateMetering('perplexity-sonar-pro')).toBeUndefined();
     expect(estimateMetering('totally-made-up')).toBeUndefined();
   });
 
+  it('uses a clearly labeled baseline estimate for Grok token and web-search pricing', () => {
+    const est = estimateMetering('grok');
+    expect(est).toMatchObject({
+      estimatedCostUsd: 0.015,
+      billableUnits: 1,
+      unit: 'request',
+      costConfidence: 'estimated',
+      pricingVersion: PRICING_VERSION,
+    });
+  });
+
   it('pins the pricing snapshot version (bump deliberately)', () => {
     // Tripwire: changing default prices should bump PRICING_VERSION.
-    expect(PRICING_VERSION).toBe('2026-06');
+    expect(PRICING_VERSION).toBe('2026-07');
   });
 });
 

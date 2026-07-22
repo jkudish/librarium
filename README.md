@@ -131,7 +131,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 24 built-in provider adapters organized into four tiers:
+Librarium ships with 25 built-in provider adapters organized into four tiers:
 
 The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
 
@@ -154,6 +154,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
 | Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Gemini Grounded Search | `gemini-grounded` | ai-grounded | `GEMINI_API_KEY` |
+| Grok (xAI) | `grok` | ai-grounded | `XAI_API_KEY` |
 | ChatGPT Search (OpenRouter) | `openrouter-online` | ai-grounded | `OPENROUTER_API_KEY` |
 | Brave AI Answers | `brave-answers` | ai-grounded | `BRAVE_API_KEY` |
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
@@ -170,6 +171,8 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | OpenAI Chat | `openai-chat` | llm | `OPENAI_API_KEY` |
 | Gemini Chat | `gemini-chat` | llm | `GEMINI_API_KEY` |
 | OpenRouter Chat | `openrouter-chat` | llm | `OPENROUTER_API_KEY` |
+
+Brave AI Answers uses Brave's streaming Answers endpoint so its grounded answer text and inline citations can be normalized together.
 
 ### Provider ID Migration (Legacy Aliases)
 
@@ -301,12 +304,13 @@ librarium answer <query> [options]
 ```
 $ librarium answer "what changed in postgres 17 logical replication"
 
-  fanning out to 4 providers
+  fanning out to 5 providers
 
-  ✓ perplexity-sonar-pro   ai-grounded        2.0s    11 sources
   ✓ gemini-grounded        ai-grounded        2.7s     8 sources
+  ✓ openrouter-online      ai-grounded        2.3s    10 sources
+  ✓ brave-answers          ai-grounded        1.1s    14 sources
   ✓ exa                    ai-grounded        1.6s    19 sources
-  ✓ brave-search           raw-search         0.8s    15 results
+  ✓ kagi-fastgpt           ai-grounded        1.4s     7 sources
 
   Postgres 17 makes logical replication materially easier to operate. Replication
   slots and subscription state now survive a major-version upgrade with pg_upgrade,
@@ -323,7 +327,7 @@ $ librarium answer "what changed in postgres 17 logical replication"
   [3] pg_upgrade and replication slots
   [4] What's new in Postgres 17
 
-  4 succeeded, 0 failed, 0 async pending in 2.9s
+  5 succeeded, 0 failed, 0 async pending in 2.9s
   ▸ 38 unique sources after dedupe (53 total citations)
   ▸ ~/research/agents/librarium/1781136000-what-changed-in-postgres-17/
 ```
@@ -364,12 +368,14 @@ Every provider declares a **metering kind** in a built-in registry, visible in `
 |---|---|---|
 | `native_cost` | API returns a real per-call cost | Perplexity, Exa, OpenRouter |
 | `native_tokens` | API returns token counts but no cost | Claude, OpenAI, Gemini |
-| `request_priced` | Deterministic/plan price per request | SerpAPI, SearchAPI, Brave, Kagi |
+| `request_priced` | Deterministic/plan price per request | SerpAPI, SearchAPI, Brave Web Search, Kagi |
 | `credit_priced` | Priced in account credits per request | Tavily, Firecrawl, You.com |
-| `api_unit_priced` | Priced per API unit/token, size known only after the call | Jina |
+| `api_unit_priced` | Priced per API unit/token, size known only after the call | Jina, Brave AI Answers |
 | `manual_unmetered` | No reliable per-call metering | custom providers |
 
 For request- and credit-priced providers, librarium can produce a **network-free estimate** *before* a call runs. Estimates are guesses, never facts: they live under each result's `metering.estimate` (never in `usage.costUsd`), carry a `costConfidence` (`estimated` from a built-in default snapshot, `configured` when you supply pricing, `unknown` when there's no basis) and a `pricingVersion`. Plan-dependent credit providers emit unit metadata (`billableUnits`, `unit`) **without** an invented dollar figure until you configure a price via provider `options` (`perRequestUsd`, or `creditUsd` + `creditsPerRequest`).
+
+Brave AI Answers is billed by searches plus input/output tokens, so librarium records the usage headers it receives but does not manufacture a single pre-dispatch dollar estimate or put a pricing-table calculation in reported cost.
 
 **Estimated budget (`--max-estimated-cost <usd>` or `defaults.maxEstimatedCostUsd`).** A pre-dispatch *reservation* ceiling, independent of `--max-cost` (the two never reconcile into one number). Before each provider launches, its estimated cost is reserved; once the reservation crosses the ceiling, not-yet-started providers are skipped with an estimated-budget reason. Providers with no estimable cost reserve `0`, so the reserved total is an honest lower bound. This gives products pre-call budget reservation that `--max-cost` (which only learns cost *after* a call) cannot. When it trips, the summary adds a line like:
 
@@ -672,9 +678,9 @@ Groups are named collections of provider IDs. Librarium ships with seven default
 | `quick` | gemini-grounded, openrouter-online, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
-| `comprehensive` | All deep-research + all ai-grounded | Deep + AI-grounded combined |
+| `comprehensive` | All deep-research + all ai-grounded (including Grok) | Deep + AI-grounded combined |
 | `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
-| `all` | All 20 grounded providers | Maximum grounded coverage (excludes the `llm` tier) |
+| `all` | All 21 grounded providers (including Grok) | Maximum grounded coverage (excludes the `llm` tier) |
 
 ### Custom Groups
 
@@ -789,6 +795,11 @@ The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the 
     "exa": {
       "apiKey": "$EXA_API_KEY",
       "enabled": true
+    },
+    "grok": {
+      "apiKey": "$XAI_API_KEY",
+      "enabled": true,
+      "model": "grok-4.5"
     },
     "tavily": {
       "apiKey": "$TAVILY_API_KEY",
@@ -1015,11 +1026,13 @@ Each research run creates a timestamped output directory:
   prompt.md              # The research query
   run.json               # Run manifest (machine-readable)
   summary.md             # Synthesized summary with statistics
+  answer.md              # Grounded synthesis (present after `librarium answer`)
   sources.json           # Deduplicated citations across all providers
   perplexity-sonar-pro.md    # Per-provider markdown results
   perplexity-sonar-pro.meta.json  # Per-provider metadata (model, timing, citations)
   brave-answers.md
   brave-answers.meta.json
+  verification.json      # Present after `librarium answer --verify`
   async-tasks.json       # Present if any async tasks were submitted
 ```
 
@@ -1042,7 +1055,34 @@ Each research run creates a timestamped output directory:
       "wordCount": 850,
       "citationCount": 12,
       "outputFile": "perplexity-sonar-pro.md",
-      "metaFile": "perplexity-sonar-pro.meta.json"
+      "metaFile": "perplexity-sonar-pro.meta.json",
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 640,
+        "totalTokens": 1840,
+        "costUsd": 0.0123
+      },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.0123, "source": "provider_reported" }
+      }
+    },
+    {
+      "id": "exa",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 1620,
+      "wordCount": 210,
+      "citationCount": 19,
+      "outputFile": "exa.md",
+      "metaFile": "exa.meta.json",
+      "usage": {
+        "costUsd": 0.005
+      },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.005, "source": "provider_reported" }
+      }
     }
   ],
   "sources": {
@@ -1054,6 +1094,8 @@ Each research run creates a timestamped output directory:
   "exitCode": 0
 }
 ```
+
+The `usage` and `metering` fields are optional. `usage` is reported-only: its `inputTokens`, `outputTokens`, `totalTokens`, and `costUsd` appear only when the provider's API actually returns them, and `usage.costUsd` is never a pricing-table estimate. `metering` carries the provider's metering `kind` and, once a real figure is known, the actual-cost lane (`metering.actual.source` is `provider_reported` for a cost the API returned); network-free pre-dispatch estimates live under `metering.estimate` instead. See [Metering registry and the estimated budget](#metering-registry-and-the-estimated-budget) for the full model.
 
 ## Exit Codes
 
@@ -1307,7 +1349,7 @@ Groups:
   fast           -- Quick results from multiple tiers
   comprehensive  -- Deep + AI-grounded combined
   llm            -- Opt-in LLM answers; web search/citations on by default
-  all            -- All 20 grounded providers (excludes the llm tier)
+  all            -- All 21 grounded providers (excludes the llm tier)
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     -- Synthesized overview with stats

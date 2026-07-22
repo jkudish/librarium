@@ -91,7 +91,7 @@ describe('benchmark corpus and target catalog', () => {
     const targets = allTargets(catalog);
     expect(
       targets.filter((target) => target.type === 'individual-provider'),
-    ).toHaveLength(24);
+    ).toHaveLength(25);
     expect(
       targets.filter((target) => target.type === 'built-in-group'),
     ).toHaveLength(7);
@@ -932,5 +932,18 @@ describe('benchmark runtime isolation', () => {
     expect(workflow).not.toMatch(
       /OPENAI_API_KEY|PERPLEXITY_API_KEY|ANTHROPIC_API_KEY/,
     );
+  });
+});
+
+describe('benchmark CI guard secret list', () => {
+  it('covers every provider credential env var (lockstep with PROVIDER_ENV_VARS)', async () => {
+    const { PROVIDER_ENV_VARS } = await import('../src/constants.js');
+    const { secretEnvironmentVariables } = await import(
+      '../benchmark/lib/guard.mjs'
+    );
+    const guarded = new Set(secretEnvironmentVariables);
+    for (const envVar of new Set(Object.values(PROVIDER_ENV_VARS))) {
+      expect(guarded, `guard.mjs must list ${envVar}`).toContain(envVar);
+    }
   });
 });
