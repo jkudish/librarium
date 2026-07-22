@@ -304,12 +304,13 @@ librarium answer <query> [options]
 ```
 $ librarium answer "what changed in postgres 17 logical replication"
 
-  fanning out to 4 providers
+  fanning out to 5 providers
 
-  ✓ perplexity-sonar-pro   ai-grounded        2.0s    11 sources
   ✓ gemini-grounded        ai-grounded        2.7s     8 sources
+  ✓ openrouter-online      ai-grounded        2.3s    10 sources
+  ✓ brave-answers          ai-grounded        1.1s    14 sources
   ✓ exa                    ai-grounded        1.6s    19 sources
-  ✓ brave-search           raw-search         0.8s    15 results
+  ✓ kagi-fastgpt           ai-grounded        1.4s     7 sources
 
   Postgres 17 makes logical replication materially easier to operate. Replication
   slots and subscription state now survive a major-version upgrade with pg_upgrade,
@@ -326,7 +327,7 @@ $ librarium answer "what changed in postgres 17 logical replication"
   [3] pg_upgrade and replication slots
   [4] What's new in Postgres 17
 
-  4 succeeded, 0 failed, 0 async pending in 2.9s
+  5 succeeded, 0 failed, 0 async pending in 2.9s
   ▸ 38 unique sources after dedupe (53 total citations)
   ▸ ~/research/agents/librarium/1781136000-what-changed-in-postgres-17/
 ```
@@ -1025,11 +1026,13 @@ Each research run creates a timestamped output directory:
   prompt.md              # The research query
   run.json               # Run manifest (machine-readable)
   summary.md             # Synthesized summary with statistics
+  answer.md              # Grounded synthesis (present after `librarium answer`)
   sources.json           # Deduplicated citations across all providers
   perplexity-sonar-pro.md    # Per-provider markdown results
   perplexity-sonar-pro.meta.json  # Per-provider metadata (model, timing, citations)
   brave-answers.md
   brave-answers.meta.json
+  verification.json      # Present after `librarium answer --verify`
   async-tasks.json       # Present if any async tasks were submitted
 ```
 
@@ -1052,7 +1055,34 @@ Each research run creates a timestamped output directory:
       "wordCount": 850,
       "citationCount": 12,
       "outputFile": "perplexity-sonar-pro.md",
-      "metaFile": "perplexity-sonar-pro.meta.json"
+      "metaFile": "perplexity-sonar-pro.meta.json",
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 640,
+        "totalTokens": 1840,
+        "costUsd": 0.0123
+      },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.0123, "source": "provider_reported" }
+      }
+    },
+    {
+      "id": "exa",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 1620,
+      "wordCount": 210,
+      "citationCount": 19,
+      "outputFile": "exa.md",
+      "metaFile": "exa.meta.json",
+      "usage": {
+        "costUsd": 0.005
+      },
+      "metering": {
+        "kind": "native_cost",
+        "actual": { "costUsd": 0.005, "source": "provider_reported" }
+      }
     }
   ],
   "sources": {
@@ -1064,6 +1094,8 @@ Each research run creates a timestamped output directory:
   "exitCode": 0
 }
 ```
+
+The `usage` and `metering` fields are optional. `usage` is reported-only: its `inputTokens`, `outputTokens`, `totalTokens`, and `costUsd` appear only when the provider's API actually returns them, and `usage.costUsd` is never a pricing-table estimate. `metering` carries the provider's metering `kind` and, once a real figure is known, the actual-cost lane (`metering.actual.source` is `provider_reported` for a cost the API returned); network-free pre-dispatch estimates live under `metering.estimate` instead. See [Metering registry and the estimated budget](#metering-registry-and-the-estimated-budget) for the full model.
 
 ## Exit Codes
 
