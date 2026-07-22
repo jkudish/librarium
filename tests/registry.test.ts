@@ -120,10 +120,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 24 providers', async () => {
+  it('initializeProviders registers all 25 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(24);
+    expect(all).toHaveLength(25);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -133,6 +133,7 @@ describe('registry', () => {
     expect(ids).toContain('openai-deep-o3');
     expect(ids).toContain('gemini-deep');
     expect(ids).toContain('gemini-grounded');
+    expect(ids).toContain('grok');
     expect(ids).toContain('openrouter-online');
     expect(ids).toContain('perplexity-sonar-pro');
     expect(ids).toContain('brave-answers');
@@ -171,6 +172,7 @@ describe('registry', () => {
         'openai-chat': { model: 'gpt-4o' },
         'gemini-chat': { model: 'gemini-2.0-flash' },
         'openrouter-chat': { model: 'anthropic/claude-3.5-haiku' },
+        grok: { model: 'grok-4.3' },
       },
     });
     expect((getProvider('claude') as { model?: string }).model).toBe(
@@ -185,6 +187,7 @@ describe('registry', () => {
     expect((getProvider('openrouter-chat') as { model?: string }).model).toBe(
       'anthropic/claude-3.5-haiku',
     );
+    expect((getProvider('grok') as { model?: string }).model).toBe('grok-4.3');
   });
 
   it('enables llm web search by default and allows global/provider overrides', async () => {

@@ -33,9 +33,10 @@ export const PRICING_VERSION = '2026-06';
 interface MeteringCapability {
   kind: MeteringKind;
   /**
-   * Built-in deterministic per-request price (USD) for request_priced
-   * providers with a published flat rate. Plan-dependent rates are omitted so
-   * the estimate carries unit metadata without a misleading dollar figure.
+   * Built-in per-request estimate (USD) for request-priced providers, or a
+   * documented baseline for native-token providers with extra tool-call fees.
+   * Plan-dependent rates are omitted so the estimate carries unit metadata
+   * without a misleading dollar figure.
    */
   defaultPerRequestUsd?: number;
   /** Default billable units consumed per request (credit_priced/api_unit). */
@@ -65,6 +66,13 @@ const REGISTRY: Record<string, MeteringCapability> = {
   // AI-grounded.
   'perplexity-sonar-pro': { kind: 'native_cost' },
   'gemini-grounded': { kind: 'native_tokens' },
+  // xAI returns tokens and tool usage but no dollar total. The estimate is a
+  // baseline Grok 4.5 request with one web search; actual usage remains honest.
+  grok: {
+    kind: 'native_tokens',
+    defaultPerRequestUsd: 0.015,
+    unit: 'request',
+  },
   'openrouter-online': { kind: 'native_cost' },
   exa: { kind: 'native_cost' },
   // Brave AI answers — request-priced (Data-for-AI plan), deterministic-ish.
@@ -172,8 +180,8 @@ function readPricingOverride(config?: ProviderPricingConfig): {
 
 /**
  * Network-free pre-dispatch cost estimate for a provider. Returns undefined for
- * kinds whose cost is only known from the API response (native_cost,
- * native_tokens) and for manual_unmetered providers.
+ * kinds whose cost is only known from the API response (native_cost), native
+ * token providers without a documented baseline, and manual_unmetered providers.
  */
 export function estimateMetering(
   providerId: string,
@@ -182,7 +190,10 @@ export function estimateMetering(
   const cap = getCapability(providerId);
   const override = readPricingOverride(config);
 
-  if (cap.kind === 'request_priced') {
+  if (
+    cap.kind === 'request_priced' ||
+    (cap.kind === 'native_tokens' && cap.defaultPerRequestUsd !== undefined)
+  ) {
     const perRequest = override.perRequestUsd ?? cap.defaultPerRequestUsd;
     const confidence: CostConfidence =
       override.perRequestUsd !== undefined ? 'configured' : 'estimated';
@@ -225,7 +236,7 @@ export function estimateMetering(
     return estimate;
   }
 
-  // native_cost, native_tokens, manual_unmetered: no pre-dispatch estimate.
+  // native_cost, native_tokens without a baseline, manual_unmetered: no estimate.
   return undefined;
 }
 
