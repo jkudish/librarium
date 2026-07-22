@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **xAI Grok grounded provider** (`grok`, ai-grounded tier): queries xAI's
+  official Responses API with the `web_search` tool, normalizes `url_citation`
+  annotations into citations (inline `[[n]](url)` markers preserved), and
+  reports honest API-reported cost converted from xAI's `cost_in_usd_ticks`.
+  Defaults to `grok-4.5` with a per-provider model override (`grok-4.3` for
+  cost-sensitive runs). Requires `XAI_API_KEY`. Joins the `comprehensive` and
+  `all` groups only — deliberately not `quick`/`fast`, so default-group runs
+  see no cost change. X/social search is intentionally excluded from requests.
+- Benchmark CI guard lockstep test: every provider credential env var must be
+  present in the benchmark secret blocklist.
+
+### Changed
+
+- **`brave-answers` migrated to Brave's Answers API** (the OpenAI-compatible
+  `chat/completions` endpoint) from the deprecated Summarizer Search flow.
+  Citations arrive as inline stream metadata and are normalized/deduplicated;
+  usage comes from Brave's response headers; `usage.costUsd` is set only when
+  Brave reports an explicit dollar figure. Provider id, env var, tier, and
+  group membership are unchanged. Answer content is now the native Answers
+  markdown — the adapter-fabricated `## AI Summary`/`## Web Results` headings
+  are gone.
+- `brave-answers` metering moved from `request_priced` (fixed $0.009 estimate)
+  to `api_unit_priced` (search + token billing, units-only — no fabricated USD
+  pre-dispatch estimate). `PRICING_VERSION` bumped to `2026-07`.
+- Dependency refresh within existing ranges (biome 2.5.5, wrangler 4.113,
+  marked, p-limit, vitest-pool-workers).
+
+### Fixed
+
+- Brave error messages now carry actionable hints keyed to live-verified error
+  codes: an invalid key (`422 SUBSCRIPTION_TOKEN_INVALID`) points at
+  `BRAVE_API_KEY`, and a key without the Answers subscription
+  (`400 OPTION_NOT_IN_PLAN`) points at the plan upgrade. Grok's live-verified
+  bad-key response (HTTP 400) also gets the `XAI_API_KEY` hint.
+- Hardened Brave stream handling: byte-accurate response-size caps for streams
+  and error bodies, JSON-string-aware citation-tag boundary parsing, malformed
+  stream frames skipped instead of discarding the answer, and mid-stream
+  aborts terminating hung streams without hanging on cancellation.
+- README parity with the site docs: the `answer` example reflects the real
+  `quick` group, the `run.json` sample documents the optional `usage`/`metering`
+  fields, and the run-directory anatomy includes `answer.md` and
+  `verification.json`.
+
 ## [1.3.0] - 2026-07-18
 
 ### Added
