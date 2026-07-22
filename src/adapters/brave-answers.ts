@@ -157,7 +157,7 @@ export class BraveAnswersProvider extends BaseProvider {
     const decoder = new TextDecoder();
     let receivedBytes = 0;
     let text = '';
-    while (receivedBytes <= limit) {
+    while (receivedBytes < limit) {
       const { done, value } = await reader.read();
       if (done) return text + decoder.decode();
       if (!value) continue;
@@ -166,7 +166,7 @@ export class BraveAnswersProvider extends BaseProvider {
       text += decoder.decode(value.subarray(0, allowed), { stream: true });
     }
     void reader.cancel().catch(() => {});
-    return text;
+    return text + decoder.decode();
   }
 
   private async readStream(
