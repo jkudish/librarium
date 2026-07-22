@@ -334,26 +334,26 @@ describe('GrokProvider — live-verified edge cases', () => {
 
   // NaN cannot appear on the JSON wire (it serializes to null), so null is
   // the realistic degenerate value alongside a negative number.
-  it.each([[-1], [null]])(
-    'omits costUsd when cost_in_usd_ticks is %s',
-    async (ticks) => {
-      globalThis.fetch = vi.fn().mockResolvedValueOnce(
-        jsonResponse(200, {
-          ...outputResponse(),
-          usage: {
-            input_tokens: 10,
-            output_tokens: 5,
-            cost_in_usd_ticks: ticks,
-          },
-        }),
-      );
+  it.each([
+    [-1],
+    [null],
+  ])('omits costUsd when cost_in_usd_ticks is %s', async (ticks) => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        ...outputResponse(),
+        usage: {
+          input_tokens: 10,
+          output_tokens: 5,
+          cost_in_usd_ticks: ticks,
+        },
+      }),
+    );
 
-      const result = await provider().execute('q', { timeout: 10 });
+    const result = await provider().execute('q', { timeout: 10 });
 
-      expect(result.error).toBeUndefined();
-      expect(result.usage?.costUsd).toBeUndefined();
-    },
-  );
+    expect(result.error).toBeUndefined();
+    expect(result.usage?.costUsd).toBeUndefined();
+  });
 
   it('drops url_citation annotations that lack a url', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
