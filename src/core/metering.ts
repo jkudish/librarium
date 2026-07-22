@@ -28,7 +28,7 @@ import type {
  */
 
 /** Pricing snapshot tag for the built-in default estimates below. */
-export const PRICING_VERSION = '2026-06';
+export const PRICING_VERSION = '2026-07';
 
 interface MeteringCapability {
   kind: MeteringKind;
@@ -67,11 +67,12 @@ const REGISTRY: Record<string, MeteringCapability> = {
   'gemini-grounded': { kind: 'native_tokens' },
   'openrouter-online': { kind: 'native_cost' },
   exa: { kind: 'native_cost' },
-  // Brave AI answers — request-priced (Data-for-AI plan), deterministic-ish.
+  // Brave AI Answers — billed for searches and input/output tokens. The
+  // billable mix is only known after the API returns its usage headers, so no
+  // pre-dispatch USD estimate would be honest.
   'brave-answers': {
-    kind: 'request_priced',
-    defaultPerRequestUsd: 0.009,
-    unit: 'request',
+    kind: 'api_unit_priced',
+    unit: 'search + token',
   },
   // You.com — priced per query, plan-dependent: units only, no default USD.
   'you-research': {

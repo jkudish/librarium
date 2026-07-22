@@ -25,6 +25,7 @@ describe('metering registry: kinds', () => {
     expect(getMeteringKind('tavily')).toBe('credit_priced');
     expect(getMeteringKind('firecrawl-search')).toBe('credit_priced');
     expect(getMeteringKind('jina-search')).toBe('api_unit_priced');
+    expect(getMeteringKind('brave-answers')).toBe('api_unit_priced');
   });
 
   it('resolves legacy aliases to the canonical kind', () => {
@@ -89,6 +90,12 @@ describe('metering registry: estimates', () => {
     expect(est?.estimatedCostUsd).toBeUndefined();
   });
 
+  it('does not fabricate a pre-dispatch estimate for Brave Answers search-plus-token pricing', () => {
+    const est = estimateMetering('brave-answers');
+    expect(est?.unit).toBe('search + token');
+    expect(est?.estimatedCostUsd).toBeUndefined();
+  });
+
   it('produces no estimate for native or unmetered providers', () => {
     expect(estimateMetering('claude')).toBeUndefined();
     expect(estimateMetering('perplexity-sonar-pro')).toBeUndefined();
@@ -97,7 +104,7 @@ describe('metering registry: estimates', () => {
 
   it('pins the pricing snapshot version (bump deliberately)', () => {
     // Tripwire: changing default prices should bump PRICING_VERSION.
-    expect(PRICING_VERSION).toBe('2026-06');
+    expect(PRICING_VERSION).toBe('2026-07');
   });
 });
 
