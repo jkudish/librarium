@@ -1,3 +1,4 @@
+import { MAX_RESPONSE_SIZE } from '../constants.js';
 import type {
   Citation,
   ProviderOptions,
@@ -6,6 +7,8 @@ import type {
   ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
+
+const MAX_ERROR_BODY_SIZE = 256 * 1024;
 
 const BRAVE_ANSWERS_URL =
   'https://api.search.brave.com/res/v1/chat/completions';
@@ -81,7 +84,7 @@ export class BraveAnswersProvider extends BaseProvider {
         );
       }
 
-      const streamed = await this.readStream(response);
+      const streamed = await this.readStream(response, controller.signal);
       const parsed = this.extractInlineMetadata(streamed.content);
       const usage = this.extractUsage(response.headers);
 
@@ -140,7 +143,7 @@ export class BraveAnswersProvider extends BaseProvider {
   }
 
   private async readErrorBody(response: Response): Promise<unknown> {
-    const text = await response.text();
+    const text = await this.readBounded(response, MAX_ERROR_BODY_SIZE);
     try {
       return JSON.parse(text) as unknown;
     } catch {
@@ -148,12 +151,36 @@ export class BraveAnswersProvider extends BaseProvider {
     }
   }
 
+  private async readBounded(response: Response, limit: number): Promise<string> {
+    if (!response.body) return '';
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    while (text.length <= limit) {
+      const { done, value } = await reader.read();
+      if (done) return text + decoder.decode();
+      text += decoder.decode(value, { stream: true });
+    }
+    await reader.cancel();
+    return text.slice(0, limit);
+  }
+
   private async readStream(
     response: Response,
+    signal: AbortSignal,
   ): Promise<{ content: string; model?: string }> {
     if (!response.body) return { content: '' };
 
     const reader = response.body.getReader();
+    // Race every read against the abort signal so a hung stream that never
+    // yields (or a body that ignores fetch's abort wiring) still terminates.
+    const aborted = new Promise<never>((_, reject) => {
+      const fail = () => reject(new Error('The operation was aborted'));
+      if (signal.aborted) fail();
+      else signal.addEventListener('abort', fail, { once: true });
+    });
+    aborted.catch(() => {});
+    const read = () => Promise.race([reader.read(), aborted]);
     const decoder = new TextDecoder();
     let buffer = '';
     let content = '';
@@ -172,7 +199,9 @@ export class BraveAnswersProvider extends BaseProvider {
       try {
         payload = JSON.parse(data) as BraveStreamPayload;
       } catch {
-        throw new Error('Brave Answers stream contained invalid JSON');
+        // A single malformed frame must not discard an otherwise-complete
+        // answer; skip it and keep consuming the stream.
+        return;
       }
 
       if (typeof payload.model === 'string') model = payload.model;
@@ -181,10 +210,22 @@ export class BraveAnswersProvider extends BaseProvider {
     };
 
     while (true) {
-      const { done, value } = await reader.read();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await read());
+      } catch (err) {
+        await reader.cancel().catch(() => {});
+        throw err;
+      }
       if (done) break;
+      if (!value) continue;
 
       buffer += decoder.decode(value, { stream: true });
+      if (content.length + buffer.length > MAX_RESPONSE_SIZE) {
+        await reader.cancel();
+        throw new Error(`Response exceeds ${MAX_RESPONSE_SIZE} bytes`);
+      }
       let boundary = buffer.search(/\r?\n\r?\n/);
       while (boundary !== -1) {
         const separatorLength = buffer.startsWith('\r\n', boundary) ? 4 : 2;
@@ -206,44 +247,86 @@ export class BraveAnswersProvider extends BaseProvider {
   } {
     const citations: Citation[] = [];
     const seenUrls = new Set<string>();
-    const citationPattern = /<citation>\s*([\s\S]*?)\s*<\/citation>/g;
+    const output: string[] = [];
+    const openTagPattern = /<(citation|enum_item)>/g;
+    let cursor = 0;
 
-    for (const match of content.matchAll(citationPattern)) {
-      let metadata: unknown;
-      try {
-        metadata = JSON.parse(match[1]);
-      } catch {
-        continue;
+    let open = openTagPattern.exec(content);
+    while (open) {
+      output.push(content.slice(cursor, open.index));
+      const payload = this.parseTagPayload(
+        content,
+        open.index + open[0].length,
+        `</${open[1]}>`,
+      );
+
+      if (payload.end === -1) {
+        // Unclosed tag: everything after it is truncated metadata, not answer
+        // text — drop it rather than leaking raw payload into the content.
+        cursor = content.length;
+        break;
       }
 
-      if (!this.isRecord(metadata) || typeof metadata.url !== 'string')
-        continue;
-      if (seenUrls.has(metadata.url)) continue;
-      seenUrls.add(metadata.url);
+      if (
+        open[1] === 'citation' &&
+        this.isRecord(payload.value) &&
+        typeof payload.value.url === 'string'
+      ) {
+        const metadata = payload.value;
+        const url = metadata.url as string;
+        if (!seenUrls.has(url)) {
+          seenUrls.add(url);
+          citations.push({
+            url,
+            title: this.firstString(
+              metadata.title,
+              metadata.source,
+              metadata.name,
+            ),
+            snippet: this.firstString(metadata.snippet, metadata.description),
+            provider: this.id,
+          });
+        }
+      }
 
-      const title = this.firstString(
-        metadata.title,
-        metadata.source,
-        metadata.name,
-      );
-      const snippet = this.firstString(metadata.snippet, metadata.description);
-      citations.push({
-        url: metadata.url,
-        title,
-        snippet,
-        provider: this.id,
-      });
+      cursor = payload.end;
+      openTagPattern.lastIndex = cursor;
+      open = openTagPattern.exec(content);
     }
 
-    return {
-      content: content
-        .replace(
-          /<(?:citation|enum_item)>[\s\S]*?<\/(?:citation|enum_item)>/g,
-          '',
-        )
-        .trim(),
-      citations,
-    };
+    output.push(content.slice(cursor));
+    return { content: output.join('').trim(), citations };
+  }
+
+  /**
+   * Finds the real closing tag for an inline metadata payload. A literal
+   * closing tag can appear INSIDE the payload's JSON strings (titles and
+   * snippets are web-derived), so the first close-tag occurrence is only
+   * accepted once the enclosed span parses as JSON; otherwise scanning
+   * continues to the next occurrence. Payloads that never parse fall back to
+   * the first occurrence so malformed tags are still stripped from content.
+   */
+  private parseTagPayload(
+    content: string,
+    innerStart: number,
+    closeTag: string,
+  ): { value: unknown; end: number } {
+    let searchFrom = innerStart;
+    let fallbackEnd = -1;
+    for (let attempts = 0; attempts < 32; attempts++) {
+      const candidate = content.indexOf(closeTag, searchFrom);
+      if (candidate === -1) break;
+      if (fallbackEnd === -1) fallbackEnd = candidate + closeTag.length;
+      try {
+        return {
+          value: JSON.parse(content.slice(innerStart, candidate).trim()),
+          end: candidate + closeTag.length,
+        };
+      } catch {
+        searchFrom = candidate + closeTag.length;
+      }
+    }
+    return { value: undefined, end: fallbackEnd };
   }
 
   private extractUsage(headers: Headers): ProviderUsage | undefined {

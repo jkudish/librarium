@@ -39,3 +39,13 @@ describe('default groups -- llm tier', () => {
     expect(DEFAULT_GROUPS.fast).not.toContain('grok');
   });
 });
+
+describe('default groups -- grok membership invariant', () => {
+  it('keeps grok out of every group except comprehensive and all', () => {
+    const allowed = new Set(['comprehensive', 'all']);
+    for (const [group, members] of Object.entries(DEFAULT_GROUPS)) {
+      if (allowed.has(group)) expect(members).toContain('grok');
+      else expect(members).not.toContain('grok');
+    }
+  });
+});

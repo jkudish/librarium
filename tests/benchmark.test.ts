@@ -934,3 +934,16 @@ describe('benchmark runtime isolation', () => {
     );
   });
 });
+
+describe('benchmark CI guard secret list', () => {
+  it('covers every provider credential env var (lockstep with PROVIDER_ENV_VARS)', async () => {
+    const { PROVIDER_ENV_VARS } = await import('../src/constants.js');
+    const { secretEnvironmentVariables } = await import(
+      '../benchmark/lib/guard.mjs'
+    );
+    const guarded = new Set(secretEnvironmentVariables);
+    for (const envVar of new Set(Object.values(PROVIDER_ENV_VARS))) {
+      expect(guarded, `guard.mjs must list ${envVar}`).toContain(envVar);
+    }
+  });
+});

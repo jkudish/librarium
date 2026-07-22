@@ -258,3 +258,115 @@ describe('Brave Answers provider', () => {
     );
   });
 });
+
+describe('Brave Answers provider — stream robustness', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('handles a literal closing tag inside citation JSON strings without corrupting content', async () => {
+    const citation = JSON.stringify({
+      url: 'https://example.com/tricky',
+      title: 'Tricky title',
+      snippet: 'web text with a literal </citation> inside the snippet',
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          streamEvent(`Before <citation>${citation}</citation> after.`),
+          'data: [DONE]\n\n',
+        ]),
+      );
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Before  after.');
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/tricky',
+        title: 'Tricky title',
+        snippet: 'web text with a literal </citation> inside the snippet',
+        provider: 'brave-answers',
+      },
+    ]);
+  });
+
+  it('drops an unclosed citation tag tail instead of leaking payload into content', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          streamEvent('Answer text. <citation>{"url":"https://example.com/x","snippet":"trunca'),
+          'data: [DONE]\n\n',
+        ]),
+      );
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Answer text.');
+    expect(result.citations).toEqual([]);
+  });
+
+  it('skips a malformed stream frame without discarding the rest of the answer', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      sseResponse([
+        streamEvent('First part. '),
+        'data: {broken json\n\n',
+        streamEvent('Second part.'),
+        'data: [DONE]\n\n',
+      ]),
+    );
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('First part. Second part.');
+  });
+
+  it('fails with a normalized error when the stream exceeds the response size cap', async () => {
+    const oversized = `data: ${'x'.repeat(10 * 1024 * 1024 + 64)}`;
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(sseResponse([oversized]));
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toMatch(/exceeds/i);
+    expect(result.content).toBe('');
+  });
+
+  it('returns a normalized error instead of throwing when aborted mid-stream', async () => {
+    const encoder = new TextEncoder();
+    const abortController = new AbortController();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(streamEvent('Partial answer. ')));
+        // Never close: the stream hangs until the caller aborts.
+        setTimeout(() => abortController.abort(), 20);
+      },
+    });
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(body, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    const result = await provider().execute('q', {
+      timeout: 10,
+      signal: abortController.signal,
+    });
+
+    expect(result.error).toMatch(/abort/i);
+    expect(result.content).toBe('');
+  });
+});

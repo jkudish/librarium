@@ -165,7 +165,8 @@ export class GrokProvider extends BaseProvider {
 
   protected override formatError(status: number, data: unknown): string {
     const base = `API returned ${status}: ${this.errorMessage(data)}`;
-    if (status === 401) {
+    // Live-verified: xAI reports a bad API key as HTTP 400, not 401.
+    if (status === 401 || (status === 400 && /api key/i.test(base))) {
       return `${base} — check XAI_API_KEY and access in https://console.x.ai`;
     }
     if (status === 403) {

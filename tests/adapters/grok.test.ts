@@ -307,3 +307,80 @@ describe('GrokProvider', () => {
     );
   });
 });
+
+describe('GrokProvider — live-verified edge cases', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('adds the API key hint to a 400 bad-key response (xAI reports bad keys as 400, not 401)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(400, {
+        error: { message: 'Incorrect API key provided.' },
+      }),
+    );
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toContain('400');
+    expect(result.error).toContain('XAI_API_KEY');
+  });
+
+  it.each([[-1], [Number.NaN]])(
+    'omits costUsd when cost_in_usd_ticks is %s',
+    async (ticks) => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse(200, {
+          ...outputResponse(),
+          usage: { input_tokens: 10, output_tokens: 5, cost_in_usd_ticks: ticks },
+        }),
+      );
+
+      const result = await provider().execute('q', { timeout: 10 });
+
+      expect(result.error).toBeUndefined();
+      expect(result.usage?.costUsd).toBeUndefined();
+    },
+  );
+
+  it('drops url_citation annotations that lack a url', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'grok-4.5',
+        output: [
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'Answer.',
+                annotations: [
+                  { type: 'url_citation', start_index: 0, end_index: 5, title: '1' },
+                  {
+                    type: 'url_citation',
+                    url: 'https://example.com/ok',
+                    start_index: 0,
+                    end_index: 5,
+                    title: '2',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0]?.url).toBe('https://example.com/ok');
+  });
+});

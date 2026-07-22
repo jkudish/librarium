@@ -63,7 +63,7 @@
       "envVar": "XAI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-07"
     },
     {
       "id": "openrouter-online",
