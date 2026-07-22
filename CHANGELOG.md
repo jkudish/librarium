@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-22
+
 ### Added
 
 - **xAI Grok grounded provider** (`grok`, ai-grounded tier): queries xAI's
@@ -51,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `quick` group, the `run.json` sample documents the optional `usage`/`metering`
   fields, and the run-directory anatomy includes `answer.md` and
   `verification.json`.
+
 
 ## [1.3.0] - 2026-07-18
 
@@ -236,7 +239,7 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v1.4.0...HEAD
 [1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0
 [0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
@@ -245,3 +248,4 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 [0.1.1]: https://github.com/jkudish/librarium/compare/v0.1.0...v0.1.1
 [0.1.2]: https://github.com/jkudish/librarium/compare/v0.1.1...v0.1.2
 [1.3.0]: https://github.com/jkudish/librarium/releases/tag/v1.3.0
+[1.4.0]: https://github.com/jkudish/librarium/releases/tag/v1.4.0
