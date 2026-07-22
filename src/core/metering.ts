@@ -66,8 +66,10 @@ const REGISTRY: Record<string, MeteringCapability> = {
   // AI-grounded.
   'perplexity-sonar-pro': { kind: 'native_cost' },
   'gemini-grounded': { kind: 'native_tokens' },
-  // xAI returns tokens and tool usage but no dollar total. The estimate is a
-  // baseline Grok 4.5 request with one web search; actual usage remains honest.
+  // xAI reports tokens plus an actual dollar total (cost_in_usd_ticks), which
+  // the adapter surfaces as reported costUsd. Kind stays native_tokens so the
+  // pre-dispatch estimate (a baseline Grok 4.5 request with one web search)
+  // keeps powering --max-estimated-cost reservations.
   grok: {
     kind: 'native_tokens',
     defaultPerRequestUsd: 0.015,

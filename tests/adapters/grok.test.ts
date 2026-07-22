@@ -41,6 +41,32 @@ describe('GrokProvider', () => {
     vi.restoreAllMocks();
   });
 
+  it('treats a null error field on a successful response as success', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'grok-4.5',
+        error: null,
+        output: [
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'Grounded answer.',
+                annotations: [],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const result = await provider().execute('ground this', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Grounded answer.');
+  });
+
   it('preserves inline citations and normalizes deduplicated URL annotations', async () => {
     const answer =
       'The official report confirms the result [[1]](https://source.example/a). Another source adds context [[2]](https://source.example/b).';
@@ -151,6 +177,29 @@ describe('GrokProvider', () => {
       },
     });
     expect(result.usage?.costUsd).toBeUndefined();
+  });
+
+  it('converts reported cost_in_usd_ticks into a reported costUsd', async () => {
+    // Live-captured shape: xAI nests per-tool call counts and an actual cost
+    // (in 10^-10 USD ticks) inside the usage object.
+    const usage = {
+      input_tokens: 9896,
+      output_tokens: 619,
+      total_tokens: 10515,
+      cost_in_usd_ticks: 300244000,
+      server_side_tool_usage_details: {
+        web_search_calls: 2,
+        x_search_calls: 0,
+      },
+    };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { ...outputResponse(), usage }));
+
+    const result = await provider().execute('ground this', { timeout: 10 });
+
+    expect(result.usage?.costUsd).toBeCloseTo(0.0300244, 10);
+    expect(result.usage?.raw).toEqual({ usage });
   });
 
   it('sends only the Responses API web_search tool with authorization', async () => {

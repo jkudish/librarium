@@ -31,8 +31,13 @@ interface GrokUsage {
   total_tokens?: number;
   reasoning_tokens?: number;
   cached_tokens?: number;
+  cost_in_usd_ticks?: number;
   [key: string]: unknown;
 }
+
+// xAI reports actual request cost in "ticks" of 10^-10 USD
+// (verified against the published per-token and per-search prices).
+const USD_PER_COST_TICK = 1e-10;
 
 interface GrokResponse {
   model?: string;
@@ -103,7 +108,9 @@ export class GrokProvider extends BaseProvider {
         );
       }
 
-      if (data.error !== undefined) {
+      // xAI includes `error: null` on successful responses; only a non-null
+      // error value indicates a failure.
+      if (data.error !== undefined && data.error !== null) {
         return this.errorResult(
           durationMs,
           `Grok API error: ${this.errorMessage(data.error)}`,
@@ -289,11 +296,19 @@ export class GrokProvider extends BaseProvider {
       raw.server_side_tool_usage = serverSideToolUsage;
     }
 
-    return {
+    const result: ProviderUsage = {
       inputTokens: usage?.input_tokens,
       outputTokens: usage?.output_tokens,
       totalTokens: usage?.total_tokens,
       raw,
     };
+    if (
+      typeof usage?.cost_in_usd_ticks === 'number' &&
+      Number.isFinite(usage.cost_in_usd_ticks) &&
+      usage.cost_in_usd_ticks >= 0
+    ) {
+      result.costUsd = usage.cost_in_usd_ticks * USD_PER_COST_TICK;
+    }
+    return result;
   }
 }
