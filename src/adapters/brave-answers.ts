@@ -443,6 +443,16 @@ export class BraveAnswersProvider extends BaseProvider {
     const detail = this.braveErrorDetail(body);
     const base = `Brave Answers API returned ${status}: ${detail}`;
 
+    // Live-verified: Brave reports an invalid key as 422 and a key whose plan
+    // lacks the Answers option as 400, so route hints by error code first.
+    const code = this.braveErrorCode(body);
+    if (code === 'SUBSCRIPTION_TOKEN_INVALID') {
+      return `${base} — check that ${this.envVar} is a valid Brave Search API key`;
+    }
+    if (code === 'OPTION_NOT_IN_PLAN') {
+      return `${base} — your Brave plan does not include the Answers API; upgrade at https://api-dashboard.search.brave.com`;
+    }
+
     if (status === 401) {
       return `${base} — check that ${this.envVar} is valid and enabled for the Brave Answers plan`;
     }
@@ -465,6 +475,13 @@ export class BraveAnswersProvider extends BaseProvider {
       return `${base} — check the request parameters`;
     }
     return base;
+  }
+
+  private braveErrorCode(body: unknown): string | undefined {
+    if (!this.isRecord(body)) return undefined;
+    const error = body.error;
+    if (!this.isRecord(error)) return undefined;
+    return this.firstString(error.code);
   }
 
   private braveErrorDetail(body: unknown): string {

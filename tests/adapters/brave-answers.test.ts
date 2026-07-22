@@ -174,7 +174,51 @@ describe('Brave Answers provider', () => {
 
     expect(result.error).toContain('401');
     expect(result.error).toContain('Token rejected');
-    expect(result.error).toContain('Answers plan');
+    expect(result.error).toContain('valid Brave Search API key');
+  });
+
+  it('gives the key hint for a live-shaped 422 invalid-token rejection', async () => {
+    // Live-captured envelope: Brave reports an invalid key as 422, not 401.
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      errorResponse(422, {
+        error: {
+          code: 'SUBSCRIPTION_TOKEN_INVALID',
+          detail: 'The provided subscription token is invalid.',
+          meta: { component: 'authentication' },
+          status: 422,
+        },
+        type: 'ErrorResponse',
+      }),
+    );
+
+    const result = await provider().execute('bad key', { timeout: 10 });
+
+    expect(result.error).toContain('422');
+    expect(result.error).toContain('valid Brave Search API key');
+    expect(result.error).not.toContain('shorter query');
+  });
+
+  it('gives the plan-upgrade hint for a live-shaped 400 option-not-in-plan rejection', async () => {
+    // Live-captured envelope: a key without the Answers subscription gets 400.
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      errorResponse(400, {
+        type: 'ErrorResponse',
+        error: {
+          id: 'fe2985f4-23e8-4a71-a2d2-740b1f5dcc9e',
+          status: 400,
+          detail: 'The option is not subscribed in the plan.',
+          meta: { component: 'authentication' },
+          code: 'OPTION_NOT_IN_PLAN',
+        },
+        time: 1784763543,
+      }),
+    );
+
+    const result = await provider().execute('no plan', { timeout: 10 });
+
+    expect(result.error).toContain('400');
+    expect(result.error).toContain('not subscribed');
+    expect(result.error).toContain('does not include the Answers API');
   });
 
   it('normalizes 402 errors from the top-level Brave error envelope', async () => {
