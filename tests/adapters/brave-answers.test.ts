@@ -299,6 +299,28 @@ describe('Brave Answers provider — stream robustness', () => {
     ]);
   });
 
+  it('survives a payload with many embedded closing tags inside a JSON string', async () => {
+    const citation = JSON.stringify({
+      url: 'https://example.com/many',
+      snippet: `${'</citation> '.repeat(40)}end`,
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          streamEvent(`Start <citation>${citation}</citation> end.`),
+          'data: [DONE]\n\n',
+        ]),
+      );
+
+    const result = await provider().execute('q', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Start  end.');
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0]?.url).toBe('https://example.com/many');
+  });
+
   it('drops an unclosed citation tag tail instead of leaking payload into content', async () => {
     globalThis.fetch = vi
       .fn()

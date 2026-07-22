@@ -332,7 +332,9 @@ describe('GrokProvider — live-verified edge cases', () => {
     expect(result.error).toContain('XAI_API_KEY');
   });
 
-  it.each([[-1], [Number.NaN]])(
+  // NaN cannot appear on the JSON wire (it serializes to null), so null is
+  // the realistic degenerate value alongside a negative number.
+  it.each([[-1], [null]])(
     'omits costUsd when cost_in_usd_ticks is %s',
     async (ticks) => {
       globalThis.fetch = vi.fn().mockResolvedValueOnce(

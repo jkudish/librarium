@@ -155,14 +155,18 @@ export class BraveAnswersProvider extends BaseProvider {
     if (!response.body) return '';
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let receivedBytes = 0;
     let text = '';
-    while (text.length <= limit) {
+    while (receivedBytes <= limit) {
       const { done, value } = await reader.read();
       if (done) return text + decoder.decode();
-      text += decoder.decode(value, { stream: true });
+      if (!value) continue;
+      receivedBytes += value.byteLength;
+      const allowed = value.byteLength - Math.max(0, receivedBytes - limit);
+      text += decoder.decode(value.subarray(0, allowed), { stream: true });
     }
-    await reader.cancel();
-    return text.slice(0, limit);
+    void reader.cancel().catch(() => {});
+    return text;
   }
 
   private async readStream(
@@ -209,23 +213,27 @@ export class BraveAnswersProvider extends BaseProvider {
       if (typeof delta === 'string') content += delta;
     };
 
+    let receivedBytes = 0;
     while (true) {
       let done: boolean;
       let value: Uint8Array | undefined;
       try {
         ({ done, value } = await read());
       } catch (err) {
-        await reader.cancel().catch(() => {});
+        // Best-effort cancel: never await it on a terminal error path — a
+        // hung underlying source would otherwise swallow the primary error.
+        void reader.cancel().catch(() => {});
         throw err;
       }
       if (done) break;
       if (!value) continue;
 
-      buffer += decoder.decode(value, { stream: true });
-      if (content.length + buffer.length > MAX_RESPONSE_SIZE) {
-        await reader.cancel();
+      receivedBytes += value.byteLength;
+      if (receivedBytes > MAX_RESPONSE_SIZE) {
+        void reader.cancel().catch(() => {});
         throw new Error(`Response exceeds ${MAX_RESPONSE_SIZE} bytes`);
       }
+      buffer += decoder.decode(value, { stream: true });
       let boundary = buffer.search(/\r?\n\r?\n/);
       while (boundary !== -1) {
         const separatorLength = buffer.startsWith('\r\n', boundary) ? 4 : 2;
@@ -301,32 +309,61 @@ export class BraveAnswersProvider extends BaseProvider {
   /**
    * Finds the real closing tag for an inline metadata payload. A literal
    * closing tag can appear INSIDE the payload's JSON strings (titles and
-   * snippets are web-derived), so the first close-tag occurrence is only
-   * accepted once the enclosed span parses as JSON; otherwise scanning
-   * continues to the next occurrence. Payloads that never parse fall back to
-   * the first occurrence so malformed tags are still stripped from content.
+   * snippets are web-derived), so the boundary is located with a linear
+   * quote-and-escape-aware scan that ignores occurrences inside JSON strings.
+   * Payloads that still fail to parse fall back to the first occurrence so
+   * malformed tags are stripped from content rather than leaked.
    */
   private parseTagPayload(
     content: string,
     innerStart: number,
     closeTag: string,
   ): { value: unknown; end: number } {
-    let searchFrom = innerStart;
-    let fallbackEnd = -1;
-    for (let attempts = 0; attempts < 32; attempts++) {
-      const candidate = content.indexOf(closeTag, searchFrom);
-      if (candidate === -1) break;
-      if (fallbackEnd === -1) fallbackEnd = candidate + closeTag.length;
+    const boundary = this.findCloseTagOutsideStrings(
+      content,
+      innerStart,
+      closeTag,
+    );
+    if (boundary !== -1) {
       try {
         return {
-          value: JSON.parse(content.slice(innerStart, candidate).trim()),
-          end: candidate + closeTag.length,
+          value: JSON.parse(content.slice(innerStart, boundary).trim()),
+          end: boundary + closeTag.length,
         };
       } catch {
-        searchFrom = candidate + closeTag.length;
+        // Fall through to the malformed-payload fallback below.
       }
     }
-    return { value: undefined, end: fallbackEnd };
+
+    const first = content.indexOf(closeTag, innerStart);
+    return {
+      value: undefined,
+      end: first === -1 ? -1 : first + closeTag.length,
+    };
+  }
+
+  private findCloseTagOutsideStrings(
+    content: string,
+    from: number,
+    closeTag: string,
+  ): number {
+    let inString = false;
+    let escaped = false;
+    for (let i = from; i < content.length; i++) {
+      const char = content[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === '<' && content.startsWith(closeTag, i)) return i;
+    }
+    return -1;
   }
 
   private extractUsage(headers: Headers): ProviderUsage | undefined {
