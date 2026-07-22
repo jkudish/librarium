@@ -171,6 +171,8 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Gemini Chat | `gemini-chat` | llm | `GEMINI_API_KEY` |
 | OpenRouter Chat | `openrouter-chat` | llm | `OPENROUTER_API_KEY` |
 
+Brave AI Answers uses Brave's streaming Answers endpoint so its grounded answer text and inline citations can be normalized together.
+
 ### Provider ID Migration (Legacy Aliases)
 
 Perplexity provider IDs were renamed to match current product names:
@@ -364,12 +366,14 @@ Every provider declares a **metering kind** in a built-in registry, visible in `
 |---|---|---|
 | `native_cost` | API returns a real per-call cost | Perplexity, Exa, OpenRouter |
 | `native_tokens` | API returns token counts but no cost | Claude, OpenAI, Gemini |
-| `request_priced` | Deterministic/plan price per request | SerpAPI, SearchAPI, Brave, Kagi |
+| `request_priced` | Deterministic/plan price per request | SerpAPI, SearchAPI, Brave Web Search, Kagi |
 | `credit_priced` | Priced in account credits per request | Tavily, Firecrawl, You.com |
-| `api_unit_priced` | Priced per API unit/token, size known only after the call | Jina |
+| `api_unit_priced` | Priced per API unit/token, size known only after the call | Jina, Brave AI Answers |
 | `manual_unmetered` | No reliable per-call metering | custom providers |
 
 For request- and credit-priced providers, librarium can produce a **network-free estimate** *before* a call runs. Estimates are guesses, never facts: they live under each result's `metering.estimate` (never in `usage.costUsd`), carry a `costConfidence` (`estimated` from a built-in default snapshot, `configured` when you supply pricing, `unknown` when there's no basis) and a `pricingVersion`. Plan-dependent credit providers emit unit metadata (`billableUnits`, `unit`) **without** an invented dollar figure until you configure a price via provider `options` (`perRequestUsd`, or `creditUsd` + `creditsPerRequest`).
+
+Brave AI Answers is billed by searches plus input/output tokens, so librarium records the usage headers it receives but does not manufacture a single pre-dispatch dollar estimate or put a pricing-table calculation in reported cost.
 
 **Estimated budget (`--max-estimated-cost <usd>` or `defaults.maxEstimatedCostUsd`).** A pre-dispatch *reservation* ceiling, independent of `--max-cost` (the two never reconcile into one number). Before each provider launches, its estimated cost is reserved; once the reservation crosses the ceiling, not-yet-started providers are skipped with an estimated-budget reason. Providers with no estimable cost reserve `0`, so the reserved total is an honest lower bound. This gives products pre-call budget reservation that `--max-cost` (which only learns cost *after* a call) cannot. When it trips, the summary adds a line like:
 
