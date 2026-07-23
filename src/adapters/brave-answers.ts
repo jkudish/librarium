@@ -472,9 +472,9 @@ export class BraveAnswersProvider extends BaseProvider {
     streamTokens: { input?: number; output?: number } | undefined,
   ): ProviderUsage | undefined {
     const inputTokens =
-      inline.inputTokens ?? headerUsage?.inputTokens ?? streamTokens?.input;
+      inline.inputTokens ?? streamTokens?.input ?? headerUsage?.inputTokens;
     const outputTokens =
-      inline.outputTokens ?? headerUsage?.outputTokens ?? streamTokens?.output;
+      inline.outputTokens ?? streamTokens?.output ?? headerUsage?.outputTokens;
     const costUsd = inline.costUsd ?? headerUsage?.costUsd;
     const headerRaw = this.isRecord(headerUsage?.raw) ? headerUsage.raw : {};
     const raw: JsonRecord = { ...headerRaw, ...inline.raw };

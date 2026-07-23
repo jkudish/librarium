@@ -255,6 +255,29 @@ describe('Brave Answers provider', () => {
     });
   });
 
+  it('prefers final-chunk token counts over legacy headers when no usage tag exists', async () => {
+    const finalChunk = `data: ${JSON.stringify({
+      model: 'brave',
+      choices: [{ delta: { content: '' }, finish_reason: 'stop' }],
+      usage: { completion_tokens: 50, prompt_tokens: 700 },
+    })}\n\n`;
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      sseResponse([streamEvent('Answer.'), finalChunk, 'data: [DONE]\n\n'], {
+        'x-request-tokens-in': '999',
+        'x-request-tokens-out': '999',
+      }),
+    );
+
+    const result = await provider().execute('stream over headers', {
+      timeout: 10,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.usage?.inputTokens).toBe(700);
+    expect(result.usage?.outputTokens).toBe(50);
+    expect(result.usage?.totalTokens).toBe(750);
+  });
+
   it('preserves a citation tag split across response chunks', async () => {
     const event = streamEvent(
       'A <citation>{"url":"https://example.com/chunk","snippet":"Chunked"}</citation> answer.',
