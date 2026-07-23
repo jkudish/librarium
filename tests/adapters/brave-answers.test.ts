@@ -114,8 +114,168 @@ describe('Brave Answers provider', () => {
       model: 'brave',
       messages: [{ role: 'user', content: 'what is confirmed?' }],
       stream: true,
-      web_search_options: { enable_citations: true },
+      enable_citations: true,
     });
+  });
+
+  it('parses the live inline <usage> tag for tokens and reported dollars', async () => {
+    // Live-captured stream shape (2026-07-23): usage arrives as a trailing
+    // inline tag, not response headers, and the final chunk carries
+    // OpenAI-style token counts.
+    const usageTag = JSON.stringify({
+      'X-Request-Requests': 1,
+      'X-Request-Queries': 1,
+      'X-Request-Tokens-In': 10631,
+      'X-Request-Tokens-Out': 286,
+      'X-Request-Requests-Cost': 0.0,
+      'X-Request-Queries-Cost': 0.004,
+      'X-Request-Tokens-In-Cost': 0.053155,
+      'X-Request-Tokens-Out-Cost': 0.00143,
+      'X-Request-Total-Cost': 0.058585,
+    });
+    const finalChunk = `data: ${JSON.stringify({
+      model: 'brave-pro',
+      choices: [{ delta: { content: '' }, finish_reason: 'stop' }],
+      usage: { completion_tokens: 286, prompt_tokens: 10631 },
+    })}\n\n`;
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          streamEvent('Canberra is the capital.', 'brave-pro'),
+          streamEvent(`<usage>${usageTag}</usage>`, 'brave-pro'),
+          finalChunk,
+          'data: [DONE]\n\n',
+        ]),
+      );
+
+    const result = await provider().execute('capital of Australia', {
+      timeout: 10,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Canberra is the capital.');
+    expect(result.model).toBe('brave-pro');
+    expect(result.tokenUsage).toEqual({ input: 10631, output: 286 });
+    expect(result.usage).toEqual({
+      inputTokens: 10631,
+      outputTokens: 286,
+      totalTokens: 10917,
+      costUsd: 0.058585,
+      raw: { streamUsage: JSON.parse(usageTag) },
+    });
+  });
+
+  it('falls back to final-chunk token counts when no usage tag or headers exist', async () => {
+    const finalChunk = `data: ${JSON.stringify({
+      model: 'brave',
+      choices: [{ delta: { content: '' }, finish_reason: 'stop' }],
+      usage: { completion_tokens: 12, prompt_tokens: 340 },
+    })}\n\n`;
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([streamEvent('Answer.'), finalChunk, 'data: [DONE]\n\n']),
+      );
+
+    const result = await provider().execute('tokens only', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.tokenUsage).toEqual({ input: 340, output: 12 });
+    expect(result.usage?.costUsd).toBeUndefined();
+    expect(result.usage?.totalTokens).toBe(352);
+  });
+
+  it('extracts live-shaped citation payloads that carry no title', async () => {
+    // Live-captured payload shape: start/end indexes, number, url, favicon,
+    // snippet — no title field.
+    const citation = JSON.stringify({
+      start_index: 133,
+      end_index: 133,
+      number: 1,
+      url: 'https://example.com/live-shape',
+      favicon: 'https://imgs.search.brave.com/icon',
+      snippet: 'Canberra was chosen as a compromise…',
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        sseResponse([
+          streamEvent(
+            `Compromise city.<citation>${citation}</citation>`,
+            'brave-pro',
+          ),
+          'data: [DONE]\n\n',
+        ]),
+      );
+
+    const result = await provider().execute('live citation shape', {
+      timeout: 10,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Compromise city.');
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/live-shape',
+        title: undefined,
+        snippet: 'Canberra was chosen as a compromise…',
+        provider: 'brave-answers',
+      },
+    ]);
+  });
+
+  it('prefers inline usage-tag accounting over legacy response headers', async () => {
+    const usageTag = JSON.stringify({
+      'X-Request-Tokens-In': 100,
+      'X-Request-Tokens-Out': 20,
+      'X-Request-Total-Cost': 0.01,
+    });
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      sseResponse(
+        [streamEvent(`Answer.<usage>${usageTag}</usage>`), 'data: [DONE]\n\n'],
+        {
+          'x-request-tokens-in': '999',
+          'x-request-tokens-out': '999',
+          'x-request-cost-breakdown': '{"total_usd":9.99}',
+        },
+      ),
+    );
+
+    const result = await provider().execute('precedence', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.usage?.inputTokens).toBe(100);
+    expect(result.usage?.outputTokens).toBe(20);
+    expect(result.usage?.costUsd).toBe(0.01);
+    // Header-derived raw fields remain observable alongside the stream tag.
+    expect(result.usage?.raw).toMatchObject({
+      requestTokensIn: 999,
+      streamUsage: JSON.parse(usageTag),
+    });
+  });
+
+  it('prefers final-chunk token counts over legacy headers when no usage tag exists', async () => {
+    const finalChunk = `data: ${JSON.stringify({
+      model: 'brave',
+      choices: [{ delta: { content: '' }, finish_reason: 'stop' }],
+      usage: { completion_tokens: 50, prompt_tokens: 700 },
+    })}\n\n`;
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      sseResponse([streamEvent('Answer.'), finalChunk, 'data: [DONE]\n\n'], {
+        'x-request-tokens-in': '999',
+        'x-request-tokens-out': '999',
+      }),
+    );
+
+    const result = await provider().execute('stream over headers', {
+      timeout: 10,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.usage?.inputTokens).toBe(700);
+    expect(result.usage?.outputTokens).toBe(50);
+    expect(result.usage?.totalTokens).toBe(750);
   });
 
   it('preserves a citation tag split across response chunks', async () => {
@@ -297,7 +457,7 @@ describe('Brave Answers provider', () => {
       {
         model: 'brave',
         stream: true,
-        web_search_options: { enable_citations: true },
+        enable_citations: true,
       },
     );
   });

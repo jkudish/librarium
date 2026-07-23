@@ -19,6 +19,10 @@ interface BraveStreamPayload {
   choices?: Array<{
     delta?: { content?: string };
   }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  } | null;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -67,9 +71,10 @@ export class BraveAnswersProvider extends BaseProvider {
           model: BRAVE_ANSWERS_MODEL,
           messages: [{ role: 'user', content: query }],
           stream: true,
-          web_search_options: {
-            enable_citations: true,
-          },
+          // Live-verified: enable_citations is a top-level body parameter (the
+          // OpenAI SDK passes it via extra_body); nesting it under
+          // web_search_options silently disables citations.
+          enable_citations: true,
         }),
         signal: controller.signal,
       });
@@ -86,7 +91,11 @@ export class BraveAnswersProvider extends BaseProvider {
 
       const streamed = await this.readStream(response, controller.signal);
       const parsed = this.extractInlineMetadata(streamed.content);
-      const usage = this.extractUsage(response.headers);
+      const usage = this.mergeUsage(
+        this.usageFromInlineTag(parsed.usageTag),
+        this.extractUsage(response.headers),
+        streamed.tokenUsage,
+      );
 
       return {
         provider: this.id,
@@ -175,7 +184,11 @@ export class BraveAnswersProvider extends BaseProvider {
   private async readStream(
     response: Response,
     signal: AbortSignal,
-  ): Promise<{ content: string; model?: string }> {
+  ): Promise<{
+    content: string;
+    model?: string;
+    tokenUsage?: { input?: number; output?: number };
+  }> {
     if (!response.body) return { content: '' };
 
     const reader = response.body.getReader();
@@ -192,6 +205,7 @@ export class BraveAnswersProvider extends BaseProvider {
     let buffer = '';
     let content = '';
     let model: string | undefined;
+    let tokenUsage: { input?: number; output?: number } | undefined;
 
     const consumeEvent = (event: string): void => {
       const data = event
@@ -214,6 +228,16 @@ export class BraveAnswersProvider extends BaseProvider {
       if (typeof payload.model === 'string') model = payload.model;
       const delta = payload.choices?.[0]?.delta?.content;
       if (typeof delta === 'string') content += delta;
+
+      // Live-verified: usage is null on every chunk except the final one,
+      // which carries OpenAI-style token counts.
+      if (this.isRecord(payload.usage)) {
+        const input = this.finiteCount(payload.usage.prompt_tokens);
+        const output = this.finiteCount(payload.usage.completion_tokens);
+        if (input !== undefined || output !== undefined) {
+          tokenUsage = { input, output };
+        }
+      }
     };
 
     let receivedBytes = 0;
@@ -249,18 +273,20 @@ export class BraveAnswersProvider extends BaseProvider {
     buffer += decoder.decode();
     if (buffer.trim()) consumeEvent(buffer);
 
-    return { content, model };
+    return { content, model, tokenUsage };
   }
 
   private extractInlineMetadata(content: string): {
     content: string;
     citations: Citation[];
+    usageTag?: JsonRecord;
   } {
     const citations: Citation[] = [];
     const seenUrls = new Set<string>();
     const output: string[] = [];
-    const openTagPattern = /<(citation|enum_item)>/g;
+    const openTagPattern = /<(citation|enum_item|usage)>/g;
     let cursor = 0;
+    let usageTag: JsonRecord | undefined;
 
     let open = openTagPattern.exec(content);
     while (open) {
@@ -276,6 +302,12 @@ export class BraveAnswersProvider extends BaseProvider {
         // text — drop it rather than leaking raw payload into the content.
         cursor = content.length;
         break;
+      }
+
+      if (open[1] === 'usage' && this.isRecord(payload.value)) {
+        // Live-verified: the stream's cost accounting (real dollars) arrives
+        // as a trailing inline <usage> tag, not as response headers.
+        usageTag = payload.value;
       }
 
       if (
@@ -306,7 +338,7 @@ export class BraveAnswersProvider extends BaseProvider {
     }
 
     output.push(content.slice(cursor));
-    return { content: output.join('').trim(), citations };
+    return { content: output.join('').trim(), citations, usageTag };
   }
 
   /**
@@ -398,6 +430,80 @@ export class BraveAnswersProvider extends BaseProvider {
       costUsd: reportedCostUsd,
       raw,
     };
+  }
+
+  /**
+   * Live-verified stream accounting: Brave emits a trailing inline tag like
+   * <usage>{"X-Request-Queries": 1, "X-Request-Tokens-In": 10631,
+   * "X-Request-Total-Cost": 0.058585, ...}</usage>. The "-Cost" fields are
+   * API-reported dollars, so they qualify for usage.costUsd under the
+   * honest-data contract.
+   */
+  private usageFromInlineTag(tag: JsonRecord | undefined): {
+    inputTokens?: number;
+    outputTokens?: number;
+    costUsd?: number;
+    raw?: JsonRecord;
+  } {
+    if (!tag) return {};
+    const lookup = new Map<string, unknown>();
+    for (const [key, value] of Object.entries(tag)) {
+      lookup.set(key.toLowerCase(), value);
+    }
+    const num = (key: string): number | undefined =>
+      this.finiteCount(lookup.get(key));
+
+    return {
+      inputTokens: num('x-request-tokens-in'),
+      outputTokens: num('x-request-tokens-out'),
+      costUsd: num('x-request-total-cost'),
+      raw: { streamUsage: tag },
+    };
+  }
+
+  private mergeUsage(
+    inline: {
+      inputTokens?: number;
+      outputTokens?: number;
+      costUsd?: number;
+      raw?: JsonRecord;
+    },
+    headerUsage: ProviderUsage | undefined,
+    streamTokens: { input?: number; output?: number } | undefined,
+  ): ProviderUsage | undefined {
+    const inputTokens =
+      inline.inputTokens ?? streamTokens?.input ?? headerUsage?.inputTokens;
+    const outputTokens =
+      inline.outputTokens ?? streamTokens?.output ?? headerUsage?.outputTokens;
+    const costUsd = inline.costUsd ?? headerUsage?.costUsd;
+    const headerRaw = this.isRecord(headerUsage?.raw) ? headerUsage.raw : {};
+    const raw: JsonRecord = { ...headerRaw, ...inline.raw };
+
+    if (
+      inputTokens === undefined &&
+      outputTokens === undefined &&
+      costUsd === undefined &&
+      Object.keys(raw).length === 0
+    ) {
+      return undefined;
+    }
+
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens:
+        inputTokens !== undefined && outputTokens !== undefined
+          ? inputTokens + outputTokens
+          : undefined,
+      costUsd,
+      raw,
+    };
+  }
+
+  private finiteCount(value: unknown): number | undefined {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value
+      : undefined;
   }
 
   private extractReportedCostUsd(
