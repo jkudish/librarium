@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`brave-answers` citations restored** (live-verified against the Answers
+  API): `enable_citations` is a top-level request body parameter; nesting it
+  under `web_search_options` silently disabled citations, so every answer came
+  back with zero sources.
+- **`brave-answers` inline `<usage>` accounting parsed** (live-verified):
+  Brave delivers its cost breakdown as a trailing inline `<usage>` stream tag,
+  not response headers. The raw tag previously leaked verbatim into answer
+  content; it is now stripped and reported as token usage plus the
+  API-reported dollar cost (`usage.costUsd` from `X-Request-Total-Cost`),
+  which flows through to `metering.actual`.
+- `brave-answers` token usage falls back to the final stream chunk's
+  OpenAI-style `usage` counts when no inline tag is present; legacy
+  `x-request-*` header parsing is retained as a further fallback.
+
 ## [1.4.0] - 2026-07-22
 
 ### Added
