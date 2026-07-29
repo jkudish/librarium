@@ -727,6 +727,11 @@ to keep polling. `perplexity-deep-research` and
 `perplexity-advanced-deep` use Perplexity's Agent API, which has no background
 mode, so they complete inline even in mixed mode.
 
+OpenAI's background mode is not compatible with Zero Data Retention. If your
+organization requires ZDR, do not enable `openai-research` in its current
+background configuration. See OpenAI's
+[background mode guide](https://developers.openai.com/api/docs/guides/background/).
+
 ## Provider Fallback
 
 When a provider fails for any reason (exception, error response, timeout), librarium can automatically try a lighter alternative. Add an optional `fallback` field to any provider's config:
