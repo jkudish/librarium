@@ -206,6 +206,41 @@ async function retrieveTask(
   }
 }
 
+/** Reconcile each active task once without waiting or retrieving. */
+export async function reconcilePendingTasksOnce(
+  tasks: AsyncTaskHandle[],
+): Promise<void> {
+  for (const task of tasks) {
+    const provider = getExactProvider(task.provider);
+    if (!provider?.poll || !task.outputDir) {
+      if (task.outputDir) {
+        updateAsyncTask(
+          task.outputDir,
+          task.taskId,
+          asyncPollUpdates({
+            status: 'failed',
+            rawStatus: 'unsupported_provider',
+            message: `Provider ${task.provider} does not support polling after this upgrade`,
+          }),
+        );
+      }
+      continue;
+    }
+    try {
+      const result = await provider.poll(task);
+      updateAsyncTask(task.outputDir, task.taskId, asyncPollUpdates(result));
+    } catch (error) {
+      updateAsyncTask(
+        task.outputDir,
+        task.taskId,
+        asyncPollFailureUpdates(
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+}
+
 export function registerStatusCommand(program: Command): void {
   program
     .command('status')
@@ -251,82 +286,55 @@ export function registerStatusCommand(program: Command): void {
           return;
         }
 
-        if (!opts.wait && !opts.retrieve) {
-          // A plain status call is a single non-blocking poll pass. Persist
-          // each result so CLI and MCP expose the same durable task state.
-          for (const task of pendingTasks) {
-            const provider = getExactProvider(task.provider);
-            if (!provider?.poll || !task.outputDir) {
-              if (task.outputDir) {
-                updateAsyncTask(
-                  task.outputDir,
-                  task.taskId,
-                  asyncPollUpdates({
-                    status: 'failed',
-                    rawStatus: 'unsupported_provider',
-                    message: `Provider ${task.provider} does not support polling after this upgrade`,
-                  }),
-                );
+        if (!opts.wait) {
+          // Plain status and standalone --retrieve both reconcile once first.
+          await reconcilePendingTasksOnce(pendingTasks);
+
+          if (opts.retrieve) {
+            // Retrieval below rescans persisted state and picks up tasks that
+            // completed during this single reconciliation pass.
+          } else {
+            const refreshedPending = getPendingTasks(baseDir);
+            const refreshedTerminal = getTerminalTasks(baseDir);
+            allTasks = [...refreshedPending, ...refreshedTerminal];
+            if (opts.json) {
+              console.log(JSON.stringify({ tasks: allTasks }, null, 2));
+              return;
+            }
+            if (refreshedPending.length > 0) {
+              console.log(
+                `\nPending async tasks (${refreshedPending.length}):\n`,
+              );
+              for (const task of refreshedPending) {
+                console.log(formatTaskStatus(task));
               }
-              continue;
             }
-            try {
-              const result = await provider.poll(task);
-              updateAsyncTask(
-                task.outputDir,
-                task.taskId,
-                asyncPollUpdates(result),
+            const refreshedCompleted = refreshedTerminal.filter(
+              (task) => task.status === 'completed',
+            );
+            if (refreshedCompleted.length > 0) {
+              console.log(
+                `\nCompleted (awaiting retrieval): ${refreshedCompleted.length}\n`,
               );
-            } catch (error) {
-              updateAsyncTask(
-                task.outputDir,
-                task.taskId,
-                asyncPollFailureUpdates(
-                  error instanceof Error ? error.message : String(error),
-                ),
-              );
+              for (const task of refreshedCompleted) {
+                console.log(formatTaskStatus(task));
+              }
             }
-          }
-          const refreshedPending = getPendingTasks(baseDir);
-          const refreshedTerminal = getTerminalTasks(baseDir);
-          allTasks = [...refreshedPending, ...refreshedTerminal];
-          if (opts.json) {
-            console.log(JSON.stringify({ tasks: allTasks }, null, 2));
+            const failedOrCancelled = refreshedTerminal.filter(
+              (task) => task.status === 'failed' || task.status === 'cancelled',
+            );
+            if (failedOrCancelled.length > 0) {
+              console.log(
+                `\nTerminal async tasks (${failedOrCancelled.length}):\n`,
+              );
+              for (const task of failedOrCancelled)
+                console.log(formatTaskStatus(task));
+            }
+            console.log(
+              '\nUse --wait to poll and auto-retrieve, --retrieve to fetch completed results.',
+            );
             return;
           }
-          if (refreshedPending.length > 0) {
-            console.log(
-              `\nPending async tasks (${refreshedPending.length}):\n`,
-            );
-            for (const task of refreshedPending) {
-              console.log(formatTaskStatus(task));
-            }
-          }
-          const refreshedCompleted = refreshedTerminal.filter(
-            (task) => task.status === 'completed',
-          );
-          if (refreshedCompleted.length > 0) {
-            console.log(
-              `\nCompleted (awaiting retrieval): ${refreshedCompleted.length}\n`,
-            );
-            for (const task of refreshedCompleted) {
-              console.log(formatTaskStatus(task));
-            }
-          }
-          const failedOrCancelled = refreshedTerminal.filter(
-            (task) => task.status === 'failed' || task.status === 'cancelled',
-          );
-          if (failedOrCancelled.length > 0) {
-            console.log(
-              `\nTerminal async tasks (${failedOrCancelled.length}):\n`,
-            );
-            for (const task of failedOrCancelled)
-              console.log(formatTaskStatus(task));
-          }
-          console.log(
-            '\nUse --wait to poll and auto-retrieve, --retrieve to fetch completed results.',
-          );
-          return;
         }
 
         // Wait mode: poll until done, then auto-retrieve
