@@ -96,10 +96,12 @@ describe('PerplexitySonarDeepProvider async API', () => {
     expect(await provider.poll(makeHandle())).toEqual({
       status: 'running',
       message: undefined,
+      rawStatus: 'IN_PROGRESS',
     });
     expect(await provider.poll(makeHandle())).toEqual({
       status: 'failed',
       message: 'model overloaded',
+      rawStatus: 'FAILED',
     });
 
     const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;

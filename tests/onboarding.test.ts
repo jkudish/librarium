@@ -34,7 +34,7 @@ function config(): Config {
       llmWebSearch: true,
     },
     providers: {
-      'openai-deep': {
+      'openai-research': {
         enabled: true,
         apiKey: 'keychain:OPENAI_API_KEY',
       },
@@ -48,7 +48,7 @@ function config(): Config {
 describe('onboarding credential reuse', () => {
   it('reuses keychain-backed credentials across providers that share an env var', () => {
     const selected = [
-      provider('openai-deep', 'OPENAI_API_KEY'),
+      provider('openai-research', 'OPENAI_API_KEY'),
       provider('openai-chat', 'OPENAI_API_KEY'),
     ];
 

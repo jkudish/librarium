@@ -21,6 +21,7 @@ import {
 } from './budget.js';
 import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
+import { UnsafeToRetrySubmissionError } from './errors.js';
 import { buildProviderMetering } from './metering.js';
 
 export interface DispatchOptions {
@@ -439,7 +440,28 @@ export async function dispatch(
             report: pendingReport,
           });
           return;
-        } catch {
+        } catch (error) {
+          if (error instanceof UnsafeToRetrySubmissionError) {
+            const structured = createDispatchResult(
+              id,
+              provider.tier,
+              {
+                provider: id,
+                tier: provider.tier,
+                content: '',
+                citations: [],
+                durationMs: 0,
+                error: error.message,
+              },
+              providerConfig,
+            );
+            results.push(structured);
+            const report = createReport(id, provider.tier, structured);
+            reports.push(report);
+            recordBudget(report);
+            onProgress?.({ providerId: id, event: 'error', report });
+            return;
+          }
           // Fall through to sync execution
         }
       }

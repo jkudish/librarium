@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Canonical OpenAI research provider** (`openai-research`, deep-research
+  tier): uses the Responses API with GPT-5.6 Sol by default, current
+  `web_search`, configurable reasoning effort (default `xhigh`), background
+  execution, normalized URL citations, token usage, and a per-provider model
+  override.
+
+### Changed
+
+- `openai-deep` and `openai-deep-o3` are deprecated aliases of
+  `openai-research`. Existing config keys, group members, fallback targets,
+  and CLI provider arguments resolve with a warning and deduplicate to one
+  OpenAI request. Config files are not rewritten automatically; the aliases
+  will be removed in Librarium 2.0. The deprecated programmatic adapter class
+  exports remain as canonical-provider wrappers until that release.
+- Plain `librarium status` and `status --json` now reconcile pending async
+  tasks once, persisting provider terminal state and safe error details before
+  rendering. `--wait` continues polling from that reconciled state.
+
+### Removed
+
+- New submissions to OpenAI's retired `o4-mini-deep-research` and
+  `o3-deep-research` models. Pending handles created by those removed
+  providers are not guaranteed to remain retrievable after upgrade; completed
+  report files are unchanged.
+
 ## [1.4.1] - 2026-07-23
 
 ### Fixed

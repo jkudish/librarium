@@ -15,6 +15,7 @@ export * from './adapters/openai-chat.js';
 export * from './adapters/openai-deep.js';
 export * from './adapters/openai-deep-base.js';
 export * from './adapters/openai-deep-o3.js';
+export * from './adapters/openai-research.js';
 export * from './adapters/openrouter-chat.js';
 export * from './adapters/openrouter-online.js';
 export * from './adapters/perplexity-advanced-deep.js';

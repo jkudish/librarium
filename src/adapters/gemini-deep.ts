@@ -115,7 +115,7 @@ export class GeminiDeepProvider extends BaseProvider {
 
   /**
    * Sync entry point: submit then poll inline until completion or asyncTimeout.
-   * Mirrors openai-deep so `--mode sync` works the same way.
+   * Mirrors other async deep-research adapters so `--mode sync` works the same way.
    */
   async execute(
     query: string,
@@ -189,7 +189,7 @@ export class GeminiDeepProvider extends BaseProvider {
    * Submit a background interaction. Returns a real pending handle (the
    * interaction id); the dispatcher queues it and `librarium status` polls and
    * retrieves it. Throws on submission failure so the dispatcher falls back to
-   * sync execution (mirrors openai-deep / perplexity-sonar-deep).
+   * sync execution (mirrors the other async deep-research adapters).
    */
   async submit(
     query: string,
@@ -225,6 +225,12 @@ export class GeminiDeepProvider extends BaseProvider {
       query,
       submittedAt: Date.now(),
       status: STATUS_MAP[data.status] ?? 'pending',
+      providerStatus: data.status,
+      ...(STATUS_MAP[data.status]
+        ? {}
+        : {
+            lastPollError: `Unknown Gemini interaction status: ${data.status}`,
+          }),
     };
   }
 
@@ -260,8 +266,17 @@ export class GeminiDeepProvider extends BaseProvider {
     }
 
     const data = response.data;
+    const status = STATUS_MAP[data.status];
+    if (!status) {
+      return {
+        status: handle.status === 'pending' ? 'pending' : 'running',
+        rawStatus: data.status,
+        message: `Unknown Gemini interaction status: ${data.status}`,
+      };
+    }
     return {
-      status: STATUS_MAP[data.status] ?? 'running',
+      status,
+      rawStatus: data.status,
       message: data.error?.message ?? undefined,
     };
   }
@@ -348,7 +363,7 @@ export class GeminiDeepProvider extends BaseProvider {
       const apiKey = this.getApiKey();
       // Creating an interaction is a billable deep-research run, so verify the
       // key cheaply against the models list endpoint instead (same pattern as
-      // openai-deep, whose research models also can't be pinged directly).
+      // async research models, whose model availability cannot be pinged directly).
       const response = await this.request(
         'https://generativelanguage.googleapis.com/v1beta/models',
         {

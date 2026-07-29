@@ -59,8 +59,7 @@ const REGISTRY: Record<string, MeteringCapability> = {
   'perplexity-deep-research': { kind: 'native_cost' },
   'perplexity-advanced-deep': { kind: 'native_cost' },
   // Token-metered deep research (no cost in the API response).
-  'openai-deep': { kind: 'native_tokens' },
-  'openai-deep-o3': { kind: 'native_tokens' },
+  'openai-research': { kind: 'native_tokens' },
   'gemini-deep': { kind: 'native_tokens' },
 
   // AI-grounded.

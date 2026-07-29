@@ -120,17 +120,18 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 25 providers', async () => {
+  it('initializeProviders registers all 24 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(25);
+    expect(all).toHaveLength(24);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
     expect(ids).toContain('perplexity-deep-research');
     expect(ids).toContain('perplexity-advanced-deep');
-    expect(ids).toContain('openai-deep');
-    expect(ids).toContain('openai-deep-o3');
+    expect(ids).toContain('openai-research');
+    expect(ids).not.toContain('openai-deep');
+    expect(ids).not.toContain('openai-deep-o3');
     expect(ids).toContain('gemini-deep');
     expect(ids).toContain('gemini-grounded');
     expect(ids).toContain('grok');
@@ -235,9 +236,27 @@ describe('registry', () => {
     expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
   });
 
+  it('applies OpenAI research model and maxToolCalls config', async () => {
+    await initializeProviders({
+      providers: {
+        'openai-research': {
+          model: 'gpt-5.6-sol-custom',
+          options: { maxToolCalls: 4 },
+        },
+      },
+    });
+    expect(getProvider('openai-research')).toMatchObject({
+      id: 'openai-research',
+      model: 'gpt-5.6-sol-custom',
+      maxToolCalls: 4,
+    });
+  });
+
   it('getProvider resolves legacy provider ID aliases', async () => {
     await initializeProviders();
     expect(getProvider('perplexity-sonar')?.id).toBe('perplexity-sonar-pro');
     expect(getProvider('perplexity-deep')?.id).toBe('perplexity-sonar-deep');
+    expect(getProvider('openai-deep')?.id).toBe('openai-research');
+    expect(getProvider('openai-deep-o3')?.id).toBe('openai-research');
   });
 });

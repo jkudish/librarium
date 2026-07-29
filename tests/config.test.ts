@@ -157,7 +157,7 @@ describe('mergeConfigs', () => {
     customProviders: {},
     trustedProviderIds: [],
     groups: {
-      deep: ['perplexity-sonar-deep', 'openai-deep', 'gemini-deep'],
+      deep: ['perplexity-sonar-deep', 'openai-research', 'gemini-deep'],
       quick: ['perplexity-sonar-pro', 'brave-answers', 'exa'],
     },
   };
@@ -168,6 +168,110 @@ describe('mergeConfigs', () => {
     expect(merged.defaults.maxParallel).toBe(6);
     expect(merged.defaults.mode).toBe('mixed');
     expect(merged.providers['perplexity-sonar-pro']).toBeDefined();
+  });
+
+  it('collapses retired OpenAI ids deterministically', () => {
+    const merged = mergeConfigs(
+      {
+        ...baseGlobal,
+        providers: {
+          'openai-deep': { apiKey: '$OLD', enabled: true, model: 'old' },
+          'openai-deep-o3': { apiKey: '$O3', enabled: true, model: 'o3' },
+          'openai-research': {
+            apiKey: '$CANONICAL',
+            enabled: true,
+            model: 'canonical',
+          },
+        },
+        groups: { deep: ['openai-deep', 'openai-deep-o3', 'openai-research'] },
+      },
+      null,
+    );
+    expect(merged.providers['openai-research']?.model).toBe('canonical');
+    expect(merged.groups.deep).toEqual(['openai-research']);
+  });
+
+  it('prefers the former o3 config when no canonical OpenAI config exists', () => {
+    const merged = mergeConfigs(
+      {
+        ...baseGlobal,
+        providers: {
+          'openai-deep': { apiKey: '$OLD', enabled: true, model: 'old' },
+          'openai-deep-o3': { apiKey: '$O3', enabled: true, model: 'o3' },
+        },
+      },
+      null,
+    );
+    expect(merged.providers['openai-research']?.model).toBe('o3');
+  });
+
+  it('lets either project legacy alias override canonical global OpenAI config', () => {
+    for (const legacyId of ['openai-deep', 'openai-deep-o3']) {
+      const merged = mergeConfigs(
+        {
+          ...baseGlobal,
+          providers: {
+            'openai-research': {
+              apiKey: '$GLOBAL_OPENAI_KEY',
+              enabled: false,
+              model: 'global-model',
+              options: { reasoningEffort: 'low' },
+            },
+          },
+        },
+        {
+          providers: {
+            [legacyId]: {
+              apiKey: '$PROJECT_OPENAI_KEY',
+              enabled: true,
+              model: 'project-model',
+              options: { reasoningEffort: 'xhigh', maxToolCalls: 12 },
+            },
+          },
+        },
+      );
+
+      expect(merged.providers['openai-research']).toEqual({
+        apiKey: '$PROJECT_OPENAI_KEY',
+        enabled: true,
+        model: 'project-model',
+        options: { reasoningEffort: 'xhigh', maxToolCalls: 12 },
+        fallback: undefined,
+      });
+      expect(merged.providers[legacyId]).toBeUndefined();
+    }
+  });
+
+  it('does not re-enable a globally disabled provider when a project alias omits enabled', () => {
+    for (const legacyId of ['openai-deep', 'openai-deep-o3']) {
+      const merged = mergeConfigs(
+        {
+          ...baseGlobal,
+          providers: {
+            'openai-research': {
+              apiKey: '$GLOBAL_OPENAI_KEY',
+              enabled: false,
+              model: 'global-model',
+            },
+          },
+        },
+        {
+          providers: {
+            [legacyId]: {
+              model: 'project-model',
+              options: { reasoningEffort: 'xhigh' },
+            },
+          },
+        },
+      );
+
+      expect(merged.providers['openai-research']).toMatchObject({
+        apiKey: '$GLOBAL_OPENAI_KEY',
+        enabled: false,
+        model: 'project-model',
+        options: { reasoningEffort: 'xhigh' },
+      });
+    }
   });
 
   it('applies project overrides', () => {

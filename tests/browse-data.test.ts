@@ -45,7 +45,7 @@ function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
         error: 'HTTP 401',
       },
       {
-        id: 'openai-deep',
+        id: 'openai-research',
         tier: 'deep-research',
         status: 'async-pending',
         durationMs: 0,

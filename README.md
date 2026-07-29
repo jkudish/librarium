@@ -131,7 +131,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 25 built-in provider adapters organized into four tiers:
+Librarium ships with 24 built-in provider adapters organized into four tiers:
 
 The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
 
@@ -149,8 +149,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Perplexity Sonar Deep Research | `perplexity-sonar-deep` | deep-research | `PERPLEXITY_API_KEY` |
 | Perplexity Deep Research | `perplexity-deep-research` | deep-research | `PERPLEXITY_API_KEY` |
 | Perplexity Advanced Deep Research | `perplexity-advanced-deep` | deep-research | `PERPLEXITY_API_KEY` |
-| OpenAI Deep Research (o4-mini) | `openai-deep` | deep-research | `OPENAI_API_KEY` |
-| OpenAI Deep Research (o3) | `openai-deep-o3` | deep-research | `OPENAI_API_KEY` |
+| OpenAI Research (GPT-5.6 Sol) | `openai-research` | deep-research | `OPENAI_API_KEY` |
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
 | Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Gemini Grounded Search | `gemini-grounded` | ai-grounded | `GEMINI_API_KEY` |
@@ -176,10 +175,12 @@ Brave AI Answers uses Brave's streaming Answers endpoint so its grounded answer 
 
 ### Provider ID Migration (Legacy Aliases)
 
-Perplexity provider IDs were renamed to match current product names:
+These provider IDs were renamed as their upstream products changed:
 
 - `perplexity-sonar` -> `perplexity-sonar-pro`
 - `perplexity-deep` -> `perplexity-sonar-deep`
+- `openai-deep` -> `openai-research`
+- `openai-deep-o3` -> `openai-research`
 
 For backward compatibility, librarium still accepts legacy IDs in:
 
@@ -188,7 +189,16 @@ For backward compatibility, librarium still accepts legacy IDs in:
 - custom group members
 - `fallback` targets
 
-Legacy IDs are normalized to canonical IDs and emit a warning. Output files and `run.json` always use canonical IDs.
+Legacy IDs are normalized to canonical IDs and emit a warning. If both OpenAI
+legacy IDs are configured, they collapse to one `openai-research` request;
+an explicit canonical configuration wins, otherwise the former
+`openai-deep-o3` configuration wins. Config files are not rewritten
+automatically. Output files and `run.json` always use canonical IDs.
+
+Pending OpenAI tasks submitted under the retired providers are not guaranteed
+to remain retrievable after upgrading. Completed report files already written
+to disk are unaffected. The OpenAI legacy aliases are deprecated and will be
+removed in Librarium 2.0.
 
 You can also add **custom providers** (npm modules or local scripts) via config. See [Custom Providers](#custom-providers).
 
@@ -280,7 +290,7 @@ $ librarium run "postgres pooling best practices"
   ✗ tavily                 raw-search         0.4s   HTTP 401 Unauthorized
     ↳ falling back to jina-search
   ✓ jina-search            raw-search         0.7s     8 results   (fallback for tavily)
-  ◷ openai-deep            deep-research   submitted
+  ◷ openai-research        deep-research   submitted
 
   5 succeeded, 0 failed, 1 async pending in 3.5s
   ▸ 74 unique sources after dedupe (74 total citations)
@@ -499,7 +509,7 @@ librarium status --wait --retrieve
 Retrieved results render with the same table line format as `run`, with the output file and word count appended:
 
 ```
-  ✓ openai-deep   deep-research     95.0s    14 sources   openai-deep.md, 2310 words
+  ✓ openai-research   deep-research     95.0s    14 sources   openai-research.md, 2310 words
 ```
 
 ### `usage`
@@ -525,7 +535,7 @@ Usage (last 30 days):
 
   provider       cost  est. cost  tokens  runs
   -----------  ------  ---------  ------  ----
-  openai-deep   $0.50          -    5.0k     1
+  openai-research   $0.50          -    5.0k     1
   exa          $0.020          -    1.5k     1
   serpapi           -    ~$0.015       -     1
 
@@ -674,13 +684,13 @@ Groups are named collections of provider IDs. Librarium ships with seven default
 
 | Group | Providers | Use Case |
 |---|---|---|
-| `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Thorough async research |
+| `deep` | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-research, gemini-deep | Thorough async research |
 | `quick` | gemini-grounded, openrouter-online, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `comprehensive` | All deep-research + all ai-grounded (including Grok) | Deep + AI-grounded combined |
 | `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
-| `all` | All 21 grounded providers (including Grok) | Maximum grounded coverage (excludes the `llm` tier) |
+| `all` | All 20 grounded providers (including Grok) | Maximum grounded coverage (excludes the `llm` tier) |
 
 ### Custom Groups
 
@@ -708,7 +718,14 @@ Librarium supports three execution modes, configurable via `--mode` or the `defa
 
 - **`mixed`** (default) -- Run ai-grounded and raw-search providers synchronously. Submit deep-research providers asynchronously. You get fast results right away and can retrieve deep research later.
 
-True background submission depends on the provider's API. `openai-deep`, `openai-deep-o3`, `perplexity-sonar-deep` (via Perplexity's Async Sonar API), and `gemini-deep` (via Google's Interactions API with `background: true`) submit and return immediately in `mixed`/`async` mode; poll with `librarium status --wait`. `perplexity-deep-research` and `perplexity-advanced-deep` use Perplexity's Agent API, which has no background mode, so they complete inline even in mixed mode.
+True background submission depends on the provider's API. `openai-research`,
+`perplexity-sonar-deep` (via Perplexity's Async Sonar API), and `gemini-deep`
+(via Google's Interactions API with `background: true`) submit and return
+immediately in `mixed`/`async` mode. A plain `librarium status` performs one
+poll pass and persists terminal provider errors; use `librarium status --wait`
+to keep polling. `perplexity-deep-research` and
+`perplexity-advanced-deep` use Perplexity's Agent API, which has no background
+mode, so they complete inline even in mixed mode.
 
 ## Provider Fallback
 
@@ -720,9 +737,9 @@ When a provider fails for any reason (exception, error response, timeout), libra
     "gemini-deep": {
       "apiKey": "$GEMINI_API_KEY",
       "enabled": true,
-      "fallback": "openai-deep"
+      "fallback": "openai-research"
     },
-    "openai-deep": {
+    "openai-research": {
       "apiKey": "$OPENAI_API_KEY",
       "enabled": false
     }
@@ -736,13 +753,13 @@ When a provider fails for any reason (exception, error response, timeout), libra
 - Only single-level fallback is supported (a fallback's own fallback is ignored)
 - The fallback provider must be configured with a valid API key but can be `enabled: false` (it will only activate as a backup)
 - If the fallback provider is already running in the same dispatch (e.g., explicitly listed in `--providers`), it won't be triggered again
-- Output files use the fallback provider's ID (e.g., `openai-deep.md`)
+- Output files use the fallback provider's ID (e.g., `openai-research.md`)
 
 **In `run.json`**, both the original error report and the fallback result appear in the `providers` array. The fallback report includes a `fallbackFor` field indicating which provider it replaced:
 
 ```json
 {
-  "id": "openai-deep",
+  "id": "openai-research",
   "tier": "deep-research",
   "status": "success",
   "fallbackFor": "gemini-deep"
@@ -1223,7 +1240,7 @@ const config: Config = {
   version: 1,
   defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'mixed', llmWebSearch: true },
   providers: {
-    'openai-deep': { enabled: true },        // deep-research -> async
+    'openai-research': { enabled: true },    // deep-research -> async
     'gemini-grounded': { enabled: true },    // ai-grounded -> sync, inline
   },
   customProviders: {},
@@ -1234,7 +1251,7 @@ const config: Config = {
 // 1. Dispatch. Sync results are inline; deep-research tasks come back as handles.
 const { results, asyncTasks } = await dispatch({
   config,
-  providerIds: ['openai-deep', 'gemini-grounded'],
+  providerIds: ['openai-research', 'gemini-grounded'],
   query: 'State of solid-state battery commercialization in 2026',
   mode: 'mixed',
   credentials,

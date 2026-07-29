@@ -67,6 +67,8 @@ const ASYNC_STATUS_MAP: Record<string, AsyncTaskHandle['status']> = {
   IN_PROGRESS: 'running',
   COMPLETED: 'completed',
   FAILED: 'failed',
+  CANCELLED: 'cancelled',
+  INCOMPLETE: 'failed',
 };
 
 /**
@@ -147,7 +149,7 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
    * Submit to the Async Sonar API. Returns a real pending handle; the
    * dispatcher queues it and `librarium status` polls and retrieves it.
    * Throws on submission failure so the dispatcher falls back to sync
-   * execution (mirrors openai-deep).
+   * execution (mirrors the other async deep-research adapters).
    */
   async submit(
     query: string,
@@ -178,6 +180,10 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
       query,
       submittedAt: Date.now(),
       status: ASYNC_STATUS_MAP[data.status] ?? 'pending',
+      providerStatus: data.status,
+      ...(ASYNC_STATUS_MAP[data.status]
+        ? {}
+        : { lastPollError: `Unknown Perplexity async status: ${data.status}` }),
     };
   }
 
@@ -201,8 +207,17 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
     }
 
     const data = response.data;
+    const status = ASYNC_STATUS_MAP[data.status];
+    if (!status) {
+      return {
+        status: handle.status === 'pending' ? 'pending' : 'running',
+        rawStatus: data.status,
+        message: `Unknown Perplexity async status: ${data.status}`,
+      };
+    }
     return {
-      status: ASYNC_STATUS_MAP[data.status] ?? 'running',
+      status,
+      rawStatus: data.status,
       message: data.error_message ?? undefined,
     };
   }

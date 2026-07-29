@@ -1,8 +1,9 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getProvider } from '../adapters/node-registry.js';
+import { getExactProvider } from '../adapters/node-registry.js';
 import { sanitizeId } from '../constants.js';
 import {
+  asyncPollFailureUpdates,
+  asyncPollUpdates,
   loadAsyncTasks,
   saveAsyncTasks,
   updateAsyncTask,
@@ -10,13 +11,11 @@ import {
 import { normalizeUsage } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import { buildProviderMetering } from '../core/metering.js';
-import { deduplicateSources } from '../core/normalizer.js';
+import { updateRunManifestAfterRetrieve } from '../core/retrieval-manifest.js';
 import type {
   AsyncTaskHandle,
   AsyncTaskStatus,
-  Citation,
   ProviderReport,
-  RunManifest,
 } from '../types.js';
 
 /**
@@ -35,6 +34,8 @@ export interface TaskState {
   retrieved?: boolean;
   retrieveError?: string;
   error?: string;
+  providerStatus?: string;
+  lastPolledAt?: number;
 }
 
 export interface CheckAsyncResult {
@@ -44,56 +45,13 @@ export interface CheckAsyncResult {
   tasks: TaskState[];
 }
 
-/**
- * After a successful retrieval, update run.json's provider entry and rebuild
- * sources.json from every .meta.json in the run directory. Mirrors
- * status.ts:updateManifestAfterRetrieve (kept silent and self-contained).
- */
-function updateManifestAfterRetrieve(
-  dir: string,
-  report: ProviderReport,
-): void {
-  const manifestPath = join(dir, 'run.json');
-  if (!existsSync(manifestPath)) return;
-  try {
-    const manifest = JSON.parse(
-      readFileSync(manifestPath, 'utf8'),
-    ) as RunManifest;
-    const index = manifest.providers.findIndex(
-      (p) => p.id === report.id && p.status === 'async-pending',
-    );
-    if (index >= 0) manifest.providers[index] = report;
-
-    const allCitations: Citation[] = [];
-    for (const entry of readdirSync(dir)) {
-      if (!entry.endsWith('.meta.json')) continue;
-      try {
-        const meta = JSON.parse(readFileSync(join(dir, entry), 'utf8')) as {
-          citations?: Citation[];
-        };
-        if (Array.isArray(meta.citations)) allCitations.push(...meta.citations);
-      } catch {}
-    }
-    const sources = deduplicateSources(allCitations);
-    safeWriteFile(join(dir, 'sources.json'), JSON.stringify(sources, null, 2));
-    manifest.sources = {
-      total: allCitations.length,
-      unique: sources.length,
-      file: 'sources.json',
-    };
-    safeWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
-  } catch {
-    // A malformed manifest must never block retrieval.
-  }
-}
-
 /** Retrieve one completed task silently; returns true on success. */
 async function retrieveTaskSilent(
   task: AsyncTaskHandle,
   dir: string,
   state: TaskState,
 ): Promise<boolean> {
-  const provider = getProvider(task.provider);
+  const provider = getExactProvider(task.provider);
   if (!provider?.retrieve) {
     state.retrieveError = `Provider ${task.provider} does not support retrieval`;
     return false;
@@ -144,7 +102,10 @@ async function retrieveTaskSilent(
       usage,
       metering,
     };
-    updateManifestAfterRetrieve(dir, report);
+    if (!updateRunManifestAfterRetrieve(dir, report, task.taskId)) {
+      state.retrieveError = 'Retrieved result, but could not update run.json';
+      return false;
+    }
 
     const remaining = loadAsyncTasks(dir).filter(
       (t) => t.taskId !== task.taskId,
@@ -178,35 +139,64 @@ export async function checkAsyncTasks(
       status: task.status,
       submittedAt: task.submittedAt,
       ...(task.completedAt ? { completedAt: task.completedAt } : {}),
+      ...(task.providerStatus ? { providerStatus: task.providerStatus } : {}),
+      ...(task.lastPolledAt ? { lastPolledAt: task.lastPolledAt } : {}),
+      ...(task.lastPollError ? { error: task.lastPollError } : {}),
     };
 
     if (task.status === 'pending' || task.status === 'running') {
-      const provider = getProvider(task.provider);
+      const provider = getExactProvider(task.provider);
       if (provider?.poll) {
         polled++;
         try {
           const poll = await provider.poll(task);
-          state.status = poll.status;
-          if (poll.status === 'completed' || poll.status === 'failed') {
-            updateAsyncTask(runDir, task.taskId, {
-              status: poll.status,
-              completedAt: Date.now(),
-            });
-            task.status = poll.status;
-            if (poll.status === 'failed') {
-              state.error = poll.message ?? 'task failed';
-            }
-          } else {
-            updateAsyncTask(runDir, task.taskId, {
-              status: poll.status,
-              lastPolledAt: Date.now(),
-            });
-          }
+          const updated = updateAsyncTask(
+            runDir,
+            task.taskId,
+            asyncPollUpdates(poll),
+          );
+          Object.assign(task, updated ?? asyncPollUpdates(poll));
+          state.status = task.status;
+          state.completedAt = task.completedAt;
+          state.providerStatus = task.providerStatus;
+          state.lastPolledAt = task.lastPolledAt;
+          state.error = task.lastPollError;
         } catch (e) {
-          state.error = e instanceof Error ? e.message : String(e);
+          const error = e instanceof Error ? e.message : String(e);
+          const updated = updateAsyncTask(
+            runDir,
+            task.taskId,
+            asyncPollFailureUpdates(error),
+          );
+          Object.assign(task, updated ?? asyncPollFailureUpdates(error));
+          state.lastPolledAt = task.lastPolledAt;
+          state.error = task.lastPollError;
         }
       } else {
-        state.error = `Provider ${task.provider} does not support polling`;
+        const error = `Provider ${task.provider} does not support polling after this upgrade`;
+        const updated = updateAsyncTask(
+          runDir,
+          task.taskId,
+          asyncPollUpdates({
+            status: 'failed',
+            rawStatus: 'unsupported_provider',
+            message: error,
+          }),
+        );
+        Object.assign(
+          task,
+          updated ??
+            asyncPollUpdates({
+              status: 'failed',
+              rawStatus: 'unsupported_provider',
+              message: error,
+            }),
+        );
+        state.status = task.status;
+        state.completedAt = task.completedAt;
+        state.providerStatus = task.providerStatus;
+        state.lastPolledAt = task.lastPolledAt;
+        state.error = task.lastPollError;
       }
     }
 

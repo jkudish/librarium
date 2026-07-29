@@ -1,11 +1,7 @@
-import { OpenAIDeepBaseProvider } from './openai-deep-base.js';
+import { OpenAIResearchProvider } from './openai-research.js';
 
 /**
- * OpenAI Deep Research provider (o3).
- * Higher-quality deep research model.
- * Tier: deep-research (async)
+ * @deprecated Use OpenAIResearchProvider. This wrapper no longer dispatches
+ * o3-deep-research; it behaves as the canonical openai-research provider.
  */
-export class OpenAIDeepO3Provider extends OpenAIDeepBaseProvider {
-  readonly id = 'openai-deep-o3';
-  readonly model = 'o3-deep-research';
-}
+export class OpenAIDeepO3Provider extends OpenAIResearchProvider {}

@@ -98,7 +98,7 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 
 | Tier | Providers | Speed | Depth |
 |------|-----------|-------|-------|
-| deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-deep, openai-deep-o3, gemini-deep | Minutes | Comprehensive |
+| deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-research, gemini-deep | Minutes | Comprehensive |
 | ai-grounded | perplexity-sonar-pro, brave-answers, exa, you-research, kagi-fastgpt | Seconds | Good |
 | raw-search | perplexity-search, brave-search, jina-search, searchapi, serpapi, tavily | Fast | Links only |
 | llm | claude, openai-chat, gemini-chat, openrouter-chat | Seconds | Ungrounded (no citations) |

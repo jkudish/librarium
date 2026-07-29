@@ -105,7 +105,7 @@ function compactError(error: string | undefined, maxLength = 80): string {
  *
  *   ✓ perplexity-sonar-pro   ai-grounded      2.1s    12 sources
  *   ✗ brave-search           raw-search       0.3s   HTTP 401 Unauthorized
- *   ◷ openai-deep            deep-research   submitted
+ *   ◷ openai-research        deep-research   submitted
  */
 export function formatProviderLine(
   report: ProviderReport,

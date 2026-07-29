@@ -77,7 +77,7 @@ describe('aggregateUsage', () => {
   it('totals cost and tokens per provider across runs', () => {
     writeManifest(baseDir, nowSec, [
       report('exa', { costUsd: 0.02, totalTokens: 1000 }),
-      report('openai-deep', {
+      report('openai-research', {
         costUsd: 0.5,
         inputTokens: 200,
         outputTokens: 300,
@@ -96,10 +96,10 @@ describe('aggregateUsage', () => {
     expect(exa?.totalTokens).toBe(3000);
     expect(exa?.runCount).toBe(2);
 
-    const oai = agg.providers.find((p) => p.provider === 'openai-deep');
+    const oai = agg.providers.find((p) => p.provider === 'openai-research');
     expect(oai?.totalTokens).toBe(500);
-    // Sorted by cost descending: openai-deep first.
-    expect(agg.providers[0].provider).toBe('openai-deep');
+    // Sorted by cost descending: openai-research first.
+    expect(agg.providers[0].provider).toBe('openai-research');
   });
 
   it('counts runs with no reported usage', () => {

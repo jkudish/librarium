@@ -130,10 +130,12 @@ describe('GeminiDeepProvider Interactions API', () => {
     expect(await provider.poll(makeHandle())).toEqual({
       status: 'running',
       message: undefined,
+      rawStatus: 'in_progress',
     });
     expect(await provider.poll(makeHandle())).toEqual({
       status: 'failed',
       message: 'agent overloaded',
+      rawStatus: 'failed',
     });
 
     const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;

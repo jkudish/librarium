@@ -31,8 +31,7 @@ export const PROVIDER_ENV_VARS: Record<string, string> = {
   'perplexity-advanced-deep': 'PERPLEXITY_API_KEY',
   'perplexity-sonar-pro': 'PERPLEXITY_API_KEY',
   'perplexity-search': 'PERPLEXITY_API_KEY',
-  'openai-deep': 'OPENAI_API_KEY',
-  'openai-deep-o3': 'OPENAI_API_KEY',
+  'openai-research': 'OPENAI_API_KEY',
   'gemini-deep': 'GEMINI_API_KEY',
   'gemini-grounded': 'GEMINI_API_KEY',
   grok: 'XAI_API_KEY',
@@ -60,8 +59,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   'perplexity-advanced-deep': 'Perplexity Advanced Deep Research',
   'perplexity-sonar-pro': 'Perplexity Sonar Pro',
   'perplexity-search': 'Perplexity Search',
-  'openai-deep': 'OpenAI Deep Research (o4-mini)',
-  'openai-deep-o3': 'OpenAI Deep Research (o3)',
+  'openai-research': 'OpenAI Research',
   'gemini-deep': 'Gemini Deep Research',
   'gemini-grounded': 'Gemini Grounded Search',
   grok: 'Grok (xAI)',
@@ -86,6 +84,8 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 export const PROVIDER_ID_ALIASES: Record<string, string> = {
   'perplexity-deep': 'perplexity-sonar-deep',
   'perplexity-sonar': 'perplexity-sonar-pro',
+  'openai-deep': 'openai-research',
+  'openai-deep-o3': 'openai-research',
 };
 
 /**
@@ -339,8 +339,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'perplexity-sonar-deep',
     'perplexity-deep-research',
     'perplexity-advanced-deep',
-    'openai-deep',
-    'openai-deep-o3',
+    'openai-research',
     'gemini-deep',
   ],
   quick: [
@@ -376,8 +375,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'perplexity-sonar-deep',
     'perplexity-deep-research',
     'perplexity-advanced-deep',
-    'openai-deep',
-    'openai-deep-o3',
+    'openai-research',
     'gemini-deep',
     'perplexity-sonar-pro',
     'gemini-grounded',
@@ -399,8 +397,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'perplexity-sonar-deep',
     'perplexity-deep-research',
     'perplexity-advanced-deep',
-    'openai-deep',
-    'openai-deep-o3',
+    'openai-research',
     'gemini-deep',
     'perplexity-sonar-pro',
     'gemini-grounded',

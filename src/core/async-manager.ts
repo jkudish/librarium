@@ -1,6 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AsyncTaskHandle } from '../types.js';
+import type {
+  AsyncPollResult,
+  AsyncTaskHandle,
+  AsyncTaskStatus,
+} from '../types.js';
 import { safeWriteFile } from './fs-utils.js';
 
 const ASYNC_TASKS_FILE = 'async-tasks.json';
@@ -46,6 +50,39 @@ export function updateAsyncTask(
   return tasks[index];
 }
 
+export function isAsyncTaskTerminal(status: AsyncTaskStatus): boolean {
+  return (
+    status === 'completed' || status === 'failed' || status === 'cancelled'
+  );
+}
+
+/**
+ * Convert one provider poll response into durable task fields. The caller owns
+ * the file write, which lets CLI and MCP share terminal/error semantics.
+ */
+export function asyncPollUpdates(
+  poll: AsyncPollResult,
+  now = Date.now(),
+): Partial<AsyncTaskHandle> {
+  return {
+    status: poll.status,
+    lastPolledAt: now,
+    ...(poll.rawStatus !== undefined ? { providerStatus: poll.rawStatus } : {}),
+    ...(poll.message !== undefined
+      ? { lastPollError: poll.message }
+      : { lastPollError: undefined }),
+    ...(isAsyncTaskTerminal(poll.status) ? { completedAt: now } : {}),
+  };
+}
+
+/** Durable diagnostic for a poll attempt that could not reach the provider. */
+export function asyncPollFailureUpdates(
+  error: string,
+  now = Date.now(),
+): Partial<AsyncTaskHandle> {
+  return { lastPolledAt: now, lastPollError: error };
+}
+
 /**
  * Get all pending/running async tasks across all output directories
  */
@@ -62,6 +99,7 @@ export function getPendingTasks(baseOutputDir: string): AsyncTaskHandle[] {
       const dirTasks = loadAsyncTasks(dir);
       for (const task of dirTasks) {
         if (task.status === 'pending' || task.status === 'running') {
+          if (!task.outputDir) task.outputDir = dir;
           tasks.push(task);
         }
       }

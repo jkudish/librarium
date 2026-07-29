@@ -10,6 +10,8 @@ export interface HttpRequestOptions {
   body?: unknown;
   timeout?: number; // ms
   signal?: AbortSignal;
+  /** Override retries for requests that are unsafe to repeat. */
+  maxRetries?: number;
 }
 
 export interface HttpResponse<T = unknown> {
@@ -33,11 +35,12 @@ export async function httpRequest<T = unknown>(
     body,
     timeout = 30000,
     signal,
+    maxRetries = MAX_RETRIES,
   } = options;
 
   let lastError: Error | undefined;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
       const delay = INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1);
       await sleep(delay);
@@ -102,7 +105,7 @@ export async function httpRequest<T = unknown>(
 
       // Retry on 5xx and 429
       if (response.status >= 500 || response.status === 429) {
-        if (attempt < MAX_RETRIES) {
+        if (attempt < maxRetries) {
           lastError = new Error(
             `HTTP ${response.status}: ${response.statusText}`,
           );
@@ -140,7 +143,7 @@ export async function httpRequest<T = unknown>(
         lastError = e instanceof Error ? e : new Error(String(e));
       }
 
-      if (attempt >= MAX_RETRIES) break;
+      if (attempt >= maxRetries) break;
     }
   }
 
