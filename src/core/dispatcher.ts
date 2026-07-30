@@ -362,8 +362,56 @@ export async function dispatch(
             timeout: config.defaults.asyncTimeout,
           });
 
-          // If submit already completed (e.g. Gemini/Perplexity wrap execute),
-          // retrieve immediately and treat as sync result
+          if (
+            handle.status === 'cancelled' ||
+            ((handle.status === 'completed' || handle.status === 'failed') &&
+              !provider.retrieve)
+          ) {
+            const terminalError =
+              handle.lastPollError ??
+              (handle.status === 'cancelled'
+                ? handle.providerStatus
+                  ? `Task was cancelled (${handle.providerStatus})`
+                  : 'Task was cancelled'
+                : handle.status === 'failed'
+                  ? handle.providerStatus
+                    ? `Task failed (${handle.providerStatus})`
+                    : 'Task failed during submission'
+                  : 'Task completed, but the provider does not support retrieval');
+            const structured = createDispatchResult(
+              id,
+              provider.tier,
+              {
+                provider: id,
+                tier: provider.tier,
+                content: '',
+                citations: [],
+                durationMs: 0,
+                error: terminalError,
+              },
+              providerConfig,
+            );
+            results.push(structured);
+            const report = createReport(id, provider.tier, structured);
+            reports.push(report);
+            recordBudget(report);
+            onProgress?.({ providerId: id, event: 'error', report });
+            const fallbackReport = await tryFallback(id, report);
+            if (fallbackReport) {
+              reports.push(fallbackReport);
+              recordBudget(fallbackReport);
+              onProgress?.({
+                providerId: fallbackReport.id,
+                event:
+                  fallbackReport.status === 'success' ? 'completed' : 'error',
+                report: fallbackReport,
+              });
+            }
+            return;
+          }
+
+          // If submit is already terminal, retrieve immediately and treat it
+          // as a synchronous result.
           if (
             (handle.status === 'completed' || handle.status === 'failed') &&
             provider.retrieve

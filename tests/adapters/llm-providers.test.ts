@@ -29,7 +29,7 @@ describe('llm providers', () => {
   it('calls the Anthropic Messages API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'claude-haiku-4-5',
+        model: 'claude-sonnet-5',
         content: [
           {
             type: 'text',
@@ -67,7 +67,7 @@ describe('llm providers', () => {
         provider: 'claude',
       },
     ]);
-    expect(result.model).toBe('claude-haiku-4-5');
+    expect(result.model).toBe('claude-sonnet-5');
     expect(result.usage).toMatchObject({
       inputTokens: 5,
       outputTokens: 9,
@@ -80,9 +80,11 @@ describe('llm providers', () => {
     expect(headers['x-api-key']).toBe('anthropic-key');
     expect(headers['anthropic-version']).toBe('2023-06-01');
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'claude-haiku-4-5',
-      max_tokens: 4096,
+      model: 'claude-sonnet-5',
+      max_tokens: 16000,
       messages: [{ role: 'user', content: 'what is rust?' }],
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'medium' },
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
     });
   });
@@ -104,7 +106,60 @@ describe('llm providers', () => {
     await provider.execute('hi', { timeout: 10 });
 
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(options.body as string).model).toBe('claude-opus-4-8');
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'claude-opus-4-8',
+      max_tokens: 16000,
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+    });
+  });
+
+  it('applies explicit Claude thinking, effort, and output options', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'claude-sonnet-5',
+        content: [{ type: 'text', text: 'ok' }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new ClaudeProvider({
+      maxTokens: 32000,
+      thinking: 'disabled',
+      effort: 'low',
+      webSearch: false,
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    });
+    await provider.execute('hi', { timeout: 10 });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'claude-sonnet-5',
+      max_tokens: 32000,
+      messages: [{ role: 'user', content: 'hi' }],
+      thinking: { type: 'disabled' },
+      output_config: { effort: 'low' },
+    });
+  });
+
+  it('rejects invalid Claude options before making a paid request', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    for (const options of [
+      { maxTokens: 0 },
+      { thinking: 'enabled' },
+      { effort: 'adaptive' },
+    ]) {
+      const provider = new ClaudeProvider({
+        ...options,
+        credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+      });
+      await expect(
+        provider.execute('hi', { timeout: 10 }),
+      ).resolves.toMatchObject({ error: expect.any(String) });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('surfaces Claude API errors', async () => {

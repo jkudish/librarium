@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Claude now defaults to `claude-sonnet-5` with a 16,000-token output ceiling,
+  adaptive thinking, and `medium` effort. `maxTokens`, `thinking`, and `effort`
+  are configurable; automatic thinking/effort defaults apply only to the
+  default Sonnet 5 model so custom model overrides remain compatible.
 - Gemini Chat now defaults to the current production `gemini-3.6-flash`
   model instead of `gemini-2.5-flash`.
 - OpenRouter Chat now defaults to `openai/gpt-5.6-terra`. Both OpenRouter

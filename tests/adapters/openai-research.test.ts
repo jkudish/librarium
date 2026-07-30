@@ -1,10 +1,14 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { getProvider, initializeProviders } from '../../src/adapters/index.js';
+import {
+  getProvider,
+  initializeProviders,
+  registerProvider,
+} from '../../src/adapters/index.js';
 import { OpenAIDeepProvider } from '../../src/adapters/openai-deep.js';
 import { OpenAIDeepO3Provider } from '../../src/adapters/openai-deep-o3.js';
 import { OpenAIResearchProvider } from '../../src/adapters/openai-research.js';
 import { dispatch } from '../../src/core/dispatcher.js';
-import type { AsyncTaskHandle, Config } from '../../src/types.js';
+import type { AsyncTaskHandle, Config, Provider } from '../../src/types.js';
 
 function jsonResponse(status: number, data: unknown): Response {
   return {
@@ -196,6 +200,154 @@ describe('OpenAIResearchProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.reports[0]).toMatchObject({ status: 'error' });
     expect(result.asyncTasks).toEqual([]);
+  });
+
+  it('reports an immediately cancelled submission without queuing it', async () => {
+    const cancelledProvider: Provider = {
+      id: 'cancelled-submit-test',
+      displayName: 'Cancelled submit test',
+      tier: 'deep-research',
+      envVar: '',
+      execute: vi.fn(),
+      submit: async (query) => ({
+        provider: 'cancelled-submit-test',
+        taskId: 'cancelled-1',
+        query,
+        submittedAt: Date.now(),
+        status: 'cancelled',
+      }),
+    };
+    registerProvider(cancelledProvider);
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: '',
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'mixed',
+        llmWebSearch: true,
+      },
+      providers: { 'cancelled-submit-test': { enabled: true } },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+
+    const result = await dispatch({
+      config,
+      providerIds: ['cancelled-submit-test'],
+      query: 'cancel this',
+      mode: 'mixed',
+    });
+
+    expect(result.asyncTasks).toEqual([]);
+    expect(result.reports).toEqual([
+      expect.objectContaining({ status: 'error', error: 'Task was cancelled' }),
+    ]);
+    expect(cancelledProvider.execute).not.toHaveBeenCalled();
+  });
+
+  it('reports an immediately failed submission without retrieval as terminal', async () => {
+    const failedProvider: Provider = {
+      id: 'failed-submit-test',
+      displayName: 'Failed submit test',
+      tier: 'deep-research',
+      envVar: '',
+      execute: vi.fn(),
+      submit: async (query) => ({
+        provider: 'failed-submit-test',
+        taskId: 'failed-1',
+        query,
+        submittedAt: Date.now(),
+        status: 'failed',
+        providerStatus: 'REJECTED',
+      }),
+    };
+    registerProvider(failedProvider);
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: '',
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'mixed',
+        llmWebSearch: true,
+      },
+      providers: { 'failed-submit-test': { enabled: true } },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+
+    const result = await dispatch({
+      config,
+      providerIds: ['failed-submit-test'],
+      query: 'fail this',
+      mode: 'mixed',
+    });
+
+    expect(result.asyncTasks).toEqual([]);
+    expect(result.reports).toEqual([
+      expect.objectContaining({
+        status: 'error',
+        error: 'Task failed (REJECTED)',
+      }),
+    ]);
+    expect(failedProvider.execute).not.toHaveBeenCalled();
+  });
+
+  it('reports an immediately completed submission without retrieval as terminal', async () => {
+    const completedProvider: Provider = {
+      id: 'completed-submit-test',
+      displayName: 'Completed submit test',
+      tier: 'deep-research',
+      envVar: '',
+      execute: vi.fn(),
+      submit: async (query) => ({
+        provider: 'completed-submit-test',
+        taskId: 'completed-1',
+        query,
+        submittedAt: Date.now(),
+        status: 'completed',
+      }),
+    };
+    registerProvider(completedProvider);
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: '',
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'mixed',
+        llmWebSearch: true,
+      },
+      providers: { 'completed-submit-test': { enabled: true } },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+
+    const result = await dispatch({
+      config,
+      providerIds: ['completed-submit-test'],
+      query: 'complete this',
+      mode: 'mixed',
+    });
+
+    expect(result.asyncTasks).toEqual([]);
+    expect(result.reports).toEqual([
+      expect.objectContaining({
+        status: 'error',
+        error: 'Task completed, but the provider does not support retrieval',
+      }),
+    ]);
+    expect(completedProvider.execute).not.toHaveBeenCalled();
   });
 
   it('keeps unknown provider statuses retryable and visible', async () => {

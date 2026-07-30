@@ -173,6 +173,10 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 
 Brave AI Answers uses Brave's streaming Answers endpoint so its grounded answer text and inline citations can be normalized together.
 
+ChatGPT Search (OpenRouter) keeps its GPT-4o Mini/Exa-backed search profile but
+uses OpenRouter's current `openrouter:web_search` server tool rather than the
+deprecated `:online` model suffix.
+
 ### Provider ID Migration (Legacy Aliases)
 
 These provider IDs were renamed as their upstream products changed:
@@ -222,6 +226,10 @@ The `llm` tier is deliberately kept apart from the grounded tiers. These adapter
 - `openai-chat` uses the OpenAI Responses API with the `web_search` tool.
 - `gemini-chat` uses Gemini Google Search grounding.
 - `openrouter-chat` uses OpenRouter's `openrouter:web_search` server tool.
+
+Default models are `claude-sonnet-5`, `gpt-5-mini`, `gemini-3.6-flash`, and
+`openai/gpt-5.6-terra`, respectively. Each accepts a per-provider `model`
+override.
 
 If you want old-style direct model answers with no web search, set `"llmWebSearch": false` under `defaults`, or set `"options": { "webSearch": false }` on a specific llm provider. When web search is off, llm providers contribute no citations or source URLs.
 
@@ -870,6 +878,34 @@ Or turn it off for one provider:
 }
 ```
 
+Claude defaults to Sonnet 5 with a 16,000-token output ceiling, adaptive
+thinking, and `medium` effort. The larger ceiling leaves room for both thinking
+and the visible answer; it is a cap, not a target. Configure these controls per
+provider:
+
+```json
+{
+  "providers": {
+    "claude": {
+      "apiKey": "$ANTHROPIC_API_KEY",
+      "enabled": true,
+      "model": "claude-sonnet-5",
+      "options": {
+        "maxTokens": 16000,
+        "thinking": "adaptive",
+        "effort": "medium"
+      }
+    }
+  }
+}
+```
+
+`maxTokens` must be a positive integer. `thinking` accepts `adaptive` or
+`disabled`; `effort` accepts `low`, `medium`, `high`, `xhigh`, or `max`.
+Adaptive thinking and medium effort are automatic only for the default Sonnet
+5 model. When `model` is overridden, thinking and effort are omitted unless
+they are explicitly configured, avoiding unsupported fields on older models.
+
 OpenAI Research defaults to GPT-5.6 Sol with `xhigh` reasoning and OpenAI's
 standard web-search return-token budget. Configure its model and research
 limits under the canonical `openai-research` provider ID:
@@ -1398,7 +1434,7 @@ Groups:
   fast           -- Quick results from multiple tiers
   comprehensive  -- Deep + AI-grounded combined
   llm            -- Opt-in LLM answers; web search/citations on by default
-  all            -- All 21 grounded providers (excludes the llm tier)
+  all            -- All 20 grounded providers (excludes the llm tier)
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     -- Synthesized overview with stats

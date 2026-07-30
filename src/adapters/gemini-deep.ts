@@ -1,3 +1,4 @@
+import { UnsafeToRetrySubmissionError } from '../core/errors.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -188,34 +189,45 @@ export class GeminiDeepProvider extends BaseProvider {
   /**
    * Submit a background interaction. Returns a real pending handle (the
    * interaction id); the dispatcher queues it and `librarium status` polls and
-   * retrieves it. Throws on submission failure so the dispatcher falls back to
-   * sync execution (mirrors the other async deep-research adapters).
+   * retrieves it. Submission failures are terminal because the remote service
+   * may have accepted the paid background job even when no response arrived.
    */
   async submit(
     query: string,
-    _options: ProviderOptions,
+    options: ProviderOptions,
   ): Promise<AsyncTaskHandle> {
     const apiKey = this.getApiKey();
 
-    const response = await this.request<InteractionResponse>(INTERACTIONS_URL, {
-      method: 'POST',
-      headers: this.authHeaders(apiKey),
-      body: {
-        input: query,
-        agent: this.model,
-        // Background is MANDATORY for the deep-research agent.
-        background: true,
-        agent_config: {
-          type: 'deep-research',
-          thinking_summaries: 'auto',
+    let response;
+    try {
+      response = await this.request<InteractionResponse>(INTERACTIONS_URL, {
+        method: 'POST',
+        headers: this.authHeaders(apiKey),
+        body: {
+          input: query,
+          agent: this.model,
+          // Background is MANDATORY for the deep-research agent.
+          background: true,
+          agent_config: {
+            type: 'deep-research',
+            thinking_summaries: 'auto',
+          },
+          tools: [{ type: 'google_search' }],
         },
-        tools: [{ type: 'google_search' }],
-      },
-      timeout: 30000,
-    });
+        timeout: 30000,
+        signal: options.signal,
+        maxRetries: 0,
+      });
+    } catch (error) {
+      throw new UnsafeToRetrySubmissionError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
 
     if (response.status !== 200 && response.status !== 201) {
-      throw new Error(this.formatError(response.status, response.data));
+      throw new UnsafeToRetrySubmissionError(
+        this.formatError(response.status, response.data),
+      );
     }
 
     const data = response.data;

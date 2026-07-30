@@ -167,6 +167,12 @@ describe('registry', () => {
     expect(getProvider('gemini-chat')).toMatchObject({
       model: 'gemini-3.6-flash',
     });
+    expect(getProvider('claude')).toMatchObject({
+      model: 'claude-sonnet-5',
+      maxTokens: 16000,
+      thinking: 'adaptive',
+      effort: 'medium',
+    });
     expect(getProvider('openrouter-chat')).toMatchObject({
       model: 'openai/gpt-5.6-terra',
     });
@@ -195,6 +201,25 @@ describe('registry', () => {
       'anthropic/claude-3.5-haiku',
     );
     expect((getProvider('grok') as { model?: string }).model).toBe('grok-4.3');
+  });
+
+  it('applies Claude response-control options', async () => {
+    await initializeProviders({
+      providers: {
+        claude: {
+          options: {
+            maxTokens: 24000,
+            thinking: 'disabled',
+            effort: 'low',
+          },
+        },
+      },
+    });
+    expect(getProvider('claude')).toMatchObject({
+      maxTokens: 24000,
+      thinking: 'disabled',
+      effort: 'low',
+    });
   });
 
   it('enables llm web search by default and allows global/provider overrides', async () => {

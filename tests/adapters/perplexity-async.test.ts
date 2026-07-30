@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { PerplexitySonarDeepProvider } from '../../src/adapters/perplexity-sonar-deep.js';
+import { UnsafeToRetrySubmissionError } from '../../src/core/errors.js';
 import type { AsyncTaskHandle } from '../../src/types.js';
 
 function jsonResponse(status: number, data: unknown): Response {
@@ -67,15 +68,31 @@ describe('PerplexitySonarDeepProvider async API', () => {
     expect(body.request.messages[0]?.content).toBe('postgres pooling');
   });
 
-  it('throws on submit failure so the dispatcher falls back to sync', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(429, { error: { message: 'rate limited' } }),
-      );
+  it.each([429, 500])(
+    'does not retry an HTTP %s background submission',
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(status, { error: { message: 'submission failed' } }),
+        );
+      globalThis.fetch = fetchMock;
+
+      await expect(
+        makeProvider().submit('postgres pooling', { timeout: 1800 }),
+      ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not retry or fall through after an ambiguous transport failure', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('socket timed out'));
+    globalThis.fetch = fetchMock;
+
     await expect(
       makeProvider().submit('postgres pooling', { timeout: 1800 }),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('maps poll statuses (IN_PROGRESS running, FAILED with message)', async () => {

@@ -347,7 +347,17 @@ export function registerStatusCommand(program: Command): void {
           const justCompleted: Array<{
             task: AsyncTaskHandle;
             dir: string;
-          }> = [];
+          }> = terminalTasks
+            .filter(
+              (task): task is AsyncTaskHandle & { outputDir: string } =>
+                task.status === 'completed' && Boolean(task.outputDir),
+            )
+            .map((task) => ({ task, dir: task.outputDir }));
+          const completedTaskKeys = new Set(
+            justCompleted.map(
+              ({ task, dir }) => `${dir}\0${task.provider}\0${task.taskId}`,
+            ),
+          );
 
           while (remaining.length > 0) {
             for (const task of remaining) {
@@ -383,8 +393,17 @@ export function registerStatusCommand(program: Command): void {
                       asyncPollUpdates(result),
                     );
                   task.status = result.status;
-                  if (result.status === 'completed' && task.outputDir) {
+                  if (
+                    result.status === 'completed' &&
+                    task.outputDir &&
+                    !completedTaskKeys.has(
+                      `${task.outputDir}\0${task.provider}\0${task.taskId}`,
+                    )
+                  ) {
                     justCompleted.push({ task, dir: task.outputDir });
+                    completedTaskKeys.add(
+                      `${task.outputDir}\0${task.provider}\0${task.taskId}`,
+                    );
                   }
                   if (
                     result.status === 'failed' ||

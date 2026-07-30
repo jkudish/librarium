@@ -180,6 +180,9 @@ export async function initializeProviders(
     new ClaudeProvider({
       model: providerConfig.claude?.model,
       webSearch: providerWebSearch('claude', providerConfig, llmWebSearch),
+      maxTokens: providerConfig.claude?.options?.maxTokens,
+      thinking: providerConfig.claude?.options?.thinking,
+      effort: providerConfig.claude?.options?.effort,
     }),
     new OpenAIChatProvider({
       model: providerConfig['openai-chat']?.model,

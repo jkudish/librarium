@@ -153,4 +153,11 @@ describe('README drift: providers, tiers, and groups', () => {
       `README.md does not document group(s) as \`name\`: ${missing.join(', ')}.`,
     ).toEqual([]);
   });
+
+  it('keeps the grounded all-group count aligned with the registry', () => {
+    const groundedCount = DEFAULT_GROUPS.all.length;
+    expect(groundedCount).toBe(20);
+    expect(README).toContain(`All ${groundedCount} grounded providers`);
+    expect(README).not.toContain('All 21 grounded providers');
+  });
 });

@@ -10,7 +10,7 @@ triggers:
 
 # Librarium -- Multi-Provider Deep Research
 
-Run research queries across 10 search and deep-research APIs in parallel, collect results, deduplicate sources, and produce structured output.
+Run research queries across 24 search, deep-research, and LLM provider adapters in parallel, collect results, deduplicate sources, and produce structured output.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ Run research queries across 10 search and deep-research APIs in parallel, collec
 ### Phase 1: Query Analysis
 Analyze the user's research question. Determine:
 - Is this a technical, business, or general knowledge query?
-- Which provider group is best suited? (`quick` for fast answers, `deep` for thorough research, `comprehensive` for important decisions, `all` for maximum grounded coverage, `llm` for an ungrounded baseline/contrast with no citations)
+- Which provider group is best suited? (`quick` for fast answers, `deep` for thorough research, `comprehensive` for important decisions, `all` for maximum grounded coverage, `llm` for direct model answers with web search enabled by default)
 - What execution mode? (`sync` for quick queries, `mixed` for deep research)
 
 ### Phase 2: Provider Selection
@@ -33,7 +33,7 @@ Select providers based on query type:
 - **Competitive research**: Use `all` group (maximum coverage)
 - **Specific provider**: Use `--providers` flag (accepts canonical IDs or display names, e.g. `-p "Exa Search,brave-search"`)
 - **Competitive research**: Use `all` group (maximum grounded coverage)
-- **Ungrounded baseline / contrast**: Use `llm` group (Claude, OpenAI, Gemini, OpenRouter -- direct model answers, no citations)
+- **Direct model answers**: Use `llm` group (Claude, OpenAI, Gemini, OpenRouter). Web search is enabled by default; disable `llmWebSearch` for an ungrounded baseline with no citations.
 - **Specific provider**: Use `--providers` flag
 
 ### Phase 3: Dispatch
@@ -101,7 +101,7 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 | deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-research, gemini-deep | Minutes | Comprehensive |
 | ai-grounded | perplexity-sonar-pro, brave-answers, exa, you-research, kagi-fastgpt | Seconds | Good |
 | raw-search | perplexity-search, brave-search, jina-search, searchapi, serpapi, tavily | Fast | Links only |
-| llm | claude, openai-chat, gemini-chat, openrouter-chat | Seconds | Ungrounded (no citations) |
+| llm | claude, openai-chat, gemini-chat, openrouter-chat | Seconds | Model-native web search by default; optionally ungrounded |
 
 ## Output Structure
 
