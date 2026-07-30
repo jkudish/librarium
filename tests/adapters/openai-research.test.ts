@@ -20,6 +20,7 @@ function provider(
     model?: string;
     maxToolCalls?: unknown;
     reasoningEffort?: unknown;
+    returnTokenBudget?: unknown;
   } = {},
 ) {
   return new OpenAIResearchProvider({
@@ -69,6 +70,7 @@ describe('OpenAIResearchProvider', () => {
     const task = await provider({
       maxToolCalls: 3,
       reasoningEffort: 'high',
+      returnTokenBudget: 'unlimited',
     }).submit('What changed?', { timeout: 1800 });
     expect(task).toMatchObject({
       provider: 'openai-research',
@@ -90,7 +92,7 @@ describe('OpenAIResearchProvider', () => {
     });
   });
 
-  it('uses xhigh reasoning and omits max_tool_calls by default', async () => {
+  it('uses xhigh reasoning, the standard search budget, and omits max_tool_calls by default', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -102,6 +104,9 @@ describe('OpenAIResearchProvider', () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
     expect(body.reasoning).toEqual({ effort: 'xhigh' });
+    expect(body.tools).toEqual([
+      { type: 'web_search', return_token_budget: 'default' },
+    ]);
     expect(body).not.toHaveProperty('max_tool_calls');
   });
 
@@ -116,6 +121,11 @@ describe('OpenAIResearchProvider', () => {
         timeout: 1800,
       }),
     ).rejects.toThrow('reasoningEffort must be one of');
+    await expect(
+      provider({ returnTokenBudget: 'extended' }).submit('query', {
+        timeout: 1800,
+      }),
+    ).rejects.toThrow('returnTokenBudget must be one of: default, unlimited');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

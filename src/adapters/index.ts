@@ -149,6 +149,8 @@ export async function initializeProviders(
       maxToolCalls: providerConfig['openai-research']?.options?.maxToolCalls,
       reasoningEffort:
         providerConfig['openai-research']?.options?.reasoningEffort,
+      returnTokenBudget:
+        providerConfig['openai-research']?.options?.returnTokenBudget,
       apiKey: providerConfig['openai-research']?.apiKey,
       credentials,
     }),

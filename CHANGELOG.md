@@ -14,9 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `web_search`, configurable reasoning effort (default `xhigh`), background
   execution, normalized URL citations, token usage, and a per-provider model
   override.
+- OpenAI Research `options.returnTokenBudget` configuration with validated
+  `default` and `unlimited` values. The standard OpenAI return-token budget is
+  now the Librarium default; unlimited web-result context is an explicit
+  high-effort opt-in.
 
 ### Changed
 
+- Gemini Chat now defaults to the current production `gemini-3.6-flash`
+  model instead of `gemini-2.5-flash`.
+- OpenRouter Chat now defaults to `openai/gpt-5.6-terra`. Both OpenRouter
+  search adapters use the agentic `openrouter:web_search` server tool instead
+  of the deprecated `:online` model suffix; the dedicated `openrouter-online`
+  adapter retains its existing GPT-4o Mini/Exa-backed search profile.
 - `openai-deep` and `openai-deep-o3` are deprecated aliases of
   `openai-research`. Existing config keys, group members, fallback targets,
   and CLI provider arguments resolve with a warning and deduplicate to one

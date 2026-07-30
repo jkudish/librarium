@@ -221,7 +221,7 @@ The `llm` tier is deliberately kept apart from the grounded tiers. These adapter
 - `claude` uses Anthropic's Messages API web search tool.
 - `openai-chat` uses the OpenAI Responses API with the `web_search` tool.
 - `gemini-chat` uses Gemini Google Search grounding.
-- `openrouter-chat` uses OpenRouter's online/web-search path.
+- `openrouter-chat` uses OpenRouter's `openrouter:web_search` server tool.
 
 If you want old-style direct model answers with no web search, set `"llmWebSearch": false` under `defaults`, or set `"options": { "webSearch": false }` on a specific llm provider. When web search is off, llm providers contribute no citations or source URLs.
 
@@ -869,6 +869,33 @@ Or turn it off for one provider:
   }
 }
 ```
+
+OpenAI Research defaults to GPT-5.6 Sol with `xhigh` reasoning and OpenAI's
+standard web-search return-token budget. Configure its model and research
+limits under the canonical `openai-research` provider ID:
+
+```json
+{
+  "providers": {
+    "openai-research": {
+      "apiKey": "$OPENAI_API_KEY",
+      "enabled": true,
+      "model": "gpt-5.6-sol",
+      "options": {
+        "reasoningEffort": "high",
+        "maxToolCalls": 5,
+        "returnTokenBudget": "default"
+      }
+    }
+  }
+}
+```
+
+`reasoningEffort` accepts `none`, `low`, `medium`, `high`, `xhigh`, or `max`
+and defaults to `xhigh`. `maxToolCalls` must be a positive integer when set.
+`returnTokenBudget` accepts `default` or `unlimited` and defaults to `default`.
+Use `unlimited` only for high-effort research that needs to inspect unusually
+large amounts of web content; it can increase latency and token usage.
 
 Some providers support optional model overrides. Gemini Deep Research defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier (and more expensive) variant:
 

@@ -47,6 +47,7 @@ export interface OpenAIResearchProviderOptions extends BaseProviderOptions {
   model?: string;
   maxToolCalls?: unknown;
   reasoningEffort?: unknown;
+  returnTokenBudget?: unknown;
 }
 
 const DEFAULT_MODEL = 'gpt-5.6-sol';
@@ -59,6 +60,8 @@ const REASONING_EFFORTS = [
   'max',
 ] as const;
 type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+const RETURN_TOKEN_BUDGETS = ['default', 'unlimited'] as const;
+type ReturnTokenBudget = (typeof RETURN_TOKEN_BUDGETS)[number];
 
 const STATUS_MAP: Record<string, AsyncTaskStatus> = {
   queued: 'pending',
@@ -92,6 +95,19 @@ function parseReasoningEffort(value: unknown): ReasoningEffort {
   );
 }
 
+function parseReturnTokenBudget(value: unknown): ReturnTokenBudget {
+  if (value === undefined) return 'default';
+  if (
+    typeof value === 'string' &&
+    RETURN_TOKEN_BUDGETS.includes(value as ReturnTokenBudget)
+  ) {
+    return value as ReturnTokenBudget;
+  }
+  throw new Error(
+    `openai-research options.returnTokenBudget must be one of: ${RETURN_TOKEN_BUDGETS.join(', ')}`,
+  );
+}
+
 /**
  * OpenAI async research through the Responses API. This deliberately accepts
  * exactly the configured model: a rejected model is an actionable API error,
@@ -103,12 +119,14 @@ export class OpenAIResearchProvider extends BaseProvider {
   readonly model: string;
   private readonly configuredMaxToolCalls?: unknown;
   private readonly configuredReasoningEffort?: unknown;
+  private readonly configuredReturnTokenBudget?: unknown;
 
   constructor(options: OpenAIResearchProviderOptions = {}) {
     super(options);
     this.model = options.model?.trim() || DEFAULT_MODEL;
     this.configuredMaxToolCalls = options.maxToolCalls;
     this.configuredReasoningEffort = options.reasoningEffort;
+    this.configuredReturnTokenBudget = options.returnTokenBudget;
   }
 
   get maxToolCalls(): number | undefined {
@@ -117,6 +135,10 @@ export class OpenAIResearchProvider extends BaseProvider {
 
   get reasoningEffort(): ReasoningEffort {
     return parseReasoningEffort(this.configuredReasoningEffort);
+  }
+
+  get returnTokenBudget(): ReturnTokenBudget {
+    return parseReturnTokenBudget(this.configuredReturnTokenBudget);
   }
 
   async execute(
@@ -185,7 +207,12 @@ export class OpenAIResearchProvider extends BaseProvider {
           body: {
             model: this.model,
             input: [{ role: 'user', content: query }],
-            tools: [{ type: 'web_search', return_token_budget: 'unlimited' }],
+            tools: [
+              {
+                type: 'web_search',
+                return_token_budget: this.returnTokenBudget,
+              },
+            ],
             reasoning: { effort: this.reasoningEffort },
             ...(this.maxToolCalls ? { max_tool_calls: this.maxToolCalls } : {}),
             background: true,

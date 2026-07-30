@@ -97,7 +97,7 @@ describe('grounded providers', () => {
   it('calls OpenRouter online search and extracts URL annotations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini:online',
+        model: 'openai/gpt-4o-mini',
         choices: [
           {
             message: {
@@ -161,8 +161,9 @@ describe('grounded providers', () => {
       'Bearer openrouter-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'openai/gpt-4o-mini:online',
+      model: 'openai/gpt-4o-mini',
       messages: [{ role: 'user', content: 'search online' }],
+      tools: [{ type: 'openrouter:web_search' }],
     });
   });
 

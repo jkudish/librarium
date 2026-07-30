@@ -270,7 +270,7 @@ describe('llm providers', () => {
           candidatesTokenCount: 7,
           totalTokenCount: 10,
         },
-        modelVersion: 'gemini-2.5-flash',
+        modelVersion: 'gemini-3.6-flash',
       }),
     );
     globalThis.fetch = fetchMock;
@@ -299,7 +299,7 @@ describe('llm providers', () => {
     });
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('models/gemini-2.5-flash:generateContent');
+    expect(url).toContain('models/gemini-3.6-flash:generateContent');
     // The API key travels in the x-goog-api-key header, never the URL.
     expect(url).not.toContain('key=');
     expect(url).not.toContain('gemini-key');
@@ -333,7 +333,7 @@ describe('llm providers', () => {
   it('calls OpenRouter chat with web search, usage accounting, and citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini:online',
+        model: 'openai/gpt-5.6-terra',
         choices: [
           {
             message: {
@@ -391,7 +391,33 @@ describe('llm providers', () => {
       'Bearer openrouter-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'openai/gpt-4o-mini:online',
+      model: 'openai/gpt-5.6-terra',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ type: 'openrouter:web_search' }],
+      usage: { include: true },
+    });
+  });
+
+  it('can disable OpenRouter web search and strips a legacy online suffix', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'anthropic/claude-sonnet-5',
+        choices: [{ message: { content: 'Direct answer.' } }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new OpenRouterChatProvider({
+      model: 'anthropic/claude-sonnet-5:online',
+      webSearch: false,
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+    });
+    const result = await provider.execute('hello', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'anthropic/claude-sonnet-5',
       messages: [{ role: 'user', content: 'hello' }],
       usage: { include: true },
     });

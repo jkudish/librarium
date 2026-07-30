@@ -164,6 +164,12 @@ describe('registry', () => {
     ]) {
       expect(getProvider(id)?.tier).toBe('llm');
     }
+    expect(getProvider('gemini-chat')).toMatchObject({
+      model: 'gemini-3.6-flash',
+    });
+    expect(getProvider('openrouter-chat')).toMatchObject({
+      model: 'openai/gpt-5.6-terra',
+    });
   });
 
   it('applies model config override to llm-tier providers', async () => {
@@ -236,12 +242,12 @@ describe('registry', () => {
     expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
   });
 
-  it('applies OpenAI research model and maxToolCalls config', async () => {
+  it('applies OpenAI research model and research options config', async () => {
     await initializeProviders({
       providers: {
         'openai-research': {
           model: 'gpt-5.6-sol-custom',
-          options: { maxToolCalls: 4 },
+          options: { maxToolCalls: 4, returnTokenBudget: 'unlimited' },
         },
       },
     });
@@ -249,6 +255,7 @@ describe('registry', () => {
       id: 'openai-research',
       model: 'gpt-5.6-sol-custom',
       maxToolCalls: 4,
+      returnTokenBudget: 'unlimited',
     });
   });
 

@@ -41,11 +41,13 @@ interface OpenRouterResponse {
   };
 }
 
-const OPENROUTER_ONLINE_MODEL = 'openai/gpt-4o-mini:online';
+const OPENROUTER_ONLINE_MODEL = 'openai/gpt-4o-mini';
 
 /**
  * OpenRouter online search provider.
- * Uses OpenRouter chat completions with Exa-backed online grounding.
+ * Uses OpenRouter's agentic web-search server tool. The configured model does
+ * not support native search, so OpenRouter retains the existing Exa-backed
+ * grounding behavior without the deprecated `:online` suffix.
  * Tier: ai-grounded (sync)
  */
 export class OpenRouterOnlineProvider extends BaseProvider {
@@ -72,6 +74,7 @@ export class OpenRouterOnlineProvider extends BaseProvider {
           body: {
             model: OPENROUTER_ONLINE_MODEL,
             messages: [{ role: 'user', content: query }],
+            tools: [{ type: 'openrouter:web_search' }],
           },
           timeout: options.timeout * 1000,
           signal: options.signal,

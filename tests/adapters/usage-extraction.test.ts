@@ -229,7 +229,7 @@ describe('usage extraction', () => {
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini:online',
+        model: 'openai/gpt-4o-mini',
         choices: [
           {
             message: {
