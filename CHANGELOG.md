@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Canonical OpenAI research provider** (`openai-research`, deep-research
+  tier): uses the Responses API with GPT-5.6 Sol by default, current
+  `web_search`, configurable reasoning effort (default `xhigh`), background
+  execution, normalized URL citations, token usage, and a per-provider model
+  override.
+- OpenAI Research `options.returnTokenBudget` configuration with validated
+  `default` and `unlimited` values. The standard OpenAI return-token budget is
+  now the Librarium default; unlimited web-result context is an explicit
+  high-effort opt-in.
+
+### Changed
+
+- Claude now defaults to `claude-sonnet-5` with a 16,000-token output ceiling,
+  adaptive thinking, and `medium` effort. `maxTokens`, `thinking`, and `effort`
+  are configurable; automatic thinking/effort defaults apply only to the
+  default Sonnet 5 model so custom model overrides remain compatible.
+- Gemini Chat now defaults to the current production `gemini-3.6-flash`
+  model instead of `gemini-2.5-flash`.
+- OpenRouter Chat now defaults to `openai/gpt-5.6-terra`. Both OpenRouter
+  search adapters use the agentic `openrouter:web_search` server tool instead
+  of the deprecated `:online` model suffix; the dedicated `openrouter-online`
+  adapter retains its existing GPT-4o Mini/Exa-backed search profile.
+- `openai-deep` and `openai-deep-o3` are deprecated aliases of
+  `openai-research`. Existing config keys, group members, fallback targets,
+  and CLI provider arguments resolve with a warning and deduplicate to one
+  OpenAI request. Config files are not rewritten automatically; the aliases
+  will be removed in Librarium 2.0. The deprecated programmatic adapter class
+  exports remain as canonical-provider wrappers until that release.
+- Plain `librarium status` and `status --json` now reconcile pending async
+  tasks once, persisting provider terminal state and safe error details before
+  rendering. `--wait` continues polling from that reconciled state.
+
+### Removed
+
+- New submissions to OpenAI's retired `o4-mini-deep-research` and
+  `o3-deep-research` models. Pending handles created by those removed
+  providers are not guaranteed to remain retrievable after upgrade; completed
+  report files are unchanged.
+
 ## [1.4.1] - 2026-07-23
 
 ### Fixed

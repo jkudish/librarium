@@ -91,7 +91,7 @@ describe('benchmark corpus and target catalog', () => {
     const targets = allTargets(catalog);
     expect(
       targets.filter((target) => target.type === 'individual-provider'),
-    ).toHaveLength(25);
+    ).toHaveLength(24);
     expect(
       targets.filter((target) => target.type === 'built-in-group'),
     ).toHaveLength(7);
@@ -132,7 +132,7 @@ describe('benchmark command and safety', () => {
     const result = await executeBenchmark(
       {
         track: 'stable',
-        providers: ['brave-search', 'openai-deep'],
+        providers: ['brave-search', 'openai-research'],
         questionIds: ['stable-capital-australia'],
         dryRun: true,
       },
@@ -153,7 +153,7 @@ describe('benchmark command and safety', () => {
     );
     expect(result.preflight.unknownCostOperations).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ operation: 'provider:openai-deep' }),
+        expect.objectContaining({ operation: 'provider:openai-research' }),
         expect.objectContaining({
           operation: 'judge:openai/gpt-5-mini-2025-08-07',
         }),
@@ -711,12 +711,12 @@ describe('benchmark fixture replay and artifacts', () => {
         version: 1,
         providers: [
           {
-            id: 'openai-deep',
+            id: 'openai-research',
             tier: 'deep-research',
             status: 'async-pending',
           },
         ],
-        asyncTasks: [{ provider: 'openai-deep', taskId: 'fixture' }],
+        asyncTasks: [{ provider: 'openai-research', taskId: 'fixture' }],
       }),
     );
     expect(() => parseLibrariumRun(directory)).toThrow(

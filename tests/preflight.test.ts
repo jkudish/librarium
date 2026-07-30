@@ -55,7 +55,7 @@ describe('shouldConfirmDeepResearch', () => {
 
 describe('countDeepResearch', () => {
   const tierById = new Map<string, ProviderTier>([
-    ['openai-deep', 'deep-research'],
+    ['openai-research', 'deep-research'],
     ['gemini-deep', 'deep-research'],
     ['exa', 'ai-grounded'],
     ['brave-search', 'raw-search'],
@@ -63,7 +63,7 @@ describe('countDeepResearch', () => {
 
   it('counts only deep-research-tier providers', () => {
     expect(
-      countDeepResearch(['openai-deep', 'gemini-deep', 'exa'], tierById),
+      countDeepResearch(['openai-research', 'gemini-deep', 'exa'], tierById),
     ).toBe(2);
     expect(countDeepResearch(['exa', 'brave-search'], tierById)).toBe(0);
     expect(countDeepResearch(['unknown'], tierById)).toBe(0);
@@ -73,11 +73,11 @@ describe('countDeepResearch', () => {
 describe('deepResearchWarning', () => {
   it('lists providers and warns about time and per-call billing, no em-dash', () => {
     const message = deepResearchWarning([
-      'openai-deep',
+      'openai-research',
       'gemini-deep',
       'perplexity-deep-research',
     ]);
-    expect(message).toContain('openai-deep');
+    expect(message).toContain('openai-research');
     expect(message).toContain('3 deep-research providers');
     expect(message.toLowerCase()).toContain('bills per call');
     expect(message).not.toContain('—');

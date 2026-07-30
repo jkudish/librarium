@@ -1,6 +1,7 @@
 import { registerCustomProviders } from '../node-entry.js';
 import {
   getAllProviders,
+  getExactProvider,
   getProvider,
   getProviderMeta,
   getProvidersByTier,
@@ -12,6 +13,7 @@ import {
 
 export {
   getAllProviders,
+  getExactProvider,
   getProvider,
   getProviderMeta,
   getProvidersByTier,

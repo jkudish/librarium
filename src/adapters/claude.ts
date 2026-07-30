@@ -42,11 +42,52 @@ interface AnthropicResponse {
 export interface ClaudeProviderOptions extends BaseProviderOptions {
   model?: string;
   webSearch?: boolean;
+  maxTokens?: unknown;
+  thinking?: unknown;
+  effort?: unknown;
 }
 
-const DEFAULT_CLAUDE_MODEL = 'claude-haiku-4-5';
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5';
 const ANTHROPIC_VERSION = '2023-06-01';
-const MAX_TOKENS = 4096;
+const DEFAULT_MAX_TOKENS = 16000;
+const THINKING_MODES = ['adaptive', 'disabled'] as const;
+type ThinkingMode = (typeof THINKING_MODES)[number];
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+type EffortLevel = (typeof EFFORT_LEVELS)[number];
+
+function parseMaxTokens(value: unknown): number {
+  if (value === undefined) return DEFAULT_MAX_TOKENS;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+  throw new Error('claude options.maxTokens must be a positive integer');
+}
+
+function parseThinking(value: unknown): ThinkingMode | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value === 'string' &&
+    THINKING_MODES.includes(value as ThinkingMode)
+  ) {
+    return value as ThinkingMode;
+  }
+  throw new Error(
+    `claude options.thinking must be one of: ${THINKING_MODES.join(', ')}`,
+  );
+}
+
+function parseEffort(value: unknown): EffortLevel | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value === 'string' &&
+    EFFORT_LEVELS.includes(value as EffortLevel)
+  ) {
+    return value as EffortLevel;
+  }
+  throw new Error(
+    `claude options.effort must be one of: ${EFFORT_LEVELS.join(', ')}`,
+  );
+}
 
 /**
  * Claude LLM provider.
@@ -58,11 +99,35 @@ export class ClaudeProvider extends BaseProvider {
   readonly tier: ProviderTier = 'llm';
   readonly model: string;
   readonly webSearch: boolean;
+  private readonly configuredMaxTokens?: unknown;
+  private readonly configuredThinking?: unknown;
+  private readonly configuredEffort?: unknown;
 
   constructor(options: ClaudeProviderOptions = {}) {
     super(options);
     this.model = options.model?.trim() || DEFAULT_CLAUDE_MODEL;
     this.webSearch = options.webSearch ?? true;
+    this.configuredMaxTokens = options.maxTokens;
+    this.configuredThinking = options.thinking;
+    this.configuredEffort = options.effort;
+  }
+
+  get maxTokens(): number {
+    return parseMaxTokens(this.configuredMaxTokens);
+  }
+
+  get thinking(): ThinkingMode | undefined {
+    return (
+      parseThinking(this.configuredThinking) ??
+      (this.model === DEFAULT_CLAUDE_MODEL ? 'adaptive' : undefined)
+    );
+  }
+
+  get effort(): EffortLevel | undefined {
+    return (
+      parseEffort(this.configuredEffort) ??
+      (this.model === DEFAULT_CLAUDE_MODEL ? 'medium' : undefined)
+    );
   }
 
   async execute(
@@ -75,9 +140,13 @@ export class ClaudeProvider extends BaseProvider {
     try {
       const body: Record<string, unknown> = {
         model: this.model,
-        max_tokens: MAX_TOKENS,
+        max_tokens: this.maxTokens,
         messages: [{ role: 'user', content: query }],
       };
+      const thinking = this.thinking;
+      const effort = this.effort;
+      if (thinking) body.thinking = { type: thinking };
+      if (effort) body.output_config = { effort };
       if (this.webSearch) {
         body.tools = [
           {

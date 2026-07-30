@@ -1,10 +1,16 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
-import { getProvider, initializeProviders } from '../adapters/node-registry.js';
+import {
+  getExactProvider,
+  getProvider,
+  initializeProviders,
+} from '../adapters/node-registry.js';
 import { sanitizeId } from '../constants.js';
 import {
+  asyncPollFailureUpdates,
+  asyncPollUpdates,
   getPendingTasks,
   loadAsyncTasks,
   saveAsyncTasks,
@@ -14,14 +20,12 @@ import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { normalizeUsage } from '../core/dispatcher.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import { buildProviderMetering } from '../core/metering.js';
-import { deduplicateSources } from '../core/normalizer.js';
+import { updateRunManifestAfterRetrieve } from '../core/retrieval-manifest.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
   AsyncTaskHandle,
-  Citation,
   ProviderConfig,
   ProviderReport,
-  RunManifest,
 } from '../types.js';
 import { writeHtmlReport } from './html-report.js';
 import { writeJsonlReport } from './jsonl-report.js';
@@ -45,7 +49,11 @@ function formatTaskAge(submittedAt: number): string {
 }
 
 function formatTaskStatus(task: AsyncTaskHandle): string {
-  return `  ${task.provider} | Task: ${task.taskId.slice(0, 20)}... | Status: ${task.status} | Submitted: ${formatTaskAge(task.submittedAt)}`;
+  const remote = task.providerStatus
+    ? ` | Provider: ${task.providerStatus}`
+    : '';
+  const error = task.lastPollError ? ` | Error: ${task.lastPollError}` : '';
+  return `  ${task.provider} | Task: ${task.taskId.slice(0, 20)}... | Status: ${task.status}${remote}${error} | Submitted: ${formatTaskAge(task.submittedAt)}`;
 }
 
 /** Column widths across a set of async tasks so result lines align. */
@@ -65,7 +73,7 @@ async function retrieveTask(
   print: (line: string) => void,
   providerConfig?: ProviderConfig,
 ): Promise<boolean> {
-  const provider = getProvider(task.provider);
+  const provider = getExactProvider(task.provider);
   if (!provider?.retrieve) {
     spinner.text = `Provider ${task.provider} does not support retrieval`;
     return false;
@@ -150,7 +158,10 @@ async function retrieveTask(
 
     // Fold the retrieved result back into run.json and sources.json so JSON
     // consumers, browse tallies, and regenerated reports see the final state.
-    updateManifestAfterRetrieve(dir, report);
+    if (!updateRunManifestAfterRetrieve(dir, report, task.taskId)) {
+      spinner.text = `Retrieved ${task.provider}, but could not update run.json; task kept for retry`;
+      return false;
+    }
 
     // Mark as retrieved by removing from async tasks
     const tasks = loadAsyncTasks(dir);
@@ -195,52 +206,38 @@ async function retrieveTask(
   }
 }
 
-/**
- * After a successful retrieval, update run.json's provider entry and rebuild
- * sources.json from every .meta.json in the run directory, so the manifest no
- * longer reports the provider as async-pending.
- */
-function updateManifestAfterRetrieve(
-  dir: string,
-  report: ProviderReport,
-): void {
-  const manifestPath = join(dir, 'run.json');
-  if (!existsSync(manifestPath)) return;
-
-  try {
-    const manifest = JSON.parse(
-      readFileSync(manifestPath, 'utf8'),
-    ) as RunManifest;
-
-    const index = manifest.providers.findIndex(
-      (p) => p.id === report.id && p.status === 'async-pending',
-    );
-    if (index >= 0) {
-      manifest.providers[index] = report;
+/** Reconcile each active task once without waiting or retrieving. */
+export async function reconcilePendingTasksOnce(
+  tasks: AsyncTaskHandle[],
+): Promise<void> {
+  for (const task of tasks) {
+    const provider = getExactProvider(task.provider);
+    if (!provider?.poll || !task.outputDir) {
+      if (task.outputDir) {
+        updateAsyncTask(
+          task.outputDir,
+          task.taskId,
+          asyncPollUpdates({
+            status: 'failed',
+            rawStatus: 'unsupported_provider',
+            message: `Provider ${task.provider} does not support polling after this upgrade`,
+          }),
+        );
+      }
+      continue;
     }
-
-    // Rebuild the deduped source list from all per-provider meta files.
-    const allCitations: Citation[] = [];
-    for (const entry of readdirSync(dir)) {
-      if (!entry.endsWith('.meta.json')) continue;
-      try {
-        const meta = JSON.parse(readFileSync(join(dir, entry), 'utf8')) as {
-          citations?: Citation[];
-        };
-        if (Array.isArray(meta.citations)) allCitations.push(...meta.citations);
-      } catch {}
+    try {
+      const result = await provider.poll(task);
+      updateAsyncTask(task.outputDir, task.taskId, asyncPollUpdates(result));
+    } catch (error) {
+      updateAsyncTask(
+        task.outputDir,
+        task.taskId,
+        asyncPollFailureUpdates(
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
     }
-    const sources = deduplicateSources(allCitations);
-    safeWriteFile(join(dir, 'sources.json'), JSON.stringify(sources, null, 2));
-    manifest.sources = {
-      total: allCitations.length,
-      unique: sources.length,
-      file: 'sources.json',
-    };
-
-    safeWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
-  } catch {
-    // A malformed manifest should never block retrieval itself.
   }
 }
 
@@ -275,8 +272,8 @@ export function registerStatusCommand(program: Command): void {
 
         // Gather all async tasks (pending + completed unretrieved)
         const pendingTasks = getPendingTasks(baseDir);
-        const completedTasks = getCompletedTasks(baseDir);
-        const allTasks = [...pendingTasks, ...completedTasks];
+        const terminalTasks = getTerminalTasks(baseDir);
+        let allTasks = [...pendingTasks, ...terminalTasks];
 
         if (allTasks.length === 0) {
           if (opts.json) {
@@ -289,30 +286,55 @@ export function registerStatusCommand(program: Command): void {
           return;
         }
 
-        if (opts.json && !opts.wait && !opts.retrieve) {
-          console.log(JSON.stringify({ tasks: allTasks }, null, 2));
-          return;
-        }
+        if (!opts.wait) {
+          // Plain status and standalone --retrieve both reconcile once first.
+          await reconcilePendingTasksOnce(pendingTasks);
 
-        if (!opts.wait && !opts.retrieve) {
-          if (pendingTasks.length > 0) {
-            console.log(`\nPending async tasks (${pendingTasks.length}):\n`);
-            for (const task of pendingTasks) {
-              console.log(formatTaskStatus(task));
+          if (opts.retrieve) {
+            // Retrieval below rescans persisted state and picks up tasks that
+            // completed during this single reconciliation pass.
+          } else {
+            const refreshedPending = getPendingTasks(baseDir);
+            const refreshedTerminal = getTerminalTasks(baseDir);
+            allTasks = [...refreshedPending, ...refreshedTerminal];
+            if (opts.json) {
+              console.log(JSON.stringify({ tasks: allTasks }, null, 2));
+              return;
             }
-          }
-          if (completedTasks.length > 0) {
-            console.log(
-              `\nCompleted (awaiting retrieval): ${completedTasks.length}\n`,
+            if (refreshedPending.length > 0) {
+              console.log(
+                `\nPending async tasks (${refreshedPending.length}):\n`,
+              );
+              for (const task of refreshedPending) {
+                console.log(formatTaskStatus(task));
+              }
+            }
+            const refreshedCompleted = refreshedTerminal.filter(
+              (task) => task.status === 'completed',
             );
-            for (const task of completedTasks) {
-              console.log(formatTaskStatus(task));
+            if (refreshedCompleted.length > 0) {
+              console.log(
+                `\nCompleted (awaiting retrieval): ${refreshedCompleted.length}\n`,
+              );
+              for (const task of refreshedCompleted) {
+                console.log(formatTaskStatus(task));
+              }
             }
+            const failedOrCancelled = refreshedTerminal.filter(
+              (task) => task.status === 'failed' || task.status === 'cancelled',
+            );
+            if (failedOrCancelled.length > 0) {
+              console.log(
+                `\nTerminal async tasks (${failedOrCancelled.length}):\n`,
+              );
+              for (const task of failedOrCancelled)
+                console.log(formatTaskStatus(task));
+            }
+            console.log(
+              '\nUse --wait to poll and auto-retrieve, --retrieve to fetch completed results.',
+            );
+            return;
           }
-          console.log(
-            '\nUse --wait to poll and auto-retrieve, --retrieve to fetch completed results.',
-          );
-          return;
         }
 
         // Wait mode: poll until done, then auto-retrieve
@@ -325,13 +347,34 @@ export function registerStatusCommand(program: Command): void {
           const justCompleted: Array<{
             task: AsyncTaskHandle;
             dir: string;
-          }> = [];
+          }> = terminalTasks
+            .filter(
+              (task): task is AsyncTaskHandle & { outputDir: string } =>
+                task.status === 'completed' && Boolean(task.outputDir),
+            )
+            .map((task) => ({ task, dir: task.outputDir }));
+          const completedTaskKeys = new Set(
+            justCompleted.map(
+              ({ task, dir }) => `${dir}\0${task.provider}\0${task.taskId}`,
+            ),
+          );
 
           while (remaining.length > 0) {
             for (const task of remaining) {
-              const provider = getProvider(task.provider);
+              const provider = getExactProvider(task.provider);
               if (!provider?.poll) {
                 spinner.text = `Provider ${task.provider} does not support polling`;
+                if (task.outputDir) {
+                  updateAsyncTask(
+                    task.outputDir,
+                    task.taskId,
+                    asyncPollUpdates({
+                      status: 'failed',
+                      rawStatus: 'unsupported_provider',
+                      message: `Provider ${task.provider} does not support polling after this upgrade`,
+                    }),
+                  );
+                }
                 task.status = 'failed';
                 continue;
               }
@@ -340,19 +383,32 @@ export function registerStatusCommand(program: Command): void {
                 const result = await provider.poll(task);
                 if (
                   result.status === 'completed' ||
-                  result.status === 'failed'
+                  result.status === 'failed' ||
+                  result.status === 'cancelled'
                 ) {
-                  if (task.outputDir) {
-                    updateAsyncTask(task.outputDir, task.taskId, {
-                      status: result.status,
-                      completedAt: Date.now(),
-                    });
-                  }
+                  if (task.outputDir)
+                    updateAsyncTask(
+                      task.outputDir,
+                      task.taskId,
+                      asyncPollUpdates(result),
+                    );
                   task.status = result.status;
-                  if (result.status === 'completed' && task.outputDir) {
+                  if (
+                    result.status === 'completed' &&
+                    task.outputDir &&
+                    !completedTaskKeys.has(
+                      `${task.outputDir}\0${task.provider}\0${task.taskId}`,
+                    )
+                  ) {
                     justCompleted.push({ task, dir: task.outputDir });
+                    completedTaskKeys.add(
+                      `${task.outputDir}\0${task.provider}\0${task.taskId}`,
+                    );
                   }
-                  if (result.status === 'failed') {
+                  if (
+                    result.status === 'failed' ||
+                    result.status === 'cancelled'
+                  ) {
                     const failureReport: ProviderReport = {
                       id: task.provider,
                       tier: getProvider(task.provider)?.tier ?? 'deep-research',
@@ -381,14 +437,22 @@ export function registerStatusCommand(program: Command): void {
                     ? ` (${result.progress}%)`
                     : '';
                   spinner.text = `${task.provider}: ${result.status}${progress}`;
-                  if (task.outputDir) {
-                    updateAsyncTask(task.outputDir, task.taskId, {
-                      status: result.status,
-                      lastPolledAt: Date.now(),
-                    });
-                  }
+                  if (task.outputDir)
+                    updateAsyncTask(
+                      task.outputDir,
+                      task.taskId,
+                      asyncPollUpdates(result),
+                    );
                 }
               } catch (e) {
+                if (task.outputDir)
+                  updateAsyncTask(
+                    task.outputDir,
+                    task.taskId,
+                    asyncPollFailureUpdates(
+                      e instanceof Error ? e.message : String(e),
+                    ),
+                  );
                 spinner.text = `Error polling ${task.provider}: ${e instanceof Error ? e.message : String(e)}`;
               }
             }
@@ -475,7 +539,7 @@ export function registerStatusCommand(program: Command): void {
         if (opts.json) {
           const updatedTasks = [
             ...getPendingTasks(baseDir),
-            ...getCompletedTasks(baseDir),
+            ...getTerminalTasks(baseDir),
           ];
           console.log(JSON.stringify({ tasks: updatedTasks }, null, 2));
         }
@@ -486,28 +550,24 @@ export function registerStatusCommand(program: Command): void {
     });
 }
 
-/**
- * Get completed but unretrieved async tasks across all output directories
- */
-function getCompletedTasks(baseOutputDir: string): AsyncTaskHandle[] {
+function getTerminalTasks(baseOutputDir: string): AsyncTaskHandle[] {
   if (!existsSync(baseOutputDir)) return [];
-
-  const entries = readdirSync(baseOutputDir);
   const tasks: AsyncTaskHandle[] = [];
-
-  for (const entry of entries) {
+  for (const entry of readdirSync(baseOutputDir)) {
     const dir = join(baseOutputDir, entry);
     try {
       if (!statSync(dir).isDirectory()) continue;
-      const dirTasks = loadAsyncTasks(dir);
-      for (const task of dirTasks) {
-        if (task.status === 'completed') {
+      for (const task of loadAsyncTasks(dir)) {
+        if (
+          task.status === 'completed' ||
+          task.status === 'failed' ||
+          task.status === 'cancelled'
+        ) {
           if (!task.outputDir) task.outputDir = dir;
           tasks.push(task);
         }
       }
     } catch {}
   }
-
   return tasks;
 }

@@ -61,7 +61,7 @@ function makeConfig(overrides: Partial<Config['defaults']> = {}): Config {
     },
     customProviders: {},
     trustedProviderIds: [],
-    groups: { quick: ['exa'], deep: ['openai-deep'] },
+    groups: { quick: ['exa'], deep: ['openai-research'] },
   };
 }
 
@@ -164,7 +164,7 @@ describe('mcp tool surface', () => {
     const payload = JSON.parse((res.content as { text: string }[])[0].text);
     expect(payload.groups).toEqual([
       { name: 'quick', members: ['exa'] },
-      { name: 'deep', members: ['openai-deep'] },
+      { name: 'deep', members: ['openai-research'] },
     ]);
     await server.close();
   });

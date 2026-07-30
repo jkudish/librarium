@@ -22,8 +22,7 @@ import { GrokProvider } from './grok.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
 import { OpenAIChatProvider } from './openai-chat.js';
-import { OpenAIDeepProvider } from './openai-deep.js';
-import { OpenAIDeepO3Provider } from './openai-deep-o3.js';
+import { OpenAIResearchProvider } from './openai-research.js';
 import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
@@ -67,6 +66,15 @@ export function registerProvider(provider: Provider): void {
  */
 export function getProvider(id: string): Provider | undefined {
   return providers.get(resolveProviderId(id));
+}
+
+/**
+ * Look up only a canonical registered id. Async task files use this stricter
+ * path so retired provider handles are never reinterpreted as a new provider's
+ * remote task identifier after an upgrade.
+ */
+export function getExactProvider(id: string): Provider | undefined {
+  return providers.get(id);
 }
 
 /**
@@ -136,8 +144,16 @@ export async function initializeProviders(
     new PerplexitySonarDeepProvider(),
     new PerplexityDeepResearchProvider(),
     new PerplexityAdvancedDeepProvider(),
-    new OpenAIDeepProvider(),
-    new OpenAIDeepO3Provider(),
+    new OpenAIResearchProvider({
+      model: providerConfig['openai-research']?.model,
+      maxToolCalls: providerConfig['openai-research']?.options?.maxToolCalls,
+      reasoningEffort:
+        providerConfig['openai-research']?.options?.reasoningEffort,
+      returnTokenBudget:
+        providerConfig['openai-research']?.options?.returnTokenBudget,
+      apiKey: providerConfig['openai-research']?.apiKey,
+      credentials,
+    }),
     new GeminiDeepProvider({ model: providerConfig['gemini-deep']?.model }),
 
     // AI-Grounded Search (sync)
@@ -164,6 +180,9 @@ export async function initializeProviders(
     new ClaudeProvider({
       model: providerConfig.claude?.model,
       webSearch: providerWebSearch('claude', providerConfig, llmWebSearch),
+      maxTokens: providerConfig.claude?.options?.maxTokens,
+      thinking: providerConfig.claude?.options?.thinking,
+      effort: providerConfig.claude?.options?.effort,
     }),
     new OpenAIChatProvider({
       model: providerConfig['openai-chat']?.model,

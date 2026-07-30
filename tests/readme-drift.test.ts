@@ -125,7 +125,7 @@ describe('README drift: command flags', () => {
 describe('README drift: providers, tiers, and groups', () => {
   it('states the correct built-in provider count', () => {
     const providerCount = Object.keys(PROVIDER_ENV_VARS).length;
-    expect(providerCount).toBe(25); // tripwire: bump the prose below if this changes
+    expect(providerCount).toBe(24); // tripwire: bump the prose below if this changes
     expect(
       README.includes(`${providerCount} built-in provider adapters`),
       `README.md should say "${providerCount} built-in provider adapters" in the Providers intro.`,
@@ -152,5 +152,12 @@ describe('README drift: providers, tiers, and groups', () => {
       missing,
       `README.md does not document group(s) as \`name\`: ${missing.join(', ')}.`,
     ).toEqual([]);
+  });
+
+  it('keeps the grounded all-group count aligned with the registry', () => {
+    const groundedCount = DEFAULT_GROUPS.all.length;
+    expect(groundedCount).toBe(20);
+    expect(README).toContain(`All ${groundedCount} grounded providers`);
+    expect(README).not.toContain('All 21 grounded providers');
   });
 });

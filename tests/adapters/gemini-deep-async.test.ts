@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { GeminiDeepProvider } from '../../src/adapters/gemini-deep.js';
+import { UnsafeToRetrySubmissionError } from '../../src/core/errors.js';
 import type { AsyncTaskHandle } from '../../src/types.js';
 
 function jsonResponse(status: number, data: unknown): Response {
@@ -101,15 +102,31 @@ describe('GeminiDeepProvider Interactions API', () => {
     expect(body.agent).toBe('deep-research-max-preview-04-2026');
   });
 
-  it('throws on submit failure so the dispatcher falls back to sync', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(403, { error: { message: 'preview not enabled' } }),
-      );
+  it.each([429, 500])(
+    'does not retry an HTTP %s background submission',
+    async (status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(status, { error: { message: 'submission failed' } }),
+        );
+      globalThis.fetch = fetchMock;
+
+      await expect(
+        makeProvider().submit('history of TPUs', { timeout: 1800 }),
+      ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('does not retry or fall through after an ambiguous transport failure', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('socket timed out'));
+    globalThis.fetch = fetchMock;
+
     await expect(
       makeProvider().submit('history of TPUs', { timeout: 1800 }),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('maps poll statuses (in_progress running, failed with message)', async () => {
@@ -130,10 +147,12 @@ describe('GeminiDeepProvider Interactions API', () => {
     expect(await provider.poll(makeHandle())).toEqual({
       status: 'running',
       message: undefined,
+      rawStatus: 'in_progress',
     });
     expect(await provider.poll(makeHandle())).toEqual({
       status: 'failed',
       message: 'agent overloaded',
+      rawStatus: 'failed',
     });
 
     const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;

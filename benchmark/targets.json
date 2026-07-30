@@ -23,14 +23,7 @@
       "costConfidence": "unknown"
     },
     {
-      "id": "openai-deep",
-      "tier": "deep-research",
-      "envVar": "OPENAI_API_KEY",
-      "estimatedCostUsd": null,
-      "costConfidence": "unknown"
-    },
-    {
-      "id": "openai-deep-o3",
+      "id": "openai-research",
       "tier": "deep-research",
       "envVar": "OPENAI_API_KEY",
       "estimatedCostUsd": null,
@@ -188,8 +181,7 @@
       "perplexity-sonar-deep",
       "perplexity-deep-research",
       "perplexity-advanced-deep",
-      "openai-deep",
-      "openai-deep-o3",
+      "openai-research",
       "gemini-deep"
     ],
     "quick": [
@@ -225,8 +217,7 @@
       "perplexity-sonar-deep",
       "perplexity-deep-research",
       "perplexity-advanced-deep",
-      "openai-deep",
-      "openai-deep-o3",
+      "openai-research",
       "gemini-deep",
       "perplexity-sonar-pro",
       "gemini-grounded",
@@ -242,8 +233,7 @@
       "perplexity-sonar-deep",
       "perplexity-deep-research",
       "perplexity-advanced-deep",
-      "openai-deep",
-      "openai-deep-o3",
+      "openai-research",
       "gemini-deep",
       "perplexity-sonar-pro",
       "gemini-grounded",
@@ -270,7 +260,7 @@
       "brave-search"
     ],
     "candidate-depth-triad": [
-      "openai-deep",
+      "openai-research",
       "gemini-deep",
       "perplexity-sonar-deep"
     ]

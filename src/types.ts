@@ -154,6 +154,10 @@ export interface AsyncTaskHandle {
   status: AsyncTaskStatus;
   lastPolledAt?: number;
   completedAt?: number;
+  /** Raw provider state from the most recent successful poll. */
+  providerStatus?: string;
+  /** Safe diagnostic from the most recent poll; never credentials or headers. */
+  lastPollError?: string;
   outputDir?: string;
 }
 
@@ -162,6 +166,8 @@ export interface AsyncPollResult {
   status: AsyncTaskStatus;
   progress?: number; // 0-100
   message?: string;
+  /** Provider-native state, persisted separately from Librarium's mapped state. */
+  rawStatus?: string;
 }
 
 // Provider interface — each adapter implements this

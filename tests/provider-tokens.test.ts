@@ -8,6 +8,7 @@ import {
 } from '../src/constants.js';
 
 const PROVIDERS: ProviderNameEntry[] = [
+  { id: 'openai-research', displayName: 'OpenAI Research' },
   { id: 'perplexity-sonar-pro', displayName: 'Perplexity Sonar Pro' },
   { id: 'exa', displayName: 'Exa Search' },
   { id: 'brave-search', displayName: 'Brave Web Search' },
@@ -45,6 +46,15 @@ describe('resolveProviderToken resolution order', () => {
       token: 'perplexity-sonar',
       id: 'perplexity-sonar-pro',
     });
+  });
+
+  it('warns and collapses retired OpenAI deep tokens to one dispatch id', () => {
+    const result = resolveProviderTokens(
+      ['openai-deep', 'openai-deep-o3', 'openai-research'],
+      PROVIDERS,
+    );
+    expect(result.ids).toEqual(['openai-research']);
+    expect(result.warnings).toHaveLength(2);
   });
 
   it('resolves a display name (exact form)', () => {

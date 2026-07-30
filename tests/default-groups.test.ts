@@ -49,3 +49,13 @@ describe('default groups -- grok membership invariant', () => {
     }
   });
 });
+
+describe('default groups -- OpenAI research migration', () => {
+  it('contains the canonical OpenAI research provider exactly once per deep group', () => {
+    for (const group of ['deep', 'comprehensive', 'all'] as const) {
+      expect(DEFAULT_GROUPS[group]).toContain('openai-research');
+      expect(DEFAULT_GROUPS[group]).not.toContain('openai-deep');
+      expect(DEFAULT_GROUPS[group]).not.toContain('openai-deep-o3');
+    }
+  });
+});

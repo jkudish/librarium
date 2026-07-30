@@ -2,7 +2,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { ExaProvider } from '../../src/adapters/exa.js';
 import { GeminiDeepProvider } from '../../src/adapters/gemini-deep.js';
 import { GeminiGroundedProvider } from '../../src/adapters/gemini-grounded.js';
-import { OpenAIDeepProvider } from '../../src/adapters/openai-deep.js';
+import { OpenAIResearchProvider } from '../../src/adapters/openai-research.js';
 import { OpenRouterOnlineProvider } from '../../src/adapters/openrouter-online.js';
 import { PerplexityDeepResearchProvider } from '../../src/adapters/perplexity-deep-research.js';
 import { PerplexitySonarProProvider } from '../../src/adapters/perplexity-sonar-pro.js';
@@ -112,7 +112,7 @@ describe('usage extraction', () => {
     expect(result.usage?.costUsd).toBeUndefined();
   });
 
-  it('extracts OpenAI deep research token usage on retrieve', async () => {
+  it('extracts OpenAI research token usage on retrieve', async () => {
     const apiUsage = {
       input_tokens: 42,
       output_tokens: 314,
@@ -122,7 +122,7 @@ describe('usage extraction', () => {
       jsonResponse(200, {
         id: 'task-1',
         status: 'completed',
-        model: 'o4-mini-deep-research',
+        model: 'gpt-5.6-sol',
         output: [
           {
             type: 'message',
@@ -133,11 +133,11 @@ describe('usage extraction', () => {
       }),
     );
 
-    const provider = new OpenAIDeepProvider({
+    const provider = new OpenAIResearchProvider({
       credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
     });
     const result = await provider.retrieve({
-      provider: 'openai-deep',
+      provider: 'openai-research',
       taskId: 'task-1',
       query: 'deep question',
       submittedAt: Date.now(),
@@ -229,7 +229,7 @@ describe('usage extraction', () => {
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini:online',
+        model: 'openai/gpt-4o-mini',
         choices: [
           {
             message: {

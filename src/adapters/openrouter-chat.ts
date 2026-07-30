@@ -48,13 +48,13 @@ export interface OpenRouterChatProviderOptions extends BaseProviderOptions {
   webSearch?: boolean;
 }
 
-// Cheap, capable default. Override via config `model`.
-const DEFAULT_OPENROUTER_CHAT_MODEL = 'openai/gpt-4o-mini';
+// Balanced current-generation default. Override via config `model`.
+const DEFAULT_OPENROUTER_CHAT_MODEL = 'openai/gpt-5.6-terra';
 
 /**
  * OpenRouter LLM provider.
  * Uses OpenRouter web search by default for current answers and citations.
- * Distinct from openrouter-online (which grounds via the `:online` suffix).
+ * Distinct from openrouter-online, which always requires grounded citations.
  * Tier: llm (sync)
  */
 export class OpenRouterChatProvider extends BaseProvider {
@@ -89,6 +89,9 @@ export class OpenRouterChatProvider extends BaseProvider {
           body: {
             model: this.requestModel,
             messages: [{ role: 'user', content: query }],
+            ...(this.webSearch
+              ? { tools: [{ type: 'openrouter:web_search' }] }
+              : {}),
             // Opt into usage accounting so the response reports cost in USD.
             usage: { include: true },
           },
@@ -181,8 +184,7 @@ export class OpenRouterChatProvider extends BaseProvider {
   }
 
   private get requestModel(): string {
-    if (!this.webSearch || this.model.endsWith(':online')) return this.model;
-    return `${this.model}:online`;
+    return this.model.replace(/:online$/, '');
   }
 
   private extractCitations(annotations?: OpenRouterAnnotation[]): Citation[] {

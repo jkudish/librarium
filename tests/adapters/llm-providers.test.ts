@@ -29,7 +29,7 @@ describe('llm providers', () => {
   it('calls the Anthropic Messages API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'claude-haiku-4-5',
+        model: 'claude-sonnet-5',
         content: [
           {
             type: 'text',
@@ -67,7 +67,7 @@ describe('llm providers', () => {
         provider: 'claude',
       },
     ]);
-    expect(result.model).toBe('claude-haiku-4-5');
+    expect(result.model).toBe('claude-sonnet-5');
     expect(result.usage).toMatchObject({
       inputTokens: 5,
       outputTokens: 9,
@@ -80,9 +80,11 @@ describe('llm providers', () => {
     expect(headers['x-api-key']).toBe('anthropic-key');
     expect(headers['anthropic-version']).toBe('2023-06-01');
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'claude-haiku-4-5',
-      max_tokens: 4096,
+      model: 'claude-sonnet-5',
+      max_tokens: 16000,
       messages: [{ role: 'user', content: 'what is rust?' }],
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'medium' },
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
     });
   });
@@ -104,7 +106,60 @@ describe('llm providers', () => {
     await provider.execute('hi', { timeout: 10 });
 
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(options.body as string).model).toBe('claude-opus-4-8');
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'claude-opus-4-8',
+      max_tokens: 16000,
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+    });
+  });
+
+  it('applies explicit Claude thinking, effort, and output options', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'claude-sonnet-5',
+        content: [{ type: 'text', text: 'ok' }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new ClaudeProvider({
+      maxTokens: 32000,
+      thinking: 'disabled',
+      effort: 'low',
+      webSearch: false,
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    });
+    await provider.execute('hi', { timeout: 10 });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'claude-sonnet-5',
+      max_tokens: 32000,
+      messages: [{ role: 'user', content: 'hi' }],
+      thinking: { type: 'disabled' },
+      output_config: { effort: 'low' },
+    });
+  });
+
+  it('rejects invalid Claude options before making a paid request', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    for (const options of [
+      { maxTokens: 0 },
+      { thinking: 'enabled' },
+      { effort: 'adaptive' },
+    ]) {
+      const provider = new ClaudeProvider({
+        ...options,
+        credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+      });
+      await expect(
+        provider.execute('hi', { timeout: 10 }),
+      ).resolves.toMatchObject({ error: expect.any(String) });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('surfaces Claude API errors', async () => {
@@ -270,7 +325,7 @@ describe('llm providers', () => {
           candidatesTokenCount: 7,
           totalTokenCount: 10,
         },
-        modelVersion: 'gemini-2.5-flash',
+        modelVersion: 'gemini-3.6-flash',
       }),
     );
     globalThis.fetch = fetchMock;
@@ -299,7 +354,7 @@ describe('llm providers', () => {
     });
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('models/gemini-2.5-flash:generateContent');
+    expect(url).toContain('models/gemini-3.6-flash:generateContent');
     // The API key travels in the x-goog-api-key header, never the URL.
     expect(url).not.toContain('key=');
     expect(url).not.toContain('gemini-key');
@@ -333,7 +388,7 @@ describe('llm providers', () => {
   it('calls OpenRouter chat with web search, usage accounting, and citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini:online',
+        model: 'openai/gpt-5.6-terra',
         choices: [
           {
             message: {
@@ -391,7 +446,33 @@ describe('llm providers', () => {
       'Bearer openrouter-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'openai/gpt-4o-mini:online',
+      model: 'openai/gpt-5.6-terra',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [{ type: 'openrouter:web_search' }],
+      usage: { include: true },
+    });
+  });
+
+  it('can disable OpenRouter web search and strips a legacy online suffix', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'anthropic/claude-sonnet-5',
+        choices: [{ message: { content: 'Direct answer.' } }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new OpenRouterChatProvider({
+      model: 'anthropic/claude-sonnet-5:online',
+      webSearch: false,
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+    });
+    const result = await provider.execute('hello', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'anthropic/claude-sonnet-5',
       messages: [{ role: 'user', content: 'hello' }],
       usage: { include: true },
     });

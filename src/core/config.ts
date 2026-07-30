@@ -167,7 +167,7 @@ export function mergeConfigs(
   if (project?.providers) {
     merged.providers = mergeProviderConfigs(
       merged.providers,
-      project.providers,
+      normalizeProjectProviderConfigs(project.providers),
     );
   }
 
@@ -257,9 +257,51 @@ function mergeProviderConfigs(
   return merged;
 }
 
+/**
+ * Canonicalize one project-config layer before it is merged with global
+ * config. This preserves global -> project precedence even when either layer
+ * uses a retired provider id that maps to the same canonical provider.
+ */
+function normalizeProjectProviderConfigs(
+  providers: NonNullable<ProjectConfig['providers']>,
+): NonNullable<ProjectConfig['providers']> {
+  const layer: Config = {
+    ...DEFAULT_CONFIG,
+    defaults: { ...DEFAULT_CONFIG.defaults },
+    // Preserve omitted fields in this layer. mergeProviderConfigs applies the
+    // default enabled=true only when there is no inherited canonical entry.
+    providers: Object.fromEntries(
+      Object.entries(providers).map(([id, provider]) => [id, { ...provider }]),
+    ) as Config['providers'],
+    customProviders: {},
+    trustedProviderIds: [],
+    groups: {},
+  };
+  migrateLegacyProviderIds(layer);
+  return layer.providers;
+}
+
 function migrateLegacyProviderIds(config: Config): string[] {
   const warnings: string[] = [];
   const migratedProviders: Config['providers'] = {};
+
+  // Both retired OpenAI deep-research entries map to one canonical provider.
+  // A canonical entry wins over either alias; when only aliases exist, the
+  // former o3 entry wins deterministically regardless of JSON key order.
+  const openAiResearchConfigs = [
+    'openai-deep',
+    'openai-deep-o3',
+    'openai-research',
+  ].filter((id) => config.providers[id] !== undefined);
+  const selectedOpenAiResearchId = openAiResearchConfigs.includes(
+    'openai-research',
+  )
+    ? 'openai-research'
+    : openAiResearchConfigs.includes('openai-deep-o3')
+      ? 'openai-deep-o3'
+      : openAiResearchConfigs.includes('openai-deep')
+        ? 'openai-deep'
+        : undefined;
 
   for (const [id, providerConfig] of Object.entries(config.providers)) {
     const canonicalId = resolveProviderId(id);
@@ -286,6 +328,15 @@ function migrateLegacyProviderIds(config: Config): string[] {
       ...providerConfig,
       fallback: normalizedFallback,
     };
+
+    if (canonicalId === 'openai-research' && id !== selectedOpenAiResearchId) {
+      if (selectedOpenAiResearchId) {
+        warnings.push(
+          `Provider "${id}" maps to "openai-research"; keeping "${selectedOpenAiResearchId}"`,
+        );
+      }
+      continue;
+    }
 
     if (!migratedProviders[canonicalId] || id === canonicalId) {
       migratedProviders[canonicalId] = normalizedConfig;

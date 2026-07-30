@@ -120,17 +120,18 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 25 providers', async () => {
+  it('initializeProviders registers all 24 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(25);
+    expect(all).toHaveLength(24);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
     expect(ids).toContain('perplexity-deep-research');
     expect(ids).toContain('perplexity-advanced-deep');
-    expect(ids).toContain('openai-deep');
-    expect(ids).toContain('openai-deep-o3');
+    expect(ids).toContain('openai-research');
+    expect(ids).not.toContain('openai-deep');
+    expect(ids).not.toContain('openai-deep-o3');
     expect(ids).toContain('gemini-deep');
     expect(ids).toContain('gemini-grounded');
     expect(ids).toContain('grok');
@@ -163,6 +164,18 @@ describe('registry', () => {
     ]) {
       expect(getProvider(id)?.tier).toBe('llm');
     }
+    expect(getProvider('gemini-chat')).toMatchObject({
+      model: 'gemini-3.6-flash',
+    });
+    expect(getProvider('claude')).toMatchObject({
+      model: 'claude-sonnet-5',
+      maxTokens: 16000,
+      thinking: 'adaptive',
+      effort: 'medium',
+    });
+    expect(getProvider('openrouter-chat')).toMatchObject({
+      model: 'openai/gpt-5.6-terra',
+    });
   });
 
   it('applies model config override to llm-tier providers', async () => {
@@ -188,6 +201,25 @@ describe('registry', () => {
       'anthropic/claude-3.5-haiku',
     );
     expect((getProvider('grok') as { model?: string }).model).toBe('grok-4.3');
+  });
+
+  it('applies Claude response-control options', async () => {
+    await initializeProviders({
+      providers: {
+        claude: {
+          options: {
+            maxTokens: 24000,
+            thinking: 'disabled',
+            effort: 'low',
+          },
+        },
+      },
+    });
+    expect(getProvider('claude')).toMatchObject({
+      maxTokens: 24000,
+      thinking: 'disabled',
+      effort: 'low',
+    });
   });
 
   it('enables llm web search by default and allows global/provider overrides', async () => {
@@ -235,9 +267,28 @@ describe('registry', () => {
     expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
   });
 
+  it('applies OpenAI research model and research options config', async () => {
+    await initializeProviders({
+      providers: {
+        'openai-research': {
+          model: 'gpt-5.6-sol-custom',
+          options: { maxToolCalls: 4, returnTokenBudget: 'unlimited' },
+        },
+      },
+    });
+    expect(getProvider('openai-research')).toMatchObject({
+      id: 'openai-research',
+      model: 'gpt-5.6-sol-custom',
+      maxToolCalls: 4,
+      returnTokenBudget: 'unlimited',
+    });
+  });
+
   it('getProvider resolves legacy provider ID aliases', async () => {
     await initializeProviders();
     expect(getProvider('perplexity-sonar')?.id).toBe('perplexity-sonar-pro');
     expect(getProvider('perplexity-deep')?.id).toBe('perplexity-sonar-deep');
+    expect(getProvider('openai-deep')?.id).toBe('openai-research');
+    expect(getProvider('openai-deep-o3')?.id).toBe('openai-research');
   });
 });

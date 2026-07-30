@@ -26,8 +26,7 @@ describe('isLlmTierProvider', () => {
   it('does not flag grounded providers, including key-sharing siblings', () => {
     // These share API keys with llm-tier providers but are grounded.
     for (const id of [
-      'openai-deep',
-      'openai-deep-o3',
+      'openai-research',
       'gemini-deep',
       'gemini-grounded',
       'openrouter-online',
@@ -68,8 +67,7 @@ describe('computeInitProviderChoices (init opt-in policy)', () => {
     const choices = computeInitProviderChoices(env);
 
     for (const id of [
-      'openai-deep',
-      'openai-deep-o3',
+      'openai-research',
       'gemini-deep',
       'gemini-grounded',
       'openrouter-online',

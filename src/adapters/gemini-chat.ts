@@ -66,7 +66,7 @@ export interface GeminiChatProviderOptions extends BaseProviderOptions {
   webSearch?: boolean;
 }
 
-const DEFAULT_GEMINI_CHAT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_CHAT_MODEL = 'gemini-3.6-flash';
 
 /**
  * Gemini LLM provider.
