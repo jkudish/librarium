@@ -48,7 +48,7 @@ describe('loadConfig', () => {
     expect(config.defaults.maxParallel).toBe(6);
     expect(config.defaults.timeout).toBe(30);
     expect(config.defaults.asyncTimeout).toBe(1800);
-    expect(config.defaults.asyncPollInterval).toBe(10);
+    expect(config.defaults.asyncPollInterval).toBe(30);
     expect(config.defaults.mode).toBe('mixed');
     expect(config.defaults.llmWebSearch).toBe(true);
     expect(config.customProviders).toEqual({});

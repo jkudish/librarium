@@ -24,7 +24,7 @@ const DEFAULT_CONFIG: Config = {
     maxParallel: 6,
     timeout: 30,
     asyncTimeout: 1800,
-    asyncPollInterval: 10,
+    asyncPollInterval: 30,
     mode: 'mixed',
     llmWebSearch: true,
   },

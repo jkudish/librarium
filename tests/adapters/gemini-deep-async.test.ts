@@ -71,13 +71,21 @@ describe('GeminiDeepProvider Interactions API', () => {
       agent: string;
       input: string;
       background: boolean;
-      agent_config: { type: string };
+      agent_config: {
+        type: string;
+        thinking_summaries: string;
+        visualization: string;
+      };
       tools: Array<{ type: string }>;
     };
     expect(body.agent).toBe('deep-research-preview-04-2026');
     expect(body.input).toBe('history of TPUs');
     expect(body.background).toBe(true);
-    expect(body.agent_config.type).toBe('deep-research');
+    expect(body.agent_config).toEqual({
+      type: 'deep-research',
+      thinking_summaries: 'none',
+      visualization: 'off',
+    });
     expect(body.tools).toEqual([{ type: 'google_search' }]);
   });
 

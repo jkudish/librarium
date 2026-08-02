@@ -114,9 +114,20 @@ describe('metering registry: estimates', () => {
     });
   });
 
+  it('reserves a conservative baseline for Gemini Deep Research tasks', () => {
+    const est = estimateMetering('gemini-deep');
+    expect(est).toMatchObject({
+      estimatedCostUsd: 3,
+      billableUnits: 1,
+      unit: 'task',
+      costConfidence: 'estimated',
+      pricingVersion: PRICING_VERSION,
+    });
+  });
+
   it('pins the pricing snapshot version (bump deliberately)', () => {
     // Tripwire: changing default prices should bump PRICING_VERSION.
-    expect(PRICING_VERSION).toBe('2026-07');
+    expect(PRICING_VERSION).toBe('2026-08');
   });
 });
 
