@@ -171,6 +171,10 @@ export async function dispatch(
       return null;
     }
 
+    // A selected primary owns its own dispatch/reporting path. Bail before
+    // budget checks so the same provider cannot be recorded as skipped twice.
+    if (providerIds.includes(fallbackId)) return null;
+
     // Fallbacks are API calls too: once the cost budget is exhausted, a
     // failed primary must not launch its backup.
     if (budget?.exceeded()) {
@@ -185,7 +189,11 @@ export async function dispatch(
     // A fallback is its own billable launch: skip it if the estimated budget is
     // already spent. (The reservation itself happens only once we've committed
     // to launching, below, so a fallback we bail on never reserves.)
-    if (estimatedBudget?.exceeded()) {
+    const fallbackEstimate = meteringFor(fallbackId).estimate;
+    if (
+      estimatedBudget?.exceeded() ||
+      estimatedBudget?.wouldExceed(fallbackEstimate)
+    ) {
       recordBudgetSkip(
         fallbackId,
         fallbackProvider.tier,
@@ -194,9 +202,6 @@ export async function dispatch(
       );
       return null;
     }
-
-    // Don't use a fallback that's already running as a primary in this dispatch
-    if (providerIds.includes(fallbackId)) return null;
 
     // Claim this fallback atomically (synchronous check+add before any await)
     // to prevent two concurrently failing providers from both triggering the
@@ -207,7 +212,7 @@ export async function dispatch(
     // Committed to launching this fallback now: reserve its estimate against the
     // estimated budget. Reserving only after the claim guards means a fallback
     // we bail on above never leaves a phantom reservation behind.
-    estimatedBudget?.reserve(meteringFor(fallbackId).estimate);
+    estimatedBudget?.reserve(fallbackEstimate);
 
     // Note: enabled is intentionally not checked here — fallback providers may
     // be configured with enabled: false so they only activate as backups.
@@ -343,11 +348,15 @@ export async function dispatch(
       // spent, otherwise reserve this provider's network-free estimate before
       // it launches. Reserving only at launch means skipped providers never
       // leave a phantom reservation behind.
-      if (estimatedBudget?.exceeded()) {
+      const estimate = meteringFor(id).estimate;
+      if (
+        estimatedBudget?.exceeded() ||
+        estimatedBudget?.wouldExceed(estimate)
+      ) {
         recordBudgetSkip(id, provider.tier, ESTIMATE_BUDGET_SKIP_REASON);
         return;
       }
-      estimatedBudget?.reserve(meteringFor(id).estimate);
+      estimatedBudget?.reserve(estimate);
 
       onProgress?.({ providerId: id, event: 'started' });
 

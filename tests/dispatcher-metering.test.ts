@@ -130,6 +130,7 @@ describe('dispatcher: estimated budget reservation', () => {
     process.env.MOCK_SEARCHAPI_KEY = 'k';
     process.env.MOCK_TAVILY_KEY = 'k';
     process.env.MOCK_FIRECRAWL_SEARCH_KEY = 'k';
+    process.env.MOCK_GEMINI_DEEP_KEY = 'k';
   });
 
   afterEach(() => {
@@ -140,6 +141,7 @@ describe('dispatcher: estimated budget reservation', () => {
       'MOCK_SEARCHAPI_KEY',
       'MOCK_TAVILY_KEY',
       'MOCK_FIRECRAWL_SEARCH_KEY',
+      'MOCK_GEMINI_DEEP_KEY',
     ]) {
       delete process.env[k];
     }
@@ -171,6 +173,78 @@ describe('dispatcher: estimated budget reservation', () => {
     expect(byId.get('searchapi')?.error).toBe(ESTIMATE_BUDGET_SKIP_REASON);
     expect(byId.get('brave-search')?.status).toBe('skipped');
     expect(estimatedBudget.reservedUsd).toBeCloseTo(0.015);
+  });
+
+  it('skips Gemini Deep before launch when its estimate exceeds the ceiling', async () => {
+    registerProvider(searchProvider('gemini-deep'));
+
+    const estimatedBudget = createEstimateBudgetTracker(2);
+    const { reports } = await dispatch({
+      config: makeConfig({
+        'gemini-deep': {
+          apiKey: '$MOCK_GEMINI_DEEP_KEY',
+          enabled: true,
+        },
+      }),
+      providerIds: ['gemini-deep'],
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: process.env },
+      estimatedBudget,
+    });
+
+    expect(reports[0]?.status).toBe('skipped');
+    expect(reports[0]?.error).toBe(ESTIMATE_BUDGET_SKIP_REASON);
+    expect(estimatedBudget.reservedUsd).toBe(0);
+  });
+
+  it('allows Gemini Deep when its estimate exactly matches the ceiling', async () => {
+    registerProvider(searchProvider('gemini-deep'));
+
+    const estimatedBudget = createEstimateBudgetTracker(3);
+    const { reports } = await dispatch({
+      config: makeConfig({
+        'gemini-deep': {
+          apiKey: '$MOCK_GEMINI_DEEP_KEY',
+          enabled: true,
+        },
+      }),
+      providerIds: ['gemini-deep'],
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: process.env },
+      estimatedBudget,
+    });
+
+    expect(reports[0]?.status).toBe('success');
+    expect(estimatedBudget.reservedUsd).toBe(3);
+  });
+
+  it('uses the configured Gemini Deep price when enforcing the ceiling', async () => {
+    registerProvider(searchProvider('gemini-deep'));
+
+    const estimatedBudget = createEstimateBudgetTracker(1);
+    const { reports } = await dispatch({
+      config: makeConfig({
+        'gemini-deep': {
+          apiKey: '$MOCK_GEMINI_DEEP_KEY',
+          enabled: true,
+          options: { perRequestUsd: 1.5 },
+        },
+      }),
+      providerIds: ['gemini-deep'],
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: process.env },
+      estimatedBudget,
+    });
+
+    expect(reports[0]?.status).toBe('skipped');
+    expect(reports[0]?.metering?.estimate).toMatchObject({
+      estimatedCostUsd: 1.5,
+      costConfidence: 'configured',
+    });
+    expect(estimatedBudget.reservedUsd).toBe(0);
   });
 
   it('never skips providers whose estimate has no USD figure (reserve 0)', async () => {
@@ -242,6 +316,50 @@ describe('dispatcher: estimated budget reservation', () => {
     // serpapi (0.015) + brave-search-as-primary (0.005) = 0.02. The bailed
     // fallback must not add another 0.005.
     expect(estimatedBudget.reservedUsd).toBeCloseTo(0.02);
+  });
+
+  it('reports a selected fallback only once when the budget blocks it', async () => {
+    const failing: Provider = {
+      id: 'serpapi',
+      displayName: 'Mock serpapi',
+      tier: 'raw-search',
+      envVar: 'MOCK_SERPAPI_KEY',
+      execute: async (): Promise<ProviderResult> => ({
+        provider: 'serpapi',
+        tier: 'raw-search',
+        content: '',
+        citations: [],
+        durationMs: 1,
+        error: 'boom',
+      }),
+    };
+    registerProvider(failing);
+    registerProvider(searchProvider('brave-search'));
+
+    const config = makeConfig({
+      serpapi: { apiKey: '$MOCK_SERPAPI_KEY', enabled: true },
+      'brave-search': { apiKey: '$MOCK_BRAVE_SEARCH_KEY', enabled: true },
+    });
+    config.providers.serpapi = {
+      ...config.providers.serpapi,
+      fallback: 'brave-search',
+    } as never;
+
+    const { reports } = await dispatch({
+      config,
+      providerIds: ['serpapi', 'brave-search'],
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: process.env },
+      estimatedBudget: createEstimateBudgetTracker(0.015),
+    });
+
+    const fallbackReports = reports.filter(
+      (report) => report.id === 'brave-search',
+    );
+    expect(fallbackReports).toHaveLength(1);
+    expect(fallbackReports[0]?.status).toBe('skipped');
+    expect(fallbackReports[0]?.fallbackFor).toBeUndefined();
   });
 
   it('does not reserve or skip anything when no estimated budget is supplied', async () => {
