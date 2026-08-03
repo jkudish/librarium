@@ -42,6 +42,13 @@ describe('normalizeUrl', () => {
     expect(normalizeUrl(url)).toBe('example.com/docs/api?version=3&lang=en');
   });
 
+  it('preserves non-default ports', () => {
+    expect(normalizeUrl('https://example.com:8443/path')).toBe(
+      'example.com:8443/path',
+    );
+    expect(normalizeUrl('https://example.com/path')).toBe('example.com/path');
+  });
+
   it('handles malformed URLs gracefully', () => {
     const result = normalizeUrl('not a valid url');
     expect(typeof result).toBe('string');
@@ -68,6 +75,15 @@ describe('deduplicateSources', () => {
     expect(result[0].citationCount).toBe(2);
     expect(result[0].providers).toContain('perplexity-sonar-pro');
     expect(result[0].providers).toContain('brave-answers');
+  });
+
+  it('keeps distinct ports as separate sources', () => {
+    const citations: Citation[] = [
+      { url: 'https://example.com/path', provider: 'exa' },
+      { url: 'https://example.com:8443/path', provider: 'brave-answers' },
+    ];
+
+    expect(deduplicateSources(citations)).toHaveLength(2);
   });
 
   it('sorts by citation count descending', () => {

@@ -494,31 +494,35 @@ function validateTbs(value: unknown): string | Error | undefined {
       'Firecrawl option tbs custom ranges require cdr:1, cd_min, and cd_max',
     );
   }
-  if (
-    (min && !validUsDate(min.slice(7))) ||
-    (max && !validUsDate(max.slice(7)))
-  ) {
+  const minDate = min ? usDateTimestamp(min.slice(7)) : undefined;
+  const maxDate = max ? usDateTimestamp(max.slice(7)) : undefined;
+  if ((min && minDate === undefined) || (max && maxDate === undefined)) {
     return new Error('Firecrawl option tbs contains an invalid date');
+  }
+  if (minDate !== undefined && maxDate !== undefined && minDate > maxDate) {
+    return new Error(
+      'Firecrawl option tbs custom range start must not follow its end',
+    );
   }
   return tbs;
 }
 
-function validUsDate(value: string): boolean {
+function usDateTimestamp(value: string): number | undefined {
   const [month, day, year] = value.split('/').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
-  return (
+  const valid =
     date.getUTCFullYear() === year &&
     date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
+    date.getUTCDate() === day;
+  return valid ? date.getTime() : undefined;
 }
 
 function escapeMarkdownText(value: string): string {
   return value
-    .replace(/([\\`*_[\]{}<>#+!|])/g, '\\$1')
+    .replace(/([\\`*_[\]{}<>#+!|~])/g, '\\$1')
     .replace(/^([+-])(?=\s)/, '\\$1')
     .replace(/^(\d+)\.(?=\s)/, '$1\\.')
-    .replace(/\b(https?):\/\//gi, '$1:\u200b//')
+    .replace(/\b(https?|ftp):\/\//gi, '$1:\u200b//')
     .replace(/\bwww\./gi, 'www\u200b.')
     .replace(/@/g, '@\u200b');
 }

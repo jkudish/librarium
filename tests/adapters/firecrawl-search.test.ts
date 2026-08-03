@@ -171,7 +171,7 @@ describe('Firecrawl Search provider', () => {
               title: 'Trusted](https://attacker.example) [Spoof',
               url: 'https://safe.example/story',
               snippet: 'Read [more](https://attacker.example)',
-              date: '[today](https://attacker.example)',
+              date: '[today](https://attacker.example) ftp://files.example',
             },
           ],
         },
@@ -186,6 +186,7 @@ describe('Firecrawl Search provider', () => {
     expect(html.match(/<a href=/g)).toHaveLength(1);
     expect(html).toContain('href="https://safe.example/story"');
     expect(html).not.toContain('href="https://attacker.example"');
+    expect(html).not.toContain('href="ftp://files.example"');
     expect(result.citations[0]).toMatchObject({
       title: 'Trusted](https://attacker.example) [Spoof',
       snippet: 'Read [more](https://attacker.example)',
@@ -269,6 +270,11 @@ describe('Firecrawl Search provider', () => {
     [
       'invalid custom date',
       { tbs: 'cdr:1,cd_min:02/30/2026,cd_max:03/01/2026' },
+      'tbs',
+    ],
+    [
+      'reversed custom date range',
+      { tbs: 'cdr:1,cd_min:12/31/2026,cd_max:01/01/2026' },
       'tbs',
     ],
     ['invalid country', { country: 'Canada' }, 'country'],
