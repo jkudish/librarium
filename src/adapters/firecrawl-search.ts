@@ -1,3 +1,4 @@
+import { normalizeUrl } from '../core/normalizer.js';
 import type {
   Citation,
   ProviderOptions,
@@ -198,21 +199,21 @@ export class FirecrawlSearchProvider extends BaseProvider {
       );
     }
 
-    const strings: Array<
-      keyof Pick<
-        ValidatedFirecrawlSearchOptions,
-        'tbs' | 'country' | 'location'
-      >
-    > = ['tbs', 'country', 'location'];
     const validated: ValidatedFirecrawlSearchOptions = { sources, limit };
-    for (const key of strings) {
-      const value = this.optionalNonemptyString(
-        this.configuredOptions[key],
-        key,
-      );
-      if (value instanceof Error) return value;
-      if (value !== undefined) validated[key] = value;
-    }
+    const tbs = validateTbs(this.configuredOptions.tbs);
+    if (tbs instanceof Error) return tbs;
+    if (tbs !== undefined) validated.tbs = tbs;
+
+    const country = validateCountry(this.configuredOptions.country);
+    if (country instanceof Error) return country;
+    if (country !== undefined) validated.country = country;
+
+    const location = this.optionalNonemptyString(
+      this.configuredOptions.location,
+      'location',
+    );
+    if (location instanceof Error) return location;
+    if (location !== undefined) validated.location = location;
 
     const includeDomains = this.domains(
       this.configuredOptions.includeDomains,
@@ -332,11 +333,17 @@ export class FirecrawlSearchProvider extends BaseProvider {
       if (section.length === 0) continue;
       parts.push(`## ${kind === 'web' ? 'Web' : 'News'}`, '');
       for (const result of section) {
-        const title = result.title ?? 'Untitled';
+        const title = escapeMarkdownText(result.title ?? 'Untitled');
         const date =
-          result.kind === 'news' && result.date ? ` (${result.date})` : '';
-        parts.push(`- **[${title}](${result.url})**${date}`);
-        if (result.snippet) parts.push(`  ${result.snippet}`);
+          result.kind === 'news' && result.date
+            ? ` (${escapeMarkdownText(result.date)})`
+            : '';
+        parts.push(
+          `- **[${title}](${markdownLinkDestination(result.url)})**${date}`,
+        );
+        if (result.snippet) {
+          parts.push(`  ${escapeMarkdownText(result.snippet)}`);
+        }
       }
       parts.push('');
     }
@@ -445,10 +452,79 @@ function absoluteHttpUrl(value: unknown): string | undefined {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return undefined;
     }
-    return url;
+    return parsed.href;
   } catch {
     return undefined;
   }
+}
+
+function validateCountry(value: unknown): string | Error | undefined {
+  if (value === undefined) return undefined;
+  const country = textValue(value);
+  if (!country || !/^[a-z]{2}$/i.test(country)) {
+    return new Error(
+      'Firecrawl option country must be a two-letter country code',
+    );
+  }
+  return country.toUpperCase();
+}
+
+function validateTbs(value: unknown): string | Error | undefined {
+  if (value === undefined) return undefined;
+  const tbs = textValue(value);
+  if (!tbs) return new Error('Firecrawl option tbs must be a nonempty string');
+
+  const parts = tbs.split(',');
+  const supported = parts.every(
+    (part) =>
+      /^qdr:[hdwmy]$/.test(part) ||
+      part === 'sbd:1' ||
+      part === 'cdr:1' ||
+      /^cd_(?:min|max):\d{2}\/\d{2}\/\d{4}$/.test(part),
+  );
+  if (!supported || new Set(parts).size !== parts.length) {
+    return new Error('Firecrawl option tbs has an unsupported format');
+  }
+
+  const customRange = parts.includes('cdr:1');
+  const min = parts.find((part) => part.startsWith('cd_min:'));
+  const max = parts.find((part) => part.startsWith('cd_max:'));
+  if (customRange !== Boolean(min && max)) {
+    return new Error(
+      'Firecrawl option tbs custom ranges require cdr:1, cd_min, and cd_max',
+    );
+  }
+  if (
+    (min && !validUsDate(min.slice(7))) ||
+    (max && !validUsDate(max.slice(7)))
+  ) {
+    return new Error('Firecrawl option tbs contains an invalid date');
+  }
+  return tbs;
+}
+
+function validUsDate(value: string): boolean {
+  const [month, day, year] = value.split('/').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function escapeMarkdownText(value: string): string {
+  return value
+    .replace(/([\\`*_[\]{}<>#+!|])/g, '\\$1')
+    .replace(/^([+-])(?=\s)/, '\\$1')
+    .replace(/^(\d+)\.(?=\s)/, '$1\\.')
+    .replace(/\b(https?):\/\//gi, '$1:\u200b//')
+    .replace(/\bwww\./gi, 'www\u200b.')
+    .replace(/@/g, '@\u200b');
+}
+
+function markdownLinkDestination(url: string): string {
+  return url.replace(/([\\()<>])/g, '\\$1');
 }
 
 function isHostname(value: string): boolean {
@@ -459,11 +535,7 @@ function isHostname(value: string): boolean {
 }
 
 function dedupeKey(url: string): string {
-  try {
-    const parsed = new URL(url);
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return url.toLowerCase();
-  }
+  const parsed = new URL(url);
+  parsed.hash = '';
+  return normalizeUrl(parsed.href);
 }

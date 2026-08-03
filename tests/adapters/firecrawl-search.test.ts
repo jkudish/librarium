@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { FirecrawlSearchProvider } from '../../src/adapters/firecrawl-search.js';
 import { getProvider, initializeProviders } from '../../src/adapters/index.js';
+import { renderMarkdown } from '../../src/commands/html-report.js';
 
 function jsonResponse(status: number, data: unknown): Response {
   return {
@@ -124,14 +125,14 @@ describe('Firecrawl Search provider', () => {
           web: [
             {
               title: 'Web result',
-              url: 'https://example.com',
+              url: 'https://www.example.com/path/?utm_source=newsletter',
               description: '  Web\n description ',
             },
           ],
           news: [
             {
               title: 'Duplicate news',
-              url: 'https://example.com/#today',
+              url: 'http://example.com/path#today',
               snippet: 'ignored duplicate',
               date: '2026-08-02',
             },
@@ -152,12 +153,43 @@ describe('Firecrawl Search provider', () => {
     );
 
     expect(result.content).toBe(
-      '## Web\n\n- **[Web result](https://example.com)**\n  Web description\n\n## News\n\n- **[Distinct news](https://news.example/story)** (2026-08-03)\n  News summary',
+      '## Web\n\n- **[Web result](https://www.example.com/path/?utm_source=newsletter)**\n  Web description\n\n## News\n\n- **[Distinct news](https://news.example/story)** (2026-08-03)\n  News summary',
     );
     expect(result.citations.map((citation) => citation.url)).toEqual([
-      'https://example.com',
+      'https://www.example.com/path/?utm_source=newsletter',
       'https://news.example/story',
     ]);
+  });
+
+  it('escapes provider-controlled Markdown without altering citation metadata', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        success: true,
+        data: {
+          news: [
+            {
+              title: 'Trusted](https://attacker.example) [Spoof',
+              url: 'https://safe.example/story',
+              snippet: 'Read [more](https://attacker.example)',
+              date: '[today](https://attacker.example)',
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await provider({ sources: ['news'] }).execute('safe', {
+      timeout: 10,
+    });
+    const html = renderMarkdown(result.content);
+
+    expect(html.match(/<a href=/g)).toHaveLength(1);
+    expect(html).toContain('href="https://safe.example/story"');
+    expect(html).not.toContain('href="https://attacker.example"');
+    expect(result.citations[0]).toMatchObject({
+      title: 'Trusted](https://attacker.example) [Spoof',
+      snippet: 'Read [more](https://attacker.example)',
+    });
   });
 
   it('ignores malformed results without a safe absolute HTTP(S) URL', async () => {
@@ -188,7 +220,7 @@ describe('Firecrawl Search provider', () => {
     expect(result.content).toContain('https://ok.example');
     expect(result.citations).toEqual([
       {
-        url: 'https://ok.example',
+        url: 'https://ok.example/',
         provider: 'firecrawl-search',
       },
     ]);
@@ -232,6 +264,14 @@ describe('Firecrawl Search provider', () => {
     ['unsupported source', { sources: ['images'] }, 'sources'],
     ['empty categories', { categories: [] }, 'categories'],
     ['unsupported category', { categories: ['video'] }, 'categories'],
+    ['invalid freshness', { tbs: 'soon' }, 'tbs'],
+    ['incomplete custom date range', { tbs: 'cdr:1,cd_min:01/01/2026' }, 'tbs'],
+    [
+      'invalid custom date',
+      { tbs: 'cdr:1,cd_min:02/30/2026,cd_max:03/01/2026' },
+      'tbs',
+    ],
+    ['invalid country', { country: 'Canada' }, 'country'],
     [
       'invalid hostname',
       { includeDomains: ['https://example.com'] },
@@ -247,6 +287,17 @@ describe('Firecrawl Search provider', () => {
 
     expect(result.error).toContain(expectedError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes a configured country code before fetch', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { success: true, data: {} }));
+    globalThis.fetch = fetchMock;
+
+    await provider({ country: 'ca' }).execute('country', { timeout: 10 });
+
+    expect(requestBody(fetchMock)).toMatchObject({ country: 'CA' });
   });
 
   it('rejects conflicting domain filters before fetch', async () => {
