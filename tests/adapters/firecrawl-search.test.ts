@@ -160,7 +160,7 @@ describe('Firecrawl Search provider', () => {
     ]);
   });
 
-  it('ignores malformed result entries without a nonempty URL', async () => {
+  it('ignores malformed results without a safe absolute HTTP(S) URL', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         success: true,
@@ -170,6 +170,9 @@ describe('Firecrawl Search provider', () => {
             {},
             { url: '' },
             { url: 42 },
+            { url: 'not a URL' },
+            { url: 'javascript:alert(1)' },
+            { url: 'ftp://example.com' },
             { url: 'https://ok.example' },
           ],
           news: 'not an array',
@@ -183,7 +186,12 @@ describe('Firecrawl Search provider', () => {
     );
 
     expect(result.content).toContain('https://ok.example');
-    expect(result.citations).toHaveLength(1);
+    expect(result.citations).toEqual([
+      {
+        url: 'https://ok.example',
+        provider: 'firecrawl-search',
+      },
+    ]);
   });
 
   it.each([
@@ -264,6 +272,20 @@ describe('Firecrawl Search provider', () => {
     const result = await provider().execute('failure', { timeout: 10 });
 
     expect(result.error).toBe('Request timed out');
+    expect(result.content).toBe('');
+    expect(result.citations).toEqual([]);
+  });
+
+  it('reports an API error even when success:false is omitted', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { error: 'Search unavailable' }),
+      );
+
+    const result = await provider().execute('failure', { timeout: 10 });
+
+    expect(result.error).toBe('Search unavailable');
     expect(result.content).toBe('');
     expect(result.citations).toEqual([]);
   });
