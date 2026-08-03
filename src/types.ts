@@ -31,6 +31,10 @@ export interface ProviderUsage {
   outputTokens?: number;
   totalTokens?: number;
   costUsd?: number;
+  /** Provider-reported billable units, such as credits. Never estimated. */
+  billableUnits?: number;
+  /** Unit for billableUnits, such as 'credit', 'request', or 'token'. */
+  unit?: string;
   raw?: unknown;
 }
 

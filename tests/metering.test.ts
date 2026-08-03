@@ -164,6 +164,19 @@ describe('buildProviderMetering: estimate vs actual separation', () => {
     expect(metering.actual).toBeUndefined();
   });
 
+  it('preserves provider-reported billable units without fabricating USD', () => {
+    const metering = buildProviderMetering('firecrawl-search', undefined, {
+      billableUnits: 4,
+      unit: 'credit',
+    });
+    expect(metering.kind).toBe('credit_priced');
+    expect(metering.actual).toEqual({
+      billableUnits: 4,
+      source: 'provider_reported',
+    });
+    expect(metering.actual?.costUsd).toBeUndefined();
+  });
+
   it('defaults unknown providers to manual_unmetered with no estimate/actual', () => {
     const metering = buildProviderMetering('totally-made-up');
     expect(metering).toEqual({ kind: 'manual_unmetered' });

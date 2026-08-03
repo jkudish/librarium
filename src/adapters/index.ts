@@ -170,7 +170,20 @@ export async function initializeProviders(
     new PerplexitySearchProvider(),
     new BraveSearchProvider(),
     new JinaSearchProvider(),
-    new FirecrawlSearchProvider(),
+    new FirecrawlSearchProvider({
+      sources: providerConfig['firecrawl-search']?.options?.sources,
+      limit: providerConfig['firecrawl-search']?.options?.limit,
+      tbs: providerConfig['firecrawl-search']?.options?.tbs,
+      country: providerConfig['firecrawl-search']?.options?.country,
+      location: providerConfig['firecrawl-search']?.options?.location,
+      includeDomains:
+        providerConfig['firecrawl-search']?.options?.includeDomains,
+      excludeDomains:
+        providerConfig['firecrawl-search']?.options?.excludeDomains,
+      categories: providerConfig['firecrawl-search']?.options?.categories,
+      ignoreInvalidURLs:
+        providerConfig['firecrawl-search']?.options?.ignoreInvalidURLs,
+    }),
     new SearchApiProvider(),
     new SerpApiProvider(),
     new TavilyProvider(),

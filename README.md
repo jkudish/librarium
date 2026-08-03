@@ -933,6 +933,37 @@ and defaults to `xhigh`. `maxToolCalls` must be a positive integer when set.
 Use `unlimited` only for high-effort research that needs to inspect unusually
 large amounts of web content; it can increase latency and token usage.
 
+Firecrawl Search defaults to ten web results. Its `limit` is applied **per
+source**, so selecting both web and news can return up to twice that number.
+Configure the supported Firecrawl Search API fields under `firecrawl-search`:
+
+```json
+{
+  "providers": {
+    "firecrawl-search": {
+      "apiKey": "$FIRECRAWL_API_KEY",
+      "enabled": true,
+      "options": {
+        "sources": ["web", "news"],
+        "limit": 5,
+        "tbs": "qdr:w",
+        "country": "US",
+        "location": "Toronto, Ontario, Canada",
+        "includeDomains": ["docs.firecrawl.dev"],
+        "categories": ["github", "research"],
+        "ignoreInvalidURLs": true
+      }
+    }
+  }
+}
+```
+
+`sources` accepts `web` and/or `news`; `limit` must be a safe integer from 1
+to 100. `includeDomains` and `excludeDomains` are mutually exclusive hostname
+lists. `categories` accepts `github`, `research`, and `pdf`. Images,
+`scrapeOptions`, and enterprise options are intentionally unsupported by this
+raw-search adapter.
+
 Some providers support optional model overrides. Gemini Deep Research defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier (and more expensive) variant:
 
 Librarium requests only the final report from Gemini Deep Research. Thinking summaries and automatic visualization are disabled because Librarium does not stream or display those intermediate artifacts.

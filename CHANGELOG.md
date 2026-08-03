@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Configurable Firecrawl Search** (`firecrawl-search`, raw-search tier):
+  supports validated web/news sources, per-source limits, locale/time filters,
+  domain filtering, categories, and invalid-URL handling. Web and news results
+  are normalized into labeled sections with combined deduplicated citations;
+  Firecrawl-reported `creditsUsed` now flows through usage and metering as
+  provider-reported credit units without fabricating a USD cost.
 - **Canonical OpenAI research provider** (`openai-research`, deep-research
   tier): uses the Responses API with GPT-5.6 Sol by default, current
   `web_search`, configurable reasoning effort (default `xhigh`), background
