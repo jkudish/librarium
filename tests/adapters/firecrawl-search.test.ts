@@ -170,7 +170,8 @@ describe('Firecrawl Search provider', () => {
             {
               title: 'Trusted](https://attacker.example) [Spoof',
               url: 'https://safe.example/story',
-              snippet: 'Read [more](https://attacker.example)',
+              snippet:
+                'Read [more](https://attacker.example) ~~spoofed~~ ftp://files.example',
               date: '[today](https://attacker.example) ftp://files.example',
             },
           ],
@@ -187,9 +188,13 @@ describe('Firecrawl Search provider', () => {
     expect(html).toContain('href="https://safe.example/story"');
     expect(html).not.toContain('href="https://attacker.example"');
     expect(html).not.toContain('href="ftp://files.example"');
+    expect(html).not.toContain('<del>');
+    expect(result.content).toContain('\\~\\~spoofed\\~\\~');
+    expect(result.content).toContain('ftp:\u200b//files.example');
     expect(result.citations[0]).toMatchObject({
       title: 'Trusted](https://attacker.example) [Spoof',
-      snippet: 'Read [more](https://attacker.example)',
+      snippet:
+        'Read [more](https://attacker.example) ~~spoofed~~ ftp://files.example',
     });
   });
 
