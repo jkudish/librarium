@@ -28,7 +28,7 @@ import type {
  */
 
 /** Pricing snapshot tag for the built-in default estimates below. */
-export const PRICING_VERSION = '2026-07';
+export const PRICING_VERSION = '2026-08';
 
 interface MeteringCapability {
   kind: MeteringKind;
@@ -60,7 +60,11 @@ const REGISTRY: Record<string, MeteringCapability> = {
   'perplexity-advanced-deep': { kind: 'native_cost' },
   // Token-metered deep research (no cost in the API response).
   'openai-research': { kind: 'native_tokens' },
-  'gemini-deep': { kind: 'native_tokens' },
+  'gemini-deep': {
+    kind: 'native_tokens',
+    defaultPerRequestUsd: 3,
+    unit: 'task',
+  },
 
   // AI-grounded.
   'perplexity-sonar-pro': { kind: 'native_cost' },

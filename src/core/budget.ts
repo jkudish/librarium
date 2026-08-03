@@ -70,9 +70,9 @@ export const BUDGET_SKIP_REASON = 'skipped: cost budget reached';
  *
  * Unlike the reported budget (which folds in API-reported cost AFTER a provider
  * returns), this tracker RESERVES each provider's network-free estimated cost at
- * the moment it is about to launch. Once the accumulated reservation crosses the
- * ceiling, not-yet-started providers are skipped before they ever run — giving
- * products pre-call budget reservation.
+ * the moment it is about to launch. Providers whose estimate would put the
+ * accumulated reservation over the ceiling are skipped before they ever run —
+ * giving products pre-call budget reservation.
  *
  * Honest, lower-bound semantics: a provider whose estimate has no USD figure
  * (plan-dependent credits, unmetered providers) reserves 0, so the reserved
@@ -89,6 +89,11 @@ export interface EstimateBudgetTracker {
    * a finite positive estimatedCostUsd reserve nothing. Returns the new total.
    */
   reserve(estimate: MeteringEstimate | undefined): number;
+  /**
+   * True when reserving this estimate would put the running total above the
+   * configured ceiling. Estimates without a USD figure never overflow it.
+   */
+  wouldExceed(estimate: MeteringEstimate | undefined): boolean;
   /**
    * True once the accumulated reservation has crossed the ceiling. Always false
    * when no limit is configured.
@@ -123,6 +128,16 @@ export function createEstimateBudgetTracker(
         reserved += cost;
       }
       return reserved;
+    },
+    wouldExceed(estimate) {
+      const cost = estimate?.estimatedCostUsd;
+      return (
+        limit !== undefined &&
+        typeof cost === 'number' &&
+        Number.isFinite(cost) &&
+        cost > 0 &&
+        reserved + cost > limit
+      );
     },
     exceeded() {
       return limit !== undefined && reserved >= limit;

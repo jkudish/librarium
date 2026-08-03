@@ -395,7 +395,7 @@ For request- and credit-priced providers, librarium can produce a **network-free
 
 Brave AI Answers is billed by searches plus input/output tokens, so librarium does not manufacture a single pre-dispatch dollar estimate — but Brave reports its own cost breakdown (an inline `<usage>` stream tag with an `X-Request-Total-Cost` dollar figure), which librarium surfaces as reported cost in `usage.costUsd`.
 
-**Estimated budget (`--max-estimated-cost <usd>` or `defaults.maxEstimatedCostUsd`).** A pre-dispatch *reservation* ceiling, independent of `--max-cost` (the two never reconcile into one number). Before each provider launches, its estimated cost is reserved; once the reservation crosses the ceiling, not-yet-started providers are skipped with an estimated-budget reason. Providers with no estimable cost reserve `0`, so the reserved total is an honest lower bound. This gives products pre-call budget reservation that `--max-cost` (which only learns cost *after* a call) cannot. When it trips, the summary adds a line like:
+**Estimated budget (`--max-estimated-cost <usd>` or `defaults.maxEstimatedCostUsd`).** A pre-dispatch *reservation* ceiling, independent of `--max-cost` (the two never reconcile into one number). Before each provider launches, Librarium skips it if its estimate would put the reserved total over the ceiling; otherwise the estimate is reserved. Providers with no estimable cost reserve `0`, so the reserved total is an honest lower bound. Gemini Deep Research reserves a conservative $3 per submitted task by default; override it with the provider option `perRequestUsd` if your observed workload differs. This gives products pre-call budget reservation that `--max-cost` (which only learns cost *after* a call) cannot. When it trips, the summary adds a line like:
 
 ```
   ▸ estimated budget reached: ~$0.05 reserved of $0.05 budget, skipped 2 providers
@@ -807,7 +807,7 @@ The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the 
     "maxParallel": 6,
     "timeout": 30,
     "asyncTimeout": 1800,
-    "asyncPollInterval": 10,
+    "asyncPollInterval": 30,
     "mode": "mixed",
     "llmWebSearch": true,
     "maxCostUsd": 0.5,
@@ -934,6 +934,8 @@ Use `unlimited` only for high-effort research that needs to inspect unusually
 large amounts of web content; it can increase latency and token usage.
 
 Some providers support optional model overrides. Gemini Deep Research defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier (and more expensive) variant:
+
+Librarium requests only the final report from Gemini Deep Research. Thinking summaries and automatic visualization are disabled because Librarium does not stream or display those intermediate artifacts.
 
 ```json
 {

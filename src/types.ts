@@ -256,7 +256,7 @@ export const DefaultsSchema = z.object({
   maxParallel: z.number().default(6),
   timeout: z.number().default(30),
   asyncTimeout: z.number().default(1800),
-  asyncPollInterval: z.number().default(10),
+  asyncPollInterval: z.number().default(30),
   mode: z.enum(['sync', 'async', 'mixed']).default('mixed'),
   llmWebSearch: z.boolean().default(true),
   // Optional runtime spend circuit breaker. Honest budget: only API-reported

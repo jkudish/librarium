@@ -79,6 +79,9 @@ const API_REVISION = '2026-05-20';
  */
 const DEFAULT_GEMINI_DEEP_AGENT = 'deep-research-preview-04-2026';
 
+/** Reduce status-request volume while keeping synchronous waits responsive. */
+const SYNC_POLL_INTERVAL_MS = 15_000;
+
 const STATUS_MAP: Record<string, AsyncTaskStatus> = {
   in_progress: 'running',
   requires_action: 'running',
@@ -137,7 +140,7 @@ export class GeminiDeepProvider extends BaseProvider {
         pollResult.status !== 'cancelled' &&
         Date.now() < deadline
       ) {
-        await this.sleep(5000);
+        await this.sleep(SYNC_POLL_INTERVAL_MS);
         try {
           pollResult = await this.poll(handle);
           handle.status = pollResult.status;
@@ -210,7 +213,10 @@ export class GeminiDeepProvider extends BaseProvider {
           background: true,
           agent_config: {
             type: 'deep-research',
-            thinking_summaries: 'auto',
+            // Librarium polls for the final report rather than streaming
+            // progress, so intermediate summaries only add unused output.
+            thinking_summaries: 'none',
+            visualization: 'off',
           },
           tools: [{ type: 'google_search' }],
         },
