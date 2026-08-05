@@ -181,34 +181,83 @@ describe('executeResearchRun', () => {
     dirs.push(outputDir);
     const provider = new EmbeddedProvider();
 
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const result = await executeResearchRun(
+        {
+          query: 'async observer isolation',
+          config: { ...config, defaults: { ...config.defaults, outputDir } },
+          providerIds: [provider.id],
+          outputDir,
+          slug: 'async-observer-isolation',
+          onEvent: async () => {
+            throw new Error('async observer exploded');
+          },
+        },
+        {
+          providerRegistry: {
+            getProvider: () => provider,
+            getAllProviders: () => [provider],
+          },
+          httpClient: async () => ({
+            status: 200,
+            statusText: 'OK',
+            data: { answer: 'Still completed asynchronously' },
+            headers: {},
+            durationMs: 1,
+          }),
+        },
+      );
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(result.manifest.status).toBe('completed');
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('delegates HTTP projection to custom registries', async () => {
+    const outputDir = join(
+      tmpdir(),
+      `librarium-projection-${crypto.randomUUID()}`,
+    );
+    dirs.push(outputDir);
+    const projectedClient = vi.fn(async () => ({
+      status: 200,
+      statusText: 'OK',
+      data: { answer: 'Registry projection' },
+      headers: {},
+      durationMs: 1,
+    }));
+    const provider = new EmbeddedProvider({ httpClient: projectedClient });
+    const projected: ProviderRegistry = {
+      getProvider: () => provider,
+      getAllProviders: () => [provider],
+    };
+    const withHttpClient = vi.fn(() => projected);
+    const registry: ProviderRegistry = {
+      getProvider: () => undefined,
+      getAllProviders: () => [],
+      withHttpClient,
+    };
+    const override = vi.fn();
+
     const result = await executeResearchRun(
       {
-        query: 'async observer isolation',
+        query: 'custom registry projection',
         config: { ...config, defaults: { ...config.defaults, outputDir } },
         providerIds: [provider.id],
         outputDir,
-        slug: 'async-observer-isolation',
-        onEvent: async () => {
-          throw new Error('async observer exploded');
-        },
+        slug: 'custom-registry-projection',
       },
-      {
-        providerRegistry: {
-          getProvider: () => provider,
-          getAllProviders: () => [provider],
-        },
-        httpClient: async () => ({
-          status: 200,
-          statusText: 'OK',
-          data: { answer: 'Still completed asynchronously' },
-          headers: {},
-          durationMs: 1,
-        }),
-      },
+      { providerRegistry: registry, httpClient: override },
     );
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(result.manifest.status).toBe('completed');
+    expect(withHttpClient).toHaveBeenCalledWith(override);
+    expect(result.results[0]?.text).toBe('Registry projection');
+    expect(projectedClient).toHaveBeenCalledOnce();
   });
 
   it('keeps HTTP overrides isolated across concurrent and later runs', async () => {

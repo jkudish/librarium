@@ -1275,7 +1275,7 @@ const run = await executeResearchRun({
 console.log(run.manifest.status, run.sources.length);
 ```
 
-Production defaults are used when `overrides` is omitted. Embedders and tests may independently replace `providerRegistry`, `taskStore`, `httpClient`, or `dispatch`. `onEvent` receives a typed event union and is observational: an event handler failure cannot interrupt dispatch or corrupt persistence. A `postDispatch` callback can add `answer` or `verification` metadata before the manifest reaches its final lifecycle state; callback failures are reported as `post-dispatch-warning` events and do not discard the run.
+Production defaults are used when `overrides` is omitted. Embedders and tests may independently replace `providerRegistry`, `taskStore`, `httpClient`, or `dispatch`. The HTTP override creates run-local copies of built-in and other `ProviderBase` adapters; a registry containing plain-object providers can implement `withHttpClient()` to supply its own run-local projection. `onEvent` receives a typed event union and is observational: an event handler failure cannot interrupt dispatch or corrupt persistence. A `postDispatch` callback can add `answer` or `verification` metadata before the manifest reaches its final lifecycle state; callback failures are reported as `post-dispatch-warning` events and do not discard the run.
 
 ### Custom providers (`librarium/node`)
 
