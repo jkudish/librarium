@@ -1122,14 +1122,15 @@ Each research run creates a timestamped output directory:
   brave-answers.md
   brave-answers.meta.json
   verification.json      # Present after `librarium answer --verify`
-  async-tasks.json       # Present if any async tasks were submitted
 ```
 
 ### run.json Schema
 
 ```json
 {
-  "version": 1,
+  "schemaVersion": 2,
+  "revision": 4,
+  "status": "completed",
   "timestamp": 1771500000,
   "slug": "postgresql-pooling",
   "query": "PostgreSQL connection pooling best practices",
@@ -1179,10 +1180,11 @@ Each research run creates a timestamped output directory:
     "unique": 28,
     "file": "sources.json"
   },
-  "asyncTasks": [],
   "exitCode": 0
 }
 ```
+
+`run.json` is created before dispatch and is the only persisted source of truth for the run. Per-run inter-process locking serializes mutations, and `revision` increases on every atomic mutation. Locks fail closed: an orphaned lock after a hard process crash must be removed manually only after confirming no Librarium process is using that run. `status` is `running`, `awaiting_async`, `completed`, `partial`, `failed`, or `cancelled`; `exitCode` is `null` while work is still running or awaiting retrieval. Background providers add a `task` object directly to their provider entry containing the provider task ID, timestamps, mapped status, and safe diagnostics. After retrieval, the compact task audit remains with `retrievedAt`; Librarium does not create or read `async-tasks.json`.
 
 The `usage` and `metering` fields are optional. `usage` is reported-only: its `inputTokens`, `outputTokens`, `totalTokens`, and `costUsd` appear only when the provider's API actually returns them, and `usage.costUsd` is never a pricing-table estimate. `metering` carries the provider's metering `kind` and, once a real figure is known, the actual-cost lane (`metering.actual.source` is `provider_reported` for a cost the API returned); network-free pre-dispatch estimates live under `metering.estimate` instead. See [Metering registry and the estimated budget](#metering-registry-and-the-estimated-budget) for the full model.
 

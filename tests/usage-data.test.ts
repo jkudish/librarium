@@ -33,7 +33,9 @@ function writeManifest(
   );
   mkdirSync(dir, { recursive: true });
   const manifest: RunManifest = {
-    version: 1,
+    schemaVersion: 2,
+    revision: 0,
+    status: 'completed',
     timestamp: timestampSeconds,
     slug: 'slug',
     query: 'q',
@@ -41,7 +43,6 @@ function writeManifest(
     outputDir: dir,
     providers,
     sources: { total: 0, unique: 0, file: 'sources.json' },
-    asyncTasks: [],
     exitCode: 0,
   };
   writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));

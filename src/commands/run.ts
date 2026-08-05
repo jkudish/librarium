@@ -8,7 +8,6 @@ import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import { saveAsyncTasks } from '../core/async-manager.js';
 import {
   BUDGET_SKIP_REASON,
   createBudgetTracker,
@@ -28,6 +27,13 @@ import {
   ProviderSelectionError,
   resolveProviderSelection,
 } from '../core/provider-selection.js';
+import {
+  applyRunLifecycle,
+  createRunManifest,
+  markRunFailed,
+  mutateRunManifest,
+  upsertProviderReport,
+} from '../core/run-manifest.js';
 import { generateSummary } from '../core/synthesis.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
@@ -110,7 +116,7 @@ export interface PostDispatchContext {
 
 export interface PostDispatchResult {
   /** Additive fields merged into the run manifest before it is written. */
-  manifestExtra?: Partial<RunManifest>;
+  manifestExtra?: Partial<Pick<RunManifest, 'answer' | 'verification'>>;
   /**
    * Raw synthesized answer body for downstream hook stages (verification).
    * Never merged into the manifest or persisted.
@@ -216,6 +222,7 @@ export async function executeRun(
       prettyStream.write(`${line}\n`);
       if (wasSpinning) spinner.start();
     };
+    let activeOutputDir: string | undefined;
 
     try {
       const globalConfig = loadConfig();
@@ -335,6 +342,7 @@ export async function executeRun(
       const baseDir = resolve(config.defaults.outputDir);
       const outputDir = resolveOutputDir(baseDir, slug);
       mkdirSync(outputDir, { recursive: true });
+      activeOutputDir = outputDir;
 
       // Write prompt (with refined variants recorded for reproducibility)
       let promptDoc = buildPrompt(query);
@@ -342,6 +350,22 @@ export async function executeRun(
         promptDoc += `\n\n## Refined Query Variants\n\n- deep-research: ${refined.tierQueries['deep-research']}\n- ai-grounded: ${refined.tierQueries['ai-grounded']}\n- raw-search: ${refined.tierQueries['raw-search']}\n`;
       }
       safeWriteFile(join(outputDir, 'prompt.md'), promptDoc);
+
+      // run.json is a live write-ahead manifest. It exists before any provider
+      // can create a paid remote task, and remains authoritative thereafter.
+      const timestamp = Math.floor(Date.now() / 1000);
+      createRunManifest(outputDir, {
+        status: 'running',
+        timestamp,
+        slug,
+        query,
+        mode: config.defaults.mode,
+        outputDir,
+        providers: [],
+        sources: { total: 0, unique: 0, file: 'sources.json' },
+        exitCode: null,
+        refinedQueries: refined?.tierQueries,
+      });
 
       // Column widths cover both primaries and any configured fallbacks so
       // lines stay aligned if a fallback fires mid-run.
@@ -419,6 +443,9 @@ export async function executeRun(
         estimatedBudget,
         allowFallbacks: opts.fallback !== false,
         onProgress: (event) => {
+          if (event.report) {
+            upsertProviderReport(outputDir, event.report, event.task);
+          }
           if (live) {
             switch (event.event) {
               case 'started':
@@ -494,7 +521,8 @@ export async function executeRun(
 
       // Post-dispatch hook (e.g. `librarium answer` grounded synthesis). It
       // owns its own fail-open behavior; a throw here must never lose the run.
-      let manifestExtra: Partial<RunManifest> = {};
+      let manifestExtra: Partial<Pick<RunManifest, 'answer' | 'verification'>> =
+        {};
       if (hooks?.postDispatch) {
         try {
           const hookResult = await hooks.postDispatch({
@@ -517,14 +545,6 @@ export async function executeRun(
         }
       }
 
-      // Write async tasks
-      if (asyncTasks.length > 0) {
-        for (const task of asyncTasks) {
-          task.outputDir = outputDir;
-        }
-        saveAsyncTasks(outputDir, asyncTasks);
-      }
-
       // Determine exit code. When a primary fails but its fallback succeeds,
       // the user's intent was fully satisfied — exclude the recovered primary's
       // error report so it doesn't inflate the failure count.
@@ -536,36 +556,26 @@ export async function executeRun(
       const effectiveReports = reports.filter(
         (r) => !recoveredPrimaries.has(r.id),
       );
-      const successCount = effectiveReports.filter(
-        (r) => r.status === 'success' || r.status === 'async-pending',
-      ).length;
-      const exitCode =
-        successCount === 0 ? 2 : successCount < effectiveReports.length ? 1 : 0;
-
-      // Write run manifest
-      const timestamp = Math.floor(Date.now() / 1000);
-      const manifest: RunManifest = {
-        version: 1,
-        timestamp,
-        slug,
-        query,
-        mode: config.defaults.mode,
-        outputDir,
-        providers: reports,
-        sources: {
+      const manifest = mutateRunManifest(outputDir, (current) => {
+        const tasks = new Map(
+          current.providers
+            .filter((provider) => provider.task)
+            .map((provider) => [provider.id, provider.task]),
+        );
+        current.providers = reports.map((report) => ({
+          ...report,
+          ...(tasks.get(report.id) ? { task: tasks.get(report.id) } : {}),
+        }));
+        current.sources = {
           total: allCitations.length,
           unique: sources.length,
           file: 'sources.json',
-        },
-        asyncTasks,
-        exitCode,
-        refinedQueries: refined?.tierQueries,
-        ...manifestExtra,
-      };
-      safeWriteFile(
-        join(outputDir, 'run.json'),
-        JSON.stringify(manifest, null, 2),
-      );
+        };
+        Object.assign(current, manifestExtra);
+        applyRunLifecycle(current);
+      });
+      // Awaiting background work is intentionally non-terminal.
+      const exitCode = manifest.exitCode ?? 0;
 
       // Write summary
       const summary = generateSummary({
@@ -701,7 +711,15 @@ export async function executeRun(
       process.exitCode = exitCode;
       return { exitCode, outputDir };
     } catch (e) {
-      spinner.fail(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      if (activeOutputDir) {
+        try {
+          markRunFailed(activeOutputDir, message);
+        } catch {
+          // Preserve the original failure; manifest diagnostics are best effort.
+        }
+      }
+      spinner.fail(message);
       process.exitCode = 2;
       return { exitCode: 2 };
     }

@@ -13,7 +13,6 @@ import {
   asyncPollUpdates,
   getPendingTasks,
   loadAsyncTasks,
-  saveAsyncTasks,
   updateAsyncTask,
 } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
@@ -163,11 +162,6 @@ async function retrieveTask(
       return false;
     }
 
-    // Mark as retrieved by removing from async tasks
-    const tasks = loadAsyncTasks(dir);
-    const updatedTasks = tasks.filter((t) => t.taskId !== task.taskId);
-    saveAsyncTasks(dir, updatedTasks);
-
     // If an HTML report was already generated for this run, regenerate it so
     // the retrieved result fills in.
     const reportPath = join(dir, 'report.html');
@@ -216,6 +210,7 @@ export async function reconcilePendingTasksOnce(
       if (task.outputDir) {
         updateAsyncTask(
           task.outputDir,
+          task.provider,
           task.taskId,
           asyncPollUpdates({
             status: 'failed',
@@ -228,10 +223,16 @@ export async function reconcilePendingTasksOnce(
     }
     try {
       const result = await provider.poll(task);
-      updateAsyncTask(task.outputDir, task.taskId, asyncPollUpdates(result));
+      updateAsyncTask(
+        task.outputDir,
+        task.provider,
+        task.taskId,
+        asyncPollUpdates(result),
+      );
     } catch (error) {
       updateAsyncTask(
         task.outputDir,
+        task.provider,
         task.taskId,
         asyncPollFailureUpdates(
           error instanceof Error ? error.message : String(error),
@@ -367,6 +368,7 @@ export function registerStatusCommand(program: Command): void {
                 if (task.outputDir) {
                   updateAsyncTask(
                     task.outputDir,
+                    task.provider,
                     task.taskId,
                     asyncPollUpdates({
                       status: 'failed',
@@ -389,6 +391,7 @@ export function registerStatusCommand(program: Command): void {
                   if (task.outputDir)
                     updateAsyncTask(
                       task.outputDir,
+                      task.provider,
                       task.taskId,
                       asyncPollUpdates(result),
                     );
@@ -440,6 +443,7 @@ export function registerStatusCommand(program: Command): void {
                   if (task.outputDir)
                     updateAsyncTask(
                       task.outputDir,
+                      task.provider,
                       task.taskId,
                       asyncPollUpdates(result),
                     );
@@ -448,6 +452,7 @@ export function registerStatusCommand(program: Command): void {
                 if (task.outputDir)
                   updateAsyncTask(
                     task.outputDir,
+                    task.provider,
                     task.taskId,
                     asyncPollFailureUpdates(
                       e instanceof Error ? e.message : String(e),

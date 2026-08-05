@@ -44,7 +44,9 @@ let baseDir: string;
 
 function makeConfig(overrides: Partial<Config['defaults']> = {}): Config {
   return {
-    version: 1,
+    schemaVersion: 2,
+    revision: 0,
+    status: 'completed',
     defaults: {
       outputDir: baseDir,
       maxParallel: 6,
@@ -67,7 +69,9 @@ function makeConfig(overrides: Partial<Config['defaults']> = {}): Config {
 
 function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
   return {
-    version: 1,
+    schemaVersion: 2,
+    revision: 0,
+    status: 'completed',
     timestamp: 1_781_136_000,
     slug: 'q',
     query: 'test query',
@@ -75,7 +79,6 @@ function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
     outputDir: join(baseDir, 'q'),
     providers: [],
     sources: { total: 0, unique: 0, file: 'sources.json' },
-    asyncTasks: [],
     exitCode: 0,
     ...overrides,
   };
