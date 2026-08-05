@@ -92,6 +92,22 @@ describe('dist registry sharing (core + node)', () => {
     );
   }
 
+  it('exports the built-in descriptor inventory from the packaged core', async () => {
+    const core = (await import(DIST_CORE)) as CoreModule;
+
+    expect(core.BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(24);
+    expect(
+      core.BUILTIN_PROVIDER_DESCRIPTORS.find(
+        (descriptor) => descriptor.id === 'openai-research',
+      ),
+    ).toMatchObject({
+      defaultModel: 'gpt-5.6-sol',
+      capabilities: { execution: 'background', persistedTasks: true },
+      credential: { envVar: 'OPENAI_API_KEY', required: true },
+      metering: { kind: 'native_tokens' },
+    });
+  });
+
   it('registerCustomProviders (node) is visible to getProvider/dispatch (core)', async () => {
     const core = (await import(DIST_CORE)) as CoreModule;
     const node = (await import(DIST_NODE)) as NodeModule;
