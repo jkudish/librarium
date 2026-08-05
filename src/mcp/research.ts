@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import {
   getAllProviders,
   initializeProviders,
@@ -6,11 +6,7 @@ import {
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
-import { dispatch } from '../core/dispatcher.js';
-import { safeWriteFile } from '../core/fs-utils.js';
-import { deduplicateSources } from '../core/normalizer.js';
 import {
-  buildPrompt,
   type CreateRunDirDeps,
   createRunDir,
   generateSlug,
@@ -20,24 +16,11 @@ import {
   resolveProviderSelection as resolveProviderSelectionCore,
 } from '../core/provider-selection.js';
 import {
-  applyRunLifecycle,
-  createRunManifest,
-  markRunFailed,
-  mutateRunManifest,
-  toRunTaskState,
-  upsertProviderReport,
-} from '../core/run-manifest.js';
-import { generateSummary } from '../core/synthesis.js';
+  type ExecuteResearchRunDependencies,
+  executeResearchRun,
+} from '../core/research-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
-import type {
-  Citation,
-  Config,
-  DeduplicatedSource,
-  Defaults,
-  ProviderDispatchResult,
-  ProviderReport,
-  RunManifest,
-} from '../types.js';
+import type { Config, Defaults } from '../types.js';
 
 /**
  * Silent, file-writing research pipeline used by the MCP server. This mirrors
@@ -60,7 +43,7 @@ export interface SilentRunDeps {
   /** Load + merge config (global + project + CLI flags). Injectable for tests. */
   loadMergedConfig?: () => Config;
   /** Core dispatch. Injectable so tests can stub network. */
-  dispatch?: typeof dispatch;
+  dispatch?: ExecuteResearchRunDependencies['dispatch'];
   /** Initialize providers (registry side effect). Injectable for tests. */
   initialize?: typeof initializeProviders;
   /** Credentials (env). Defaults to process.env. */
@@ -75,14 +58,7 @@ export interface SilentRunDeps {
   runDirDeps?: CreateRunDirDeps;
 }
 
-export interface SilentRunResult {
-  manifest: RunManifest;
-  reports: ProviderReport[];
-  results: ProviderDispatchResult[];
-  sources: DeduplicatedSource[];
-  totalCitations: number;
-  totalDurationMs: number;
-}
+export type SilentRunResult = Awaited<ReturnType<typeof executeResearchRun>>;
 
 export { ProviderSelectionError as ResearchInputError };
 
@@ -112,42 +88,6 @@ export function resolveProviderSelection(
   return resolveProviderSelectionCore(config, args, getAllProviders(), {
     onWarn,
   });
-}
-
-/** Write per-provider markdown + meta files for a completed dispatch. */
-function writeProviderOutputs(
-  outputDir: string,
-  reports: ProviderReport[],
-  results: ProviderDispatchResult[],
-): void {
-  for (const result of results) {
-    const report = reports.find(
-      (candidate) =>
-        candidate.id === result.provider &&
-        candidate.fallbackFor === result.fallbackFor,
-    );
-    if (!report?.outputFile || !report.metaFile) continue;
-
-    safeWriteFile(join(outputDir, report.outputFile), result.text);
-    safeWriteFile(
-      join(outputDir, report.metaFile),
-      JSON.stringify(
-        {
-          provider: result.provider,
-          tier: result.tier,
-          model: result.model,
-          durationMs: result.durationMs,
-          citationCount: result.citations.length,
-          tokenUsage: result.tokenUsage,
-          usage: result.usage,
-          metering: result.metering,
-          citations: result.citations,
-        },
-        null,
-        2,
-      ),
-    );
-  }
 }
 
 /**
@@ -212,110 +152,21 @@ export async function runResearchSilent(
   // created directory is what gets recorded in the manifest below.
   const outputDir = createRunDir(baseDir, slug, deps.runDirDeps);
 
-  let promptDoc = buildPrompt(args.query);
-  if (refined) {
-    promptDoc += `\n\n## Refined Query Variants\n\n- deep-research: ${refined.tierQueries['deep-research']}\n- ai-grounded: ${refined.tierQueries['ai-grounded']}\n- raw-search: ${refined.tierQueries['raw-search']}\n`;
-  }
-  safeWriteFile(join(outputDir, 'prompt.md'), promptDoc);
-
-  const timestamp = Math.floor(Date.now() / 1000);
-  createRunManifest(outputDir, {
-    status: 'running',
-    timestamp,
-    slug,
-    query: args.query,
-    mode: config.defaults.mode,
-    outputDir,
-    providers: [],
-    sources: { total: 0, unique: 0, file: 'sources.json' },
-    exitCode: null,
-    refinedQueries: refined?.tierQueries,
-  });
-
-  try {
-    const dispatchFn = deps.dispatch ?? dispatch;
-    const dispatchStartedAt = Date.now();
-    const { reports, results, asyncTasks } = await dispatchFn({
+  return executeResearchRun(
+    {
+      query: args.query,
       config,
       providerIds,
-      query: args.query,
+      outputDir,
+      slug,
       tierQueries: refined?.tierQueries,
-      mode: config.defaults.mode,
       credentials,
-      onProgress: (event) => {
-        if (event.report) {
-          upsertProviderReport(outputDir, event.report, event.task);
+      onEvent: (event) => {
+        if (event.type === 'post-dispatch-warning') {
+          onWarn(`[librarium] warning: ${event.message}`);
         }
       },
-    });
-    const totalDurationMs = Date.now() - dispatchStartedAt;
-
-    writeProviderOutputs(outputDir, reports, results);
-
-    const allCitations: Citation[] = results.flatMap((result) =>
-      result.status === 'success' ? result.citations : [],
-    );
-    const sources = deduplicateSources(allCitations);
-
-    safeWriteFile(
-      join(outputDir, 'sources.json'),
-      JSON.stringify(sources, null, 2),
-    );
-
-    const taskByProvider = new Map(
-      asyncTasks.map((task) => [task.provider, toRunTaskState(task)]),
-    );
-    const manifest = mutateRunManifest(outputDir, (current) => {
-      const persistedTasks = new Map(
-        current.providers
-          .filter((provider) => provider.task)
-          .map((provider) => [provider.id, provider.task]),
-      );
-      current.providers = reports.map((report) => ({
-        ...report,
-        ...((report.task ??
-        taskByProvider.get(report.id) ??
-        persistedTasks.get(report.id))
-          ? {
-              task:
-                report.task ??
-                taskByProvider.get(report.id) ??
-                persistedTasks.get(report.id),
-            }
-          : {}),
-      }));
-      current.sources = {
-        total: allCitations.length,
-        unique: sources.length,
-        file: 'sources.json',
-      };
-      applyRunLifecycle(current);
-    });
-
-    const summary = generateSummary({
-      query: args.query,
-      reports,
-      sources,
-      asyncTasks,
-      timestamp,
-    });
-    safeWriteFile(join(outputDir, 'summary.md'), summary);
-
-    return {
-      manifest,
-      reports,
-      results,
-      sources,
-      totalCitations: allCitations.length,
-      totalDurationMs,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    try {
-      markRunFailed(outputDir, message);
-    } catch {
-      // Preserve the original failure; manifest diagnostics are best effort.
-    }
-    throw error;
-  }
+    },
+    { dispatch: deps.dispatch },
+  );
 }

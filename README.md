@@ -1198,7 +1198,7 @@ The `usage` and `metering` fields are optional. `usage` is reported-only: its `i
 
 ## Library Usage (`librarium/core`)
 
-Everything the CLI does with providers is importable. The `librarium/core` entry exposes the adapters, registry, dispatcher, normalizer, and types -- and returns results **in memory** (writing `run.json`/report files is a CLI concern). The core entry has zero Node-only dependencies: no `node:fs`, no `process.env` access, fetch-based HTTP only. It is tested in workerd (Cloudflare's runtime) on every CI run.
+Everything the CLI does with providers is importable. The `librarium/core` entry exposes the adapters, registry, dispatcher, normalizer, and types, and returns results **in memory**. The core entry has zero Node-only dependencies: no `node:fs`, no `process.env` access, fetch-based HTTP only. It is tested in workerd (Cloudflare's runtime) on every CI run. Node applications that want Librarium's complete durable file-writing lifecycle can use `executeResearchRun()` from `librarium/node`.
 
 ```bash
 npm install librarium
@@ -1246,6 +1246,36 @@ Notes:
 - **Custom providers from the library.** Hand-written providers work anywhere via `registerProvider()` (edge included). npm- and script-based custom providers need Node (module resolution, child processes), so they load through the dedicated `librarium/node` entry -- the same loader the CLI uses. See [Custom providers](#custom-providers-librariumnode).
 - **Async deep-research from the library.** `dispatch` with `mode: 'async'`/`'mixed'` returns `asyncTasks` handles; polling/retrieval is the caller's responsibility. See [Async deep-research](#async-deep-research-from-the-library).
 - **Bring your own persistence.** Core returns data; where it goes (D1, R2, files, nowhere) is up to you.
+
+### Headless durable runs (`librarium/node`)
+
+`executeResearchRun(request, overrides?)` is the shared application service behind the CLI and MCP server. It has no spinner, prompt, stdout, or stderr behavior. The caller supplies an initialized config, selected provider IDs, and an output directory; the service creates and reconciles `run.json`, dispatches providers, writes provider results, deduplicates citations, and writes `prompt.md`, `sources.json`, and `summary.md`.
+
+```ts
+import { initializeProviders } from 'librarium/core';
+import { executeResearchRun } from 'librarium/node';
+
+const credentials = { env: process.env };
+await initializeProviders({ ...config, credentials });
+
+const run = await executeResearchRun({
+  query: 'Compare current deep-research APIs',
+  config,
+  providerIds: ['openai-research'],
+  outputDir: '/absolute/path/to/run',
+  slug: 'compare-current-deep-research-apis',
+  credentials,
+  onEvent(event) {
+    if (event.type === 'dispatch-progress') {
+      renderProgress(event.progress);
+    }
+  },
+});
+
+console.log(run.manifest.status, run.sources.length);
+```
+
+Production defaults are used when `overrides` is omitted. Embedders and tests may independently replace `providerRegistry`, `taskStore`, `httpClient`, or `dispatch`. `onEvent` receives a typed event union and is observational: an event handler failure cannot interrupt dispatch or corrupt persistence. A `postDispatch` callback can add `answer` or `verification` metadata before the manifest reaches its final lifecycle state; callback failures are reported as `post-dispatch-warning` events and do not discard the run.
 
 ### Custom providers (`librarium/node`)
 

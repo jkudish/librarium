@@ -3,6 +3,7 @@ import {
   type CredentialContext,
   describeCredentialReference,
 } from '../core/credentials.js';
+import type { HttpClient } from '../core/http-client.js';
 import { getMeteringKind } from '../core/metering.js';
 import {
   providerCredentialRef,
@@ -44,6 +45,7 @@ export type ProviderInitConfig = Partial<
   >
 > & {
   credentials?: CredentialContext;
+  httpClient?: HttpClient;
 };
 
 export interface ProviderInitResult {
@@ -176,6 +178,7 @@ export async function initializeProviders(
   providers.clear();
   const providerConfig = config.providers ?? {};
   const credentials = config.credentials ?? {};
+  const httpClient = config.httpClient;
   const llmWebSearch = config.defaults?.llmWebSearch ?? true;
 
   const builtIns: Provider[] = [
@@ -246,6 +249,7 @@ export async function initializeProviders(
       provider.configure({
         apiKey: providerConfig[provider.id]?.apiKey,
         credentials,
+        httpClient,
       });
     }
     provider.source = 'builtin';
