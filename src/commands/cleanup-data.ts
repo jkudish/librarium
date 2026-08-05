@@ -72,13 +72,25 @@ export function hasPendingAsync(dir: string): boolean {
     try {
       const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       if (isRunManifest(parsed)) {
-        return (parsed as RunManifest).providers.some((provider) =>
-          ['pending', 'running'].includes(provider.task?.status ?? ''),
+        const manifest = parsed as RunManifest;
+        return (
+          manifest.status === 'awaiting_async' ||
+          manifest.providers.some(
+            (provider) =>
+              provider.task !== undefined &&
+              provider.task.retrievedAt === undefined &&
+              ['pending', 'running', 'completed'].includes(
+                provider.task.status,
+              ),
+          )
         );
       }
     } catch {
-      // Ignore corrupt manifest.
+      // A corrupt authoritative manifest may contain the only remote handle.
+      return true;
     }
+    // Unsupported/invalid manifests are conservatively protected.
+    return true;
   }
   return false;
 }

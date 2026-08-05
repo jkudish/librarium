@@ -380,6 +380,8 @@ export interface RunManifest {
   providers: ProviderReport[];
   sources: { total: number; unique: number; file: string };
   exitCode: number | null;
+  /** Safe top-level diagnostic when orchestration fails after creation. */
+  error?: string;
   /** Tier-tuned query variants used for dispatch (run --refine). */
   refinedQueries?: Partial<Record<ProviderTier, string>>;
   /**

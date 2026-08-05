@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `schemaVersion: 2` manifest written before dispatch. It carries a monotonic
   `revision`, explicit run lifecycle status, nullable in-progress `exitCode`,
   and provider-embedded background task state. Retrieval retains compact task
-  audit metadata on the provider entry.
+  audit metadata on the provider entry. Per-run inter-process locks serialize
+  mutations so concurrent CLI/MCP reconciliation cannot lose task updates.
 - **Breaking library API:** custom and hand-written providers must now declare
   `execution: "inline"` or `execution: "background"`. Background providers
   must implement the complete `execute`/`submit`/`poll`/`retrieve` lifecycle;

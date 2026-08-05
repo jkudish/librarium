@@ -22,6 +22,7 @@ import {
 import {
   applyRunLifecycle,
   createRunManifest,
+  markRunFailed,
   mutateRunManifest,
   toRunTaskState,
   upsertProviderReport,
@@ -231,68 +232,90 @@ export async function runResearchSilent(
     refinedQueries: refined?.tierQueries,
   });
 
-  const dispatchFn = deps.dispatch ?? dispatch;
-  const dispatchStartedAt = Date.now();
-  const { reports, results, asyncTasks } = await dispatchFn({
-    config,
-    providerIds,
-    query: args.query,
-    tierQueries: refined?.tierQueries,
-    mode: config.defaults.mode,
-    credentials,
-    onProgress: (event) => {
-      if (event.report) {
-        upsertProviderReport(outputDir, event.report, event.task);
-      }
-    },
-  });
-  const totalDurationMs = Date.now() - dispatchStartedAt;
+  try {
+    const dispatchFn = deps.dispatch ?? dispatch;
+    const dispatchStartedAt = Date.now();
+    const { reports, results, asyncTasks } = await dispatchFn({
+      config,
+      providerIds,
+      query: args.query,
+      tierQueries: refined?.tierQueries,
+      mode: config.defaults.mode,
+      credentials,
+      onProgress: (event) => {
+        if (event.report) {
+          upsertProviderReport(outputDir, event.report, event.task);
+        }
+      },
+    });
+    const totalDurationMs = Date.now() - dispatchStartedAt;
 
-  writeProviderOutputs(outputDir, reports, results);
+    writeProviderOutputs(outputDir, reports, results);
 
-  const allCitations: Citation[] = results.flatMap((result) =>
-    result.status === 'success' ? result.citations : [],
-  );
-  const sources = deduplicateSources(allCitations);
+    const allCitations: Citation[] = results.flatMap((result) =>
+      result.status === 'success' ? result.citations : [],
+    );
+    const sources = deduplicateSources(allCitations);
 
-  safeWriteFile(
-    join(outputDir, 'sources.json'),
-    JSON.stringify(sources, null, 2),
-  );
+    safeWriteFile(
+      join(outputDir, 'sources.json'),
+      JSON.stringify(sources, null, 2),
+    );
 
-  const taskByProvider = new Map(
-    asyncTasks.map((task) => [task.provider, toRunTaskState(task)]),
-  );
-  const manifest = mutateRunManifest(outputDir, (current) => {
-    current.providers = reports.map((report) => ({
-      ...report,
-      ...(taskByProvider.get(report.id)
-        ? { task: taskByProvider.get(report.id) }
-        : {}),
-    }));
-    current.sources = {
-      total: allCitations.length,
-      unique: sources.length,
-      file: 'sources.json',
+    const taskByProvider = new Map(
+      asyncTasks.map((task) => [task.provider, toRunTaskState(task)]),
+    );
+    const manifest = mutateRunManifest(outputDir, (current) => {
+      const persistedTasks = new Map(
+        current.providers
+          .filter((provider) => provider.task)
+          .map((provider) => [provider.id, provider.task]),
+      );
+      current.providers = reports.map((report) => ({
+        ...report,
+        ...((report.task ??
+        taskByProvider.get(report.id) ??
+        persistedTasks.get(report.id))
+          ? {
+              task:
+                report.task ??
+                taskByProvider.get(report.id) ??
+                persistedTasks.get(report.id),
+            }
+          : {}),
+      }));
+      current.sources = {
+        total: allCitations.length,
+        unique: sources.length,
+        file: 'sources.json',
+      };
+      applyRunLifecycle(current);
+    });
+
+    const summary = generateSummary({
+      query: args.query,
+      reports,
+      sources,
+      asyncTasks,
+      timestamp,
+    });
+    safeWriteFile(join(outputDir, 'summary.md'), summary);
+
+    return {
+      manifest,
+      reports,
+      results,
+      sources,
+      totalCitations: allCitations.length,
+      totalDurationMs,
     };
-    applyRunLifecycle(current);
-  });
-
-  const summary = generateSummary({
-    query: args.query,
-    reports,
-    sources,
-    asyncTasks,
-    timestamp,
-  });
-  safeWriteFile(join(outputDir, 'summary.md'), summary);
-
-  return {
-    manifest,
-    reports,
-    results,
-    sources,
-    totalCitations: allCitations.length,
-    totalDurationMs,
-  };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      markRunFailed(outputDir, message);
+    } catch {
+      // Preserve the original failure; manifest diagnostics are best effort.
+    }
+    throw error;
+  }
 }

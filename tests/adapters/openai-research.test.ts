@@ -203,6 +203,7 @@ describe('OpenAIResearchProvider', () => {
   });
 
   it('reports an immediately cancelled background submission without queuing it', async () => {
+    const progress = vi.fn();
     const cancelledProvider: Provider = {
       id: 'cancelled-submit-test',
       displayName: 'Cancelled submit test',
@@ -250,16 +251,29 @@ describe('OpenAIResearchProvider', () => {
       providerIds: ['cancelled-submit-test'],
       query: 'cancel this',
       mode: 'mixed',
+      onProgress: progress,
     });
 
     expect(result.asyncTasks).toEqual([]);
     expect(result.reports).toEqual([
-      expect.objectContaining({ status: 'error', error: 'Task was cancelled' }),
+      expect.objectContaining({
+        status: 'error',
+        error: 'Task was cancelled',
+        task: expect.objectContaining({
+          taskId: 'cancelled-1',
+          status: 'cancelled',
+        }),
+      }),
     ]);
+    expect(progress.mock.calls[1]?.[0]).toMatchObject({
+      event: 'async-submitted',
+      task: { taskId: 'cancelled-1' },
+    });
     expect(cancelledProvider.execute).not.toHaveBeenCalled();
   });
 
   it('retrieves an immediately failed background submission', async () => {
+    const progress = vi.fn();
     const failedProvider: Provider = {
       id: 'failed-submit-test',
       displayName: 'Failed submit test',
@@ -308,6 +322,7 @@ describe('OpenAIResearchProvider', () => {
       providerIds: ['failed-submit-test'],
       query: 'fail this',
       mode: 'mixed',
+      onProgress: progress,
     });
 
     expect(result.asyncTasks).toEqual([]);
@@ -315,12 +330,21 @@ describe('OpenAIResearchProvider', () => {
       expect.objectContaining({
         status: 'error',
         error: 'Task failed (REJECTED)',
+        task: expect.objectContaining({
+          taskId: 'failed-1',
+          status: 'failed',
+        }),
       }),
     ]);
+    expect(progress.mock.calls[1]?.[0]).toMatchObject({
+      event: 'async-submitted',
+      task: { taskId: 'failed-1' },
+    });
     expect(failedProvider.execute).not.toHaveBeenCalled();
   });
 
   it('retrieves an immediately completed background submission', async () => {
+    const progress = vi.fn();
     const completedProvider: Provider = {
       id: 'completed-submit-test',
       displayName: 'Completed submit test',
@@ -367,14 +391,24 @@ describe('OpenAIResearchProvider', () => {
       providerIds: ['completed-submit-test'],
       query: 'complete this',
       mode: 'mixed',
+      onProgress: progress,
     });
 
     expect(result.asyncTasks).toEqual([]);
     expect(result.reports).toEqual([
       expect.objectContaining({
         status: 'success',
+        task: expect.objectContaining({
+          taskId: 'completed-1',
+          status: 'completed',
+          retrievedAt: expect.any(Number),
+        }),
       }),
     ]);
+    expect(progress.mock.calls[1]?.[0]).toMatchObject({
+      event: 'async-submitted',
+      task: { taskId: 'completed-1' },
+    });
     expect(completedProvider.execute).not.toHaveBeenCalled();
   });
 

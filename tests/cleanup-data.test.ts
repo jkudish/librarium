@@ -180,6 +180,36 @@ describe('hasPendingAsync', () => {
     expect(hasPendingAsync(dir)).toBe(true);
   });
 
+  it('protects completed tasks that still await retrieval', () => {
+    const dir = makeRun('100-awaiting', {
+      'run.json': JSON.stringify(
+        makeManifest({
+          status: 'awaiting_async',
+          exitCode: null,
+          providers: [
+            {
+              id: 'openai-research',
+              tier: 'deep-research',
+              status: 'async-pending',
+              durationMs: 0,
+              wordCount: 0,
+              citationCount: 0,
+              outputFile: '',
+              metaFile: '',
+              task: { taskId: 't1', submittedAt: 1, status: 'completed' },
+            },
+          ],
+        }),
+      ),
+    });
+    expect(hasPendingAsync(dir)).toBe(true);
+  });
+
+  it('conservatively protects a corrupt authoritative manifest', () => {
+    const dir = makeRun('100-corrupt', { 'run.json': '{not-json' });
+    expect(hasPendingAsync(dir)).toBe(true);
+  });
+
   it('is false for a run dir with no async indicators', () => {
     const dir = makeRun('100-d', {
       'run.json': JSON.stringify(makeManifest()),

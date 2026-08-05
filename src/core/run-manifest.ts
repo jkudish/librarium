@@ -1,4 +1,12 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type {
   AsyncTaskHandle,
@@ -11,6 +19,10 @@ import type {
 import { safeWriteFile } from './fs-utils.js';
 
 export const RUN_MANIFEST_FILE = 'run.json';
+const LOCK_TIMEOUT_MS = 30_000;
+const STALE_LOCK_MS = 120_000;
+const LOCK_POLL_MS = 20;
+const lockWaitArray = new Int32Array(new SharedArrayBuffer(4));
 
 export class RunManifestError extends Error {
   constructor(
@@ -160,25 +172,70 @@ export function mutateRunManifest(
   expectedRevision?: number,
 ): RunManifest {
   const path = join(outputDir, RUN_MANIFEST_FILE);
-  const current = readRunManifest(outputDir);
-  if (expectedRevision !== undefined && current.revision !== expectedRevision) {
-    throw new RunManifestRevisionError(
-      path,
-      expectedRevision,
-      current.revision,
-    );
+  return withManifestLock(path, () => {
+    const current = readRunManifest(outputDir);
+    if (
+      expectedRevision !== undefined &&
+      current.revision !== expectedRevision
+    ) {
+      throw new RunManifestRevisionError(
+        path,
+        expectedRevision,
+        current.revision,
+      );
+    }
+    const next = structuredClone(current);
+    mutate(next);
+    next.revision = current.revision + 1;
+    if (!isRunManifest(next)) {
+      throw new RunManifestError(
+        'Mutation produced an invalid run manifest',
+        path,
+      );
+    }
+    safeWriteFile(path, JSON.stringify(next, null, 2));
+    return next;
+  });
+}
+
+function withManifestLock<T>(manifestPath: string, action: () => T): T {
+  const lockPath = `${manifestPath}.lock`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  let descriptor: number | undefined;
+  while (descriptor === undefined) {
+    try {
+      descriptor = openSync(lockPath, 'wx', 0o600);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new RunManifestError(
+          'Timed out waiting for the run manifest mutation lock',
+          manifestPath,
+        );
+      }
+      Atomics.wait(lockWaitArray, 0, 0, LOCK_POLL_MS);
+    }
   }
-  const next = structuredClone(current);
-  mutate(next);
-  next.revision = current.revision + 1;
-  if (!isRunManifest(next)) {
-    throw new RunManifestError(
-      'Mutation produced an invalid run manifest',
-      path,
-    );
+  try {
+    return action();
+  } finally {
+    closeSync(descriptor);
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      // A stale-lock recovery racing this cleanup is harmless.
+    }
   }
-  safeWriteFile(path, JSON.stringify(next, null, 2));
-  return next;
 }
 
 function reportIdentity(report: ProviderReport): string {
@@ -219,8 +276,8 @@ export function upsertProviderReport(
       index >= 0 ? manifest.providers[index]?.task : undefined;
     const next = {
       ...report,
-      ...((persistedTask ?? previousTask)
-        ? { task: persistedTask ?? previousTask }
+      ...((report.task ?? persistedTask ?? previousTask)
+        ? { task: report.task ?? persistedTask ?? previousTask }
         : {}),
     };
     if (index >= 0) manifest.providers[index] = next;
@@ -291,6 +348,17 @@ export function updateRunTask(
     );
     if (!provider?.task) return;
     provider.task = { ...provider.task, ...updates };
+    if (
+      provider.task.status === 'failed' ||
+      provider.task.status === 'cancelled'
+    ) {
+      provider.status = 'error';
+      provider.error =
+        provider.task.lastPollError ??
+        (provider.task.status === 'cancelled'
+          ? 'Task was cancelled'
+          : 'Task failed');
+    }
     found = true;
     applyRunLifecycle(manifest);
   });
@@ -300,6 +368,34 @@ export function updateRunTask(
       (task) => task.provider === providerId && task.taskId === taskId,
     ) ?? null
   );
+}
+
+export function markRunFailed(
+  outputDir: string,
+  error: string,
+  now = Date.now(),
+): RunManifest {
+  return mutateRunManifest(outputDir, (manifest) => {
+    manifest.error = error;
+    const waiting = manifest.providers.some(
+      (provider) =>
+        provider.task !== undefined &&
+        provider.task.retrievedAt === undefined &&
+        ['pending', 'running', 'completed'].includes(provider.task.status),
+    );
+    if (waiting) {
+      manifest.status = 'awaiting_async';
+      manifest.exitCode = null;
+      delete manifest.completedAt;
+      return;
+    }
+    const succeeded = manifest.providers.some(
+      (provider) => provider.status === 'success',
+    );
+    manifest.status = succeeded ? 'partial' : 'failed';
+    manifest.exitCode = succeeded ? 1 : 2;
+    manifest.completedAt = now;
+  });
 }
 
 export function markTaskRetrieved(

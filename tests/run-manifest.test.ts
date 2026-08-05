@@ -1,6 +1,8 @@
+import { spawn } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildSync } from 'esbuild';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyRunLifecycle,
@@ -71,6 +73,51 @@ describe('run manifest v2 store', () => {
     );
   });
 
+  it('serializes mutations across processes without losing revisions', async () => {
+    create();
+    const workers = 4;
+    const iterations = 20;
+    const fixture = join(
+      process.cwd(),
+      'tests/fixtures/mutate-run-manifest.ts',
+    );
+    const workerBundle = join(dir, 'mutation-worker.mjs');
+    buildSync({
+      entryPoints: [fixture],
+      outfile: workerBundle,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node20',
+    });
+    await Promise.all(
+      Array.from(
+        { length: workers },
+        (_, index) =>
+          new Promise<void>((resolve, reject) => {
+            const child = spawn(
+              process.execPath,
+              [workerBundle, dir, String(index), String(iterations)],
+              { stdio: 'pipe' },
+            );
+            let stderr = '';
+            child.stderr.on('data', (chunk) => {
+              stderr += String(chunk);
+            });
+            child.on('error', reject);
+            child.on('exit', (code) => {
+              if (code === 0) resolve();
+              else
+                reject(new Error(`mutation worker exited ${code}: ${stderr}`));
+            });
+          }),
+      ),
+    );
+    const manifest = readRunManifest(dir);
+    expect(manifest.revision).toBe(workers * iterations);
+    expect(manifest.query).toHaveLength('query'.length + workers * iterations);
+  });
+
   it('persists a submitted task inside its provider before reconciliation', () => {
     create();
     upsertProviderReport(dir, pendingReport, {
@@ -114,6 +161,28 @@ describe('run manifest v2 store', () => {
     const manifest = readRunManifest(dir);
     expect(manifest.providers[0]?.task?.status).toBe('running');
     expect(manifest.providers[1]?.task?.status).toBe('completed');
+  });
+
+  it('reconciles terminal task state into the provider-facing report', () => {
+    create();
+    upsertProviderReport(dir, pendingReport, {
+      provider: pendingReport.id,
+      taskId: 'task-failed',
+      query: 'query',
+      submittedAt: 10,
+      status: 'running',
+    });
+    updateRunTask(dir, pendingReport.id, 'task-failed', {
+      status: 'failed',
+      lastPollError: 'remote task failed',
+    });
+    const manifest = readRunManifest(dir);
+    expect(manifest).toMatchObject({ status: 'failed', exitCode: 2 });
+    expect(manifest.providers[0]).toMatchObject({
+      status: 'error',
+      error: 'remote task failed',
+      task: { status: 'failed' },
+    });
   });
 
   it('retains compact task audit data after retrieval', () => {

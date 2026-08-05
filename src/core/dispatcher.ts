@@ -366,6 +366,26 @@ export async function dispatch(
           const handle = await provider.submit(queryForTier(provider.tier), {
             timeout: config.defaults.asyncTimeout,
           });
+          const pendingMetering = meteringFor(id);
+          const submittedReport: ProviderReport = {
+            id,
+            tier: provider.tier,
+            status: 'async-pending',
+            durationMs: 0,
+            wordCount: 0,
+            citationCount: 0,
+            outputFile: '',
+            metaFile: '',
+            metering: pendingMetering,
+          };
+          // Persist every accepted remote handle before any retrieval or
+          // fallback work can throw. This is the paid-task write-ahead edge.
+          onProgress?.({
+            providerId: id,
+            event: 'async-submitted',
+            report: submittedReport,
+            task: handle,
+          });
 
           if (handle.status === 'cancelled') {
             const terminalError =
@@ -388,9 +408,24 @@ export async function dispatch(
             );
             results.push(structured);
             const report = createReport(id, provider.tier, structured);
+            report.task = {
+              taskId: handle.taskId,
+              submittedAt: handle.submittedAt,
+              status: 'cancelled',
+              completedAt: handle.completedAt ?? Date.now(),
+              ...(handle.providerStatus
+                ? { providerStatus: handle.providerStatus }
+                : {}),
+              lastPollError: terminalError,
+            };
             reports.push(report);
             recordBudget(report);
-            onProgress?.({ providerId: id, event: 'error', report });
+            onProgress?.({
+              providerId: id,
+              event: 'error',
+              report,
+              task: handle,
+            });
             const fallbackReport = await tryFallback(id, report);
             if (fallbackReport) {
               reports.push(fallbackReport);
@@ -417,11 +452,28 @@ export async function dispatch(
             );
             results.push(structured);
             const report = createReport(id, provider.tier, structured);
+            const retrievedAt = result.error ? undefined : Date.now();
+            report.task = {
+              taskId: handle.taskId,
+              submittedAt: handle.submittedAt,
+              status: handle.status,
+              completedAt: handle.completedAt ?? Date.now(),
+              ...(retrievedAt !== undefined ? { retrievedAt } : {}),
+              ...(handle.providerStatus
+                ? { providerStatus: handle.providerStatus }
+                : {}),
+              ...(result.error ? { lastPollError: result.error } : {}),
+            };
             reports.push(report);
             recordBudget(report);
 
             if (result.error) {
-              onProgress?.({ providerId: id, event: 'error', report });
+              onProgress?.({
+                providerId: id,
+                event: 'error',
+                report,
+                task: handle,
+              });
               const fallbackReport = await tryFallback(id, report);
               if (fallbackReport) {
                 reports.push(fallbackReport);
@@ -441,7 +493,12 @@ export async function dispatch(
                 }
               }
             } else {
-              onProgress?.({ providerId: id, event: 'completed', report });
+              onProgress?.({
+                providerId: id,
+                event: 'completed',
+                report,
+                task: handle,
+              });
             }
             return;
           }
@@ -451,7 +508,6 @@ export async function dispatch(
           // since there is no synchronous result to evaluate. Fallback only fires
           // when a provider completes immediately with an error (handled above).
           asyncTasks.push(handle);
-          const pendingMetering = meteringFor(id);
           results.push({
             provider: id,
             tier: provider.tier,
@@ -462,24 +518,7 @@ export async function dispatch(
             durationMs: 0,
             metering: pendingMetering,
           });
-          const pendingReport: ProviderReport = {
-            id,
-            tier: provider.tier,
-            status: 'async-pending',
-            durationMs: 0,
-            wordCount: 0,
-            citationCount: 0,
-            outputFile: '',
-            metaFile: '',
-            metering: pendingMetering,
-          };
-          reports.push(pendingReport);
-          onProgress?.({
-            providerId: id,
-            event: 'async-submitted',
-            report: pendingReport,
-            task: handle,
-          });
+          reports.push(submittedReport);
           return;
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);

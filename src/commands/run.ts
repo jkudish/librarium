@@ -30,6 +30,7 @@ import {
 import {
   applyRunLifecycle,
   createRunManifest,
+  markRunFailed,
   mutateRunManifest,
   upsertProviderReport,
 } from '../core/run-manifest.js';
@@ -221,6 +222,7 @@ export async function executeRun(
       prettyStream.write(`${line}\n`);
       if (wasSpinning) spinner.start();
     };
+    let activeOutputDir: string | undefined;
 
     try {
       const globalConfig = loadConfig();
@@ -340,6 +342,7 @@ export async function executeRun(
       const baseDir = resolve(config.defaults.outputDir);
       const outputDir = resolveOutputDir(baseDir, slug);
       mkdirSync(outputDir, { recursive: true });
+      activeOutputDir = outputDir;
 
       // Write prompt (with refined variants recorded for reproducibility)
       let promptDoc = buildPrompt(query);
@@ -708,7 +711,15 @@ export async function executeRun(
       process.exitCode = exitCode;
       return { exitCode, outputDir };
     } catch (e) {
-      spinner.fail(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      if (activeOutputDir) {
+        try {
+          markRunFailed(activeOutputDir, message);
+        } catch {
+          // Preserve the original failure; manifest diagnostics are best effort.
+        }
+      }
+      spinner.fail(message);
       process.exitCode = 2;
       return { exitCode: 2 };
     }
