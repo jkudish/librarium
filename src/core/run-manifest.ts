@@ -5,7 +5,6 @@ import {
   openSync,
   readdirSync,
   readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -207,18 +206,26 @@ function withManifestLock<T>(manifestPath: string, action: () => T): T {
   let descriptor: number | undefined;
   while (descriptor === undefined) {
     try {
-      descriptor = openSync(lockPath, 'wx', 0o600);
-      writeFileSync(
-        descriptor,
-        JSON.stringify({ token, pid: process.pid, createdAt: Date.now() }),
-      );
+      const candidate = openSync(lockPath, 'wx', 0o600);
+      try {
+        writeFileSync(
+          candidate,
+          JSON.stringify({ token, pid: process.pid, createdAt: Date.now() }),
+        );
+        descriptor = candidate;
+      } catch (error) {
+        closeSync(candidate);
+        try {
+          unlinkSync(lockPath);
+        } catch {}
+        throw error;
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') throw error;
-      if (reclaimDeadOwnerLock(lockPath)) continue;
       if (Date.now() >= deadline) {
         throw new RunManifestError(
-          'Timed out waiting for the run manifest mutation lock',
+          'Timed out waiting for the run manifest mutation lock; if the recorded owner crashed, remove this lock file manually after confirming no Librarium process is using the run',
           manifestPath,
         );
       }
@@ -237,40 +244,6 @@ function withManifestLock<T>(manifestPath: string, action: () => T): T {
     } catch {
       // A dead-owner recovery or manual cleanup may already have removed it.
     }
-  }
-}
-
-function reclaimDeadOwnerLock(lockPath: string): boolean {
-  let owner: { token?: string; pid?: number };
-  try {
-    owner = JSON.parse(readFileSync(lockPath, 'utf8')) as typeof owner;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
-    return false;
-  }
-  if (
-    typeof owner.token !== 'string' ||
-    typeof owner.pid !== 'number' ||
-    isProcessAlive(owner.pid)
-  ) {
-    return false;
-  }
-  const reclaimedPath = `${lockPath}.reclaimed.${owner.token}`;
-  try {
-    renameSync(lockPath, reclaimedPath);
-    unlinkSync(reclaimedPath);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT';
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 
