@@ -65,6 +65,7 @@ function provider(
     id,
     displayName: id,
     tier,
+    execution: 'inline',
     envVar: `VERIFY_${id.toUpperCase()}_KEY`,
     execute,
   };

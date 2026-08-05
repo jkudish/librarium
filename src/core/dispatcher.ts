@@ -360,33 +360,19 @@ export async function dispatch(
 
       onProgress?.({ providerId: id, event: 'started' });
 
-      // For deep-research providers in async/mixed mode, use submit
-      if (
-        provider.tier === 'deep-research' &&
-        mode !== 'sync' &&
-        provider.submit
-      ) {
+      // Background providers expose a complete persisted-task lifecycle.
+      if (provider.execution === 'background' && mode !== 'sync') {
         try {
           const handle = await provider.submit(queryForTier(provider.tier), {
             timeout: config.defaults.asyncTimeout,
           });
 
-          if (
-            handle.status === 'cancelled' ||
-            ((handle.status === 'completed' || handle.status === 'failed') &&
-              !provider.retrieve)
-          ) {
+          if (handle.status === 'cancelled') {
             const terminalError =
               handle.lastPollError ??
-              (handle.status === 'cancelled'
-                ? handle.providerStatus
-                  ? `Task was cancelled (${handle.providerStatus})`
-                  : 'Task was cancelled'
-                : handle.status === 'failed'
-                  ? handle.providerStatus
-                    ? `Task failed (${handle.providerStatus})`
-                    : 'Task failed during submission'
-                  : 'Task completed, but the provider does not support retrieval');
+              (handle.providerStatus
+                ? `Task was cancelled (${handle.providerStatus})`
+                : 'Task was cancelled');
             const structured = createDispatchResult(
               id,
               provider.tier,
@@ -421,10 +407,7 @@ export async function dispatch(
 
           // If submit is already terminal, retrieve immediately and treat it
           // as a synchronous result.
-          if (
-            (handle.status === 'completed' || handle.status === 'failed') &&
-            provider.retrieve
-          ) {
+          if (handle.status === 'completed' || handle.status === 'failed') {
             const result = await provider.retrieve(handle);
             const structured = createDispatchResult(
               id,
@@ -498,28 +481,30 @@ export async function dispatch(
           });
           return;
         } catch (error) {
-          if (error instanceof UnsafeToRetrySubmissionError) {
-            const structured = createDispatchResult(
-              id,
-              provider.tier,
-              {
-                provider: id,
-                tier: provider.tier,
-                content: '',
-                citations: [],
-                durationMs: 0,
-                error: error.message,
-              },
-              providerConfig,
-            );
-            results.push(structured);
-            const report = createReport(id, provider.tier, structured);
-            reports.push(report);
-            recordBudget(report);
-            onProgress?.({ providerId: id, event: 'error', report });
-            return;
-          }
-          // Fall through to sync execution
+          const detail = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof UnsafeToRetrySubmissionError
+              ? detail
+              : `Background submission failed and was not retried because the remote task may have been accepted: ${detail}`;
+          const structured = createDispatchResult(
+            id,
+            provider.tier,
+            {
+              provider: id,
+              tier: provider.tier,
+              content: '',
+              citations: [],
+              durationMs: 0,
+              error: message,
+            },
+            providerConfig,
+          );
+          results.push(structured);
+          const report = createReport(id, provider.tier, structured);
+          reports.push(report);
+          recordBudget(report);
+          onProgress?.({ providerId: id, event: 'error', report });
+          return;
         }
       }
 

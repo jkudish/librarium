@@ -52,7 +52,7 @@ async function retrieveTaskSilent(
   state: TaskState,
 ): Promise<boolean> {
   const provider = getExactProvider(task.provider);
-  if (!provider?.retrieve) {
+  if (provider?.execution !== 'background') {
     state.retrieveError = `Provider ${task.provider} does not support retrieval`;
     return false;
   }
@@ -146,7 +146,7 @@ export async function checkAsyncTasks(
 
     if (task.status === 'pending' || task.status === 'running') {
       const provider = getExactProvider(task.provider);
-      if (provider?.poll) {
+      if (provider?.execution === 'background') {
         polled++;
         try {
           const poll = await provider.poll(task);

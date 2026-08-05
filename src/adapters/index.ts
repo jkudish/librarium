@@ -9,7 +9,7 @@ import {
   providerHasCredential,
 } from '../core/provider-selection.js';
 import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
-import { BaseProvider } from './base.js';
+import { ProviderBase } from './base.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
 import { ClaudeProvider } from './claude.js';
@@ -56,9 +56,48 @@ export interface ProviderInitResult {
  * Register a provider in the registry
  */
 export function registerProvider(provider: Provider): void {
+  assertProviderExecutionContract(provider);
   provider.source ??= 'builtin';
   provider.requiresApiKey ??= true;
   providers.set(provider.id, provider);
+}
+
+function assertProviderExecutionContract(provider: Provider): void {
+  const candidate = provider as Provider & {
+    execution?: unknown;
+    execute?: unknown;
+    submit?: unknown;
+    poll?: unknown;
+    retrieve?: unknown;
+  };
+  if (
+    candidate.execution !== 'inline' &&
+    candidate.execution !== 'background'
+  ) {
+    throw new TypeError(
+      `Provider "${provider.id}" must declare execution as "inline" or "background"`,
+    );
+  }
+  if (typeof candidate.execute !== 'function') {
+    throw new TypeError(`Provider "${provider.id}" must define execute`);
+  }
+  const lifecycle = [candidate.submit, candidate.poll, candidate.retrieve];
+  if (
+    candidate.execution === 'background' &&
+    lifecycle.some((method) => typeof method !== 'function')
+  ) {
+    throw new TypeError(
+      `Background provider "${provider.id}" must define submit, poll, and retrieve`,
+    );
+  }
+  if (
+    candidate.execution === 'inline' &&
+    lifecycle.some((method) => method !== undefined)
+  ) {
+    throw new TypeError(
+      `Inline provider "${provider.id}" cannot define submit, poll, or retrieve`,
+    );
+  }
 }
 
 /**
@@ -203,7 +242,7 @@ export async function initializeProviders(
   ];
 
   for (const provider of builtIns) {
-    if (provider instanceof BaseProvider) {
+    if (provider instanceof ProviderBase) {
       provider.configure({
         apiKey: providerConfig[provider.id]?.apiKey,
         credentials,

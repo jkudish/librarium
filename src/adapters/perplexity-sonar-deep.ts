@@ -8,7 +8,7 @@ import type {
   ProviderTier,
   ProviderUsage,
 } from '../types.js';
-import { BaseProvider } from './base.js';
+import { BackgroundBaseProvider } from './base.js';
 
 interface PerplexityMessage {
   role: string;
@@ -77,7 +77,7 @@ const ASYNC_STATUS_MAP: Record<string, AsyncTaskHandle['status']> = {
  * Uses the sonar-deep-research model via the Chat Completions API for comprehensive research queries.
  * Tier: deep-research (async capable)
  */
-export class PerplexitySonarDeepProvider extends BaseProvider {
+export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
   readonly id = 'perplexity-sonar-deep';
   readonly tier: ProviderTier = 'deep-research';
 
@@ -171,7 +171,6 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
         },
         timeout: 30000,
         signal: options.signal,
-        maxRetries: 0,
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(

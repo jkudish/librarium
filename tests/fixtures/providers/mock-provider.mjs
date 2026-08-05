@@ -78,6 +78,7 @@ async function main() {
         id: providerId,
         displayName,
         tier,
+        execution: 'inline',
         // Keyless: the mock never needs a credential, so the dispatcher runs
         // it without any environment setup.
         requiresApiKey: false,

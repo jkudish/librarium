@@ -45,6 +45,7 @@ describe('MCP check_async retrieval persists metering', () => {
       id: 'perplexity-sonar-deep',
       displayName: 'Mock deep',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_PPLX_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'perplexity-sonar-deep',
@@ -61,6 +62,14 @@ describe('MCP check_async retrieval persists metering', () => {
         durationMs: 10,
         usage: { costUsd: 0.42, totalTokens: 100 },
       }),
+      submit: async (query) => ({
+        provider: 'perplexity-sonar-deep',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      poll: async () => ({ status: 'completed' }),
     };
     registerProvider(provider);
 
@@ -139,6 +148,7 @@ describe('MCP check_async retrieval persists metering', () => {
       id: 'perplexity-sonar-deep',
       displayName: 'Mock deep',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_PPLX_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'perplexity-sonar-deep',
@@ -154,6 +164,14 @@ describe('MCP check_async retrieval persists metering', () => {
         citations: [],
         durationMs: 1,
       }),
+      submit: async (query) => ({
+        provider: 'perplexity-sonar-deep',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      poll: async () => ({ status: 'completed' }),
     };
     registerProvider(provider);
     saveAsyncTasks(dir, [
@@ -206,6 +224,7 @@ describe('MCP check_async poll state persistence', () => {
       id: 'mock-async',
       displayName: 'Mock async',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'mock-async',
@@ -218,6 +237,20 @@ describe('MCP check_async poll state persistence', () => {
         status: 'cancelled',
         rawStatus: 'CANCELLED',
         message: 'cancelled by provider',
+      }),
+      submit: async (query) => ({
+        provider: 'mock-async',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      retrieve: async () => ({
+        provider: 'mock-async',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
       }),
     };
     registerProvider(provider);
@@ -254,6 +287,7 @@ describe('MCP check_async poll state persistence', () => {
       id: 'mock-unknown',
       displayName: 'Mock unknown',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'mock-unknown',
@@ -266,6 +300,20 @@ describe('MCP check_async poll state persistence', () => {
         status: 'running',
         rawStatus: 'MIGRATING',
         message: 'Unknown remote status: MIGRATING',
+      }),
+      submit: async (query) => ({
+        provider: 'mock-unknown',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      retrieve: async () => ({
+        provider: 'mock-unknown',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
       }),
     };
     registerProvider(provider);

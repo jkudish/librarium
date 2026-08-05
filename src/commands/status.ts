@@ -74,7 +74,7 @@ async function retrieveTask(
   providerConfig?: ProviderConfig,
 ): Promise<boolean> {
   const provider = getExactProvider(task.provider);
-  if (!provider?.retrieve) {
+  if (provider?.execution !== 'background') {
     spinner.text = `Provider ${task.provider} does not support retrieval`;
     return false;
   }
@@ -212,7 +212,7 @@ export async function reconcilePendingTasksOnce(
 ): Promise<void> {
   for (const task of tasks) {
     const provider = getExactProvider(task.provider);
-    if (!provider?.poll || !task.outputDir) {
+    if (provider?.execution !== 'background' || !task.outputDir) {
       if (task.outputDir) {
         updateAsyncTask(
           task.outputDir,
@@ -362,7 +362,7 @@ export function registerStatusCommand(program: Command): void {
           while (remaining.length > 0) {
             for (const task of remaining) {
               const provider = getExactProvider(task.provider);
-              if (!provider?.poll) {
+              if (provider?.execution !== 'background') {
                 spinner.text = `Provider ${task.provider} does not support polling`;
                 if (task.outputDir) {
                   updateAsyncTask(

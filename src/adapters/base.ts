@@ -9,6 +9,10 @@ import {
   httpRequest,
 } from '../core/http-client.js';
 import type {
+  AsyncPollResult,
+  AsyncTaskHandle,
+  BackgroundProvider,
+  InlineProvider,
   Provider,
   ProviderOptions,
   ProviderResult,
@@ -24,11 +28,10 @@ export interface BaseProviderOptions {
  * Base class for all provider adapters.
  * Handles common concerns: API key resolution, HTTP client, display info.
  *
- * Note: submit/poll/retrieve are NOT declared here. Only deep-research
- * subclasses that need async capabilities implement them directly,
- * satisfying the Provider interface's optional methods.
+ * Inline is the default execution contract, so the synchronous adapters need
+ * no per-class boilerplate. Background adapters extend BackgroundBaseProvider.
  */
-export abstract class BaseProvider implements Provider {
+export abstract class ProviderBase {
   abstract readonly id: string;
   abstract readonly tier: ProviderTier;
   source?: Provider['source'];
@@ -119,4 +122,28 @@ export abstract class BaseProvider implements Provider {
     query: string,
     options: ProviderOptions,
   ): Promise<ProviderResult>;
+}
+
+export abstract class BaseProvider
+  extends ProviderBase
+  implements InlineProvider
+{
+  readonly execution = 'inline' as const;
+}
+
+/** Base for adapters that implement the complete persisted-task lifecycle. */
+export abstract class BackgroundBaseProvider
+  extends ProviderBase
+  implements BackgroundProvider
+{
+  readonly execution = 'background' as const;
+
+  abstract submit(
+    query: string,
+    options: ProviderOptions,
+  ): Promise<AsyncTaskHandle>;
+
+  abstract poll(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
+
+  abstract retrieve(handle: AsyncTaskHandle): Promise<ProviderResult>;
 }

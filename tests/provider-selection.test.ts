@@ -12,6 +12,7 @@ function provider(id: string, envVar: string): Provider {
     id,
     displayName: id,
     tier: 'raw-search',
+    execution: 'inline',
     envVar,
     execute: async () => ({
       provider: id,
