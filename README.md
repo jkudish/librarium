@@ -266,8 +266,10 @@ for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
 }
 ```
 
-Invalid configured options skip only that provider and produce an initialization
-warning; unrelated providers remain available.
+Configured options are checked against the descriptor schema during
+initialization. Invalid values produce a warning while the adapter stays
+registered, so background retrieval and built-in ID protection remain intact;
+the adapter rejects the invalid controls before making a paid request.
 
 ## Commands
 
@@ -1317,7 +1319,7 @@ Three flavors of custom provider:
 The last two are Node-only, so they live behind the `librarium/node` entry point (one implementation, shared with the CLI). It exposes:
 
 - `loadCustomProviders(config, options?) -> { providers, loadedIds, skippedIds, warnings }` -- loads (but does not register) the npm/script providers declared in `config.customProviders`, applying the same `trustedProviderIds` gating and reserved-ID protection the CLI uses.
-- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Call it after `initializeProviders()` so reserved-ID detection sees the built-ins. Same return shape.
+- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Built-in IDs are reserved directly from the descriptor inventory, even before initialization or when a built-in has invalid options. Same return shape.
 
 ```ts
 import { dispatch, initializeProviders, getProvider } from 'librarium/core';

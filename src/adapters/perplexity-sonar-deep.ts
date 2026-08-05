@@ -1,4 +1,5 @@
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -62,6 +63,9 @@ interface AsyncSonarEnvelope {
 }
 
 const ASYNC_SONAR_URL = 'https://api.perplexity.ai/v1/async/sonar';
+const SONAR_DEEP_MODEL = getBuiltinProviderDefaultModel(
+  'perplexity-sonar-deep',
+);
 
 const ASYNC_STATUS_MAP: Record<string, AsyncTaskHandle['status']> = {
   CREATED: 'pending',
@@ -95,7 +99,7 @@ export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-deep-research',
+            model: SONAR_DEEP_MODEL,
             messages: [{ role: 'user', content: query }],
           },
           timeout: options.timeout * 1000,
@@ -126,7 +130,7 @@ export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
         content,
         citations,
         durationMs,
-        model: data.model ?? 'sonar-deep-research',
+        model: data.model ?? SONAR_DEEP_MODEL,
         tokenUsage: {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
@@ -165,7 +169,7 @@ export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
         headers: { Authorization: `Bearer ${apiKey}` },
         body: {
           request: {
-            model: 'sonar-deep-research',
+            model: SONAR_DEEP_MODEL,
             messages: [{ role: 'user', content: query }],
           },
         },
@@ -290,7 +294,7 @@ export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
         content: completion.choices?.[0]?.message?.content ?? '',
         citations: this.extractAsyncCitations(completion),
         durationMs: this.taskDurationMs(data, start),
-        model: completion.model ?? data.model ?? 'sonar-deep-research',
+        model: completion.model ?? data.model ?? SONAR_DEEP_MODEL,
         tokenUsage: {
           input: completion.usage?.prompt_tokens,
           output: completion.usage?.completion_tokens,
@@ -348,7 +352,7 @@ export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-deep-research',
+            model: SONAR_DEEP_MODEL,
             messages: [{ role: 'user', content: 'ping' }],
             max_tokens: 5,
           },

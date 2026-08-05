@@ -1,6 +1,9 @@
 declare const __VERSION__: string;
 
-import { BUILTIN_PROVIDER_DEFINITIONS } from './core/provider-descriptor.js';
+import {
+  BUILTIN_PROVIDER_DEFINITIONS,
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER,
+} from './core/provider-descriptor.js';
 
 export const VERSION =
   typeof __VERSION__ !== 'undefined' ? __VERSION__ : '0.1.0';
@@ -28,16 +31,17 @@ export const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Provider environment variable names
 export const PROVIDER_ENV_VARS: Record<string, string> = Object.fromEntries(
-  BUILTIN_PROVIDER_DEFINITIONS.map(({ id, credential }) => [
-    id,
-    credential.envVar,
-  ]),
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map(
+    ({ id, credential }) => [id, credential.envVar],
+  ),
 );
 
 // Provider display names
 export const PROVIDER_DISPLAY_NAMES: Record<string, string> =
   Object.fromEntries(
-    BUILTIN_PROVIDER_DEFINITIONS.map(({ id, display }) => [id, display.name]),
+    BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map(
+      ({ id, display }) => [id, display.name],
+    ),
   );
 
 // Backward-compatible provider ID aliases (legacy -> canonical)

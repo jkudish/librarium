@@ -54,6 +54,36 @@ describe('built-in provider descriptors', () => {
     }
   });
 
+  it('preserves the established registry order independently of catalog order', async () => {
+    await initializeProviders();
+    expect(getAllProviders().map(({ id }) => id)).toEqual([
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'perplexity-advanced-deep',
+      'openai-research',
+      'gemini-deep',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'kagi-fastgpt',
+      'perplexity-search',
+      'brave-search',
+      'jina-search',
+      'firecrawl-search',
+      'searchapi',
+      'serpapi',
+      'tavily',
+      'claude',
+      'openai-chat',
+      'gemini-chat',
+      'openrouter-chat',
+    ]);
+  });
+
   it('isolates an invalid provider option schema from other adapters', async () => {
     const result = await initializeProviders({
       providers: {
@@ -63,11 +93,32 @@ describe('built-in provider descriptors', () => {
       },
     });
 
-    expect(getProvider('openai-research')).toBeUndefined();
+    expect(getProvider('openai-research')).toBeDefined();
     expect(getProvider('gemini-deep')).toBeDefined();
     expect(result.warnings).toEqual([
-      expect.stringContaining('Skipping openai-research: invalid options'),
+      expect.stringContaining('Invalid options for openai-research'),
     ]);
+  });
+
+  it('distinguishes remote tasks from process-local lifecycle wrappers', () => {
+    const persistence = Object.fromEntries(
+      BUILTIN_PROVIDER_DESCRIPTORS.filter(
+        (descriptor) => descriptor.capabilities.execution === 'background',
+      ).map((descriptor) => [
+        descriptor.id,
+        descriptor.capabilities.execution === 'background'
+          ? descriptor.capabilities.taskPersistence
+          : undefined,
+      ]),
+    );
+
+    expect(persistence).toEqual({
+      'openai-research': 'remote',
+      'gemini-deep': 'remote',
+      'perplexity-sonar-deep': 'remote',
+      'perplexity-deep-research': 'process-local',
+      'perplexity-advanced-deep': 'process-local',
+    });
   });
 
   it('validates explicit default-group policy against descriptors', () => {

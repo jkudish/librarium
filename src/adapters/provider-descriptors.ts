@@ -1,5 +1,7 @@
 import {
   BUILTIN_PROVIDER_DEFINITIONS,
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER,
+  getBuiltinProviderDefinition,
   type ProviderDescriptorDefinition,
 } from '../core/provider-descriptor.js';
 import type { Config, Provider, ProviderConfig } from '../types.js';
@@ -44,6 +46,16 @@ function option(config: ProviderConfig | undefined, key: string): unknown {
   return config?.options?.[key];
 }
 
+function model(
+  id: string,
+  context: BuiltInProviderFactoryContext,
+): string | undefined {
+  return (
+    context.providerConfig?.model ??
+    getBuiltinProviderDefinition(id)?.defaultModel
+  );
+}
+
 function webSearch(context: BuiltInProviderFactoryContext): boolean {
   const configured = option(context.providerConfig, 'webSearch');
   return typeof configured === 'boolean'
@@ -57,17 +69,18 @@ const factories: Record<string, ProviderFactory> = {
   'perplexity-advanced-deep': () => new PerplexityAdvancedDeepProvider(),
   'openai-research': ({ providerConfig }) =>
     new OpenAIResearchProvider({
-      model: providerConfig?.model,
+      model:
+        providerConfig?.model ??
+        getBuiltinProviderDefinition('openai-research')?.defaultModel,
       maxToolCalls: option(providerConfig, 'maxToolCalls'),
       reasoningEffort: option(providerConfig, 'reasoningEffort'),
       returnTokenBudget: option(providerConfig, 'returnTokenBudget'),
     }),
-  'gemini-deep': ({ providerConfig }) =>
-    new GeminiDeepProvider({ model: providerConfig?.model }),
+  'gemini-deep': (context) =>
+    new GeminiDeepProvider({ model: model('gemini-deep', context) }),
   'perplexity-sonar-pro': () => new PerplexitySonarProProvider(),
   'gemini-grounded': () => new GeminiGroundedProvider(),
-  grok: ({ providerConfig }) =>
-    new GrokProvider({ model: providerConfig?.model }),
+  grok: (context) => new GrokProvider({ model: model('grok', context) }),
   'openrouter-online': () => new OpenRouterOnlineProvider(),
   'brave-answers': () => new BraveAnswersProvider(),
   exa: () => new ExaProvider(),
@@ -82,7 +95,7 @@ const factories: Record<string, ProviderFactory> = {
   tavily: () => new TavilyProvider(),
   claude: (context) =>
     new ClaudeProvider({
-      model: context.providerConfig?.model,
+      model: model('claude', context),
       webSearch: webSearch(context),
       maxTokens: option(context.providerConfig, 'maxTokens'),
       thinking: option(context.providerConfig, 'thinking'),
@@ -90,23 +103,23 @@ const factories: Record<string, ProviderFactory> = {
     }),
   'openai-chat': (context) =>
     new OpenAIChatProvider({
-      model: context.providerConfig?.model,
+      model: model('openai-chat', context),
       webSearch: webSearch(context),
     }),
   'gemini-chat': (context) =>
     new GeminiChatProvider({
-      model: context.providerConfig?.model,
+      model: model('gemini-chat', context),
       webSearch: webSearch(context),
     }),
   'openrouter-chat': (context) =>
     new OpenRouterChatProvider({
-      model: context.providerConfig?.model,
+      model: model('openrouter-chat', context),
       webSearch: webSearch(context),
     }),
 };
 
 export const BUILTIN_PROVIDER_DESCRIPTORS: readonly BuiltInProviderDescriptor[] =
-  BUILTIN_PROVIDER_DEFINITIONS.map((definition) => {
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map((definition) => {
     const factory = factories[definition.id];
     if (!factory) {
       throw new Error(`Missing built-in provider factory: ${definition.id}`);

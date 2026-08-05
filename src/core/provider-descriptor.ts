@@ -19,12 +19,13 @@ export type ProviderCapabilities =
       execution: 'background';
       healthCheck: true;
       citations: true;
-      persistedTasks: true;
+      taskPersistence: 'remote' | 'process-local';
       webSearch: 'always';
     };
 
 export interface ProviderDescriptorDefinition {
   id: string;
+  registrationOrder: number;
   aliases: readonly string[];
   tier: ProviderTier;
   display: {
@@ -77,11 +78,13 @@ const inline = (webSearch?: 'always' | 'optional'): ProviderCapabilities => ({
   citations: true,
   ...(webSearch ? { webSearch } : {}),
 });
-const background = (): ProviderCapabilities => ({
+const background = (
+  taskPersistence: 'remote' | 'process-local' = 'remote',
+): ProviderCapabilities => ({
   execution: 'background',
   healthCheck: true,
   citations: true,
-  persistedTasks: true,
+  taskPersistence,
   webSearch: 'always',
 });
 
@@ -107,6 +110,7 @@ function define(input: DefinitionInput): ProviderDescriptorDefinition {
 export const BUILTIN_PROVIDER_DEFINITIONS = [
   define({
     id: 'brave-search',
+    registrationOrder: 15,
     tier: 'raw-search',
     envVar: 'BRAVE_API_KEY',
     display: {
@@ -127,6 +131,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'perplexity-sonar-pro',
+    registrationOrder: 6,
     aliases: ['perplexity-sonar'],
     tier: 'ai-grounded',
     envVar: 'PERPLEXITY_API_KEY',
@@ -145,6 +150,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'exa',
+    registrationOrder: 11,
     tier: 'ai-grounded',
     envVar: 'EXA_API_KEY',
     display: {
@@ -161,6 +167,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'tavily',
+    registrationOrder: 20,
     tier: 'raw-search',
     envVar: 'TAVILY_API_KEY',
     display: {
@@ -181,6 +188,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'openai-research',
+    registrationOrder: 4,
     aliases: ['openai-deep', 'openai-deep-o3'],
     tier: 'deep-research',
     envVar: 'OPENAI_API_KEY',
@@ -200,6 +208,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'gemini-grounded',
+    registrationOrder: 7,
     tier: 'ai-grounded',
     envVar: 'GEMINI_API_KEY',
     defaultModel: 'gemini-2.5-flash',
@@ -216,6 +225,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'gemini-deep',
+    registrationOrder: 5,
     tier: 'deep-research',
     envVar: 'GEMINI_API_KEY',
     defaultModel: 'deep-research-preview-04-2026',
@@ -232,6 +242,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'perplexity-sonar-deep',
+    registrationOrder: 1,
     aliases: ['perplexity-deep'],
     tier: 'deep-research',
     envVar: 'PERPLEXITY_API_KEY',
@@ -249,6 +260,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'perplexity-deep-research',
+    registrationOrder: 2,
     tier: 'deep-research',
     envVar: 'PERPLEXITY_API_KEY',
     defaultModel: 'deep-research',
@@ -261,10 +273,11 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       order: 131,
     },
     metering: { kind: 'native_cost' },
-    capabilities: background(),
+    capabilities: background('process-local'),
   }),
   define({
     id: 'perplexity-advanced-deep',
+    registrationOrder: 3,
     tier: 'deep-research',
     envVar: 'PERPLEXITY_API_KEY',
     defaultModel: 'advanced-deep-research',
@@ -277,10 +290,11 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       order: 132,
     },
     metering: { kind: 'native_cost' },
-    capabilities: background(),
+    capabilities: background('process-local'),
   }),
   define({
     id: 'perplexity-search',
+    registrationOrder: 14,
     tier: 'raw-search',
     envVar: 'PERPLEXITY_API_KEY',
     display: {
@@ -296,6 +310,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'brave-answers',
+    registrationOrder: 10,
     tier: 'ai-grounded',
     envVar: 'BRAVE_API_KEY',
     defaultModel: 'brave',
@@ -312,6 +327,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'openrouter-online',
+    registrationOrder: 9,
     tier: 'ai-grounded',
     envVar: 'OPENROUTER_API_KEY',
     defaultModel: 'openai/gpt-4o-mini',
@@ -328,6 +344,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'grok',
+    registrationOrder: 8,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
     defaultModel: 'grok-4.5',
@@ -348,6 +365,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'you-research',
+    registrationOrder: 12,
     tier: 'ai-grounded',
     envVar: 'YOU_COM_API_KEY',
     display: {
@@ -367,6 +385,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'kagi-fastgpt',
+    registrationOrder: 13,
     tier: 'ai-grounded',
     envVar: 'KAGI_API_KEY',
     display: {
@@ -386,6 +405,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'jina-search',
+    registrationOrder: 16,
     tier: 'raw-search',
     envVar: 'JINA_AI_API_KEY',
     display: {
@@ -401,6 +421,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'firecrawl-search',
+    registrationOrder: 17,
     tier: 'raw-search',
     envVar: 'FIRECRAWL_API_KEY',
     display: {
@@ -420,6 +441,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'searchapi',
+    registrationOrder: 18,
     tier: 'raw-search',
     envVar: 'SEARCHAPI_API_KEY',
     display: {
@@ -439,6 +461,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'serpapi',
+    registrationOrder: 19,
     tier: 'raw-search',
     envVar: 'SERPAPI_API_KEY',
     display: {
@@ -458,6 +481,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'claude',
+    registrationOrder: 21,
     tier: 'llm',
     envVar: 'ANTHROPIC_API_KEY',
     defaultModel: 'claude-sonnet-5',
@@ -475,6 +499,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'openai-chat',
+    registrationOrder: 22,
     tier: 'llm',
     envVar: 'OPENAI_API_KEY',
     defaultModel: 'gpt-5-mini',
@@ -492,6 +517,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'gemini-chat',
+    registrationOrder: 23,
     tier: 'llm',
     envVar: 'GEMINI_API_KEY',
     defaultModel: 'gemini-3.6-flash',
@@ -509,6 +535,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
   define({
     id: 'openrouter-chat',
+    registrationOrder: 24,
     tier: 'llm',
     envVar: 'OPENROUTER_API_KEY',
     defaultModel: 'openai/gpt-5.6-terra',
@@ -527,6 +554,10 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   }),
 ] as const satisfies readonly ProviderDescriptorDefinition[];
 
+export const BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER = [
+  ...BUILTIN_PROVIDER_DEFINITIONS,
+].sort((a, b) => a.registrationOrder - b.registrationOrder);
+
 export const BUILTIN_PROVIDER_DEFINITION_BY_ID = new Map(
   BUILTIN_PROVIDER_DEFINITIONS.map((definition) => [definition.id, definition]),
 );
@@ -535,4 +566,13 @@ export function getBuiltinProviderDefinition(
   id: string,
 ): ProviderDescriptorDefinition | undefined {
   return BUILTIN_PROVIDER_DEFINITION_BY_ID.get(id);
+}
+
+/** Return the descriptor-owned model identifier for a model-backed adapter. */
+export function getBuiltinProviderDefaultModel(id: string): string {
+  const model = getBuiltinProviderDefinition(id)?.defaultModel;
+  if (!model) {
+    throw new Error(`Built-in provider has no declared default model: ${id}`);
+  }
+  return model;
 }

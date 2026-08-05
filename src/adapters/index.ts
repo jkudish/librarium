@@ -172,16 +172,25 @@ export async function initializeProviders(
           (issue) => `${issue.path.join('.') || 'options'}: ${issue.message}`,
         )
         .join('; ');
-      warnings.push(`Skipping ${descriptor.id}: invalid options (${detail})`);
-      continue;
+      warnings.push(`Invalid options for ${descriptor.id} (${detail})`);
     }
     const normalizedConfig = configured
-      ? { ...configured, options: options.data }
+      ? {
+          ...configured,
+          options: options.success ? options.data : configured.options,
+        }
       : undefined;
-    const provider = descriptor.factory({
-      providerConfig: normalizedConfig,
-      defaults: config.defaults,
-    });
+    let provider: Provider;
+    try {
+      provider = descriptor.factory({
+        providerConfig: normalizedConfig,
+        defaults: config.defaults,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      warnings.push(`Skipping ${descriptor.id}: ${detail}`);
+      continue;
+    }
     assertBuiltInDescriptorMatch(descriptor, provider);
     if (provider instanceof ProviderBase) {
       provider.configure({
