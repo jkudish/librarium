@@ -49,6 +49,7 @@ import {
   formatRunSummary,
   hyperlink,
   isColorEnabled,
+  type LineWidths,
   shortenHomePath,
 } from './run-format.js';
 
@@ -410,17 +411,13 @@ export async function executeRun(
               return;
             }
             if (event.type === 'dispatch-completed') {
-              spinner.stop();
-              if (live) {
-                live.resolveRemaining(event.reports);
-                live.stop();
-              } else {
-                for (const report of event.reports) {
-                  if (report.status === 'skipped') {
-                    printLine(formatProviderLine(report, widths, color));
-                  }
-                }
-              }
+              finalizeDispatchPresentation(event.reports, {
+                spinner,
+                live,
+                printLine,
+                widths,
+                color,
+              });
               return;
             }
             if (event.type !== 'dispatch-progress') return;
@@ -616,6 +613,34 @@ export async function executeRun(
       spinner.fail(message);
       process.exitCode = 2;
       return { exitCode: 2 };
+    }
+  }
+}
+
+export interface DispatchPresentation {
+  spinner: { stop(): unknown };
+  live: Pick<LiveRunTable, 'resolveRemaining' | 'stop'> | null;
+  printLine: (line: string) => void;
+  widths: LineWidths;
+  color: boolean;
+}
+
+/** Finalize provider rows before artifacts and post-dispatch hooks can print. */
+export function finalizeDispatchPresentation(
+  reports: ProviderReport[],
+  presentation: DispatchPresentation,
+): void {
+  presentation.spinner.stop();
+  if (presentation.live) {
+    presentation.live.resolveRemaining(reports);
+    presentation.live.stop();
+    return;
+  }
+  for (const report of reports) {
+    if (report.status === 'skipped') {
+      presentation.printLine(
+        formatProviderLine(report, presentation.widths, presentation.color),
+      );
     }
   }
 }
