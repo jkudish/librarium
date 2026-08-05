@@ -240,6 +240,39 @@ If you want old-style direct model answers with no web search, set `"llmWebSearc
 
 As a result they stay out of the default run unless you explicitly enable them in config. Reach for them on demand via `-p claude,openai-chat,...`, a custom group, or `--group llm` regardless of your init choices.
 
+### Built-in provider descriptors
+
+Each built-in provider is represented by one typed descriptor. It combines the
+adapter factory with its tier, display/catalog metadata, credential environment
+variable, metering declaration, option schema, aliases, default model, and a
+discriminated inline/background capability contract. Registry initialization,
+the onboarding catalog, provider names, credential lookup, aliases, and
+metering are derived from that inventory. Default groups remain explicit
+policy, with automatic validation against the inventory so a new provider
+cannot silently drift out of `all` or `llm`.
+
+Library consumers can inspect the same inventory:
+
+```ts
+import { BUILTIN_PROVIDER_DESCRIPTORS } from 'librarium/core';
+
+for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
+  console.log({
+    id: descriptor.id,
+    model: descriptor.defaultModel,
+    execution: descriptor.capabilities.execution,
+    options: descriptor.optionsSchema,
+  });
+}
+```
+
+Configured options are checked against the descriptor schema during
+initialization. Invalid values produce a warning while the adapter stays
+registered, so background retrieval and built-in ID protection remain intact;
+the adapter blocks `execute`, `submit`, and `test` before HTTP. Background
+`poll` and `retrieve` remain available for work submitted before the config
+became invalid.
+
 ## Commands
 
 ### `run`
@@ -380,7 +413,7 @@ Use `--max-cost` as a backstop against runaway synchronous fan-outs, not as a ha
 
 `--max-cost` is deliberately reported-only: it never guesses. The gap it leaves — providers that report no cost (most raw-search APIs) run "for free" as far as the breaker is concerned — is filled by a separate, opt-in **estimated** lane.
 
-Every provider declares a **metering kind** in a built-in registry, visible in `librarium ls` (and its `--json`):
+Every provider declares a **metering kind** in its built-in descriptor, visible in `librarium ls` (and its `--json`):
 
 | Kind | Meaning | Examples |
 |---|---|---|
@@ -1288,7 +1321,7 @@ Three flavors of custom provider:
 The last two are Node-only, so they live behind the `librarium/node` entry point (one implementation, shared with the CLI). It exposes:
 
 - `loadCustomProviders(config, options?) -> { providers, loadedIds, skippedIds, warnings }` -- loads (but does not register) the npm/script providers declared in `config.customProviders`, applying the same `trustedProviderIds` gating and reserved-ID protection the CLI uses.
-- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Call it after `initializeProviders()` so reserved-ID detection sees the built-ins. Same return shape.
+- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Built-in IDs are reserved directly from the descriptor inventory, even before initialization or when a built-in has invalid options. Same return shape.
 
 ```ts
 import { dispatch, initializeProviders, getProvider } from 'librarium/core';

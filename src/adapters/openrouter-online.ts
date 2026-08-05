@@ -1,3 +1,4 @@
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   Citation,
   ProviderOptions,
@@ -41,7 +42,8 @@ interface OpenRouterResponse {
   };
 }
 
-const OPENROUTER_ONLINE_MODEL = 'openai/gpt-4o-mini';
+const OPENROUTER_ONLINE_MODEL =
+  getBuiltinProviderDefaultModel('openrouter-online');
 
 /**
  * OpenRouter online search provider.

@@ -1,4 +1,5 @@
 import { MAX_RESPONSE_SIZE } from '../constants.js';
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   Citation,
   ProviderOptions,
@@ -12,7 +13,7 @@ const MAX_ERROR_BODY_SIZE = 256 * 1024;
 
 const BRAVE_ANSWERS_URL =
   'https://api.search.brave.com/res/v1/chat/completions';
-const BRAVE_ANSWERS_MODEL = 'brave';
+const BRAVE_ANSWERS_MODEL = getBuiltinProviderDefaultModel('brave-answers');
 
 interface BraveStreamPayload {
   model?: string;

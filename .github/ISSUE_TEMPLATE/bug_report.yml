@@ -66,10 +66,12 @@ body:
         - perplexity-sonar-deep
         - perplexity-deep-research
         - perplexity-advanced-deep
-        - openai-deep
-        - openai-deep-o3
+        - openai-research
         - gemini-deep
         - perplexity-sonar-pro
+        - gemini-grounded
+        - grok
+        - openrouter-online
         - perplexity-search
         - brave-answers
         - exa
@@ -77,9 +79,14 @@ body:
         - kagi-fastgpt
         - brave-search
         - jina-search
+        - firecrawl-search
         - searchapi
         - serpapi
         - tavily
+        - claude
+        - openai-chat
+        - gemini-chat
+        - openrouter-chat
         - Not sure / all
     validations:
       required: false

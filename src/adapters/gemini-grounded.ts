@@ -1,3 +1,4 @@
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   Citation,
   ProviderOptions,
@@ -40,7 +41,7 @@ interface GeminiGroundedResponse {
   };
 }
 
-const GEMINI_GROUNDED_MODEL = 'gemini-2.5-flash';
+const GEMINI_GROUNDED_MODEL = getBuiltinProviderDefaultModel('gemini-grounded');
 
 /**
  * Gemini grounded search provider.

@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Built-in providers now use typed descriptors as the single source for
+  factories, tiers, display/catalog metadata, credential names, aliases,
+  default models, metering, option schemas, and execution capabilities.
+  Registry and catalog output are derived from the descriptors; explicit
+  default-group policy is validated automatically against the inventory.
+- CLI and MCP research now share the headless `executeResearchRun()` Node
+  application service with optional provider-registry, task-store, and HTTP
+  overrides plus typed lifecycle events.
+
 - **Breaking run artifact schema:** `run.json` is now a live
   `schemaVersion: 2` manifest written before dispatch. It carries a monotonic
   `revision`, explicit run lifecycle status, nullable in-progress `exitCode`,

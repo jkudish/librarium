@@ -1,4 +1,5 @@
 import {
+  BUILTIN_PROVIDER_DESCRIPTORS,
   type Config,
   dispatch,
   GeminiGroundedProvider,
@@ -36,6 +37,7 @@ function makeConfig(): Config {
 
 describe('librarium/core in workerd', () => {
   it('imports the core export, initializes adapters, and dispatches in memory', async () => {
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(24);
     await initializeProviders({
       credentials: { env: { GEMINI_API_KEY: 'test-key' } },
     });
