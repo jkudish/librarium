@@ -25,6 +25,7 @@ describe('status reconciliation', () => {
       id: 'status-reconcile-mock',
       displayName: 'Status reconcile mock',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: async () => ({
         provider: 'status-reconcile-mock',
@@ -36,6 +37,20 @@ describe('status reconciliation', () => {
       poll: async () => ({
         status: 'completed',
         rawStatus: 'COMPLETED',
+      }),
+      submit: async (query) => ({
+        provider: 'status-reconcile-mock',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      retrieve: async () => ({
+        provider: 'status-reconcile-mock',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
       }),
     };
     registerProvider(provider);

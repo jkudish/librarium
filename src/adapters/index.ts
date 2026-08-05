@@ -56,9 +56,44 @@ export interface ProviderInitResult {
  * Register a provider in the registry
  */
 export function registerProvider(provider: Provider): void {
+  assertProviderExecutionContract(provider);
   provider.source ??= 'builtin';
   provider.requiresApiKey ??= true;
   providers.set(provider.id, provider);
+}
+
+function assertProviderExecutionContract(provider: Provider): void {
+  const candidate = provider as Provider & {
+    execution?: unknown;
+    submit?: unknown;
+    poll?: unknown;
+    retrieve?: unknown;
+  };
+  if (
+    candidate.execution !== 'inline' &&
+    candidate.execution !== 'background'
+  ) {
+    throw new TypeError(
+      `Provider "${provider.id}" must declare execution as "inline" or "background"`,
+    );
+  }
+  const lifecycle = [candidate.submit, candidate.poll, candidate.retrieve];
+  if (
+    candidate.execution === 'background' &&
+    lifecycle.some((method) => typeof method !== 'function')
+  ) {
+    throw new TypeError(
+      `Background provider "${provider.id}" must define submit, poll, and retrieve`,
+    );
+  }
+  if (
+    candidate.execution === 'inline' &&
+    lifecycle.some((method) => method !== undefined)
+  ) {
+    throw new TypeError(
+      `Inline provider "${provider.id}" cannot define submit, poll, or retrieve`,
+    );
+  }
 }
 
 /**

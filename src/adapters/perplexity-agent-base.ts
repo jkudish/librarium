@@ -6,7 +6,7 @@ import type {
   ProviderResult,
   ProviderUsage,
 } from '../types.js';
-import { BaseProvider } from './base.js';
+import { BackgroundBaseProvider } from './base.js';
 
 interface AgentAnnotation {
   type: string;
@@ -56,7 +56,7 @@ const AGENT_API_URL = 'https://api.perplexity.ai/v1/agent';
  * Shared base for Perplexity Agent API providers (preset-based).
  * Subclasses only need to declare id, tier, and preset.
  */
-export abstract class PerplexityAgentBaseProvider extends BaseProvider {
+export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider {
   abstract readonly preset: string;
 
   private storedResults = new Map<string, ProviderResult>();

@@ -54,13 +54,19 @@ Your provider must match librarium's `Provider` shape:
   - `id` (must equal the config key)
   - `displayName`
   - `tier` (`deep-research`, `ai-grounded`, `raw-search`)
-  - `envVar` (string, may be empty only when `requiresApiKey` is `false`)
-  - `execute(query, options)`
-- Optional methods:
-  - `submit(query, options)`
-  - `poll(handle)`
-  - `retrieve(handle)`
-  - `test()`
+- `envVar` (string, may be empty only when `requiresApiKey` is `false`)
+- `execution`: either `inline` or `background`
+- `execute(query, options)`
+- `test()` is optional
+
+Execution contracts are discriminated:
+
+- `execution: "inline"` completes work in `execute()` and must not expose
+  task lifecycle hooks.
+- `execution: "background"` still implements `execute()` for synchronous
+  callers, and must also implement all of `submit(query, options)`,
+  `poll(handle)`, and `retrieve(handle)`. Librarium never accepts a partial
+  background lifecycle.
 - Optional metadata:
   - `requiresApiKey` (defaults to `true`)
 
@@ -167,6 +173,7 @@ Failure:
     "id": "my-provider",
     "displayName": "My Provider",
     "tier": "raw-search",
+    "execution": "inline",
     "envVar": "MY_PROVIDER_API_KEY",
     "requiresApiKey": true,
     "capabilities": {
@@ -183,7 +190,10 @@ Failure:
 Rules:
 
 - `displayName` and `tier` are required
-- `execute` is expected; if `capabilities.execute` is explicitly `false`, load fails
+- `execution` must be either `inline` or `background`
+- `capabilities.execute` must be `true`
+- Background scripts must declare `submit`, `poll`, and `retrieve` as `true`;
+  inline scripts must not declare those hooks
 - If `id` is returned, it must match the configured provider ID
 
 ### Operation Data Shapes
@@ -221,7 +231,7 @@ A built-in adapter declares its pricing model in the central registry. The meter
 
 Built-in adapters live in core and must stay runtime-portable (fetch-only HTTP, no `node:*`, no direct `process.env`; a workerd CI suite enforces this). To add one, update **all** of these in lockstep -- several are guarded by tests, so a partial change fails CI:
 
-1. **Adapter** -- `src/adapters/<id>.ts`, extending `BaseProvider` and implementing `execute` (plus `submit`/`poll`/`retrieve` for async deep research). Return `usage` when the API reports cost/tokens.
+1. **Adapter** -- `src/adapters/<id>.ts`, extending `BaseProvider` for inline execution or `BackgroundBaseProvider` for a complete remote-task lifecycle. Implement `execute` in both cases; background adapters also implement `submit`/`poll`/`retrieve`. Return `usage` when the API reports cost/tokens.
 2. **Registration** -- add an instance to the `builtIns` array in `src/adapters/index.ts` (`initializeProviders`).
 3. **Constants** (`src/constants.ts`) -- `PROVIDER_ENV_VARS`, `PROVIDER_DISPLAY_NAMES`, and at least one entry in `DEFAULT_GROUPS` (and `all`).
 4. **Metering registry** (`src/core/metering.ts`) -- add a `REGISTRY` entry with the provider's `kind` (and, for priced kinds, `defaultPerRequestUsd` / `defaultUnitsPerRequest` / `unit`). **Required:** the lockstep test in `tests/metering.test.ts` asserts every built-in has a registry entry, so a missing entry fails CI.
@@ -249,4 +259,3 @@ Run `npm run test` (it includes the metering lockstep and README-drift guards) a
 | `returned invalid JSON` | Script wrote non-JSON to stdout | Write only one JSON envelope to stdout |
 | `returned invalid ... payload` | Shape mismatch for operation data | Return correct schema for that operation |
 | `timed out` | Operation exceeded timeout | Optimize provider or raise timeout for execute/submit |
-

@@ -69,6 +69,7 @@ describe('librarium/node entry', () => {
         `  id: '${id}',`,
         "  displayName: 'Lib Provider',",
         "  tier: 'ai-grounded',",
+        "  execution: 'inline',",
         "  envVar: '',",
         '  requiresApiKey: false,',
         '  async execute(query) {',

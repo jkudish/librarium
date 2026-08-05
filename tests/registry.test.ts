@@ -17,6 +17,7 @@ function createMockProvider(
     id,
     displayName: `Mock ${id}`,
     tier,
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (
       _query: string,
@@ -61,6 +62,41 @@ describe('registry', () => {
     const provider = createMockProvider('test-provider');
     registerProvider(provider);
     expect(getProvider('test-provider')).toBe(provider);
+  });
+
+  it('rejects an incomplete background provider at runtime', () => {
+    const provider = {
+      ...createMockProvider('incomplete-background', 'deep-research'),
+      execution: 'background',
+      submit: async () => ({
+        provider: 'incomplete-background',
+        taskId: 'task',
+        query: 'query',
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+    } as unknown as Provider;
+
+    expect(() => registerProvider(provider)).toThrow(
+      'must define submit, poll, and retrieve',
+    );
+  });
+
+  it('rejects lifecycle hooks on an inline provider at runtime', () => {
+    const provider = {
+      ...createMockProvider('invalid-inline'),
+      submit: async () => ({
+        provider: 'invalid-inline',
+        taskId: 'task',
+        query: 'query',
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+    } as unknown as Provider;
+
+    expect(() => registerProvider(provider)).toThrow(
+      'cannot define submit, poll, or retrieve',
+    );
   });
 
   it('getProvider returns registered provider', () => {
@@ -152,6 +188,26 @@ describe('registry', () => {
     expect(ids).toContain('openai-chat');
     expect(ids).toContain('gemini-chat');
     expect(ids).toContain('openrouter-chat');
+  });
+
+  it('marks only providers with a complete task lifecycle as background', async () => {
+    await initializeProviders();
+
+    const background = getAllProviders()
+      .filter((provider) => provider.execution === 'background')
+      .map((provider) => provider.id)
+      .sort();
+
+    expect(background).toEqual([
+      'gemini-deep',
+      'openai-research',
+      'perplexity-advanced-deep',
+      'perplexity-deep-research',
+      'perplexity-sonar-deep',
+    ]);
+    expect(
+      getAllProviders().filter((provider) => provider.execution === 'inline'),
+    ).toHaveLength(19);
   });
 
   it('registers llm-tier providers with the llm tier', async () => {

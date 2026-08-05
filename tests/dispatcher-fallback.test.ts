@@ -46,6 +46,7 @@ function createSuccessProvider(
     id,
     displayName: `Mock ${id}`,
     tier,
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (
       _query: string,
@@ -72,6 +73,7 @@ function createFailingProvider(
     id,
     displayName: `Mock ${id}`,
     tier,
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (): Promise<ProviderResult> => {
       throw new Error(errorMessage);
@@ -380,6 +382,7 @@ describe('dispatcher fallback', () => {
       id: 'error-result',
       displayName: 'Mock error-result',
       tier: 'ai-grounded',
+      execution: 'inline',
       envVar: 'MOCK_PRIMARY_KEY',
       execute: async (
         _query: string,

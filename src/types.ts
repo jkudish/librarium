@@ -170,8 +170,8 @@ export interface AsyncPollResult {
   rawStatus?: string;
 }
 
-// Provider interface — each adapter implements this
-export interface Provider {
+// Fields shared by every provider implementation.
+export interface ProviderCommon {
   id: string;
   displayName: string;
   tier: ProviderTier;
@@ -179,17 +179,35 @@ export interface Provider {
   source?: ProviderSource;
   requiresApiKey?: boolean;
 
-  // Sync execution (all providers)
+  // All providers support direct execution. Background providers use this for
+  // synchronous callers that choose to wait for their remote task.
   execute(query: string, options: ProviderOptions): Promise<ProviderResult>;
-
-  // Async (deep-research only)
-  submit?(query: string, options: ProviderOptions): Promise<AsyncTaskHandle>;
-  poll?(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
-  retrieve?(handle: AsyncTaskHandle): Promise<ProviderResult>;
 
   // Health check
   test?(): Promise<{ ok: boolean; error?: string }>;
 }
+
+/** A provider whose work is complete when execute() resolves. */
+export interface InlineProvider extends ProviderCommon {
+  execution: 'inline';
+}
+
+/**
+ * A provider that can submit work to a remote background service.
+ *
+ * All lifecycle hooks are required together: a task handle without polling or
+ * retrieval support cannot be safely persisted or resumed.
+ */
+export interface BackgroundProvider extends ProviderCommon {
+  execution: 'background';
+
+  submit(query: string, options: ProviderOptions): Promise<AsyncTaskHandle>;
+  poll(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
+  retrieve(handle: AsyncTaskHandle): Promise<ProviderResult>;
+}
+
+// Provider interface — each adapter implements one execution contract.
+export type Provider = InlineProvider | BackgroundProvider;
 
 // Provider meta for ls/display
 export interface ProviderMeta {

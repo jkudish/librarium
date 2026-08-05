@@ -81,11 +81,12 @@ const SCRIPT_DESCRIBE_SCHEMA = z.object({
   id: z.string().optional(),
   displayName: z.string().min(1),
   tier: PROVIDER_TIER_SCHEMA,
+  execution: z.enum(['inline', 'background']),
   envVar: z.string().optional(),
   requiresApiKey: z.boolean().optional(),
   capabilities: z
     .object({
-      execute: z.boolean().optional(),
+      execute: z.boolean(),
       submit: z.boolean().optional(),
       poll: z.boolean().optional(),
       retrieve: z.boolean().optional(),
@@ -289,21 +290,39 @@ async function loadScriptProvider(
     );
   }
 
-  const capabilities = describe.capabilities ?? {};
-  if (capabilities.execute === false) {
+  const capabilities = describe.capabilities;
+  if (!capabilities?.execute) {
     throw new Error(
       'Script provider describe.capabilities.execute must be true',
     );
   }
 
-  const provider: Provider = {
+  if (
+    describe.execution === 'background' &&
+    (!capabilities.submit || !capabilities.poll || !capabilities.retrieve)
+  ) {
+    throw new Error(
+      'Background script providers must declare submit, poll, and retrieve capabilities as true',
+    );
+  }
+
+  if (
+    describe.execution === 'inline' &&
+    (capabilities.submit || capabilities.poll || capabilities.retrieve)
+  ) {
+    throw new Error(
+      'Inline script providers cannot declare submit, poll, or retrieve capabilities',
+    );
+  }
+
+  const base = {
     id: providerId,
     displayName: describe.displayName,
     tier: describe.tier,
     envVar: describe.envVar ?? '',
-    source: 'script',
+    source: 'script' as const,
     requiresApiKey: describe.requiresApiKey ?? true,
-    execute: async (query, options) =>
+    execute: async (query: string, options: ProviderOptions) =>
       callScriptOperation({
         providerId,
         source,
@@ -316,8 +335,26 @@ async function loadScriptProvider(
       }),
   };
 
-  if (capabilities.submit) {
-    provider.submit = async (query, options) =>
+  const test = capabilities.test
+    ? async () =>
+        callScriptOperation({
+          providerId,
+          source,
+          providerConfig,
+          operation: 'test',
+          timeoutSeconds: getOperationTimeoutSeconds('test'),
+          schema: SCRIPT_TEST_SCHEMA,
+        })
+    : undefined;
+
+  if (describe.execution === 'inline') {
+    return { ...base, execution: 'inline', ...(test ? { test } : {}) };
+  }
+
+  return {
+    ...base,
+    execution: 'background',
+    submit: async (query: string, options: ProviderOptions) =>
       callScriptOperation({
         providerId,
         source,
@@ -327,11 +364,8 @@ async function loadScriptProvider(
         options,
         timeoutSeconds: getOperationTimeoutSeconds('submit', options),
         schema: ASYNC_TASK_HANDLE_SCHEMA,
-      });
-  }
-
-  if (capabilities.poll) {
-    provider.poll = async (handle) =>
+      }),
+    poll: async (handle: AsyncTaskHandle) =>
       callScriptOperation({
         providerId,
         source,
@@ -340,11 +374,8 @@ async function loadScriptProvider(
         handle,
         timeoutSeconds: getOperationTimeoutSeconds('poll'),
         schema: ASYNC_POLL_RESULT_SCHEMA,
-      });
-  }
-
-  if (capabilities.retrieve) {
-    provider.retrieve = async (handle) =>
+      }),
+    retrieve: async (handle: AsyncTaskHandle) =>
       callScriptOperation({
         providerId,
         source,
@@ -353,22 +384,9 @@ async function loadScriptProvider(
         handle,
         timeoutSeconds: getOperationTimeoutSeconds('retrieve'),
         schema: PROVIDER_RESULT_SCHEMA,
-      });
-  }
-
-  if (capabilities.test) {
-    provider.test = async () =>
-      callScriptOperation({
-        providerId,
-        source,
-        providerConfig,
-        operation: 'test',
-        timeoutSeconds: getOperationTimeoutSeconds('test'),
-        schema: SCRIPT_TEST_SCHEMA,
-      });
-  }
-
-  return provider;
+      }),
+    ...(test ? { test } : {}),
+  };
 }
 
 function getOperationTimeoutSeconds(
@@ -535,7 +553,13 @@ function normalizeAndValidateProvider(
     throw new Error('Provider module did not return a provider object');
   }
 
-  const provider = candidate as Partial<Provider>;
+  const provider = candidate as Partial<Provider> & {
+    execution?: unknown;
+    submit?: unknown;
+    poll?: unknown;
+    retrieve?: unknown;
+    test?: unknown;
+  };
 
   if (provider.id !== providerId) {
     throw new Error(
@@ -554,11 +578,36 @@ function normalizeAndValidateProvider(
   if (typeof provider.execute !== 'function') {
     throw new Error('Provider must define an execute(query, options) function');
   }
+  if (provider.execution !== 'inline' && provider.execution !== 'background') {
+    throw new Error(
+      'Provider must declare execution as "inline" or "background"',
+    );
+  }
   for (const method of ['submit', 'poll', 'retrieve', 'test'] as const) {
     const value = provider[method];
     if (value !== undefined && typeof value !== 'function') {
       throw new Error(`Provider method "${method}" must be a function`);
     }
+  }
+  if (
+    provider.execution === 'background' &&
+    (typeof provider.submit !== 'function' ||
+      typeof provider.poll !== 'function' ||
+      typeof provider.retrieve !== 'function')
+  ) {
+    throw new Error(
+      'Background providers must define submit(query, options), poll(handle), and retrieve(handle)',
+    );
+  }
+  if (
+    provider.execution === 'inline' &&
+    (provider.submit !== undefined ||
+      provider.poll !== undefined ||
+      provider.retrieve !== undefined)
+  ) {
+    throw new Error(
+      'Inline providers cannot define submit, poll, or retrieve; declare execution: "background" instead',
+    );
   }
 
   provider.source = source;

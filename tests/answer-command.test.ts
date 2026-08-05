@@ -253,6 +253,7 @@ describe('synthesizeAnswer', () => {
       id: 'primary',
       displayName: 'Primary',
       tier: 'ai-grounded',
+      execution: 'inline',
       envVar: 'VERIFY_PRIMARY_KEY',
       execute,
     });

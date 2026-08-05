@@ -50,6 +50,7 @@ describe('librarium/core in workerd', () => {
       id: 'worker-mock',
       displayName: 'Worker Mock',
       tier: 'ai-grounded',
+      execution: 'inline',
       envVar: '',
       requiresApiKey: false,
       execute: async (

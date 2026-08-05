@@ -73,6 +73,7 @@ describe('dist registry sharing (core + node)', () => {
         `  id: '${id}',`,
         "  displayName: 'Dist Lib Provider',",
         "  tier: 'ai-grounded',",
+        "  execution: 'inline',",
         "  envVar: '',",
         '  requiresApiKey: false,',
         '  async execute(query) {',

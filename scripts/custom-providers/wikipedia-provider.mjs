@@ -86,6 +86,7 @@ async function main() {
       id: providerId,
       displayName: 'Wikipedia Script Provider',
       tier: 'raw-search',
+      execution: 'inline',
       envVar: '',
       requiresApiKey: false,
       capabilities: {

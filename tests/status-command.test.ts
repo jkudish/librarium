@@ -17,6 +17,7 @@ vi.mock('../src/adapters/node-registry.js', () => {
     id: 'status-command-mock',
     displayName: 'Status command mock',
     tier: 'deep-research',
+    execution: 'background',
     envVar: '',
     execute: async () => ({
       provider: 'status-command-mock',
@@ -27,6 +28,13 @@ vi.mock('../src/adapters/node-registry.js', () => {
     }),
     poll: (...args) => state.poll(...args),
     retrieve: (...args) => state.retrieve(...args),
+    submit: async (query) => ({
+      provider: 'status-command-mock',
+      taskId: 'unused',
+      query,
+      submittedAt: Date.now(),
+      status: 'pending',
+    }),
   };
   return {
     initializeProviders: vi.fn(async () => ({

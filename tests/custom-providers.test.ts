@@ -36,6 +36,7 @@ describe('custom providers', () => {
         "  id: 'untrusted-provider',",
         "  displayName: 'Untrusted Provider',",
         "  tier: 'raw-search',",
+        "  execution: 'inline',",
         "  envVar: '',",
         '  requiresApiKey: false,',
         '  async execute(query) {',
@@ -98,6 +99,7 @@ describe('custom providers', () => {
         '    id: context.id,',
         "    displayName: 'My NPM Provider',",
         "    tier: 'ai-grounded',",
+        "    execution: 'inline',",
         "    envVar: '',",
         '    requiresApiKey: false,',
         '    async execute(query) {',
@@ -161,9 +163,10 @@ describe('custom providers', () => {
         '    data: {',
         "      displayName: 'Script Provider',",
         "      tier: 'deep-research',",
+        "      execution: 'background',",
         "      envVar: '',",
         '      requiresApiKey: false,',
-        '      capabilities: { submit: true, poll: true, retrieve: true, test: true }',
+        '      capabilities: { execute: true, submit: true, poll: true, retrieve: true, test: true }',
         '    }',
         '  }));',
         '} else if (op === "execute") {',
@@ -242,6 +245,7 @@ describe('custom providers', () => {
     const provider = getProvider('script-provider');
     expect(provider).toBeDefined();
     expect(provider!.source).toBe('script');
+    expect(provider!.execution).toBe('background');
     expect(provider!.submit).toBeDefined();
     expect(provider!.poll).toBeDefined();
     expect(provider!.retrieve).toBeDefined();
@@ -252,11 +256,13 @@ describe('custom providers', () => {
     expect(executed.tier).toBe('deep-research');
     expect(executed.content).toBe('exec:question:tagged');
 
-    const handle = await provider!.submit!('question', { timeout: 5 });
+    if (provider!.execution !== 'background')
+      throw new Error('expected background provider');
+    const handle = await provider!.submit('question', { timeout: 5 });
     expect(handle.provider).toBe('script-provider');
-    const pollResult = await provider!.poll!(handle);
+    const pollResult = await provider!.poll(handle);
     expect(pollResult.status).toBe('completed');
-    const retrieved = await provider!.retrieve!(handle);
+    const retrieved = await provider!.retrieve(handle);
     expect(retrieved.content).toBe('retrieved:task-123');
     const health = await provider!.test!();
     expect(health.ok).toBe(true);
@@ -287,6 +293,92 @@ describe('custom providers', () => {
     expect(initResult.warnings.join('\n')).toContain('invalid JSON');
   });
 
+  it('rejects script background providers missing lifecycle hooks', async () => {
+    const scriptPath = join(tmpDir, 'incomplete-background.mjs');
+    writeFileSync(
+      scriptPath,
+      [
+        "import { readFileSync } from 'node:fs';",
+        'const input = JSON.parse(readFileSync(0, "utf-8"));',
+        'if (input.operation === "describe") {',
+        '  process.stdout.write(JSON.stringify({ ok: true, data: {',
+        "    displayName: 'Incomplete Background', tier: 'deep-research', execution: 'background',",
+        '    requiresApiKey: false, capabilities: { execute: true, submit: true, poll: true }',
+        '  }}));',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { incomplete: { enabled: true } },
+      customProviders: {
+        incomplete: { type: 'script', command: 'node', args: [scriptPath] },
+      },
+      trustedProviderIds: ['incomplete'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain(
+      'must declare submit, poll, and retrieve',
+    );
+  });
+
+  it('rejects npm background providers missing lifecycle hooks', async () => {
+    const modulePath = join(tmpDir, 'incomplete-background.mjs');
+    writeFileSync(
+      modulePath,
+      [
+        'export default {',
+        "  id: 'incomplete-npm', displayName: 'Incomplete NPM', tier: 'deep-research',",
+        "  execution: 'background', envVar: '', requiresApiKey: false,",
+        '  async execute() { return { provider: "incomplete-npm", tier: "deep-research", content: "", citations: [], durationMs: 0 }; },',
+        '  async submit(query) { return { provider: "incomplete-npm", taskId: "x", query, submittedAt: 0, status: "pending" }; },',
+        '};',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { 'incomplete-npm': { enabled: true } },
+      customProviders: {
+        'incomplete-npm': { type: 'npm', module: modulePath },
+      },
+      trustedProviderIds: ['incomplete-npm'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain(
+      'Background providers must define submit',
+    );
+  });
+
+  it('rejects npm providers that omit their execution contract', async () => {
+    const modulePath = join(tmpDir, 'missing-execution.mjs');
+    writeFileSync(
+      modulePath,
+      [
+        'export default {',
+        "  id: 'missing-execution', displayName: 'Missing Execution', tier: 'raw-search',",
+        "  envVar: '', requiresApiKey: false,",
+        '  async execute() { return { provider: "missing-execution", tier: "raw-search", content: "", citations: [], durationMs: 0 }; },',
+        '};',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { 'missing-execution': { enabled: true } },
+      customProviders: {
+        'missing-execution': { type: 'npm', module: modulePath },
+      },
+      trustedProviderIds: ['missing-execution'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain('must declare execution');
+  });
+
   it('rejects custom providers that collide with built-in IDs', async () => {
     const modulePath = join(tmpDir, 'exa-override.mjs');
     writeFileSync(
@@ -296,6 +388,7 @@ describe('custom providers', () => {
         "  id: 'exa',",
         "  displayName: 'Exa Override',",
         "  tier: 'ai-grounded',",
+        "  execution: 'inline',",
         "  envVar: '',",
         '  requiresApiKey: false,',
         '  async execute(query, _options) {',

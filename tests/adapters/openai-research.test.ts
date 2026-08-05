@@ -202,11 +202,12 @@ describe('OpenAIResearchProvider', () => {
     expect(result.asyncTasks).toEqual([]);
   });
 
-  it('reports an immediately cancelled submission without queuing it', async () => {
+  it('reports an immediately cancelled background submission without queuing it', async () => {
     const cancelledProvider: Provider = {
       id: 'cancelled-submit-test',
       displayName: 'Cancelled submit test',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: vi.fn(),
       submit: async (query) => ({
@@ -215,6 +216,15 @@ describe('OpenAIResearchProvider', () => {
         query,
         submittedAt: Date.now(),
         status: 'cancelled',
+      }),
+      poll: async () => ({ status: 'cancelled' }),
+      retrieve: async () => ({
+        provider: 'cancelled-submit-test',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
+        error: 'Task was cancelled',
       }),
     };
     registerProvider(cancelledProvider);
@@ -249,11 +259,12 @@ describe('OpenAIResearchProvider', () => {
     expect(cancelledProvider.execute).not.toHaveBeenCalled();
   });
 
-  it('reports an immediately failed submission without retrieval as terminal', async () => {
+  it('retrieves an immediately failed background submission', async () => {
     const failedProvider: Provider = {
       id: 'failed-submit-test',
       displayName: 'Failed submit test',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: vi.fn(),
       submit: async (query) => ({
@@ -263,6 +274,15 @@ describe('OpenAIResearchProvider', () => {
         submittedAt: Date.now(),
         status: 'failed',
         providerStatus: 'REJECTED',
+      }),
+      poll: async () => ({ status: 'failed' }),
+      retrieve: async () => ({
+        provider: 'failed-submit-test',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
+        error: 'Task failed (REJECTED)',
       }),
     };
     registerProvider(failedProvider);
@@ -300,11 +320,12 @@ describe('OpenAIResearchProvider', () => {
     expect(failedProvider.execute).not.toHaveBeenCalled();
   });
 
-  it('reports an immediately completed submission without retrieval as terminal', async () => {
+  it('retrieves an immediately completed background submission', async () => {
     const completedProvider: Provider = {
       id: 'completed-submit-test',
       displayName: 'Completed submit test',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: vi.fn(),
       submit: async (query) => ({
@@ -313,6 +334,14 @@ describe('OpenAIResearchProvider', () => {
         query,
         submittedAt: Date.now(),
         status: 'completed',
+      }),
+      poll: async () => ({ status: 'completed' }),
+      retrieve: async () => ({
+        provider: 'completed-submit-test',
+        tier: 'deep-research',
+        content: 'Completed research',
+        citations: [],
+        durationMs: 1,
       }),
     };
     registerProvider(completedProvider);
@@ -343,8 +372,7 @@ describe('OpenAIResearchProvider', () => {
     expect(result.asyncTasks).toEqual([]);
     expect(result.reports).toEqual([
       expect.objectContaining({
-        status: 'error',
-        error: 'Task completed, but the provider does not support retrieval',
+        status: 'success',
       }),
     ]);
     expect(completedProvider.execute).not.toHaveBeenCalled();

@@ -360,33 +360,19 @@ export async function dispatch(
 
       onProgress?.({ providerId: id, event: 'started' });
 
-      // For deep-research providers in async/mixed mode, use submit
-      if (
-        provider.tier === 'deep-research' &&
-        mode !== 'sync' &&
-        provider.submit
-      ) {
+      // Background providers expose a complete persisted-task lifecycle.
+      if (provider.execution === 'background' && mode !== 'sync') {
         try {
           const handle = await provider.submit(queryForTier(provider.tier), {
             timeout: config.defaults.asyncTimeout,
           });
 
-          if (
-            handle.status === 'cancelled' ||
-            ((handle.status === 'completed' || handle.status === 'failed') &&
-              !provider.retrieve)
-          ) {
+          if (handle.status === 'cancelled') {
             const terminalError =
               handle.lastPollError ??
-              (handle.status === 'cancelled'
-                ? handle.providerStatus
-                  ? `Task was cancelled (${handle.providerStatus})`
-                  : 'Task was cancelled'
-                : handle.status === 'failed'
-                  ? handle.providerStatus
-                    ? `Task failed (${handle.providerStatus})`
-                    : 'Task failed during submission'
-                  : 'Task completed, but the provider does not support retrieval');
+              (handle.providerStatus
+                ? `Task was cancelled (${handle.providerStatus})`
+                : 'Task was cancelled');
             const structured = createDispatchResult(
               id,
               provider.tier,
@@ -421,10 +407,7 @@ export async function dispatch(
 
           // If submit is already terminal, retrieve immediately and treat it
           // as a synchronous result.
-          if (
-            (handle.status === 'completed' || handle.status === 'failed') &&
-            provider.retrieve
-          ) {
+          if (handle.status === 'completed' || handle.status === 'failed') {
             const result = await provider.retrieve(handle);
             const structured = createDispatchResult(
               id,

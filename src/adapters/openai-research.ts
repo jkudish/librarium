@@ -9,7 +9,7 @@ import type {
   ProviderTier,
   ProviderUsage,
 } from '../types.js';
-import { BaseProvider, type BaseProviderOptions } from './base.js';
+import { BackgroundBaseProvider, type BaseProviderOptions } from './base.js';
 
 interface OpenAIAnnotation {
   type: string;
@@ -113,7 +113,7 @@ function parseReturnTokenBudget(value: unknown): ReturnTokenBudget {
  * exactly the configured model: a rejected model is an actionable API error,
  * never an opportunity to silently substitute a retired research model.
  */
-export class OpenAIResearchProvider extends BaseProvider {
+export class OpenAIResearchProvider extends BackgroundBaseProvider {
   readonly id = 'openai-research';
   readonly tier: ProviderTier = 'deep-research';
   readonly model: string;
@@ -219,7 +219,6 @@ export class OpenAIResearchProvider extends BaseProvider {
           },
           timeout: 30000,
           signal: options.signal,
-          maxRetries: 0,
         },
       );
     } catch (error) {

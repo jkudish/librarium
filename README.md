@@ -208,7 +208,7 @@ You can also add **custom providers** (npm modules or local scripts) via config.
 
 ## Provider Tiers
 
-Providers are categorized into four tiers based on their capabilities, latency, and depth:
+Providers are categorized into four tiers based on their capabilities, latency, and depth. Their execution contract is separate: an `inline` provider finishes in `execute()`, while a `background` provider also provides complete `submit`/`poll`/`retrieve` lifecycle hooks.
 
 - **deep-research** -- Async deep research providers that take minutes to complete but produce comprehensive, multi-source reports. These providers may use a submit/poll/retrieve pattern. Best for thorough research on important topics.
 
@@ -1092,9 +1092,11 @@ Error response:
   "data": {
     "displayName": "My Script Provider",
     "tier": "deep-research",
+    "execution": "background",
     "envVar": "MY_PROVIDER_API_KEY",
     "requiresApiKey": true,
     "capabilities": {
+      "execute": true,
       "submit": true,
       "poll": true,
       "retrieve": true,
@@ -1343,7 +1345,7 @@ const handles: AsyncTaskHandle[] = await loadHandles();
 
 for (const handle of handles) {
   const provider = getProvider(handle.provider);
-  if (!provider?.poll || !provider.retrieve) continue; // not an async provider
+  if (provider?.execution !== 'background') continue;
 
   // 3. Poll for status. AsyncPollResult.status is the AsyncTaskStatus enum:
   //    'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
