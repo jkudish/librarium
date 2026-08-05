@@ -68,6 +68,19 @@ export interface DispatchResult {
   asyncTasks: AsyncTaskHandle[];
 }
 
+export class AcceptedTaskPersistenceError extends Error {
+  constructor(
+    readonly handle: AsyncTaskHandle,
+    cause: unknown,
+  ) {
+    super(
+      `Accepted background task ${handle.provider}/${handle.taskId}, but its handle could not be persisted: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+    this.name = 'AcceptedTaskPersistenceError';
+  }
+}
+
 export async function dispatch(
   options: DispatchOptions,
 ): Promise<DispatchResult> {
@@ -380,12 +393,16 @@ export async function dispatch(
           };
           // Persist every accepted remote handle before any retrieval or
           // fallback work can throw. This is the paid-task write-ahead edge.
-          onProgress?.({
-            providerId: id,
-            event: 'async-submitted',
-            report: submittedReport,
-            task: handle,
-          });
+          try {
+            onProgress?.({
+              providerId: id,
+              event: 'async-submitted',
+              report: submittedReport,
+              task: handle,
+            });
+          } catch (error) {
+            throw new AcceptedTaskPersistenceError(handle, error);
+          }
 
           if (handle.status === 'cancelled') {
             const terminalError =
@@ -521,6 +538,7 @@ export async function dispatch(
           reports.push(submittedReport);
           return;
         } catch (error) {
+          if (error instanceof AcceptedTaskPersistenceError) throw error;
           const detail = error instanceof Error ? error.message : String(error);
           const message =
             error instanceof UnsafeToRetrySubmissionError
@@ -646,7 +664,11 @@ export async function dispatch(
     }),
   );
 
-  await Promise.allSettled(tasks);
+  const settled = await Promise.allSettled(tasks);
+  const rejected = settled.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (rejected) throw rejected.reason;
   return { reports, results, asyncTasks };
 }
 

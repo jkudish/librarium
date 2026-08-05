@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import type {
@@ -20,7 +23,6 @@ import { safeWriteFile } from './fs-utils.js';
 
 export const RUN_MANIFEST_FILE = 'run.json';
 const LOCK_TIMEOUT_MS = 30_000;
-const STALE_LOCK_MS = 120_000;
 const LOCK_POLL_MS = 20;
 const lockWaitArray = new Int32Array(new SharedArrayBuffer(4));
 
@@ -201,22 +203,19 @@ export function mutateRunManifest(
 function withManifestLock<T>(manifestPath: string, action: () => T): T {
   const lockPath = `${manifestPath}.lock`;
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const token = randomUUID();
   let descriptor: number | undefined;
   while (descriptor === undefined) {
     try {
       descriptor = openSync(lockPath, 'wx', 0o600);
+      writeFileSync(
+        descriptor,
+        JSON.stringify({ token, pid: process.pid, createdAt: Date.now() }),
+      );
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - statSync(lockPath).mtimeMs > STALE_LOCK_MS) {
-          unlinkSync(lockPath);
-          continue;
-        }
-      } catch (statError) {
-        if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw statError;
-      }
+      if (reclaimDeadOwnerLock(lockPath)) continue;
       if (Date.now() >= deadline) {
         throw new RunManifestError(
           'Timed out waiting for the run manifest mutation lock',
@@ -231,10 +230,47 @@ function withManifestLock<T>(manifestPath: string, action: () => T): T {
   } finally {
     closeSync(descriptor);
     try {
-      unlinkSync(lockPath);
+      const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
+        token?: string;
+      };
+      if (owner.token === token) unlinkSync(lockPath);
     } catch {
-      // A stale-lock recovery racing this cleanup is harmless.
+      // A dead-owner recovery or manual cleanup may already have removed it.
     }
+  }
+}
+
+function reclaimDeadOwnerLock(lockPath: string): boolean {
+  let owner: { token?: string; pid?: number };
+  try {
+    owner = JSON.parse(readFileSync(lockPath, 'utf8')) as typeof owner;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+    return false;
+  }
+  if (
+    typeof owner.token !== 'string' ||
+    typeof owner.pid !== 'number' ||
+    isProcessAlive(owner.pid)
+  ) {
+    return false;
+  }
+  const reclaimedPath = `${lockPath}.reclaimed.${owner.token}`;
+  try {
+    renameSync(lockPath, reclaimedPath);
+    unlinkSync(reclaimedPath);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 

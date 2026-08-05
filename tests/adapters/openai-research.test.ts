@@ -7,7 +7,10 @@ import {
 import { OpenAIDeepProvider } from '../../src/adapters/openai-deep.js';
 import { OpenAIDeepO3Provider } from '../../src/adapters/openai-deep-o3.js';
 import { OpenAIResearchProvider } from '../../src/adapters/openai-research.js';
-import { dispatch } from '../../src/core/dispatcher.js';
+import {
+  type AcceptedTaskPersistenceError,
+  dispatch,
+} from '../../src/core/dispatcher.js';
 import type { AsyncTaskHandle, Config, Provider } from '../../src/types.js';
 
 function jsonResponse(status: number, data: unknown): Response {
@@ -270,6 +273,65 @@ describe('OpenAIResearchProvider', () => {
       task: { taskId: 'cancelled-1' },
     });
     expect(cancelledProvider.execute).not.toHaveBeenCalled();
+  });
+
+  it('fails loudly with the accepted handle when write-ahead persistence fails', async () => {
+    const acceptedProvider: Provider = {
+      id: 'accepted-persistence-test',
+      displayName: 'Accepted persistence test',
+      tier: 'deep-research',
+      execution: 'background',
+      envVar: '',
+      requiresApiKey: false,
+      execute: vi.fn(),
+      submit: async (query) => ({
+        provider: 'accepted-persistence-test',
+        taskId: 'accepted-1',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      poll: async () => ({ status: 'pending' }),
+      retrieve: vi.fn(),
+    };
+    registerProvider(acceptedProvider);
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: '',
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'mixed',
+        llmWebSearch: true,
+      },
+      providers: { [acceptedProvider.id]: { enabled: true } },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+
+    const request = dispatch({
+      config,
+      providerIds: [acceptedProvider.id],
+      query: 'persist this',
+      mode: 'mixed',
+      onProgress: (event) => {
+        if (event.event === 'async-submitted') {
+          throw new Error('disk unavailable');
+        }
+      },
+    });
+
+    await expect(request).rejects.toMatchObject({
+      name: 'AcceptedTaskPersistenceError',
+      handle: {
+        provider: acceptedProvider.id,
+        taskId: 'accepted-1',
+      },
+    } satisfies Partial<AcceptedTaskPersistenceError>);
+    expect(acceptedProvider.retrieve).not.toHaveBeenCalled();
   });
 
   it('retrieves an immediately failed background submission', async () => {
