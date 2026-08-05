@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking library API:** custom and hand-written providers must now declare
+  `execution: "inline"` or `execution: "background"`. Background providers
+  must implement the complete `execute`/`submit`/`poll`/`retrieve` lifecycle;
+  partial lifecycle hooks are rejected at registration. Script-provider
+  `describe` responses must declare the same execution contract and explicitly
+  advertise `execute`.
+- **Breaking HTTP API:** `HttpRequestOptions.maxRetries` is replaced by the
+  explicit `retry` policy. GET requests use bounded safe retries by default;
+  non-GET requests do not retry unless configured with `mode: "idempotent"`
+  and an idempotency key.
 - Claude now defaults to `claude-sonnet-5` with a 16,000-token output ceiling,
   adaptive thinking, and `medium` effort. `maxTokens`, `thinking`, and `effort`
   are configurable; automatic thinking/effort defaults apply only to the

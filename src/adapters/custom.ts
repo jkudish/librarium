@@ -348,45 +348,53 @@ async function loadScriptProvider(
     : undefined;
 
   if (describe.execution === 'inline') {
-    return { ...base, execution: 'inline', ...(test ? { test } : {}) };
+    return normalizeAndValidateProvider(
+      { ...base, execution: 'inline', ...(test ? { test } : {}) },
+      providerId,
+      'script',
+    );
   }
 
-  return {
-    ...base,
-    execution: 'background',
-    submit: async (query: string, options: ProviderOptions) =>
-      callScriptOperation({
-        providerId,
-        source,
-        providerConfig,
-        operation: 'submit',
-        query,
-        options,
-        timeoutSeconds: getOperationTimeoutSeconds('submit', options),
-        schema: ASYNC_TASK_HANDLE_SCHEMA,
-      }),
-    poll: async (handle: AsyncTaskHandle) =>
-      callScriptOperation({
-        providerId,
-        source,
-        providerConfig,
-        operation: 'poll',
-        handle,
-        timeoutSeconds: getOperationTimeoutSeconds('poll'),
-        schema: ASYNC_POLL_RESULT_SCHEMA,
-      }),
-    retrieve: async (handle: AsyncTaskHandle) =>
-      callScriptOperation({
-        providerId,
-        source,
-        providerConfig,
-        operation: 'retrieve',
-        handle,
-        timeoutSeconds: getOperationTimeoutSeconds('retrieve'),
-        schema: PROVIDER_RESULT_SCHEMA,
-      }),
-    ...(test ? { test } : {}),
-  };
+  return normalizeAndValidateProvider(
+    {
+      ...base,
+      execution: 'background',
+      submit: async (query: string, options: ProviderOptions) =>
+        callScriptOperation({
+          providerId,
+          source,
+          providerConfig,
+          operation: 'submit',
+          query,
+          options,
+          timeoutSeconds: getOperationTimeoutSeconds('submit', options),
+          schema: ASYNC_TASK_HANDLE_SCHEMA,
+        }),
+      poll: async (handle: AsyncTaskHandle) =>
+        callScriptOperation({
+          providerId,
+          source,
+          providerConfig,
+          operation: 'poll',
+          handle,
+          timeoutSeconds: getOperationTimeoutSeconds('poll'),
+          schema: ASYNC_POLL_RESULT_SCHEMA,
+        }),
+      retrieve: async (handle: AsyncTaskHandle) =>
+        callScriptOperation({
+          providerId,
+          source,
+          providerConfig,
+          operation: 'retrieve',
+          handle,
+          timeoutSeconds: getOperationTimeoutSeconds('retrieve'),
+          schema: PROVIDER_RESULT_SCHEMA,
+        }),
+      ...(test ? { test } : {}),
+    },
+    providerId,
+    'script',
+  );
 }
 
 function getOperationTimeoutSeconds(

@@ -9,7 +9,7 @@ import {
   providerHasCredential,
 } from '../core/provider-selection.js';
 import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
-import { BaseProvider } from './base.js';
+import { ProviderBase } from './base.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
 import { ClaudeProvider } from './claude.js';
@@ -65,6 +65,7 @@ export function registerProvider(provider: Provider): void {
 function assertProviderExecutionContract(provider: Provider): void {
   const candidate = provider as Provider & {
     execution?: unknown;
+    execute?: unknown;
     submit?: unknown;
     poll?: unknown;
     retrieve?: unknown;
@@ -76,6 +77,9 @@ function assertProviderExecutionContract(provider: Provider): void {
     throw new TypeError(
       `Provider "${provider.id}" must declare execution as "inline" or "background"`,
     );
+  }
+  if (typeof candidate.execute !== 'function') {
+    throw new TypeError(`Provider "${provider.id}" must define execute`);
   }
   const lifecycle = [candidate.submit, candidate.poll, candidate.retrieve];
   if (
@@ -238,7 +242,7 @@ export async function initializeProviders(
   ];
 
   for (const provider of builtIns) {
-    if (provider instanceof BaseProvider) {
+    if (provider instanceof ProviderBase) {
       provider.configure({
         apiKey: providerConfig[provider.id]?.apiKey,
         credentials,

@@ -121,6 +121,10 @@ export async function httpRequest<T = unknown>(
         ...headers,
       };
       if (retry.idempotencyHeader && retry.idempotencyKey) {
+        const normalized = retry.idempotencyHeader.toLowerCase();
+        for (const name of Object.keys(requestHeaders)) {
+          if (name.toLowerCase() === normalized) delete requestHeaders[name];
+        }
         requestHeaders[retry.idempotencyHeader] = retry.idempotencyKey;
       }
 

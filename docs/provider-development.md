@@ -54,9 +54,9 @@ Your provider must match librarium's `Provider` shape:
   - `id` (must equal the config key)
   - `displayName`
   - `tier` (`deep-research`, `ai-grounded`, `raw-search`)
-- `envVar` (string, may be empty only when `requiresApiKey` is `false`)
-- `execution`: either `inline` or `background`
-- `execute(query, options)`
+  - `envVar` (string, may be empty only when `requiresApiKey` is `false`)
+  - `execution`: either `inline` or `background`
+  - `execute(query, options)`
 - `test()` is optional
 
 Execution contracts are discriminated:

@@ -481,28 +481,30 @@ export async function dispatch(
           });
           return;
         } catch (error) {
-          if (error instanceof UnsafeToRetrySubmissionError) {
-            const structured = createDispatchResult(
-              id,
-              provider.tier,
-              {
-                provider: id,
-                tier: provider.tier,
-                content: '',
-                citations: [],
-                durationMs: 0,
-                error: error.message,
-              },
-              providerConfig,
-            );
-            results.push(structured);
-            const report = createReport(id, provider.tier, structured);
-            reports.push(report);
-            recordBudget(report);
-            onProgress?.({ providerId: id, event: 'error', report });
-            return;
-          }
-          // Fall through to sync execution
+          const detail = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof UnsafeToRetrySubmissionError
+              ? detail
+              : `Background submission failed and was not retried because the remote task may have been accepted: ${detail}`;
+          const structured = createDispatchResult(
+            id,
+            provider.tier,
+            {
+              provider: id,
+              tier: provider.tier,
+              content: '',
+              citations: [],
+              durationMs: 0,
+              error: message,
+            },
+            providerConfig,
+          );
+          results.push(structured);
+          const report = createReport(id, provider.tier, structured);
+          reports.push(report);
+          recordBudget(report);
+          onProgress?.({ providerId: id, event: 'error', report });
+          return;
         }
       }
 

@@ -324,6 +324,103 @@ describe('custom providers', () => {
     );
   });
 
+  it('rejects script providers that require a key without envVar', async () => {
+    const scriptPath = join(tmpDir, 'missing-env-var.mjs');
+    writeFileSync(
+      scriptPath,
+      [
+        "import { readFileSync } from 'node:fs';",
+        'const input = JSON.parse(readFileSync(0, "utf-8"));',
+        'if (input.operation === "describe") {',
+        '  process.stdout.write(JSON.stringify({ ok: true, data: {',
+        "    displayName: 'Missing Env', tier: 'raw-search', execution: 'inline',",
+        '    capabilities: { execute: true }',
+        '  }}));',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { 'missing-env': { enabled: true } },
+      customProviders: {
+        'missing-env': { type: 'script', command: 'node', args: [scriptPath] },
+      },
+      trustedProviderIds: ['missing-env'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain(
+      'requires an API key but envVar is empty',
+    );
+  });
+
+  it('rejects inline script providers with lifecycle capabilities', async () => {
+    const scriptPath = join(tmpDir, 'inline-lifecycle.mjs');
+    writeFileSync(
+      scriptPath,
+      [
+        "import { readFileSync } from 'node:fs';",
+        'const input = JSON.parse(readFileSync(0, "utf-8"));',
+        'if (input.operation === "describe") {',
+        '  process.stdout.write(JSON.stringify({ ok: true, data: {',
+        "    displayName: 'Inline Lifecycle', tier: 'raw-search', execution: 'inline',",
+        '    requiresApiKey: false, capabilities: { execute: true, submit: true }',
+        '  }}));',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { 'inline-lifecycle': { enabled: true } },
+      customProviders: {
+        'inline-lifecycle': {
+          type: 'script',
+          command: 'node',
+          args: [scriptPath],
+        },
+      },
+      trustedProviderIds: ['inline-lifecycle'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain(
+      'cannot declare submit, poll, or retrieve',
+    );
+  });
+
+  it('rejects script providers that disable execute', async () => {
+    const scriptPath = join(tmpDir, 'no-execute.mjs');
+    writeFileSync(
+      scriptPath,
+      [
+        "import { readFileSync } from 'node:fs';",
+        'const input = JSON.parse(readFileSync(0, "utf-8"));',
+        'if (input.operation === "describe") {',
+        '  process.stdout.write(JSON.stringify({ ok: true, data: {',
+        "    displayName: 'No Execute', tier: 'raw-search', execution: 'inline',",
+        '    requiresApiKey: false, capabilities: { execute: false }',
+        '  }}));',
+        '}',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { 'no-execute': { enabled: true } },
+      customProviders: {
+        'no-execute': { type: 'script', command: 'node', args: [scriptPath] },
+      },
+      trustedProviderIds: ['no-execute'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain(
+      'capabilities.execute must be true',
+    );
+  });
+
   it('rejects npm background providers missing lifecycle hooks', async () => {
     const modulePath = join(tmpDir, 'incomplete-background.mjs');
     writeFileSync(
@@ -377,6 +474,35 @@ describe('custom providers', () => {
 
     expect(result.loadedCustomProviders).toEqual([]);
     expect(result.warnings.join('\n')).toContain('must declare execution');
+  });
+
+  it('rejects inline npm providers with lifecycle hooks', async () => {
+    const modulePath = join(tmpDir, 'inline-npm-lifecycle.mjs');
+    writeFileSync(
+      modulePath,
+      [
+        'export default {',
+        "  id: 'inline-npm-lifecycle', displayName: 'Inline NPM Lifecycle', tier: 'raw-search',",
+        "  execution: 'inline', envVar: '', requiresApiKey: false,",
+        '  async execute() { return { provider: "inline-npm-lifecycle", tier: "raw-search", content: "", citations: [], durationMs: 0 }; },',
+        '  async submit() {},',
+        '};',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await initializeProviders({
+      providers: { 'inline-npm-lifecycle': { enabled: true } },
+      customProviders: {
+        'inline-npm-lifecycle': { type: 'npm', module: modulePath },
+      },
+      trustedProviderIds: ['inline-npm-lifecycle'],
+    });
+
+    expect(result.loadedCustomProviders).toEqual([]);
+    expect(result.warnings.join('\n')).toContain(
+      'Inline providers cannot define submit, poll, or retrieve',
+    );
   });
 
   it('rejects custom providers that collide with built-in IDs', async () => {

@@ -31,7 +31,7 @@ export interface BaseProviderOptions {
  * Inline is the default execution contract, so the synchronous adapters need
  * no per-class boilerplate. Background adapters extend BackgroundBaseProvider.
  */
-abstract class ProviderBase {
+export abstract class ProviderBase {
   abstract readonly id: string;
   abstract readonly tier: ProviderTier;
   source?: Provider['source'];

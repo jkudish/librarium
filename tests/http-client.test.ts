@@ -125,6 +125,32 @@ describe('httpRequest', () => {
     expect(headers['Idempotency-Key']).toBe('run-123');
   });
 
+  it('overrides a caller idempotency header case-insensitively', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({}),
+      text: async () => '{}',
+    });
+    globalThis.fetch = fetchMock;
+
+    await httpRequest('https://api.example.com/data', {
+      method: 'POST',
+      headers: { 'idempotency-key': 'stale-key' },
+      retry: {
+        mode: 'idempotent',
+        idempotencyKey: 'authoritative-key',
+      },
+    });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<
+      string,
+      string
+    >;
+    expect(headers['Idempotency-Key']).toBe('authoritative-key');
+    expect(headers['idempotency-key']).toBeUndefined();
+  });
+
   it('rejects safe retry policy on a mutating request', async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock;

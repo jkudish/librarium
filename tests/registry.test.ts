@@ -99,6 +99,19 @@ describe('registry', () => {
     );
   });
 
+  it('rejects a provider without execute at runtime', () => {
+    const provider = {
+      id: 'missing-execute',
+      displayName: 'Missing Execute',
+      tier: 'raw-search',
+      execution: 'inline',
+      envVar: '',
+      requiresApiKey: false,
+    } as unknown as Provider;
+
+    expect(() => registerProvider(provider)).toThrow('must define execute');
+  });
+
   it('getProvider returns registered provider', () => {
     const provider = createMockProvider('my-provider');
     registerProvider(provider);
@@ -208,6 +221,53 @@ describe('registry', () => {
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
     ).toHaveLength(19);
+  });
+
+  it('injects credentials into every background built-in', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'unauthorized' } }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await initializeProviders({
+      credentials: {
+        env: {
+          GEMINI_API_KEY: 'gemini-sentinel',
+          OPENAI_API_KEY: 'openai-sentinel',
+          PERPLEXITY_API_KEY: 'perplexity-sentinel',
+        },
+      },
+    });
+
+    const expectedHeaders: Record<string, [string, string]> = {
+      'gemini-deep': ['x-goog-api-key', 'gemini-sentinel'],
+      'openai-research': ['authorization', 'Bearer openai-sentinel'],
+      'perplexity-advanced-deep': [
+        'authorization',
+        'Bearer perplexity-sentinel',
+      ],
+      'perplexity-deep-research': [
+        'authorization',
+        'Bearer perplexity-sentinel',
+      ],
+      'perplexity-sonar-deep': ['authorization', 'Bearer perplexity-sentinel'],
+    };
+
+    for (const [id, [header, expected]] of Object.entries(expectedHeaders)) {
+      fetchMock.mockClear();
+      const provider = getProvider(id);
+      expect(provider?.execution).toBe('background');
+      if (provider?.execution !== 'background') continue;
+
+      await provider.submit('credential check', { timeout: 1 }).catch(() => {});
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const init = fetchMock.mock.calls[0][1] as RequestInit;
+      expect(new Headers(init.headers).get(header)).toBe(expected);
+    }
   });
 
   it('registers llm-tier providers with the llm tier', async () => {
