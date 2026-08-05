@@ -11,7 +11,7 @@ import {
   summarizeCandidates,
   unsafeBaseDirReason,
 } from '../src/commands/cleanup-data.js';
-import type { AsyncTaskHandle, RunManifest } from '../src/types.js';
+import type { RunManifest } from '../src/types.js';
 
 let baseDir: string;
 
@@ -19,7 +19,9 @@ const DAY = 24 * 60 * 60 * 1000;
 
 function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
   return {
-    version: 1,
+    schemaVersion: 2,
+    revision: 0,
+    status: 'completed',
     timestamp: 1_781_136_000,
     slug: 'postgres-pooling',
     query: 'postgres pooling best practices',
@@ -38,7 +40,6 @@ function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
       },
     ],
     sources: { total: 25, unique: 20, file: 'sources.json' },
-    asyncTasks: [],
     exitCode: 0,
     ...overrides,
   };
@@ -149,25 +150,14 @@ describe('discoverCandidates', () => {
 });
 
 describe('hasPendingAsync', () => {
-  it('is true when async-tasks.json has a pending or running task', () => {
+  it('ignores legacy async-tasks.json files', () => {
     const dir = makeRun('100-a', {
-      'async-tasks.json': JSON.stringify([
-        { taskId: 't1', status: 'pending' } as Partial<AsyncTaskHandle>,
-      ]),
-    });
-    expect(hasPendingAsync(dir)).toBe(true);
-  });
-
-  it('is false when async tasks are all completed', () => {
-    const dir = makeRun('100-b', {
-      'async-tasks.json': JSON.stringify([
-        { taskId: 't1', status: 'completed' } as Partial<AsyncTaskHandle>,
-      ]),
+      'async-tasks.json': JSON.stringify([{ taskId: 't1', status: 'pending' }]),
     });
     expect(hasPendingAsync(dir)).toBe(false);
   });
 
-  it('falls back to run.json provider status when async file is absent', () => {
+  it('reads pending task state from run.json', () => {
     const dir = makeRun('100-c', {
       'run.json': JSON.stringify(
         makeManifest({
@@ -181,6 +171,7 @@ describe('hasPendingAsync', () => {
               citationCount: 0,
               outputFile: '',
               metaFile: '',
+              task: { taskId: 't1', submittedAt: 1, status: 'pending' },
             },
           ],
         }),
@@ -207,7 +198,25 @@ describe('summarizeCandidates', () => {
       'a.md': 'x'.repeat(100),
     });
     makeRun(`${newSecs}-new`, {
-      'async-tasks.json': JSON.stringify([{ taskId: 't', status: 'running' }]),
+      'run.json': JSON.stringify(
+        makeManifest({
+          status: 'awaiting_async',
+          exitCode: null,
+          providers: [
+            {
+              id: 'openai-research',
+              tier: 'deep-research',
+              status: 'async-pending',
+              durationMs: 0,
+              wordCount: 0,
+              citationCount: 0,
+              outputFile: '',
+              metaFile: '',
+              task: { taskId: 't', submittedAt: 1, status: 'running' },
+            },
+          ],
+        }),
+      ),
       'b.md': 'y'.repeat(200),
     });
 

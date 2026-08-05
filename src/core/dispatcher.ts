@@ -478,6 +478,7 @@ export async function dispatch(
             providerId: id,
             event: 'async-submitted',
             report: pendingReport,
+            task: handle,
           });
           return;
         } catch (error) {

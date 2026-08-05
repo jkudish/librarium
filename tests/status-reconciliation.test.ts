@@ -66,14 +66,14 @@ describe('status reconciliation', () => {
 
     await reconcilePendingTasksOnce([task]);
 
-    const persisted = JSON.parse(
-      readFileSync(join(dir, 'async-tasks.json'), 'utf8'),
-    );
-    expect(persisted[0]).toMatchObject({
+    const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(persisted.providers[0].task).toMatchObject({
       status: 'completed',
       providerStatus: 'COMPLETED',
     });
-    expect(persisted[0].completedAt).toEqual(expect.any(Number));
-    expect(persisted[0].lastPolledAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.lastPolledAt).toEqual(
+      expect.any(Number),
+    );
   });
 });

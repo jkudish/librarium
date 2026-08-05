@@ -28,7 +28,9 @@ function makeReport(overrides: Partial<ProviderReport> = {}): ProviderReport {
 
 function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
   return {
-    version: 1,
+    schemaVersion: 2,
+    revision: 0,
+    status: 'completed',
     timestamp: 1_781_136_000,
     slug: 'postgres-pooling',
     query: 'postgres pooling best practices',
@@ -36,7 +38,6 @@ function makeManifest(overrides: Partial<RunManifest> = {}): RunManifest {
     outputDir: '/tmp/x',
     providers: [makeReport()],
     sources: { total: 25, unique: 20, file: 'sources.json' },
-    asyncTasks: [],
     exitCode: 0,
     ...overrides,
   };

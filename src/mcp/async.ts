@@ -5,7 +5,6 @@ import {
   asyncPollFailureUpdates,
   asyncPollUpdates,
   loadAsyncTasks,
-  saveAsyncTasks,
   updateAsyncTask,
 } from '../core/async-manager.js';
 import { normalizeUsage } from '../core/dispatcher.js';
@@ -107,10 +106,6 @@ async function retrieveTaskSilent(
       return false;
     }
 
-    const remaining = loadAsyncTasks(dir).filter(
-      (t) => t.taskId !== task.taskId,
-    );
-    saveAsyncTasks(dir, remaining);
     state.retrieved = true;
     return true;
   } catch (e) {
@@ -152,6 +147,7 @@ export async function checkAsyncTasks(
           const poll = await provider.poll(task);
           const updated = updateAsyncTask(
             runDir,
+            task.provider,
             task.taskId,
             asyncPollUpdates(poll),
           );
@@ -165,6 +161,7 @@ export async function checkAsyncTasks(
           const error = e instanceof Error ? e.message : String(e);
           const updated = updateAsyncTask(
             runDir,
+            task.provider,
             task.taskId,
             asyncPollFailureUpdates(error),
           );
@@ -176,6 +173,7 @@ export async function checkAsyncTasks(
         const error = `Provider ${task.provider} does not support polling after this upgrade`;
         const updated = updateAsyncTask(
           runDir,
+          task.provider,
           task.taskId,
           asyncPollUpdates({
             status: 'failed',

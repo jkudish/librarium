@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { discoverRuns, readRunEntry } from '../commands/browse-data.js';
-import { loadAsyncTasks } from '../core/async-manager.js';
+import { loadRunTasks } from '../core/run-manifest.js';
 import type {
   AsyncTaskHandle,
   DeduplicatedSource,
@@ -169,9 +169,10 @@ export function shapeResearchResult(run: SilentRunResult): ResearchToolResult {
       truncated: shapedSources.truncated,
       items: shapedSources.items,
     },
-    pendingTaskIds: manifest.asyncTasks
-      .filter((t) => t.status === 'pending' || t.status === 'running')
-      .map((t) => t.taskId),
+    pendingTaskIds: manifest.providers
+      .flatMap((provider) => (provider.task ? [provider.task] : []))
+      .filter((task) => task.status === 'pending' || task.status === 'running')
+      .map((task) => task.taskId),
     summaryFile: join(manifest.outputDir, 'summary.md'),
   };
 }
@@ -362,5 +363,5 @@ export function readRunResults(
 
 /** Load async task handles for a run directory. */
 export function loadRunAsyncTasks(runDir: string): AsyncTaskHandle[] {
-  return loadAsyncTasks(runDir);
+  return loadRunTasks(runDir);
 }

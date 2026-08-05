@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking run artifact schema:** `run.json` is now a live
+  `schemaVersion: 2` manifest written before dispatch. It carries a monotonic
+  `revision`, explicit run lifecycle status, nullable in-progress `exitCode`,
+  and provider-embedded background task state. Retrieval retains compact task
+  audit metadata on the provider entry.
 - **Breaking library API:** custom and hand-written providers must now declare
   `execution: "inline"` or `execution: "background"`. Background providers
   must implement the complete `execute`/`submit`/`poll`/`retrieve` lifecycle;
@@ -52,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rendering. `--wait` continues polling from that reconciled state.
 
 ### Removed
+
+- Removed all `async-tasks.json` reads and writes, including legacy v1 run
+  manifest fallback. Existing v1 run directories are intentionally not loaded;
+  new status, browse, usage, cleanup, report, and MCP operations require a
+  schemaVersion 2 `run.json`.
 
 - New submissions to OpenAI's retired `o4-mini-deep-research` and
   `o3-deep-research` models. Pending handles created by those removed

@@ -4,7 +4,6 @@ import {
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
-import { saveAsyncTasks } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
 import { dispatch } from '../core/dispatcher.js';
@@ -20,6 +19,13 @@ import {
   ProviderSelectionError,
   resolveProviderSelection as resolveProviderSelectionCore,
 } from '../core/provider-selection.js';
+import {
+  applyRunLifecycle,
+  createRunManifest,
+  mutateRunManifest,
+  toRunTaskState,
+  upsertProviderReport,
+} from '../core/run-manifest.js';
 import { generateSummary } from '../core/synthesis.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
@@ -35,7 +41,7 @@ import type {
 /**
  * Silent, file-writing research pipeline used by the MCP server. This mirrors
  * the side effects of `librarium run` (run.json manifest, per-provider
- * .md/.meta.json, sources.json, summary.md, prompt.md, async-tasks.json) but
+ * .md/.meta.json, sources.json, summary.md, prompt.md) but
  * contains no spinners, tables, or stdout writes. Any diagnostics go to the
  * injectable `onWarn` sink (stderr by default) so the MCP stdio protocol on
  * stdout stays pure.
@@ -211,6 +217,20 @@ export async function runResearchSilent(
   }
   safeWriteFile(join(outputDir, 'prompt.md'), promptDoc);
 
+  const timestamp = Math.floor(Date.now() / 1000);
+  createRunManifest(outputDir, {
+    status: 'running',
+    timestamp,
+    slug,
+    query: args.query,
+    mode: config.defaults.mode,
+    outputDir,
+    providers: [],
+    sources: { total: 0, unique: 0, file: 'sources.json' },
+    exitCode: null,
+    refinedQueries: refined?.tierQueries,
+  });
+
   const dispatchFn = deps.dispatch ?? dispatch;
   const dispatchStartedAt = Date.now();
   const { reports, results, asyncTasks } = await dispatchFn({
@@ -220,6 +240,11 @@ export async function runResearchSilent(
     tierQueries: refined?.tierQueries,
     mode: config.defaults.mode,
     credentials,
+    onProgress: (event) => {
+      if (event.report) {
+        upsertProviderReport(outputDir, event.report, event.task);
+      }
+    },
   });
   const totalDurationMs = Date.now() - dispatchStartedAt;
 
@@ -235,45 +260,23 @@ export async function runResearchSilent(
     JSON.stringify(sources, null, 2),
   );
 
-  if (asyncTasks.length > 0) {
-    for (const task of asyncTasks) {
-      task.outputDir = outputDir;
-    }
-    saveAsyncTasks(outputDir, asyncTasks);
-  }
-
-  // Exit-code parity with run.ts: recovered primaries don't count as failures.
-  const recoveredPrimaries = new Set(
-    reports
-      .filter((r) => r.fallbackFor && r.status === 'success')
-      .map((r) => r.fallbackFor as string),
+  const taskByProvider = new Map(
+    asyncTasks.map((task) => [task.provider, toRunTaskState(task)]),
   );
-  const effectiveReports = reports.filter((r) => !recoveredPrimaries.has(r.id));
-  const successCount = effectiveReports.filter(
-    (r) => r.status === 'success' || r.status === 'async-pending',
-  ).length;
-  const exitCode =
-    successCount === 0 ? 2 : successCount < effectiveReports.length ? 1 : 0;
-
-  const timestamp = Math.floor(Date.now() / 1000);
-  const manifest: RunManifest = {
-    version: 1,
-    timestamp,
-    slug,
-    query: args.query,
-    mode: config.defaults.mode,
-    outputDir,
-    providers: reports,
-    sources: {
+  const manifest = mutateRunManifest(outputDir, (current) => {
+    current.providers = reports.map((report) => ({
+      ...report,
+      ...(taskByProvider.get(report.id)
+        ? { task: taskByProvider.get(report.id) }
+        : {}),
+    }));
+    current.sources = {
       total: allCitations.length,
       unique: sources.length,
       file: 'sources.json',
-    },
-    asyncTasks,
-    exitCode,
-    refinedQueries: refined?.tierQueries,
-  };
-  safeWriteFile(join(outputDir, 'run.json'), JSON.stringify(manifest, null, 2));
+    };
+    applyRunLifecycle(current);
+  });
 
   const summary = generateSummary({
     query: args.query,
