@@ -4,6 +4,7 @@ import {
   resolveCredential,
 } from '../core/credentials.js';
 import {
+  type HttpClient,
   type HttpRequestOptions,
   type HttpResponse,
   httpRequest,
@@ -22,6 +23,7 @@ import type {
 export interface BaseProviderOptions {
   apiKey?: string;
   credentials?: CredentialContext;
+  httpClient?: HttpClient;
 }
 
 /**
@@ -39,10 +41,12 @@ export abstract class ProviderBase {
 
   private apiKeyRef?: string;
   private credentials: CredentialContext;
+  private httpClient: HttpClient;
 
   constructor(options: BaseProviderOptions = {}) {
     this.apiKeyRef = options.apiKey;
     this.credentials = options.credentials ?? {};
+    this.httpClient = options.httpClient ?? httpRequest;
   }
 
   get displayName(): string {
@@ -56,6 +60,20 @@ export abstract class ProviderBase {
   configure(options: BaseProviderOptions): void {
     this.apiKeyRef = options.apiKey;
     this.credentials = options.credentials ?? {};
+    this.httpClient = options.httpClient ?? httpRequest;
+  }
+
+  /**
+   * Create a run-local provider instance with a different transport while
+   * preserving the initialized credentials and adapter configuration.
+   */
+  withHttpClient(httpClient: HttpClient): this {
+    const clone = Object.assign(
+      Object.create(Object.getPrototypeOf(this)) as this,
+      this,
+    );
+    clone.httpClient = httpClient;
+    return clone;
   }
 
   /**
@@ -79,7 +97,7 @@ export abstract class ProviderBase {
     url: string,
     options: HttpRequestOptions = {},
   ): Promise<HttpResponse<T>> {
-    return httpRequest<T>(url, options);
+    return this.httpClient<T>(url, options);
   }
 
   /**

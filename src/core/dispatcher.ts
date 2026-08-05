@@ -60,7 +60,15 @@ export interface DispatchOptions {
    * repository benchmark, can disable fallback dispatch explicitly.
    */
   allowFallbacks?: boolean;
+  /** Provider lookup dependency. Defaults to Librarium's process registry. */
+  providerRegistry?: ProviderLookup;
 }
+
+export interface ProviderLookup {
+  getProvider(id: string): Provider | undefined;
+}
+
+export const defaultProviderLookup: ProviderLookup = { getProvider };
 
 export interface DispatchResult {
   reports: ProviderReport[];
@@ -94,6 +102,7 @@ export async function dispatch(
     budget,
     estimatedBudget,
   } = options;
+  const providerRegistry = options.providerRegistry ?? defaultProviderLookup;
   const queryForTier = (tier: Provider['tier']): string =>
     options.tierQueries?.[tier] ?? query;
   // Single metering normalization path: static kind + network-free estimate +
@@ -176,7 +185,7 @@ export async function dispatch(
     const fallbackId = config.providers[id]?.fallback;
     if (!fallbackId) return null;
 
-    const fallbackProvider = getProvider(fallbackId);
+    const fallbackProvider = providerRegistry.getProvider(fallbackId);
     if (!fallbackProvider) return null;
 
     const fallbackConfig = config.providers[fallbackId];
@@ -289,7 +298,7 @@ export async function dispatch(
 
   const tasks = providerIds.map((id) =>
     limit(async (): Promise<void> => {
-      const provider = getProvider(id);
+      const provider = providerRegistry.getProvider(id);
       if (!provider) {
         const metering = meteringFor(id);
         results.push({

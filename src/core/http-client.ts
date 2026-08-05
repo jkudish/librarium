@@ -43,6 +43,12 @@ export interface HttpResponse<T = unknown> {
   durationMs: number;
 }
 
+/** Injectable transport contract used by providers and application services. */
+export type HttpClient = <T = unknown>(
+  url: string,
+  options?: HttpRequestOptions,
+) => Promise<HttpResponse<T>>;
+
 export class HttpRequestAbortedError extends Error {
   constructor() {
     super('Request aborted');
