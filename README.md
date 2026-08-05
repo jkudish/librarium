@@ -269,7 +269,9 @@ for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
 Configured options are checked against the descriptor schema during
 initialization. Invalid values produce a warning while the adapter stays
 registered, so background retrieval and built-in ID protection remain intact;
-the adapter rejects the invalid controls before making a paid request.
+the adapter blocks `execute`, `submit`, and `test` before HTTP. Background
+`poll` and `retrieve` remain available for work submitted before the config
+became invalid.
 
 ## Commands
 

@@ -178,6 +178,8 @@ export interface ProviderCommon {
   envVar: string;
   source?: ProviderSource;
   requiresApiKey?: boolean;
+  /** Safe validation diagnostic; blocks new work but not background retrieval. */
+  configurationError?: string;
 
   // All providers support direct execution. Background providers use this for
   // synchronous callers that choose to wait for their remote task.

@@ -191,6 +191,9 @@ export async function initializeProviders(
       warnings.push(`Skipping ${descriptor.id}: ${detail}`);
       continue;
     }
+    if (!options.success) {
+      applyConfigurationError(provider, `Invalid options for ${descriptor.id}`);
+    }
     assertBuiltInDescriptorMatch(descriptor, provider);
     if (provider instanceof ProviderBase) {
       provider.configure({
@@ -209,6 +212,25 @@ export async function initializeProviders(
     loadedCustomProviders: [],
     skippedCustomProviders: [],
   };
+}
+
+function applyConfigurationError(provider: Provider, message: string): void {
+  provider.configurationError = message;
+  provider.execute = async () => ({
+    provider: provider.id,
+    tier: provider.tier,
+    content: '',
+    citations: [],
+    durationMs: 0,
+    error: message,
+  });
+  provider.test = async () => ({ ok: false, error: message });
+
+  if (provider.execution === 'background') {
+    provider.submit = async () => {
+      throw new Error(message);
+    };
+  }
 }
 
 function assertBuiltInDescriptorMatch(

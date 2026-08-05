@@ -85,7 +85,14 @@ describe('built-in provider descriptors', () => {
   });
 
   it('isolates an invalid provider option schema from other adapters', async () => {
+    const httpClient = vi.fn(async () => ({
+      status: 200,
+      headers: new Headers(),
+      data: { id: 'response-1', status: 'completed', output: [] },
+    }));
     const result = await initializeProviders({
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+      httpClient,
       providers: {
         'openai-research': {
           options: { returnTokenBudget: 'bottomless' },
@@ -98,6 +105,50 @@ describe('built-in provider descriptors', () => {
     expect(result.warnings).toEqual([
       expect.stringContaining('Invalid options for openai-research'),
     ]);
+
+    const openai = getProvider('openai-research');
+    expect(openai?.execution).toBe('background');
+    if (openai?.execution !== 'background') return;
+
+    await expect(
+      openai.submit('new paid work', { timeout: 10 }),
+    ).rejects.toThrow('Invalid options for openai-research');
+    expect(httpClient).not.toHaveBeenCalled();
+
+    await openai.retrieve({
+      provider: 'openai-research',
+      taskId: 'response-1',
+      query: 'existing work',
+      submittedAt: Date.now(),
+      status: 'completed',
+    });
+    expect(httpClient).toHaveBeenCalledOnce();
+  });
+
+  it('blocks invalid LLM controls before HTTP without unregistering adapters', async () => {
+    const httpClient = vi.fn();
+    const ids = ['claude', 'openai-chat', 'gemini-chat', 'openrouter-chat'];
+    await initializeProviders({
+      httpClient,
+      providers: Object.fromEntries(
+        ids.map((id) => [id, { options: { webSearch: 'false' } }]),
+      ),
+    });
+
+    for (const id of ids) {
+      const provider = getProvider(id);
+      expect(provider).toBeDefined();
+      await expect(
+        provider?.execute('must not run', { timeout: 10 }),
+      ).resolves.toMatchObject({
+        error: `Invalid options for ${id}`,
+      });
+      await expect(provider?.test?.()).resolves.toEqual({
+        ok: false,
+        error: `Invalid options for ${id}`,
+      });
+    }
+    expect(httpClient).not.toHaveBeenCalled();
   });
 
   it('distinguishes remote tasks from process-local lifecycle wrappers', () => {
