@@ -409,6 +409,20 @@ export async function executeRun(
               );
               return;
             }
+            if (event.type === 'dispatch-completed') {
+              spinner.stop();
+              if (live) {
+                live.resolveRemaining(event.reports);
+                live.stop();
+              } else {
+                for (const report of event.reports) {
+                  if (report.status === 'skipped') {
+                    printLine(formatProviderLine(report, widths, color));
+                  }
+                }
+              }
+              return;
+            }
             if (event.type !== 'dispatch-progress') return;
             const { progress } = event;
             if (live) {
@@ -459,22 +473,6 @@ export async function executeRun(
                 })
             : undefined,
         });
-
-      spinner.stop();
-
-      if (live) {
-        // Rows that never emitted events (e.g. skipped providers) resolve
-        // from the final reports before the block is finalized.
-        live.resolveRemaining(reports);
-        live.stop();
-      } else {
-        // Skipped providers never emit progress events — show them too.
-        for (const report of reports) {
-          if (report.status === 'skipped') {
-            printLine(formatProviderLine(report, widths, color));
-          }
-        }
-      }
 
       // Determine exit code. When a primary fails but its fallback succeeds,
       // the user's intent was fully satisfied — exclude the recovered primary's

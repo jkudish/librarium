@@ -63,9 +63,17 @@ export abstract class ProviderBase {
     this.httpClient = options.httpClient ?? httpRequest;
   }
 
-  /** Override only the transport, preserving credentials and provider config. */
-  setHttpClient(httpClient: HttpClient = httpRequest): void {
-    this.httpClient = httpClient;
+  /**
+   * Create a run-local provider instance with a different transport while
+   * preserving the initialized credentials and adapter configuration.
+   */
+  withHttpClient(httpClient: HttpClient): this {
+    const clone = Object.assign(
+      Object.create(Object.getPrototypeOf(this)) as this,
+      this,
+    );
+    clone.httpClient = httpClient;
+    return clone;
   }
 
   /**

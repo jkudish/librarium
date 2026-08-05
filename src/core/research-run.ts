@@ -36,17 +36,12 @@ import { generateSummary } from './synthesis.js';
 
 export interface ProviderRegistry extends ProviderLookup {
   getAllProviders(): Provider[];
-  configureHttpClient?(httpClient: HttpClient): void;
+  withHttpClient?(httpClient: HttpClient): ProviderRegistry;
 }
 
 export const defaultProviderRegistry: ProviderRegistry = {
   getProvider,
   getAllProviders,
-  configureHttpClient: (httpClient) => {
-    for (const provider of getAllProviders()) {
-      if (provider instanceof ProviderBase) provider.setHttpClient(httpClient);
-    }
-  },
 };
 
 export interface RunManifestStore {
@@ -66,6 +61,7 @@ export const defaultRunManifestStore: RunManifestStore = {
 export type ResearchRunEvent =
   | { type: 'manifest-created'; manifest: RunManifest }
   | { type: 'dispatch-progress'; progress: ProgressEvent }
+  | { type: 'dispatch-completed'; reports: ProviderReport[] }
   | { type: 'post-dispatch-warning'; message: string }
   | { type: 'completed'; manifest: RunManifest }
   | { type: 'failed'; outputDir: string; error: Error };
@@ -81,7 +77,6 @@ export interface ResearchRunPostDispatchContext {
 
 export interface ResearchRunPostDispatchResult {
   manifestExtra?: Partial<Pick<RunManifest, 'answer' | 'verification'>>;
-  answerText?: string;
 }
 
 export interface ExecuteResearchRunRequest {
@@ -95,7 +90,7 @@ export interface ExecuteResearchRunRequest {
   budget?: BudgetTracker;
   estimatedBudget?: EstimateBudgetTracker;
   allowFallbacks?: boolean;
-  onEvent?: (event: ResearchRunEvent) => void;
+  onEvent?: (event: ResearchRunEvent) => void | Promise<void>;
   postDispatch?: (
     context: ResearchRunPostDispatchContext,
   ) => Promise<ResearchRunPostDispatchResult | undefined>;
@@ -138,7 +133,8 @@ export async function executeResearchRun(
   const now = dependencies.now ?? Date.now;
   const emit = (event: ResearchRunEvent): void => {
     try {
-      request.onEvent?.(event);
+      const observation = request.onEvent?.(event);
+      if (observation) void Promise.resolve(observation).catch(() => {});
     } catch {
       // Observers are presentation adapters and cannot compromise persistence.
     }
@@ -159,8 +155,6 @@ export async function executeResearchRun(
     }
     prompt += '\n';
   }
-  safeWriteFile(join(request.outputDir, 'prompt.md'), prompt);
-
   const timestamp = Math.floor(now() / 1000);
   const created = taskStore.create(request.outputDir, {
     status: 'running',
@@ -177,17 +171,10 @@ export async function executeResearchRun(
   emit({ type: 'manifest-created', manifest: created });
 
   try {
-    if (dependencies.httpClient) {
-      if (providerRegistry.configureHttpClient) {
-        providerRegistry.configureHttpClient(dependencies.httpClient);
-      } else {
-        for (const provider of providerRegistry.getAllProviders()) {
-          if (provider instanceof ProviderBase) {
-            provider.setHttpClient(dependencies.httpClient);
-          }
-        }
-      }
-    }
+    safeWriteFile(join(request.outputDir, 'prompt.md'), prompt);
+    const runRegistry = dependencies.httpClient
+      ? registryWithHttpClient(providerRegistry, dependencies.httpClient)
+      : providerRegistry;
 
     const dispatchStartedAt = now();
     const { reports, results, asyncTasks } = await dispatchRun({
@@ -200,7 +187,7 @@ export async function executeResearchRun(
       budget: request.budget,
       estimatedBudget: request.estimatedBudget,
       allowFallbacks: request.allowFallbacks,
-      providerRegistry,
+      providerRegistry: runRegistry,
       onProgress: (progress) => {
         if (progress.report) {
           taskStore.upsertProviderReport(
@@ -213,6 +200,7 @@ export async function executeResearchRun(
       },
     });
     const totalDurationMs = now() - dispatchStartedAt;
+    emit({ type: 'dispatch-completed', reports });
 
     writeProviderOutputs(request.outputDir, reports, results);
     const allCitations: Citation[] = results.flatMap((result) =>
@@ -309,6 +297,31 @@ export async function executeResearchRun(
     emit({ type: 'failed', outputDir: request.outputDir, error: normalized });
     throw error;
   }
+}
+
+function registryWithHttpClient(
+  registry: ProviderRegistry,
+  httpClient: HttpClient,
+): ProviderRegistry {
+  if (registry.withHttpClient) return registry.withHttpClient(httpClient);
+
+  const clones = new WeakMap<Provider, Provider>();
+  const runLocal = (provider: Provider | undefined): Provider | undefined => {
+    if (!provider || !(provider instanceof ProviderBase)) return provider;
+    const existing = clones.get(provider);
+    if (existing) return existing;
+    const clone = provider.withHttpClient(httpClient);
+    clones.set(provider, clone);
+    return clone;
+  };
+
+  return {
+    getProvider: (id) => runLocal(registry.getProvider(id)),
+    getAllProviders: () =>
+      registry
+        .getAllProviders()
+        .map((provider) => runLocal(provider) as Provider),
+  };
 }
 
 function writeProviderOutputs(
