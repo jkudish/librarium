@@ -35,7 +35,7 @@ export function normalizeUrl(url: string): string {
       parsed.searchParams.delete(param);
     }
     // Rebuild without protocol, strip trailing slash
-    let normalized = `${parsed.hostname}${parsed.pathname}`;
+    let normalized = `${parsed.host}${parsed.pathname}`;
     if (parsed.searchParams.toString()) {
       normalized += `?${parsed.searchParams.toString()}`;
     }

@@ -156,18 +156,27 @@ export function estimateMetering(
 }
 
 /**
- * Build the actual-cost lane from reported usage. usage.costUsd is only ever set
- * by an adapter from a real API figure, so its presence means provider_reported.
+ * Build the actual lane from provider-reported usage. usage.costUsd and
+ * billableUnits are only ever set by adapters from real API response fields.
  */
 function actualFromUsage(usage?: ProviderUsage): MeteringActual | undefined {
-  if (
+  const costUsd =
     usage?.costUsd !== undefined &&
     Number.isFinite(usage.costUsd) &&
     usage.costUsd >= 0
-  ) {
-    return { costUsd: usage.costUsd, source: 'provider_reported' };
-  }
-  return undefined;
+      ? usage.costUsd
+      : undefined;
+  const billableUnits =
+    usage?.billableUnits !== undefined &&
+    Number.isFinite(usage.billableUnits) &&
+    usage.billableUnits >= 0
+      ? usage.billableUnits
+      : undefined;
+  if (costUsd === undefined && billableUnits === undefined) return undefined;
+  const actual: MeteringActual = { source: 'provider_reported' };
+  if (costUsd !== undefined) actual.costUsd = costUsd;
+  if (billableUnits !== undefined) actual.billableUnits = billableUnits;
+  return actual;
 }
 
 /**

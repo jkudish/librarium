@@ -71,6 +71,30 @@ const claudeOptions = webSearchOptions.extend({
   thinking: z.enum(['adaptive', 'disabled']).optional(),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
+const firecrawlSearchOptions = commonOptions
+  .extend({
+    sources: z
+      .array(z.enum(['web', 'news']))
+      .nonempty()
+      .optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    tbs: z.string().min(1).optional(),
+    country: z.string().min(1).optional(),
+    location: z.string().min(1).optional(),
+    includeDomains: z.array(z.string().min(1)).nonempty().optional(),
+    excludeDomains: z.array(z.string().min(1)).nonempty().optional(),
+    categories: z
+      .array(z.enum(['github', 'research', 'pdf']))
+      .nonempty()
+      .optional(),
+    ignoreInvalidURLs: z.boolean().optional(),
+  })
+  .refine(
+    ({ includeDomains, excludeDomains }) => !(includeDomains && excludeDomains),
+    {
+      message: 'includeDomains and excludeDomains are mutually exclusive',
+    },
+  );
 
 const inline = (webSearch?: 'always' | 'optional'): ProviderCapabilities => ({
   execution: 'inline',
@@ -424,6 +448,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 17,
     tier: 'raw-search',
     envVar: 'FIRECRAWL_API_KEY',
+    optionsSchema: firecrawlSearchOptions,
     display: {
       family: 'Firecrawl',
       name: 'Firecrawl Search',
