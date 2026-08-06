@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider-reported credit units without fabricating a USD cost.
 - **Canonical OpenAI research provider** (`openai-research`, deep-research
   tier): uses the Responses API with GPT-5.6 Sol by default, current
-  `web_search`, configurable reasoning effort (default `xhigh`), background
+  `web_search`, configurable reasoning effort (default `high`), background
   execution, normalized URL citations, token usage, and a per-provider model
   override.
 - OpenAI Research `options.returnTokenBudget` configuration with validated
@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI and MCP research now share the headless `executeResearchRun()` Node
   application service with optional provider-registry, task-store, and HTTP
   overrides plus typed lifecycle events.
+- Dependency refreshes, including Marked 18.0.9, Biome 2.5.7, Cloudflare
+  Workers test tooling 0.18.7, Wrangler 4.113.0, and PostCSS 8.5.23. The
+  development-only Cloudflare tooling chain still reports five high npm audit
+  advisories; automated remediation is currently incompatible with the
+  supported toolchain. Other major dependency upgrades remain held back
+  pending compatibility work.
 
 - **Breaking run artifact schema:** `run.json` is now a live
   `schemaVersion: 2` manifest written before dispatch. It carries a monotonic
