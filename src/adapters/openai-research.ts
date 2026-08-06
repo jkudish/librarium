@@ -83,7 +83,7 @@ function parseMaxToolCalls(value: unknown): number | undefined {
 }
 
 function parseReasoningEffort(value: unknown): ReasoningEffort {
-  if (value === undefined) return 'xhigh';
+  if (value === undefined) return 'high';
   if (
     typeof value === 'string' &&
     REASONING_EFFORTS.includes(value as ReasoningEffort)

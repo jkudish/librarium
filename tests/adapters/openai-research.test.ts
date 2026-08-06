@@ -76,7 +76,7 @@ describe('OpenAIResearchProvider', () => {
 
     const task = await provider({
       maxToolCalls: 3,
-      reasoningEffort: 'high',
+      reasoningEffort: 'medium',
       returnTokenBudget: 'unlimited',
     }).submit('What changed?', { timeout: 1800 });
     expect(task).toMatchObject({
@@ -93,13 +93,13 @@ describe('OpenAIResearchProvider', () => {
       model: 'gpt-5.6-sol',
       input: [{ role: 'user', content: 'What changed?' }],
       tools: [{ type: 'web_search', return_token_budget: 'unlimited' }],
-      reasoning: { effort: 'high' },
+      reasoning: { effort: 'medium' },
       max_tool_calls: 3,
       background: true,
     });
   });
 
-  it('uses xhigh reasoning, the standard search budget, and omits max_tool_calls by default', async () => {
+  it('uses high reasoning, the standard search budget, and omits max_tool_calls by default', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -110,7 +110,7 @@ describe('OpenAIResearchProvider', () => {
     await provider().submit('What changed?', { timeout: 1800 });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
-    expect(body.reasoning).toEqual({ effort: 'xhigh' });
+    expect(body.reasoning).toEqual({ effort: 'high' });
     expect(body.tools).toEqual([
       { type: 'web_search', return_token_budget: 'default' },
     ]);

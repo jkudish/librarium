@@ -939,9 +939,10 @@ Adaptive thinking and medium effort are automatic only for the default Sonnet
 5 model. When `model` is overridden, thinking and effort are omitted unless
 they are explicitly configured, avoiding unsupported fields on older models.
 
-OpenAI Research defaults to GPT-5.6 Sol with `xhigh` reasoning and OpenAI's
-standard web-search return-token budget. Configure its model and research
-limits under the canonical `openai-research` provider ID:
+OpenAI Research defaults to GPT-5.6 Sol with `high` reasoning, OpenAI's
+standard web-search return-token budget, and no tool-call ceiling. Configure
+its model and research limits under the canonical `openai-research` provider
+ID:
 
 ```json
 {
@@ -951,8 +952,7 @@ limits under the canonical `openai-research` provider ID:
       "enabled": true,
       "model": "gpt-5.6-sol",
       "options": {
-        "reasoningEffort": "high",
-        "maxToolCalls": 5,
+        "reasoningEffort": "medium",
         "returnTokenBudget": "default"
       }
     }
@@ -961,10 +961,13 @@ limits under the canonical `openai-research` provider ID:
 ```
 
 `reasoningEffort` accepts `none`, `low`, `medium`, `high`, `xhigh`, or `max`
-and defaults to `xhigh`. `maxToolCalls` must be a positive integer when set.
-`returnTokenBudget` accepts `default` or `unlimited` and defaults to `default`.
-Use `unlimited` only for high-effort research that needs to inspect unusually
-large amounts of web content; it can increase latency and token usage.
+and defaults to `high`. Use `medium` as a speed-oriented setting and `xhigh`
+as a quality-first override. `maxToolCalls` must be a positive integer when
+set; it is uncapped by default because low ceilings can prevent complete
+research. `returnTokenBudget` accepts `default` or `unlimited` and defaults to
+`default`. Use `unlimited` only for high-effort research that needs to inspect
+unusually large amounts of web content; it can increase latency and token
+usage.
 
 Some providers support optional model overrides. Gemini Deep Research defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier (and more expensive) variant:
 

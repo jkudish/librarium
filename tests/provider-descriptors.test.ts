@@ -84,6 +84,37 @@ describe('built-in provider descriptors', () => {
     ]);
   });
 
+  it('applies the OpenAI research defaults through provider initialization', async () => {
+    const httpClient = vi.fn(async () => ({
+      status: 200,
+      headers: new Headers(),
+      data: { id: 'response-1', status: 'queued' },
+    }));
+    await initializeProviders({
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+      httpClient,
+      providers: { 'openai-research': { enabled: true } },
+    });
+
+    const openai = getProvider('openai-research');
+    expect(openai?.execution).toBe('background');
+    if (openai?.execution !== 'background') return;
+
+    await openai.submit('What changed?', { timeout: 10 });
+    expect(httpClient).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/responses',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.objectContaining({
+          reasoning: { effort: 'high' },
+          tools: [{ type: 'web_search', return_token_budget: 'default' }],
+        }),
+      }),
+    );
+    const request = httpClient.mock.calls[0]?.[1];
+    expect(request?.body).not.toHaveProperty('max_tool_calls');
+  });
+
   it('isolates an invalid provider option schema from other adapters', async () => {
     const httpClient = vi.fn(async () => ({
       status: 200,
