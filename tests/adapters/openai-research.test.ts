@@ -76,7 +76,7 @@ describe('OpenAIResearchProvider', () => {
 
     const task = await provider({
       maxToolCalls: 3,
-      reasoningEffort: 'high',
+      reasoningEffort: 'medium',
       returnTokenBudget: 'unlimited',
     }).submit('What changed?', { timeout: 1800 });
     expect(task).toMatchObject({
@@ -93,7 +93,7 @@ describe('OpenAIResearchProvider', () => {
       model: 'gpt-5.6-sol',
       input: [{ role: 'user', content: 'What changed?' }],
       tools: [{ type: 'web_search', return_token_budget: 'unlimited' }],
-      reasoning: { effort: 'high' },
+      reasoning: { effort: 'medium' },
       max_tool_calls: 3,
       background: true,
     });
