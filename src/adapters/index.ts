@@ -3,37 +3,18 @@ import {
   type CredentialContext,
   describeCredentialReference,
 } from '../core/credentials.js';
+import type { HttpClient } from '../core/http-client.js';
 import { getMeteringKind } from '../core/metering.js';
 import {
   providerCredentialRef,
   providerHasCredential,
 } from '../core/provider-selection.js';
 import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
-import { BaseProvider } from './base.js';
-import { BraveAnswersProvider } from './brave-answers.js';
-import { BraveSearchProvider } from './brave-search.js';
-import { ClaudeProvider } from './claude.js';
-import { ExaProvider } from './exa.js';
-import { FirecrawlSearchProvider } from './firecrawl-search.js';
-import { GeminiChatProvider } from './gemini-chat.js';
-import { GeminiDeepProvider } from './gemini-deep.js';
-import { GeminiGroundedProvider } from './gemini-grounded.js';
-import { GrokProvider } from './grok.js';
-import { JinaSearchProvider } from './jina-search.js';
-import { KagiFastGPTProvider } from './kagi-fastgpt.js';
-import { OpenAIChatProvider } from './openai-chat.js';
-import { OpenAIResearchProvider } from './openai-research.js';
-import { OpenRouterChatProvider } from './openrouter-chat.js';
-import { OpenRouterOnlineProvider } from './openrouter-online.js';
-import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
-import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
-import { PerplexitySearchProvider } from './perplexity-search.js';
-import { PerplexitySonarDeepProvider } from './perplexity-sonar-deep.js';
-import { PerplexitySonarProProvider } from './perplexity-sonar-pro.js';
-import { SearchApiProvider } from './searchapi.js';
-import { SerpApiProvider } from './serpapi.js';
-import { TavilyProvider } from './tavily.js';
-import { YouResearchProvider } from './you-research.js';
+import { ProviderBase } from './base.js';
+import {
+  BUILTIN_PROVIDER_DESCRIPTORS,
+  type BuiltInProviderDescriptor,
+} from './provider-descriptors.js';
 
 const providers = new Map<string, Provider>();
 
@@ -44,6 +25,7 @@ export type ProviderInitConfig = Partial<
   >
 > & {
   credentials?: CredentialContext;
+  httpClient?: HttpClient;
 };
 
 export interface ProviderInitResult {
@@ -56,9 +38,48 @@ export interface ProviderInitResult {
  * Register a provider in the registry
  */
 export function registerProvider(provider: Provider): void {
+  assertProviderExecutionContract(provider);
   provider.source ??= 'builtin';
   provider.requiresApiKey ??= true;
   providers.set(provider.id, provider);
+}
+
+function assertProviderExecutionContract(provider: Provider): void {
+  const candidate = provider as Provider & {
+    execution?: unknown;
+    execute?: unknown;
+    submit?: unknown;
+    poll?: unknown;
+    retrieve?: unknown;
+  };
+  if (
+    candidate.execution !== 'inline' &&
+    candidate.execution !== 'background'
+  ) {
+    throw new TypeError(
+      `Provider "${provider.id}" must declare execution as "inline" or "background"`,
+    );
+  }
+  if (typeof candidate.execute !== 'function') {
+    throw new TypeError(`Provider "${provider.id}" must define execute`);
+  }
+  const lifecycle = [candidate.submit, candidate.poll, candidate.retrieve];
+  if (
+    candidate.execution === 'background' &&
+    lifecycle.some((method) => typeof method !== 'function')
+  ) {
+    throw new TypeError(
+      `Background provider "${provider.id}" must define submit, poll, and retrieve`,
+    );
+  }
+  if (
+    candidate.execution === 'inline' &&
+    lifecycle.some((method) => method !== undefined)
+  ) {
+    throw new TypeError(
+      `Inline provider "${provider.id}" cannot define submit, poll, or retrieve`,
+    );
+  }
 }
 
 /**
@@ -137,108 +158,102 @@ export async function initializeProviders(
   providers.clear();
   const providerConfig = config.providers ?? {};
   const credentials = config.credentials ?? {};
-  const llmWebSearch = config.defaults?.llmWebSearch ?? true;
+  const httpClient = config.httpClient;
+  const warnings: string[] = [];
 
-  const builtIns: Provider[] = [
-    // Deep Research (async capable)
-    new PerplexitySonarDeepProvider(),
-    new PerplexityDeepResearchProvider(),
-    new PerplexityAdvancedDeepProvider(),
-    new OpenAIResearchProvider({
-      model: providerConfig['openai-research']?.model,
-      maxToolCalls: providerConfig['openai-research']?.options?.maxToolCalls,
-      reasoningEffort:
-        providerConfig['openai-research']?.options?.reasoningEffort,
-      returnTokenBudget:
-        providerConfig['openai-research']?.options?.returnTokenBudget,
-      apiKey: providerConfig['openai-research']?.apiKey,
-      credentials,
-    }),
-    new GeminiDeepProvider({ model: providerConfig['gemini-deep']?.model }),
-
-    // AI-Grounded Search (sync)
-    new PerplexitySonarProProvider(),
-    new GeminiGroundedProvider(),
-    new GrokProvider({ model: providerConfig.grok?.model }),
-    new OpenRouterOnlineProvider(),
-    new BraveAnswersProvider(),
-    new ExaProvider(),
-    new YouResearchProvider(),
-    new KagiFastGPTProvider(),
-
-    // Raw Search (sync)
-    new PerplexitySearchProvider(),
-    new BraveSearchProvider(),
-    new JinaSearchProvider(),
-    new FirecrawlSearchProvider({
-      sources: providerConfig['firecrawl-search']?.options?.sources,
-      limit: providerConfig['firecrawl-search']?.options?.limit,
-      tbs: providerConfig['firecrawl-search']?.options?.tbs,
-      country: providerConfig['firecrawl-search']?.options?.country,
-      location: providerConfig['firecrawl-search']?.options?.location,
-      includeDomains:
-        providerConfig['firecrawl-search']?.options?.includeDomains,
-      excludeDomains:
-        providerConfig['firecrawl-search']?.options?.excludeDomains,
-      categories: providerConfig['firecrawl-search']?.options?.categories,
-      ignoreInvalidURLs:
-        providerConfig['firecrawl-search']?.options?.ignoreInvalidURLs,
-    }),
-    new SearchApiProvider(),
-    new SerpApiProvider(),
-    new TavilyProvider(),
-
-    // LLM (sync). Providers are opt-in, and web search/citations are on by
-    // default unless disabled globally or per-provider via options.webSearch.
-    new ClaudeProvider({
-      model: providerConfig.claude?.model,
-      webSearch: providerWebSearch('claude', providerConfig, llmWebSearch),
-      maxTokens: providerConfig.claude?.options?.maxTokens,
-      thinking: providerConfig.claude?.options?.thinking,
-      effort: providerConfig.claude?.options?.effort,
-    }),
-    new OpenAIChatProvider({
-      model: providerConfig['openai-chat']?.model,
-      webSearch: providerWebSearch('openai-chat', providerConfig, llmWebSearch),
-    }),
-    new GeminiChatProvider({
-      model: providerConfig['gemini-chat']?.model,
-      webSearch: providerWebSearch('gemini-chat', providerConfig, llmWebSearch),
-    }),
-    new OpenRouterChatProvider({
-      model: providerConfig['openrouter-chat']?.model,
-      webSearch: providerWebSearch(
-        'openrouter-chat',
-        providerConfig,
-        llmWebSearch,
-      ),
-    }),
-  ];
-
-  for (const provider of builtIns) {
-    if (provider instanceof BaseProvider) {
+  for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
+    const configured = providerConfig[descriptor.id];
+    const options = descriptor.optionsSchema.safeParse(
+      configured?.options ?? {},
+    );
+    if (!options.success) {
+      const detail = options.error.issues
+        .map(
+          (issue) => `${issue.path.join('.') || 'options'}: ${issue.message}`,
+        )
+        .join('; ');
+      warnings.push(`Invalid options for ${descriptor.id} (${detail})`);
+    }
+    const normalizedConfig = configured
+      ? {
+          ...configured,
+          options: options.success ? options.data : configured.options,
+        }
+      : undefined;
+    let provider: Provider;
+    try {
+      provider = descriptor.factory({
+        providerConfig: normalizedConfig,
+        defaults: config.defaults,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      warnings.push(`Skipping ${descriptor.id}: ${detail}`);
+      continue;
+    }
+    if (!options.success) {
+      applyConfigurationError(provider, `Invalid options for ${descriptor.id}`);
+    }
+    assertBuiltInDescriptorMatch(descriptor, provider);
+    if (provider instanceof ProviderBase) {
       provider.configure({
-        apiKey: providerConfig[provider.id]?.apiKey,
+        apiKey: normalizedConfig?.apiKey,
         credentials,
+        httpClient,
       });
     }
     provider.source = 'builtin';
-    provider.requiresApiKey = true;
+    provider.requiresApiKey = descriptor.credential.required;
     registerProvider(provider);
   }
 
   return {
-    warnings: [],
+    warnings,
     loadedCustomProviders: [],
     skippedCustomProviders: [],
   };
 }
 
-function providerWebSearch(
-  id: string,
-  providers: NonNullable<Config['providers']>,
-  fallback: boolean,
-): boolean {
-  const configured = providers[id]?.options?.webSearch;
-  return typeof configured === 'boolean' ? configured : fallback;
+function applyConfigurationError(provider: Provider, message: string): void {
+  provider.configurationError = message;
+  provider.execute = async () => ({
+    provider: provider.id,
+    tier: provider.tier,
+    content: '',
+    citations: [],
+    durationMs: 0,
+    error: message,
+  });
+  provider.test = async () => ({ ok: false, error: message });
+
+  if (provider.execution === 'background') {
+    provider.submit = async () => {
+      throw new Error(message);
+    };
+  }
+}
+
+function assertBuiltInDescriptorMatch(
+  descriptor: BuiltInProviderDescriptor,
+  provider: Provider,
+): void {
+  const mismatches = [
+    provider.id === descriptor.id ? undefined : `id=${provider.id}`,
+    provider.tier === descriptor.tier ? undefined : `tier=${provider.tier}`,
+    provider.execution === descriptor.capabilities.execution
+      ? undefined
+      : `execution=${provider.execution}`,
+    provider.displayName === descriptor.display.name
+      ? undefined
+      : `displayName=${provider.displayName}`,
+    provider.envVar === descriptor.credential.envVar
+      ? undefined
+      : `envVar=${provider.envVar}`,
+  ].filter((value): value is string => value !== undefined);
+
+  if (mismatches.length > 0) {
+    throw new TypeError(
+      `Built-in provider descriptor mismatch for ${descriptor.id}: ${mismatches.join(', ')}`,
+    );
+  }
 }

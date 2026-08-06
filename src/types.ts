@@ -174,26 +174,46 @@ export interface AsyncPollResult {
   rawStatus?: string;
 }
 
-// Provider interface — each adapter implements this
-export interface Provider {
+// Fields shared by every provider implementation.
+export interface ProviderCommon {
   id: string;
   displayName: string;
   tier: ProviderTier;
   envVar: string;
   source?: ProviderSource;
   requiresApiKey?: boolean;
+  /** Safe validation diagnostic; blocks new work but not background retrieval. */
+  configurationError?: string;
 
-  // Sync execution (all providers)
+  // All providers support direct execution. Background providers use this for
+  // synchronous callers that choose to wait for their remote task.
   execute(query: string, options: ProviderOptions): Promise<ProviderResult>;
-
-  // Async (deep-research only)
-  submit?(query: string, options: ProviderOptions): Promise<AsyncTaskHandle>;
-  poll?(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
-  retrieve?(handle: AsyncTaskHandle): Promise<ProviderResult>;
 
   // Health check
   test?(): Promise<{ ok: boolean; error?: string }>;
 }
+
+/** A provider whose work is complete when execute() resolves. */
+export interface InlineProvider extends ProviderCommon {
+  execution: 'inline';
+}
+
+/**
+ * A provider that can submit work to a remote background service.
+ *
+ * All lifecycle hooks are required together: a task handle without polling or
+ * retrieval support cannot be safely persisted or resumed.
+ */
+export interface BackgroundProvider extends ProviderCommon {
+  execution: 'background';
+
+  submit(query: string, options: ProviderOptions): Promise<AsyncTaskHandle>;
+  poll(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
+  retrieve(handle: AsyncTaskHandle): Promise<ProviderResult>;
+}
+
+// Provider interface — each adapter implements one execution contract.
+export type Provider = InlineProvider | BackgroundProvider;
 
 // Provider meta for ls/display
 export interface ProviderMeta {
@@ -325,18 +345,49 @@ export const ProjectConfigSchema = z.object({
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
-// Run manifest — written to run.json
+export type RunStatus =
+  | 'running'
+  | 'awaiting_async'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'cancelled';
+
+/**
+ * Durable background-task state embedded in its provider record. Provider,
+ * query, and output directory are inherited from the surrounding manifest so
+ * completed tasks retain a compact audit trail without duplicating run data.
+ */
+export interface RunTaskState {
+  taskId: string;
+  submittedAt: number;
+  status: AsyncTaskStatus;
+  lastPolledAt?: number;
+  completedAt?: number;
+  retrievedAt?: number;
+  /** Raw provider state from the most recent successful poll. */
+  providerStatus?: string;
+  /** Safe diagnostic from the most recent poll; never credentials or headers. */
+  lastPollError?: string;
+}
+
+// Live run manifest — written to run.json before dispatch and mutated atomically.
 export interface RunManifest {
-  version: 1;
+  schemaVersion: 2;
+  /** Monotonic persisted-mutation counter used for compare-and-swap writes. */
+  revision: number;
+  status: RunStatus;
   timestamp: number;
+  completedAt?: number;
   slug: string;
   query: string;
   mode: 'sync' | 'async' | 'mixed';
   outputDir: string;
   providers: ProviderReport[];
   sources: { total: number; unique: number; file: string };
-  asyncTasks: AsyncTaskHandle[];
-  exitCode: number;
+  exitCode: number | null;
+  /** Safe top-level diagnostic when orchestration fails after creation. */
+  error?: string;
   /** Tier-tuned query variants used for dispatch (run --refine). */
   refinedQueries?: Partial<Record<ProviderTier, string>>;
   /**
@@ -457,6 +508,8 @@ export interface ProviderReport {
   metering?: ProviderMetering;
   error?: string;
   fallbackFor?: string;
+  /** Present only for providers submitted through a background lifecycle. */
+  task?: RunTaskState;
 }
 
 // Deduplicated source entry in sources.json
@@ -480,4 +533,6 @@ export interface ProgressEvent {
   // Populated on 'completed', 'error', and 'async-submitted' (the report for
   // providerId) and on 'fallback-started' (the failed primary's error report).
   report?: ProviderReport;
+  /** Present on `async-submitted` so callers can persist the handle first. */
+  task?: AsyncTaskHandle;
 }

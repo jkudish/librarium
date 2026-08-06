@@ -1,5 +1,10 @@
 declare const __VERSION__: string;
 
+import {
+  BUILTIN_PROVIDER_DEFINITIONS,
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER,
+} from './core/provider-descriptor.js';
+
 export const VERSION =
   typeof __VERSION__ !== 'undefined' ? __VERSION__ : '0.1.0';
 
@@ -25,68 +30,26 @@ export const INITIAL_RETRY_DELAY_MS = 1000;
 export const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Provider environment variable names
-export const PROVIDER_ENV_VARS: Record<string, string> = {
-  'perplexity-sonar-deep': 'PERPLEXITY_API_KEY',
-  'perplexity-deep-research': 'PERPLEXITY_API_KEY',
-  'perplexity-advanced-deep': 'PERPLEXITY_API_KEY',
-  'perplexity-sonar-pro': 'PERPLEXITY_API_KEY',
-  'perplexity-search': 'PERPLEXITY_API_KEY',
-  'openai-research': 'OPENAI_API_KEY',
-  'gemini-deep': 'GEMINI_API_KEY',
-  'gemini-grounded': 'GEMINI_API_KEY',
-  grok: 'XAI_API_KEY',
-  'openrouter-online': 'OPENROUTER_API_KEY',
-  'you-research': 'YOU_COM_API_KEY',
-  'jina-search': 'JINA_AI_API_KEY',
-  'kagi-fastgpt': 'KAGI_API_KEY',
-  'brave-answers': 'BRAVE_API_KEY',
-  'brave-search': 'BRAVE_API_KEY',
-  exa: 'EXA_API_KEY',
-  searchapi: 'SEARCHAPI_API_KEY',
-  serpapi: 'SERPAPI_API_KEY',
-  tavily: 'TAVILY_API_KEY',
-  'firecrawl-search': 'FIRECRAWL_API_KEY',
-  claude: 'ANTHROPIC_API_KEY',
-  'openai-chat': 'OPENAI_API_KEY',
-  'gemini-chat': 'GEMINI_API_KEY',
-  'openrouter-chat': 'OPENROUTER_API_KEY',
-};
+export const PROVIDER_ENV_VARS: Record<string, string> = Object.fromEntries(
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map(
+    ({ id, credential }) => [id, credential.envVar],
+  ),
+);
 
 // Provider display names
-export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  'perplexity-sonar-deep': 'Perplexity Sonar Deep Research',
-  'perplexity-deep-research': 'Perplexity Deep Research',
-  'perplexity-advanced-deep': 'Perplexity Advanced Deep Research',
-  'perplexity-sonar-pro': 'Perplexity Sonar Pro',
-  'perplexity-search': 'Perplexity Search',
-  'openai-research': 'OpenAI Research',
-  'gemini-deep': 'Gemini Deep Research',
-  'gemini-grounded': 'Gemini Grounded Search',
-  grok: 'Grok (xAI)',
-  'openrouter-online': 'OpenRouter Online Search',
-  'you-research': 'You.com Research',
-  'jina-search': 'Jina AI Search',
-  'kagi-fastgpt': 'Kagi FastGPT',
-  'brave-answers': 'Brave AI Answers',
-  'brave-search': 'Brave Web Search',
-  exa: 'Exa Search',
-  searchapi: 'SearchAPI',
-  serpapi: 'SerpAPI',
-  tavily: 'Tavily Search',
-  'firecrawl-search': 'Firecrawl Search',
-  claude: 'Claude',
-  'openai-chat': 'OpenAI Chat',
-  'gemini-chat': 'Gemini Chat',
-  'openrouter-chat': 'OpenRouter Chat',
-};
+export const PROVIDER_DISPLAY_NAMES: Record<string, string> =
+  Object.fromEntries(
+    BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map(
+      ({ id, display }) => [id, display.name],
+    ),
+  );
 
 // Backward-compatible provider ID aliases (legacy -> canonical)
-export const PROVIDER_ID_ALIASES: Record<string, string> = {
-  'perplexity-deep': 'perplexity-sonar-deep',
-  'perplexity-sonar': 'perplexity-sonar-pro',
-  'openai-deep': 'openai-research',
-  'openai-deep-o3': 'openai-research',
-};
+export const PROVIDER_ID_ALIASES: Record<string, string> = Object.fromEntries(
+  BUILTIN_PROVIDER_DEFINITIONS.flatMap(({ id, aliases }) =>
+    aliases.map((alias) => [alias, id]),
+  ),
+);
 
 /**
  * Resolve legacy provider IDs to canonical IDs.
@@ -418,13 +381,81 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
 };
 
 /**
+ * Validate explicit group policy against the built-in descriptor inventory.
+ * Group membership remains a product decision, while drift (unknown IDs,
+ * duplicates, wrong tier rosters, or a stale `all` group) fails immediately.
+ */
+export function validateDefaultGroups(
+  groups: Record<string, readonly string[]> = DEFAULT_GROUPS,
+): void {
+  const definitions = new Map(
+    BUILTIN_PROVIDER_DEFINITIONS.map((definition) => [
+      definition.id,
+      definition,
+    ]),
+  );
+
+  for (const [group, members] of Object.entries(groups)) {
+    const seen = new Set<string>();
+    for (const id of members) {
+      if (!definitions.has(id)) {
+        throw new Error(`Default group "${group}" has unknown provider: ${id}`);
+      }
+      if (seen.has(id)) {
+        throw new Error(`Default group "${group}" repeats provider: ${id}`);
+      }
+      seen.add(id);
+    }
+  }
+
+  const assertTierGroup = (group: string, tier: string): void => {
+    for (const id of groups[group] ?? []) {
+      if (definitions.get(id)?.tier !== tier) {
+        throw new Error(
+          `Default group "${group}" contains non-${tier} provider: ${id}`,
+        );
+      }
+    }
+  };
+  assertTierGroup('deep', 'deep-research');
+  assertTierGroup('raw', 'raw-search');
+  assertTierGroup('llm', 'llm');
+
+  const expectedLlm = BUILTIN_PROVIDER_DEFINITIONS.filter(
+    ({ tier }) => tier === 'llm',
+  ).map(({ id }) => id);
+  const expectedAll = BUILTIN_PROVIDER_DEFINITIONS.filter(
+    ({ tier }) => tier !== 'llm',
+  ).map(({ id }) => id);
+  const sameMembers = (
+    actual: readonly string[] | undefined,
+    expected: string[],
+  ) =>
+    actual?.length === expected.length &&
+    expected.every((id) => actual.includes(id));
+
+  if (!sameMembers(groups.llm, expectedLlm)) {
+    throw new Error('Default group "llm" must contain every LLM provider');
+  }
+  if (!sameMembers(groups.all, expectedAll)) {
+    throw new Error(
+      'Default group "all" must contain every non-LLM built-in provider',
+    );
+  }
+}
+
+validateDefaultGroups();
+
+/**
  * Provider IDs in the `llm` tier. These are opt-in only: never auto-enabled by
  * `init --auto` and never pre-checked in interactive `init`. The default `run`
  * path (all enabled providers) therefore excludes them unless the user
  * explicitly enabled them in config.
  */
 export const LLM_TIER_PROVIDER_IDS: ReadonlySet<string> = new Set(
-  DEFAULT_GROUPS.llm,
+  BUILTIN_PROVIDER_DEFINITIONS.filter(({ tier }) => tier === 'llm').map(
+    ({ id }) => id,
+  ),
 );
 
 /** True when the provider id belongs to the opt-in `llm` tier. */

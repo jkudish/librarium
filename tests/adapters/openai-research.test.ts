@@ -7,7 +7,10 @@ import {
 import { OpenAIDeepProvider } from '../../src/adapters/openai-deep.js';
 import { OpenAIDeepO3Provider } from '../../src/adapters/openai-deep-o3.js';
 import { OpenAIResearchProvider } from '../../src/adapters/openai-research.js';
-import { dispatch } from '../../src/core/dispatcher.js';
+import {
+  type AcceptedTaskPersistenceError,
+  dispatch,
+} from '../../src/core/dispatcher.js';
 import type { AsyncTaskHandle, Config, Provider } from '../../src/types.js';
 
 function jsonResponse(status: number, data: unknown): Response {
@@ -73,7 +76,7 @@ describe('OpenAIResearchProvider', () => {
 
     const task = await provider({
       maxToolCalls: 3,
-      reasoningEffort: 'high',
+      reasoningEffort: 'medium',
       returnTokenBudget: 'unlimited',
     }).submit('What changed?', { timeout: 1800 });
     expect(task).toMatchObject({
@@ -90,13 +93,13 @@ describe('OpenAIResearchProvider', () => {
       model: 'gpt-5.6-sol',
       input: [{ role: 'user', content: 'What changed?' }],
       tools: [{ type: 'web_search', return_token_budget: 'unlimited' }],
-      reasoning: { effort: 'high' },
+      reasoning: { effort: 'medium' },
       max_tool_calls: 3,
       background: true,
     });
   });
 
-  it('uses xhigh reasoning, the standard search budget, and omits max_tool_calls by default', async () => {
+  it('uses high reasoning, the standard search budget, and omits max_tool_calls by default', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -107,7 +110,7 @@ describe('OpenAIResearchProvider', () => {
     await provider().submit('What changed?', { timeout: 1800 });
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string);
-    expect(body.reasoning).toEqual({ effort: 'xhigh' });
+    expect(body.reasoning).toEqual({ effort: 'high' });
     expect(body.tools).toEqual([
       { type: 'web_search', return_token_budget: 'default' },
     ]);
@@ -202,11 +205,13 @@ describe('OpenAIResearchProvider', () => {
     expect(result.asyncTasks).toEqual([]);
   });
 
-  it('reports an immediately cancelled submission without queuing it', async () => {
+  it('reports an immediately cancelled background submission without queuing it', async () => {
+    const progress = vi.fn();
     const cancelledProvider: Provider = {
       id: 'cancelled-submit-test',
       displayName: 'Cancelled submit test',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: vi.fn(),
       submit: async (query) => ({
@@ -215,6 +220,15 @@ describe('OpenAIResearchProvider', () => {
         query,
         submittedAt: Date.now(),
         status: 'cancelled',
+      }),
+      poll: async () => ({ status: 'cancelled' }),
+      retrieve: async () => ({
+        provider: 'cancelled-submit-test',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
+        error: 'Task was cancelled',
       }),
     };
     registerProvider(cancelledProvider);
@@ -240,20 +254,93 @@ describe('OpenAIResearchProvider', () => {
       providerIds: ['cancelled-submit-test'],
       query: 'cancel this',
       mode: 'mixed',
+      onProgress: progress,
     });
 
     expect(result.asyncTasks).toEqual([]);
     expect(result.reports).toEqual([
-      expect.objectContaining({ status: 'error', error: 'Task was cancelled' }),
+      expect.objectContaining({
+        status: 'error',
+        error: 'Task was cancelled',
+        task: expect.objectContaining({
+          taskId: 'cancelled-1',
+          status: 'cancelled',
+        }),
+      }),
     ]);
+    expect(progress.mock.calls[1]?.[0]).toMatchObject({
+      event: 'async-submitted',
+      task: { taskId: 'cancelled-1' },
+    });
     expect(cancelledProvider.execute).not.toHaveBeenCalled();
   });
 
-  it('reports an immediately failed submission without retrieval as terminal', async () => {
+  it('fails loudly with the accepted handle when write-ahead persistence fails', async () => {
+    const acceptedProvider: Provider = {
+      id: 'accepted-persistence-test',
+      displayName: 'Accepted persistence test',
+      tier: 'deep-research',
+      execution: 'background',
+      envVar: '',
+      requiresApiKey: false,
+      execute: vi.fn(),
+      submit: async (query) => ({
+        provider: 'accepted-persistence-test',
+        taskId: 'accepted-1',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      poll: async () => ({ status: 'pending' }),
+      retrieve: vi.fn(),
+    };
+    registerProvider(acceptedProvider);
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: '',
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'mixed',
+        llmWebSearch: true,
+      },
+      providers: { [acceptedProvider.id]: { enabled: true } },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+
+    const request = dispatch({
+      config,
+      providerIds: [acceptedProvider.id],
+      query: 'persist this',
+      mode: 'mixed',
+      onProgress: (event) => {
+        if (event.event === 'async-submitted') {
+          throw new Error('disk unavailable');
+        }
+      },
+    });
+
+    await expect(request).rejects.toMatchObject({
+      name: 'AcceptedTaskPersistenceError',
+      handle: {
+        provider: acceptedProvider.id,
+        taskId: 'accepted-1',
+      },
+    } satisfies Partial<AcceptedTaskPersistenceError>);
+    expect(acceptedProvider.retrieve).not.toHaveBeenCalled();
+  });
+
+  it('retrieves an immediately failed background submission', async () => {
+    const progress = vi.fn();
     const failedProvider: Provider = {
       id: 'failed-submit-test',
       displayName: 'Failed submit test',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: vi.fn(),
       submit: async (query) => ({
@@ -263,6 +350,15 @@ describe('OpenAIResearchProvider', () => {
         submittedAt: Date.now(),
         status: 'failed',
         providerStatus: 'REJECTED',
+      }),
+      poll: async () => ({ status: 'failed' }),
+      retrieve: async () => ({
+        provider: 'failed-submit-test',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
+        error: 'Task failed (REJECTED)',
       }),
     };
     registerProvider(failedProvider);
@@ -288,6 +384,7 @@ describe('OpenAIResearchProvider', () => {
       providerIds: ['failed-submit-test'],
       query: 'fail this',
       mode: 'mixed',
+      onProgress: progress,
     });
 
     expect(result.asyncTasks).toEqual([]);
@@ -295,16 +392,26 @@ describe('OpenAIResearchProvider', () => {
       expect.objectContaining({
         status: 'error',
         error: 'Task failed (REJECTED)',
+        task: expect.objectContaining({
+          taskId: 'failed-1',
+          status: 'failed',
+        }),
       }),
     ]);
+    expect(progress.mock.calls[1]?.[0]).toMatchObject({
+      event: 'async-submitted',
+      task: { taskId: 'failed-1' },
+    });
     expect(failedProvider.execute).not.toHaveBeenCalled();
   });
 
-  it('reports an immediately completed submission without retrieval as terminal', async () => {
+  it('retrieves an immediately completed background submission', async () => {
+    const progress = vi.fn();
     const completedProvider: Provider = {
       id: 'completed-submit-test',
       displayName: 'Completed submit test',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: vi.fn(),
       submit: async (query) => ({
@@ -313,6 +420,14 @@ describe('OpenAIResearchProvider', () => {
         query,
         submittedAt: Date.now(),
         status: 'completed',
+      }),
+      poll: async () => ({ status: 'completed' }),
+      retrieve: async () => ({
+        provider: 'completed-submit-test',
+        tier: 'deep-research',
+        content: 'Completed research',
+        citations: [],
+        durationMs: 1,
       }),
     };
     registerProvider(completedProvider);
@@ -338,15 +453,24 @@ describe('OpenAIResearchProvider', () => {
       providerIds: ['completed-submit-test'],
       query: 'complete this',
       mode: 'mixed',
+      onProgress: progress,
     });
 
     expect(result.asyncTasks).toEqual([]);
     expect(result.reports).toEqual([
       expect.objectContaining({
-        status: 'error',
-        error: 'Task completed, but the provider does not support retrieval',
+        status: 'success',
+        task: expect.objectContaining({
+          taskId: 'completed-1',
+          status: 'completed',
+          retrievedAt: expect.any(Number),
+        }),
       }),
     ]);
+    expect(progress.mock.calls[1]?.[0]).toMatchObject({
+      event: 'async-submitted',
+      task: { taskId: 'completed-1' },
+    });
     expect(completedProvider.execute).not.toHaveBeenCalled();
   });
 

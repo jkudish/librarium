@@ -16,16 +16,19 @@ import {
   loadCustomProviders as loadCustomProvidersInternal,
 } from './adapters/custom.js';
 import { getAllProviders, registerProvider } from './adapters/index.js';
+import { BUILTIN_PROVIDER_DESCRIPTORS } from './adapters/provider-descriptors.js';
 import type { Config } from './types.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
+export * from './core/research-run.js';
 export * from './node-credentials.js';
 
 export interface LoadCustomProvidersOptions {
   /**
    * Provider IDs that may not be claimed by a custom provider. Defaults to the
-   * IDs of every provider currently registered in the core registry (i.e. the
-   * built-ins after `initializeProviders()`), matching CLI behavior.
+   * descriptor inventory plus every provider currently registered in the core
+   * registry, so a misconfigured built-in can never be claimed by a custom
+   * provider.
    */
   reservedProviderIds?: Iterable<string>;
 }
@@ -42,7 +45,10 @@ export async function loadCustomProviders(
   options: LoadCustomProvidersOptions = {},
 ): Promise<CustomProviderLoadResult> {
   const reservedProviderIds = new Set(
-    options.reservedProviderIds ?? getAllProviders().map((p) => p.id),
+    options.reservedProviderIds ?? [
+      ...BUILTIN_PROVIDER_DESCRIPTORS.map(({ id }) => id),
+      ...getAllProviders().map((provider) => provider.id),
+    ],
   );
 
   return loadCustomProvidersInternal({

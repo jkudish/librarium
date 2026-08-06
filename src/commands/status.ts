@@ -13,7 +13,6 @@ import {
   asyncPollUpdates,
   getPendingTasks,
   loadAsyncTasks,
-  saveAsyncTasks,
   updateAsyncTask,
 } from '../core/async-manager.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
@@ -74,7 +73,7 @@ async function retrieveTask(
   providerConfig?: ProviderConfig,
 ): Promise<boolean> {
   const provider = getExactProvider(task.provider);
-  if (!provider?.retrieve) {
+  if (provider?.execution !== 'background') {
     spinner.text = `Provider ${task.provider} does not support retrieval`;
     return false;
   }
@@ -163,11 +162,6 @@ async function retrieveTask(
       return false;
     }
 
-    // Mark as retrieved by removing from async tasks
-    const tasks = loadAsyncTasks(dir);
-    const updatedTasks = tasks.filter((t) => t.taskId !== task.taskId);
-    saveAsyncTasks(dir, updatedTasks);
-
     // If an HTML report was already generated for this run, regenerate it so
     // the retrieved result fills in.
     const reportPath = join(dir, 'report.html');
@@ -212,10 +206,11 @@ export async function reconcilePendingTasksOnce(
 ): Promise<void> {
   for (const task of tasks) {
     const provider = getExactProvider(task.provider);
-    if (!provider?.poll || !task.outputDir) {
+    if (provider?.execution !== 'background' || !task.outputDir) {
       if (task.outputDir) {
         updateAsyncTask(
           task.outputDir,
+          task.provider,
           task.taskId,
           asyncPollUpdates({
             status: 'failed',
@@ -228,10 +223,16 @@ export async function reconcilePendingTasksOnce(
     }
     try {
       const result = await provider.poll(task);
-      updateAsyncTask(task.outputDir, task.taskId, asyncPollUpdates(result));
+      updateAsyncTask(
+        task.outputDir,
+        task.provider,
+        task.taskId,
+        asyncPollUpdates(result),
+      );
     } catch (error) {
       updateAsyncTask(
         task.outputDir,
+        task.provider,
         task.taskId,
         asyncPollFailureUpdates(
           error instanceof Error ? error.message : String(error),
@@ -362,11 +363,12 @@ export function registerStatusCommand(program: Command): void {
           while (remaining.length > 0) {
             for (const task of remaining) {
               const provider = getExactProvider(task.provider);
-              if (!provider?.poll) {
+              if (provider?.execution !== 'background') {
                 spinner.text = `Provider ${task.provider} does not support polling`;
                 if (task.outputDir) {
                   updateAsyncTask(
                     task.outputDir,
+                    task.provider,
                     task.taskId,
                     asyncPollUpdates({
                       status: 'failed',
@@ -389,6 +391,7 @@ export function registerStatusCommand(program: Command): void {
                   if (task.outputDir)
                     updateAsyncTask(
                       task.outputDir,
+                      task.provider,
                       task.taskId,
                       asyncPollUpdates(result),
                     );
@@ -440,6 +443,7 @@ export function registerStatusCommand(program: Command): void {
                   if (task.outputDir)
                     updateAsyncTask(
                       task.outputDir,
+                      task.provider,
                       task.taskId,
                       asyncPollUpdates(result),
                     );
@@ -448,6 +452,7 @@ export function registerStatusCommand(program: Command): void {
                 if (task.outputDir)
                   updateAsyncTask(
                     task.outputDir,
+                    task.provider,
                     task.taskId,
                     asyncPollFailureUpdates(
                       e instanceof Error ? e.message : String(e),

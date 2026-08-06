@@ -46,6 +46,7 @@ function createSuccessProvider(
     id,
     displayName: `Mock ${id}`,
     tier,
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (
       _query: string,
@@ -72,6 +73,7 @@ function createFailingProvider(
     id,
     displayName: `Mock ${id}`,
     tier,
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (): Promise<ProviderResult> => {
       throw new Error(errorMessage);
@@ -237,6 +239,50 @@ describe('dispatcher fallback', () => {
     expect(reports[0].fallbackFor).toBeUndefined();
   });
 
+  it('does not execute again after an ambiguous background submit failure', async () => {
+    process.env.MOCK_PRIMARY_KEY = 'key-primary';
+    const execute = vi.fn<Provider['execute']>();
+    const provider: Provider = {
+      id: 'primary',
+      displayName: 'Mock primary',
+      tier: 'deep-research',
+      execution: 'background',
+      envVar: 'MOCK_PRIMARY_KEY',
+      execute,
+      submit: async () => {
+        throw new Error('submit response lost');
+      },
+      poll: async () => ({ status: 'running' }),
+      retrieve: async () => ({
+        provider: 'primary',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
+      }),
+    };
+    registerProvider(provider);
+
+    const { reports } = await dispatch({
+      config: makeConfig({
+        primary: { apiKey: '$MOCK_PRIMARY_KEY', enabled: true },
+      }),
+      providerIds: ['primary'],
+      query: 'test query',
+      outputDir: tmpDir,
+      mode: 'mixed',
+      credentials: { env: process.env },
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      id: 'primary',
+      status: 'error',
+    });
+    expect(reports[0].error).toContain('remote task may have been accepted');
+  });
+
   it('reports two errors when fallback also fails', async () => {
     process.env.MOCK_PRIMARY_KEY = 'key-primary';
     process.env.MOCK_FALLBACK_FAIL_KEY = 'key-fallback-fail';
@@ -380,6 +426,7 @@ describe('dispatcher fallback', () => {
       id: 'error-result',
       displayName: 'Mock error-result',
       tier: 'ai-grounded',
+      execution: 'inline',
       envVar: 'MOCK_PRIMARY_KEY',
       execute: async (
         _query: string,

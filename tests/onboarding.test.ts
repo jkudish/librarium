@@ -10,6 +10,7 @@ function provider(id: string, envVar: string): Provider {
     id,
     displayName: id,
     tier: 'llm',
+    execution: 'inline',
     envVar,
     execute: async () => ({
       provider: id,

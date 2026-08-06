@@ -7,6 +7,10 @@ import type {
   ProviderMetering,
   ProviderUsage,
 } from '../types.js';
+import {
+  BUILTIN_PROVIDER_DEFINITIONS,
+  type ProviderMeteringDescriptor,
+} from './provider-descriptor.js';
 
 /**
  * Provider metering capability registry.
@@ -30,118 +34,23 @@ import type {
 /** Pricing snapshot tag for the built-in default estimates below. */
 export const PRICING_VERSION = '2026-08';
 
-interface MeteringCapability {
-  kind: MeteringKind;
-  /**
-   * Built-in per-request estimate (USD) for request-priced providers, or a
-   * documented baseline for native-token providers with extra tool-call fees.
-   * Plan-dependent rates are omitted so the estimate carries unit metadata
-   * without a misleading dollar figure.
-   */
-  defaultPerRequestUsd?: number;
-  /** Default billable units consumed per request (credit_priced/api_unit). */
-  defaultUnitsPerRequest?: number;
-  /** Unit the estimate is denominated in: 'request' | 'credit' | 'token'. */
-  unit?: string;
-}
-
 /**
- * Per-provider capability table. Keys are canonical provider ids.
+ * Per-provider capability table derived from the built-in descriptors.
  *
  * Default USD figures are deliberately conservative estimates of common
  * lower-volume plan pricing as of PRICING_VERSION; they are starting points,
  * not contractual rates. Users on other plans should override via provider
  * `options` (see readPricingOverride).
  */
-const REGISTRY: Record<string, MeteringCapability> = {
-  // Deep research — Perplexity returns native cost in the usage block.
-  'perplexity-sonar-deep': { kind: 'native_cost' },
-  'perplexity-deep-research': { kind: 'native_cost' },
-  'perplexity-advanced-deep': { kind: 'native_cost' },
-  // Token-metered deep research (no cost in the API response).
-  'openai-research': { kind: 'native_tokens' },
-  'gemini-deep': {
-    kind: 'native_tokens',
-    defaultPerRequestUsd: 3,
-    unit: 'task',
-  },
-
-  // AI-grounded.
-  'perplexity-sonar-pro': { kind: 'native_cost' },
-  'gemini-grounded': { kind: 'native_tokens' },
-  // xAI reports tokens plus an actual dollar total (cost_in_usd_ticks), which
-  // the adapter surfaces as reported costUsd. Kind stays native_tokens so the
-  // pre-dispatch estimate (a baseline Grok 4.5 request with one web search)
-  // keeps powering --max-estimated-cost reservations.
-  grok: {
-    kind: 'native_tokens',
-    defaultPerRequestUsd: 0.015,
-    unit: 'request',
-  },
-  'openrouter-online': { kind: 'native_cost' },
-  exa: { kind: 'native_cost' },
-  // Brave AI Answers — billed for searches and input/output tokens. The
-  // billable mix is only known after the API returns its usage headers, so no
-  // pre-dispatch USD estimate would be honest.
-  'brave-answers': {
-    kind: 'api_unit_priced',
-    unit: 'search + token',
-  },
-  // You.com — priced per query, plan-dependent: units only, no default USD.
-  'you-research': {
-    kind: 'credit_priced',
-    defaultUnitsPerRequest: 1,
-    unit: 'query',
-  },
-  // Kagi FastGPT — published flat $0.015 per call.
-  'kagi-fastgpt': {
-    kind: 'request_priced',
-    defaultPerRequestUsd: 0.015,
-    unit: 'request',
-  },
-
-  // Raw search.
-  // Perplexity search — request-priced but plan-dependent: no default USD.
-  'perplexity-search': { kind: 'request_priced', unit: 'request' },
-  'brave-search': {
-    kind: 'request_priced',
-    defaultPerRequestUsd: 0.005,
-    unit: 'request',
-  },
-  // Jina — token/API-unit priced; billable size known only post-call.
-  'jina-search': { kind: 'api_unit_priced', unit: 'token' },
-  // Firecrawl — credit-priced, plan-dependent: units only, no default USD.
-  'firecrawl-search': {
-    kind: 'credit_priced',
-    defaultUnitsPerRequest: 1,
-    unit: 'credit',
-  },
-  searchapi: {
-    kind: 'request_priced',
-    defaultPerRequestUsd: 0.004,
-    unit: 'request',
-  },
-  serpapi: {
-    kind: 'request_priced',
-    defaultPerRequestUsd: 0.015,
-    unit: 'request',
-  },
-  // Tavily — credit-priced; advanced search consumes 2 credits.
-  tavily: { kind: 'credit_priced', defaultUnitsPerRequest: 2, unit: 'credit' },
-
-  // Ungrounded LLMs — token-metered, no cost in the response.
-  claude: { kind: 'native_tokens' },
-  'openai-chat': { kind: 'native_tokens' },
-  'gemini-chat': { kind: 'native_tokens' },
-  // OpenRouter returns native cost in its usage block.
-  'openrouter-chat': { kind: 'native_cost' },
-};
+const REGISTRY: Record<string, ProviderMeteringDescriptor> = Object.fromEntries(
+  BUILTIN_PROVIDER_DEFINITIONS.map(({ id, metering }) => [id, metering]),
+);
 
 /** Capability for unregistered/custom providers: no reliable per-call metering. */
-const UNMETERED: MeteringCapability = { kind: 'manual_unmetered' };
+const UNMETERED: ProviderMeteringDescriptor = { kind: 'manual_unmetered' };
 
 /** Look up a provider's static metering capability (kind + pricing shape). */
-function getCapability(providerId: string): MeteringCapability {
+function getCapability(providerId: string): ProviderMeteringDescriptor {
   return REGISTRY[resolveProviderId(providerId)] ?? UNMETERED;
 }
 

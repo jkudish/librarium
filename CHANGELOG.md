@@ -27,6 +27,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Built-in providers now use typed descriptors as the single source for
+  factories, tiers, display/catalog metadata, credential names, aliases,
+  default models, metering, option schemas, and execution capabilities.
+  Registry and catalog output are derived from the descriptors; explicit
+  default-group policy is validated automatically against the inventory.
+- CLI and MCP research now share the headless `executeResearchRun()` Node
+  application service with optional provider-registry, task-store, and HTTP
+  overrides plus typed lifecycle events.
+
+- **Breaking run artifact schema:** `run.json` is now a live
+  `schemaVersion: 2` manifest written before dispatch. It carries a monotonic
+  `revision`, explicit run lifecycle status, nullable in-progress `exitCode`,
+  and provider-embedded background task state. Retrieval retains compact task
+  audit metadata on the provider entry. Per-run inter-process locks serialize
+  mutations so concurrent CLI/MCP reconciliation cannot lose task updates.
+- **Breaking library API:** custom and hand-written providers must now declare
+  `execution: "inline"` or `execution: "background"`. Background providers
+  must implement the complete `execute`/`submit`/`poll`/`retrieve` lifecycle;
+  partial lifecycle hooks are rejected at registration. Script-provider
+  `describe` responses must declare the same execution contract and explicitly
+  advertise `execute`.
+- **Breaking HTTP API:** `HttpRequestOptions.maxRetries` is replaced by the
+  explicit `retry` policy. GET requests use bounded safe retries by default;
+  non-GET requests do not retry unless configured with `mode: "idempotent"`
+  and an idempotency key.
 - Claude now defaults to `claude-sonnet-5` with a 16,000-token output ceiling,
   adaptive thinking, and `medium` effort. `maxTokens`, `thinking`, and `effort`
   are configurable; automatic thinking/effort defaults apply only to the
@@ -48,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rendering. `--wait` continues polling from that reconciled state.
 
 ### Removed
+
+- Removed all `async-tasks.json` reads and writes, including legacy v1 run
+  manifest fallback. Existing v1 run directories are intentionally not loaded;
+  new status, browse, usage, cleanup, report, and MCP operations require a
+  schemaVersion 2 `run.json`.
 
 - New submissions to OpenAI's retired `o4-mini-deep-research` and
   `o3-deep-research` models. Pending handles created by those removed

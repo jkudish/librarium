@@ -39,6 +39,7 @@ function searchProvider(id: string): Provider {
     id,
     displayName: `Mock ${id}`,
     tier: 'raw-search',
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (
       _query: string,
@@ -281,6 +282,7 @@ describe('dispatcher: estimated budget reservation', () => {
       id: 'serpapi',
       displayName: 'Mock serpapi',
       tier: 'raw-search',
+      execution: 'inline',
       envVar: 'MOCK_SERPAPI_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'serpapi',
@@ -323,6 +325,7 @@ describe('dispatcher: estimated budget reservation', () => {
       id: 'serpapi',
       displayName: 'Mock serpapi',
       tier: 'raw-search',
+      execution: 'inline',
       envVar: 'MOCK_SERPAPI_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'serpapi',

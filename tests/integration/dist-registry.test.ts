@@ -73,6 +73,7 @@ describe('dist registry sharing (core + node)', () => {
         `  id: '${id}',`,
         "  displayName: 'Dist Lib Provider',",
         "  tier: 'ai-grounded',",
+        "  execution: 'inline',",
         "  envVar: '',",
         '  requiresApiKey: false,',
         '  async execute(query) {',
@@ -90,6 +91,22 @@ describe('dist registry sharing (core + node)', () => {
       'utf-8',
     );
   }
+
+  it('exports the built-in descriptor inventory from the packaged core', async () => {
+    const core = (await import(DIST_CORE)) as CoreModule;
+
+    expect(core.BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(24);
+    expect(
+      core.BUILTIN_PROVIDER_DESCRIPTORS.find(
+        (descriptor) => descriptor.id === 'openai-research',
+      ),
+    ).toMatchObject({
+      defaultModel: 'gpt-5.6-sol',
+      capabilities: { execution: 'background', taskPersistence: 'remote' },
+      credential: { envVar: 'OPENAI_API_KEY', required: true },
+      metering: { kind: 'native_tokens' },
+    });
+  });
 
   it('registerCustomProviders (node) is visible to getProvider/dispatch (core)', async () => {
     const core = (await import(DIST_CORE)) as CoreModule;
@@ -169,5 +186,28 @@ describe('dist registry sharing (core + node)', () => {
 
     // The built-in exa provider (registered via core) is still the one core sees.
     expect(core.getProvider('exa')?.source).toBe('builtin');
+  });
+
+  it('reserves descriptor IDs even when current options are invalid', async () => {
+    const core = (await import(DIST_CORE)) as CoreModule;
+    const node = (await import(DIST_NODE)) as NodeModule;
+
+    writeNpmProvider('claude');
+    const initialized = await core.initializeProviders({
+      providers: { claude: { options: { thinking: 'turbo' } } },
+    });
+    expect(initialized.warnings.join(' ')).toContain(
+      'Invalid options for claude',
+    );
+
+    const result = await node.registerCustomProviders({
+      providers: { claude: { enabled: true } },
+      customProviders: { claude: { type: 'npm', module: 'claude' } },
+      trustedProviderIds: ['claude'],
+    });
+
+    expect(result.loadedIds).not.toContain('claude');
+    expect(result.skippedIds).toContain('claude');
+    expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
   });
 });

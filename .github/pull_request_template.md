@@ -18,5 +18,5 @@
 
 - [ ] `npm test` passes
 - [ ] `npm run lint` passes
-- [ ] New providers include an adapter in `src/adapters/` and are registered in `src/adapters/index.ts`
+- [ ] New providers include an adapter, a built-in descriptor, explicit group membership, and a core export
 - [ ] Config changes are reflected in `src/core/config.ts` and `src/types.ts`

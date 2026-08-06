@@ -42,6 +42,7 @@ function costProvider(
     id,
     displayName: `Mock ${id}`,
     tier,
+    execution: 'inline',
     envVar: `MOCK_${id.toUpperCase().replace(/-/g, '_')}_KEY`,
     execute: async (
       _query: string,
@@ -173,6 +174,7 @@ describe('dispatcher budget circuit breaker', () => {
       id: 'mock-b',
       displayName: 'Mock mock-b',
       tier: 'ai-grounded',
+      execution: 'inline',
       envVar: 'MOCK_B_KEY',
       execute: async (): Promise<ProviderResult> => {
         // Fail only after mock-a has reported its over-budget cost, so the

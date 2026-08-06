@@ -1,3 +1,4 @@
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   Citation,
   ProviderOptions,
@@ -6,6 +7,8 @@ import type {
   ProviderUsage,
 } from '../types.js';
 import { BaseProvider } from './base.js';
+
+const SONAR_PRO_MODEL = getBuiltinProviderDefaultModel('perplexity-sonar-pro');
 
 interface PerplexityMessage {
   role: string;
@@ -54,7 +57,7 @@ export class PerplexitySonarProProvider extends BaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-pro',
+            model: SONAR_PRO_MODEL,
             messages: [{ role: 'user', content: query }],
           },
           timeout: options.timeout * 1000,
@@ -85,7 +88,7 @@ export class PerplexitySonarProProvider extends BaseProvider {
         content,
         citations,
         durationMs,
-        model: data.model ?? 'sonar-pro',
+        model: data.model ?? SONAR_PRO_MODEL,
         tokenUsage: {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
@@ -114,7 +117,7 @@ export class PerplexitySonarProProvider extends BaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-pro',
+            model: SONAR_PRO_MODEL,
             messages: [{ role: 'user', content: 'ping' }],
             max_tokens: 5,
           },

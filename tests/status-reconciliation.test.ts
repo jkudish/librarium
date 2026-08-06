@@ -25,6 +25,7 @@ describe('status reconciliation', () => {
       id: 'status-reconcile-mock',
       displayName: 'Status reconcile mock',
       tier: 'deep-research',
+      execution: 'background',
       envVar: '',
       execute: async () => ({
         provider: 'status-reconcile-mock',
@@ -36,6 +37,20 @@ describe('status reconciliation', () => {
       poll: async () => ({
         status: 'completed',
         rawStatus: 'COMPLETED',
+      }),
+      submit: async (query) => ({
+        provider: 'status-reconcile-mock',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      retrieve: async () => ({
+        provider: 'status-reconcile-mock',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
       }),
     };
     registerProvider(provider);
@@ -51,14 +66,14 @@ describe('status reconciliation', () => {
 
     await reconcilePendingTasksOnce([task]);
 
-    const persisted = JSON.parse(
-      readFileSync(join(dir, 'async-tasks.json'), 'utf8'),
-    );
-    expect(persisted[0]).toMatchObject({
+    const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(persisted.providers[0].task).toMatchObject({
       status: 'completed',
       providerStatus: 'COMPLETED',
     });
-    expect(persisted[0].completedAt).toEqual(expect.any(Number));
-    expect(persisted[0].lastPolledAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.lastPolledAt).toEqual(
+      expect.any(Number),
+    );
   });
 });

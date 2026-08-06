@@ -1,3 +1,4 @@
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type { ProviderTier } from '../types.js';
 import { PerplexityAgentBaseProvider } from './perplexity-agent-base.js';
 
@@ -9,5 +10,5 @@ import { PerplexityAgentBaseProvider } from './perplexity-agent-base.js';
 export class PerplexityDeepResearchProvider extends PerplexityAgentBaseProvider {
   readonly id = 'perplexity-deep-research';
   readonly tier: ProviderTier = 'deep-research';
-  readonly preset = 'deep-research';
+  readonly preset = getBuiltinProviderDefaultModel('perplexity-deep-research');
 }

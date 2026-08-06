@@ -1,36 +1,65 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
   AsyncTaskStatus,
 } from '../types.js';
-import { safeWriteFile } from './fs-utils.js';
-
-const ASYNC_TASKS_FILE = 'async-tasks.json';
+import {
+  createRunManifest,
+  discoverRunTasks,
+  loadRunTasks,
+  mutateRunManifest,
+  toRunTaskState,
+  tryReadRunManifest,
+  updateRunTask,
+} from './run-manifest.js';
 
 /**
  * Load async tasks from an output directory
  */
 export function loadAsyncTasks(outputDir: string): AsyncTaskHandle[] {
-  const path = join(outputDir, ASYNC_TASKS_FILE);
-  if (!existsSync(path)) return [];
   try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
+    return loadRunTasks(outputDir);
   } catch {
     return [];
   }
 }
 
-/**
- * Save async tasks to an output directory
- */
+/** @internal Seed embedded task state; retained for internal callers/tests. */
 export function saveAsyncTasks(
   outputDir: string,
   tasks: AsyncTaskHandle[],
 ): void {
-  const path = join(outputDir, ASYNC_TASKS_FILE);
-  safeWriteFile(path, JSON.stringify(tasks, null, 2));
+  const providers = tasks.map((task) => ({
+    id: task.provider,
+    tier: 'deep-research' as const,
+    status: 'async-pending' as const,
+    durationMs: 0,
+    wordCount: 0,
+    citationCount: 0,
+    outputFile: '',
+    metaFile: '',
+    task: toRunTaskState(task),
+  }));
+  const current = tryReadRunManifest(outputDir);
+  if (!current) {
+    createRunManifest(outputDir, {
+      status: 'awaiting_async',
+      timestamp: Math.floor(Date.now() / 1000),
+      slug: 'async-run',
+      query: tasks[0]?.query ?? '',
+      mode: 'async',
+      outputDir,
+      providers,
+      sources: { total: 0, unique: 0, file: 'sources.json' },
+      exitCode: null,
+    });
+    return;
+  }
+  mutateRunManifest(outputDir, (manifest) => {
+    manifest.providers = providers;
+    manifest.status = 'awaiting_async';
+    manifest.exitCode = null;
+  });
 }
 
 /**
@@ -38,16 +67,11 @@ export function saveAsyncTasks(
  */
 export function updateAsyncTask(
   outputDir: string,
+  providerId: string,
   taskId: string,
   updates: Partial<AsyncTaskHandle>,
 ): AsyncTaskHandle | null {
-  const tasks = loadAsyncTasks(outputDir);
-  const index = tasks.findIndex((t) => t.taskId === taskId);
-  if (index === -1) return null;
-
-  tasks[index] = { ...tasks[index], ...updates };
-  saveAsyncTasks(outputDir, tasks);
-  return tasks[index];
+  return updateRunTask(outputDir, providerId, taskId, updates);
 }
 
 export function isAsyncTaskTerminal(status: AsyncTaskStatus): boolean {
@@ -87,24 +111,8 @@ export function asyncPollFailureUpdates(
  * Get all pending/running async tasks across all output directories
  */
 export function getPendingTasks(baseOutputDir: string): AsyncTaskHandle[] {
-  if (!existsSync(baseOutputDir)) return [];
-
-  const entries = readdirSync(baseOutputDir);
-  const tasks: AsyncTaskHandle[] = [];
-
-  for (const entry of entries) {
-    const dir = join(baseOutputDir, entry);
-    try {
-      if (!statSync(dir).isDirectory()) continue;
-      const dirTasks = loadAsyncTasks(dir);
-      for (const task of dirTasks) {
-        if (task.status === 'pending' || task.status === 'running') {
-          if (!task.outputDir) task.outputDir = dir;
-          tasks.push(task);
-        }
-      }
-    } catch {}
-  }
-
-  return tasks;
+  return discoverRunTasks(
+    baseOutputDir,
+    new Set<AsyncTaskStatus>(['pending', 'running']),
+  );
 }

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { isRunManifest } from '../core/run-manifest.js';
 import type { RunManifest } from '../types.js';
 
 /**
@@ -13,16 +14,7 @@ export interface RunEntry {
   manifest: RunManifest;
 }
 
-/** Minimal structural check so a corrupt run.json can't crash the browser. */
-export function isRunManifest(value: unknown): value is RunManifest {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.query === 'string' &&
-    typeof candidate.timestamp === 'number' &&
-    Array.isArray(candidate.providers)
-  );
-}
+export { isRunManifest } from '../core/run-manifest.js';
 
 /** Parse a single run directory; returns null when there is no valid run.json. */
 export function readRunEntry(dir: string): RunEntry | null {

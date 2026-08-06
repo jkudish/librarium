@@ -9,7 +9,7 @@ import type {
   ProviderTier,
   ProviderUsage,
 } from '../types.js';
-import { BaseProvider } from './base.js';
+import { BackgroundBaseProvider } from './base.js';
 
 /**
  * Citation annotation attached to a TextContent block.
@@ -100,7 +100,7 @@ const STATUS_MAP: Record<string, AsyncTaskStatus> = {
  * server-side for minutes; results are polled and retrieved by interaction id.
  * Tier: deep-research (true async).
  */
-export class GeminiDeepProvider extends BaseProvider {
+export class GeminiDeepProvider extends BackgroundBaseProvider {
   readonly id = 'gemini-deep';
   readonly tier: ProviderTier = 'deep-research';
   readonly model: string;
@@ -222,7 +222,6 @@ export class GeminiDeepProvider extends BaseProvider {
         },
         timeout: 30000,
         signal: options.signal,
-        maxRetries: 0,
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(

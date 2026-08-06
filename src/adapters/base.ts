@@ -4,11 +4,16 @@ import {
   resolveCredential,
 } from '../core/credentials.js';
 import {
+  type HttpClient,
   type HttpRequestOptions,
   type HttpResponse,
   httpRequest,
 } from '../core/http-client.js';
 import type {
+  AsyncPollResult,
+  AsyncTaskHandle,
+  BackgroundProvider,
+  InlineProvider,
   Provider,
   ProviderOptions,
   ProviderResult,
@@ -18,17 +23,17 @@ import type {
 export interface BaseProviderOptions {
   apiKey?: string;
   credentials?: CredentialContext;
+  httpClient?: HttpClient;
 }
 
 /**
  * Base class for all provider adapters.
  * Handles common concerns: API key resolution, HTTP client, display info.
  *
- * Note: submit/poll/retrieve are NOT declared here. Only deep-research
- * subclasses that need async capabilities implement them directly,
- * satisfying the Provider interface's optional methods.
+ * Inline is the default execution contract, so the synchronous adapters need
+ * no per-class boilerplate. Background adapters extend BackgroundBaseProvider.
  */
-export abstract class BaseProvider implements Provider {
+export abstract class ProviderBase {
   abstract readonly id: string;
   abstract readonly tier: ProviderTier;
   source?: Provider['source'];
@@ -36,10 +41,12 @@ export abstract class BaseProvider implements Provider {
 
   private apiKeyRef?: string;
   private credentials: CredentialContext;
+  private httpClient: HttpClient;
 
   constructor(options: BaseProviderOptions = {}) {
     this.apiKeyRef = options.apiKey;
     this.credentials = options.credentials ?? {};
+    this.httpClient = options.httpClient ?? httpRequest;
   }
 
   get displayName(): string {
@@ -53,6 +60,20 @@ export abstract class BaseProvider implements Provider {
   configure(options: BaseProviderOptions): void {
     this.apiKeyRef = options.apiKey;
     this.credentials = options.credentials ?? {};
+    this.httpClient = options.httpClient ?? httpRequest;
+  }
+
+  /**
+   * Create a run-local provider instance with a different transport while
+   * preserving the initialized credentials and adapter configuration.
+   */
+  withHttpClient(httpClient: HttpClient): this {
+    const clone = Object.assign(
+      Object.create(Object.getPrototypeOf(this)) as this,
+      this,
+    );
+    clone.httpClient = httpClient;
+    return clone;
   }
 
   /**
@@ -76,7 +97,7 @@ export abstract class BaseProvider implements Provider {
     url: string,
     options: HttpRequestOptions = {},
   ): Promise<HttpResponse<T>> {
-    return httpRequest<T>(url, options);
+    return this.httpClient<T>(url, options);
   }
 
   /**
@@ -119,4 +140,28 @@ export abstract class BaseProvider implements Provider {
     query: string,
     options: ProviderOptions,
   ): Promise<ProviderResult>;
+}
+
+export abstract class BaseProvider
+  extends ProviderBase
+  implements InlineProvider
+{
+  readonly execution = 'inline' as const;
+}
+
+/** Base for adapters that implement the complete persisted-task lifecycle. */
+export abstract class BackgroundBaseProvider
+  extends ProviderBase
+  implements BackgroundProvider
+{
+  readonly execution = 'background' as const;
+
+  abstract submit(
+    query: string,
+    options: ProviderOptions,
+  ): Promise<AsyncTaskHandle>;
+
+  abstract poll(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
+
+  abstract retrieve(handle: AsyncTaskHandle): Promise<ProviderResult>;
 }

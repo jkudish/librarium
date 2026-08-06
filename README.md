@@ -208,7 +208,7 @@ You can also add **custom providers** (npm modules or local scripts) via config.
 
 ## Provider Tiers
 
-Providers are categorized into four tiers based on their capabilities, latency, and depth:
+Providers are categorized into four tiers based on their capabilities, latency, and depth. Their execution contract is separate: an `inline` provider finishes in `execute()`, while a `background` provider also provides complete `submit`/`poll`/`retrieve` lifecycle hooks.
 
 - **deep-research** -- Async deep research providers that take minutes to complete but produce comprehensive, multi-source reports. These providers may use a submit/poll/retrieve pattern. Best for thorough research on important topics.
 
@@ -239,6 +239,39 @@ If you want old-style direct model answers with no web search, set `"llmWebSearc
 - Interactive setup **lists** the llm-tier providers but does not select them for you, so you must choose them deliberately.
 
 As a result they stay out of the default run unless you explicitly enable them in config. Reach for them on demand via `-p claude,openai-chat,...`, a custom group, or `--group llm` regardless of your init choices.
+
+### Built-in provider descriptors
+
+Each built-in provider is represented by one typed descriptor. It combines the
+adapter factory with its tier, display/catalog metadata, credential environment
+variable, metering declaration, option schema, aliases, default model, and a
+discriminated inline/background capability contract. Registry initialization,
+the onboarding catalog, provider names, credential lookup, aliases, and
+metering are derived from that inventory. Default groups remain explicit
+policy, with automatic validation against the inventory so a new provider
+cannot silently drift out of `all` or `llm`.
+
+Library consumers can inspect the same inventory:
+
+```ts
+import { BUILTIN_PROVIDER_DESCRIPTORS } from 'librarium/core';
+
+for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
+  console.log({
+    id: descriptor.id,
+    model: descriptor.defaultModel,
+    execution: descriptor.capabilities.execution,
+    options: descriptor.optionsSchema,
+  });
+}
+```
+
+Configured options are checked against the descriptor schema during
+initialization. Invalid values produce a warning while the adapter stays
+registered, so background retrieval and built-in ID protection remain intact;
+the adapter blocks `execute`, `submit`, and `test` before HTTP. Background
+`poll` and `retrieve` remain available for work submitted before the config
+became invalid.
 
 ## Commands
 
@@ -352,7 +385,7 @@ $ librarium answer "what changed in postgres 17 logical replication"
 
 The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--max-cost`, `--max-estimated-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
 
-Pass `--verify` to add a bounded, opt-in evidence pass after synthesis. Librarium selects up to eight material factual claims, checks the independent source evidence already returned by the fan-out, and only then collects evidence from up to three successful targeted searches for unresolved claims. A query whose provider attempts all fail does not consume that successful-query allowance. Follow-ups use only eligible `ai-grounded` and `raw-search` providers from the original run; deep-research providers are never used. Each selected claim gets at most one query with at most three provider attempts, honoring configured fallbacks, eligible alternates, the inherited per-call timeout, and both inherited cost ceilings. If either ceiling is already exhausted by the original fan-out, verification makes no LLM or provider call. Verification fails open: any incomplete evidence, budget exhaustion, provider failure, or LLM failure leaves the original grounded `answer.md` intact.
+Pass `--verify` to add a bounded, opt-in evidence pass after synthesis. Librarium selects up to eight material factual claims, checks the independent source evidence already returned by the fan-out, and only then collects evidence from up to three successful targeted searches for unresolved claims. A query whose provider attempts all fail does not consume that successful-query allowance. Follow-ups start with eligible successful `ai-grounded` and `raw-search` providers from the original run and may traverse their configured eligible fallback chains, including a fallback provider that was not part of the original result set; deep-research providers are never used. Each selected claim gets at most one query with at most three provider attempts, honoring configured fallbacks, eligible alternates, the inherited per-call timeout, and both inherited cost ceilings. If either ceiling is already exhausted by the original fan-out, verification makes no LLM or provider call. Verification fails open: any incomplete evidence, budget exhaustion, provider failure, or LLM failure leaves the original grounded `answer.md` intact.
 
 `verification.json`, `run.json`, `results.jsonl` (a `"type":"verification"` line), and `report.html` carry the complete verification audit record: status and reasons, the claim-support matrix, every follow-up query and provider attempt, every verification LLM attempt, explicit revision state, and verification-only usage. `verification.usage.reportedCostUsd` and `estimatedCostUsd` are totals for the incremental provider follow-ups **plus** verification LLM calls; the original answer-synthesis call is intentionally outside this accounting. The nested `verification.usage.provider` and `.llm` objects keep token and cost lanes separate, while `successfulProviderAttempts` and `successfulLlmCalls` distinguish successful calls from all paid attempts. `reportedCostIsLowerBound`, `estimatedCostIsLowerBound`, and each lane's corresponding flags are true whenever an attempted provider could not report or be estimated, so a displayed zero is never presented as a known-free call. Per-attempt normalized API usage remains available on the provider-attempt and LLM records.
 ### Spend guardrails
@@ -380,7 +413,7 @@ Use `--max-cost` as a backstop against runaway synchronous fan-outs, not as a ha
 
 `--max-cost` is deliberately reported-only: it never guesses. The gap it leaves — providers that report no cost (most raw-search APIs) run "for free" as far as the breaker is concerned — is filled by a separate, opt-in **estimated** lane.
 
-Every provider declares a **metering kind** in a built-in registry, visible in `librarium ls` (and its `--json`):
+Every provider declares a **metering kind** in its built-in descriptor, visible in `librarium ls` (and its `--json`):
 
 | Kind | Meaning | Examples |
 |---|---|---|
@@ -906,9 +939,10 @@ Adaptive thinking and medium effort are automatic only for the default Sonnet
 5 model. When `model` is overridden, thinking and effort are omitted unless
 they are explicitly configured, avoiding unsupported fields on older models.
 
-OpenAI Research defaults to GPT-5.6 Sol with `xhigh` reasoning and OpenAI's
-standard web-search return-token budget. Configure its model and research
-limits under the canonical `openai-research` provider ID:
+OpenAI Research defaults to GPT-5.6 Sol with `high` reasoning, OpenAI's
+standard web-search return-token budget, and no tool-call ceiling. Configure
+its model and research limits under the canonical `openai-research` provider
+ID:
 
 ```json
 {
@@ -918,8 +952,7 @@ limits under the canonical `openai-research` provider ID:
       "enabled": true,
       "model": "gpt-5.6-sol",
       "options": {
-        "reasoningEffort": "high",
-        "maxToolCalls": 5,
+        "reasoningEffort": "medium",
         "returnTokenBudget": "default"
       }
     }
@@ -928,10 +961,13 @@ limits under the canonical `openai-research` provider ID:
 ```
 
 `reasoningEffort` accepts `none`, `low`, `medium`, `high`, `xhigh`, or `max`
-and defaults to `xhigh`. `maxToolCalls` must be a positive integer when set.
-`returnTokenBudget` accepts `default` or `unlimited` and defaults to `default`.
-Use `unlimited` only for high-effort research that needs to inspect unusually
-large amounts of web content; it can increase latency and token usage.
+and defaults to `high`. Use `medium` as a speed-oriented setting and `xhigh`
+as a quality-first override. `maxToolCalls` must be a positive integer when
+set; it is uncapped by default because low ceilings can prevent complete
+research. `returnTokenBudget` accepts `default` or `unlimited` and defaults to
+`default`. Use `unlimited` only for high-effort research that needs to inspect
+unusually large amounts of web content; it can increase latency and token
+usage.
 
 Firecrawl Search defaults to ten web results. Its `limit` is applied **per
 source**, so selecting both web and news can return up to twice that number.
@@ -1123,9 +1159,11 @@ Error response:
   "data": {
     "displayName": "My Script Provider",
     "tier": "deep-research",
+    "execution": "background",
     "envVar": "MY_PROVIDER_API_KEY",
     "requiresApiKey": true,
     "capabilities": {
+      "execute": true,
       "submit": true,
       "poll": true,
       "retrieve": true,
@@ -1151,14 +1189,15 @@ Each research run creates a timestamped output directory:
   brave-answers.md
   brave-answers.meta.json
   verification.json      # Present after `librarium answer --verify`
-  async-tasks.json       # Present if any async tasks were submitted
 ```
 
 ### run.json Schema
 
 ```json
 {
-  "version": 1,
+  "schemaVersion": 2,
+  "revision": 4,
+  "status": "completed",
   "timestamp": 1771500000,
   "slug": "postgresql-pooling",
   "query": "PostgreSQL connection pooling best practices",
@@ -1208,10 +1247,11 @@ Each research run creates a timestamped output directory:
     "unique": 28,
     "file": "sources.json"
   },
-  "asyncTasks": [],
   "exitCode": 0
 }
 ```
+
+`run.json` is created before dispatch and is the only persisted source of truth for the run. Per-run inter-process locking serializes mutations, and `revision` increases on every atomic mutation. Locks fail closed: an orphaned lock after a hard process crash must be removed manually only after confirming no Librarium process is using that run. `status` is `running`, `awaiting_async`, `completed`, `partial`, `failed`, or `cancelled`; `exitCode` is `null` while work is still running or awaiting retrieval. Background providers add a `task` object directly to their provider entry containing the provider task ID, timestamps, mapped status, and safe diagnostics. After retrieval, the compact task audit remains with `retrievedAt`; Librarium does not create or read `async-tasks.json`.
 
 The `usage` and `metering` fields are optional. `usage` is reported-only: its `inputTokens`, `outputTokens`, `totalTokens`, and `costUsd` appear only when the provider's API actually returns them, and `usage.costUsd` is never a pricing-table estimate. `metering` carries the provider's metering `kind` and, once a real figure is known, the actual-cost lane (`metering.actual.source` is `provider_reported` for a cost the API returned); network-free pre-dispatch estimates live under `metering.estimate` instead. See [Metering registry and the estimated budget](#metering-registry-and-the-estimated-budget) for the full model.
 
@@ -1225,7 +1265,7 @@ The `usage` and `metering` fields are optional. `usage` is reported-only: its `i
 
 ## Library Usage (`librarium/core`)
 
-Everything the CLI does with providers is importable. The `librarium/core` entry exposes the adapters, registry, dispatcher, normalizer, and types -- and returns results **in memory** (writing `run.json`/report files is a CLI concern). The core entry has zero Node-only dependencies: no `node:fs`, no `process.env` access, fetch-based HTTP only. It is tested in workerd (Cloudflare's runtime) on every CI run.
+Everything the CLI does with providers is importable. The `librarium/core` entry exposes the adapters, registry, dispatcher, normalizer, and types, and returns results **in memory**. The core entry has zero Node-only dependencies: no `node:fs`, no `process.env` access, fetch-based HTTP only. It is tested in workerd (Cloudflare's runtime) on every CI run. Node applications that want Librarium's complete durable file-writing lifecycle can use `executeResearchRun()` from `librarium/node`.
 
 ```bash
 npm install librarium
@@ -1274,6 +1314,36 @@ Notes:
 - **Async deep-research from the library.** `dispatch` with `mode: 'async'`/`'mixed'` returns `asyncTasks` handles; polling/retrieval is the caller's responsibility. See [Async deep-research](#async-deep-research-from-the-library).
 - **Bring your own persistence.** Core returns data; where it goes (D1, R2, files, nowhere) is up to you.
 
+### Headless durable runs (`librarium/node`)
+
+`executeResearchRun(request, overrides?)` is the shared application service behind the CLI and MCP server. It has no spinner, prompt, stdout, or stderr behavior. The caller supplies an initialized config, selected provider IDs, and an output directory; the service creates and reconciles `run.json`, dispatches providers, writes provider results, deduplicates citations, and writes `prompt.md`, `sources.json`, and `summary.md`.
+
+```ts
+import { initializeProviders } from 'librarium/core';
+import { executeResearchRun } from 'librarium/node';
+
+const credentials = { env: process.env };
+await initializeProviders({ ...config, credentials });
+
+const run = await executeResearchRun({
+  query: 'Compare current deep-research APIs',
+  config,
+  providerIds: ['openai-research'],
+  outputDir: '/absolute/path/to/run',
+  slug: 'compare-current-deep-research-apis',
+  credentials,
+  onEvent(event) {
+    if (event.type === 'dispatch-progress') {
+      renderProgress(event.progress);
+    }
+  },
+});
+
+console.log(run.manifest.status, run.sources.length);
+```
+
+Production defaults are used when `overrides` is omitted. Embedders and tests may independently replace `providerRegistry`, `taskStore`, `httpClient`, or `dispatch`. The HTTP override creates run-local copies of built-in and other `ProviderBase` adapters; a registry containing plain-object providers can implement `withHttpClient()` to supply its own run-local projection. `onEvent` receives a typed event union and is observational: an event handler failure cannot interrupt dispatch or corrupt persistence. A `postDispatch` callback can add `answer` or `verification` metadata before the manifest reaches its final lifecycle state; callback failures are reported as `post-dispatch-warning` events and do not discard the run.
+
 ### Custom providers (`librarium/node`)
 
 Three flavors of custom provider:
@@ -1285,7 +1355,7 @@ Three flavors of custom provider:
 The last two are Node-only, so they live behind the `librarium/node` entry point (one implementation, shared with the CLI). It exposes:
 
 - `loadCustomProviders(config, options?) -> { providers, loadedIds, skippedIds, warnings }` -- loads (but does not register) the npm/script providers declared in `config.customProviders`, applying the same `trustedProviderIds` gating and reserved-ID protection the CLI uses.
-- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Call it after `initializeProviders()` so reserved-ID detection sees the built-ins. Same return shape.
+- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Built-in IDs are reserved directly from the descriptor inventory, even before initialization or when a built-in has invalid options. Same return shape.
 
 ```ts
 import { dispatch, initializeProviders, getProvider } from 'librarium/core';
@@ -1374,7 +1444,7 @@ const handles: AsyncTaskHandle[] = await loadHandles();
 
 for (const handle of handles) {
   const provider = getProvider(handle.provider);
-  if (!provider?.poll || !provider.retrieve) continue; // not an async provider
+  if (provider?.execution !== 'background') continue;
 
   // 3. Poll for status. AsyncPollResult.status is the AsyncTaskStatus enum:
   //    'pending' | 'running' | 'completed' | 'failed' | 'cancelled'

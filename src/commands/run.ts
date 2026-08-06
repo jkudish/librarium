@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import { type Command, InvalidArgumentError } from 'commander';
 import ora from 'ora';
@@ -8,7 +8,6 @@ import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import { saveAsyncTasks } from '../core/async-manager.js';
 import {
   BUDGET_SKIP_REASON,
   createBudgetTracker,
@@ -16,22 +15,14 @@ import {
   ESTIMATE_BUDGET_SKIP_REASON,
 } from '../core/budget.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
-import { dispatch } from '../core/dispatcher.js';
-import { safeWriteFile } from '../core/fs-utils.js';
-import { deduplicateSources } from '../core/normalizer.js';
-import {
-  buildPrompt,
-  generateSlug,
-  resolveOutputDir,
-} from '../core/prompt-builder.js';
+import { generateSlug, resolveOutputDir } from '../core/prompt-builder.js';
 import {
   ProviderSelectionError,
   resolveProviderSelection,
 } from '../core/provider-selection.js';
-import { generateSummary } from '../core/synthesis.js';
+import { executeResearchRun } from '../core/research-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
-  Citation,
   Config,
   DeduplicatedSource,
   Defaults,
@@ -58,6 +49,7 @@ import {
   formatRunSummary,
   hyperlink,
   isColorEnabled,
+  type LineWidths,
   shortenHomePath,
 } from './run-format.js';
 
@@ -110,7 +102,7 @@ export interface PostDispatchContext {
 
 export interface PostDispatchResult {
   /** Additive fields merged into the run manifest before it is written. */
-  manifestExtra?: Partial<RunManifest>;
+  manifestExtra?: Partial<Pick<RunManifest, 'answer' | 'verification'>>;
   /**
    * Raw synthesized answer body for downstream hook stages (verification).
    * Never merged into the manifest or persisted.
@@ -216,7 +208,6 @@ export async function executeRun(
       prettyStream.write(`${line}\n`);
       if (wasSpinning) spinner.start();
     };
-
     try {
       const globalConfig = loadConfig();
       const projectConfig = loadProjectConfig(process.cwd());
@@ -336,13 +327,6 @@ export async function executeRun(
       const outputDir = resolveOutputDir(baseDir, slug);
       mkdirSync(outputDir, { recursive: true });
 
-      // Write prompt (with refined variants recorded for reproducibility)
-      let promptDoc = buildPrompt(query);
-      if (refined) {
-        promptDoc += `\n\n## Refined Query Variants\n\n- deep-research: ${refined.tierQueries['deep-research']}\n- ai-grounded: ${refined.tierQueries['ai-grounded']}\n- raw-search: ${refined.tierQueries['raw-search']}\n`;
-      }
-      safeWriteFile(join(outputDir, 'prompt.md'), promptDoc);
-
       // Column widths cover both primaries and any configured fallbacks so
       // lines stay aligned if a fallback fires mid-run.
       const tierById = new Map<string, ProviderTier>(
@@ -407,123 +391,85 @@ export async function executeRun(
         config.defaults.maxEstimatedCostUsd,
       );
 
-      const dispatchStartedAt = Date.now();
-      const { reports, results, asyncTasks } = await dispatch({
-        config,
-        providerIds,
-        query,
-        tierQueries: refined?.tierQueries,
-        mode: config.defaults.mode,
-        credentials,
-        budget,
-        estimatedBudget,
-        allowFallbacks: opts.fallback !== false,
-        onProgress: (event) => {
-          if (live) {
-            switch (event.event) {
+      const { reports, sources, totalCitations, totalDurationMs, manifest } =
+        await executeResearchRun({
+          query,
+          config,
+          providerIds,
+          outputDir,
+          slug,
+          tierQueries: refined?.tierQueries,
+          credentials,
+          budget,
+          estimatedBudget,
+          allowFallbacks: opts.fallback !== false,
+          onEvent: (event) => {
+            if (event.type === 'post-dispatch-warning') {
+              console.error(
+                `[librarium] warning: post-dispatch hook failed (${event.message})`,
+              );
+              return;
+            }
+            if (event.type === 'dispatch-completed') {
+              finalizeDispatchPresentation(event.reports, {
+                spinner,
+                live,
+                printLine,
+                widths,
+                color,
+              });
+              return;
+            }
+            if (event.type !== 'dispatch-progress') return;
+            const { progress } = event;
+            if (live) {
+              switch (progress.event) {
+                case 'started':
+                  live.markStarted(progress.providerId);
+                  break;
+                case 'fallback-started':
+                  live.addFallback(
+                    progress.report?.id ?? progress.providerId,
+                    progress.providerId,
+                    tierById.get(progress.providerId) ?? 'raw-search',
+                  );
+                  break;
+                case 'completed':
+                case 'error':
+                case 'async-submitted':
+                  if (progress.report) live.resolve(progress.report);
+                  break;
+              }
+              return;
+            }
+            switch (progress.event) {
               case 'started':
-                live.markStarted(event.providerId);
+                running.add(progress.providerId);
                 break;
               case 'fallback-started':
-                live.addFallback(
-                  event.report?.id ?? event.providerId,
-                  event.providerId,
-                  tierById.get(event.providerId) ?? 'raw-search',
-                );
+                printLine(formatFallbackNotice(progress.providerId, color));
+                running.add(progress.providerId);
                 break;
               case 'completed':
               case 'error':
               case 'async-submitted':
-                if (event.report) live.resolve(event.report);
+                running.delete(progress.providerId);
+                if (progress.report) {
+                  printLine(formatProviderLine(progress.report, widths, color));
+                }
                 break;
             }
-            return;
-          }
-          switch (event.event) {
-            case 'started':
-              running.add(event.providerId);
-              break;
-            case 'fallback-started':
-              printLine(formatFallbackNotice(event.providerId, color));
-              running.add(event.providerId);
-              break;
-            case 'completed':
-            case 'error':
-            case 'async-submitted':
-              running.delete(event.providerId);
-              if (event.report) {
-                printLine(formatProviderLine(event.report, widths, color));
-              }
-              break;
-          }
-          spinner.text = spinnerText();
-        },
-      });
-      const totalDurationMs = Date.now() - dispatchStartedAt;
-
-      spinner.stop();
-
-      if (live) {
-        // Rows that never emitted events (e.g. skipped providers) resolve
-        // from the final reports before the block is finalized.
-        live.resolveRemaining(reports);
-        live.stop();
-      } else {
-        // Skipped providers never emit progress events — show them too.
-        for (const report of reports) {
-          if (report.status === 'skipped') {
-            printLine(formatProviderLine(report, widths, color));
-          }
-        }
-      }
-
-      writeProviderOutputs(outputDir, reports, results);
-
-      // Collect all citations for dedup
-      const allCitations: Citation[] = results.flatMap((result) =>
-        result.status === 'success' ? result.citations : [],
-      );
-
-      const sources = deduplicateSources(allCitations);
-
-      // Write sources.json
-      safeWriteFile(
-        join(outputDir, 'sources.json'),
-        JSON.stringify(sources, null, 2),
-      );
-
-      // Post-dispatch hook (e.g. `librarium answer` grounded synthesis). It
-      // owns its own fail-open behavior; a throw here must never lose the run.
-      let manifestExtra: Partial<RunManifest> = {};
-      if (hooks?.postDispatch) {
-        try {
-          const hookResult = await hooks.postDispatch({
-            query,
-            config,
-            results,
-            reports,
-            sources,
-            outputDir,
-            color,
-            printLine,
-          });
-          if (hookResult?.manifestExtra) {
-            manifestExtra = hookResult.manifestExtra;
-          }
-        } catch (e) {
-          console.error(
-            `[librarium] warning: post-dispatch hook failed (${e instanceof Error ? e.message : String(e)})`,
-          );
-        }
-      }
-
-      // Write async tasks
-      if (asyncTasks.length > 0) {
-        for (const task of asyncTasks) {
-          task.outputDir = outputDir;
-        }
-        saveAsyncTasks(outputDir, asyncTasks);
-      }
+            spinner.text = spinnerText();
+          },
+          postDispatch: hooks?.postDispatch
+            ? async (context) =>
+                hooks.postDispatch?.({
+                  ...context,
+                  color,
+                  printLine,
+                })
+            : undefined,
+        });
 
       // Determine exit code. When a primary fails but its fallback succeeds,
       // the user's intent was fully satisfied — exclude the recovered primary's
@@ -536,46 +482,8 @@ export async function executeRun(
       const effectiveReports = reports.filter(
         (r) => !recoveredPrimaries.has(r.id),
       );
-      const successCount = effectiveReports.filter(
-        (r) => r.status === 'success' || r.status === 'async-pending',
-      ).length;
-      const exitCode =
-        successCount === 0 ? 2 : successCount < effectiveReports.length ? 1 : 0;
-
-      // Write run manifest
-      const timestamp = Math.floor(Date.now() / 1000);
-      const manifest: RunManifest = {
-        version: 1,
-        timestamp,
-        slug,
-        query,
-        mode: config.defaults.mode,
-        outputDir,
-        providers: reports,
-        sources: {
-          total: allCitations.length,
-          unique: sources.length,
-          file: 'sources.json',
-        },
-        asyncTasks,
-        exitCode,
-        refinedQueries: refined?.tierQueries,
-        ...manifestExtra,
-      };
-      safeWriteFile(
-        join(outputDir, 'run.json'),
-        JSON.stringify(manifest, null, 2),
-      );
-
-      // Write summary
-      const summary = generateSummary({
-        query,
-        reports,
-        sources,
-        asyncTasks,
-        timestamp,
-      });
-      safeWriteFile(join(outputDir, 'summary.md'), summary);
+      // Awaiting background work is intentionally non-terminal.
+      const exitCode = manifest.exitCode ?? 0;
 
       // Print summary (exclude recovered primaries so they don't show as failures)
       const successful = effectiveReports.filter((r) => r.status === 'success');
@@ -659,7 +567,7 @@ export async function executeRun(
         failed: failed.length,
         pending: pending.length,
         uniqueSources: sources.length,
-        totalCitations: allCitations.length,
+        totalCitations,
         outputDir,
         color,
         totalDurationMs,
@@ -701,9 +609,38 @@ export async function executeRun(
       process.exitCode = exitCode;
       return { exitCode, outputDir };
     } catch (e) {
-      spinner.fail(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      spinner.fail(message);
       process.exitCode = 2;
       return { exitCode: 2 };
+    }
+  }
+}
+
+export interface DispatchPresentation {
+  spinner: { stop(): unknown };
+  live: Pick<LiveRunTable, 'resolveRemaining' | 'stop'> | null;
+  printLine: (line: string) => void;
+  widths: LineWidths;
+  color: boolean;
+}
+
+/** Finalize provider rows before artifacts and post-dispatch hooks can print. */
+export function finalizeDispatchPresentation(
+  reports: ProviderReport[],
+  presentation: DispatchPresentation,
+): void {
+  presentation.spinner.stop();
+  if (presentation.live) {
+    presentation.live.resolveRemaining(reports);
+    presentation.live.stop();
+    return;
+  }
+  for (const report of reports) {
+    if (report.status === 'skipped') {
+      presentation.printLine(
+        formatProviderLine(report, presentation.widths, presentation.color),
+      );
     }
   }
 }
@@ -733,40 +670,5 @@ export function openPath(target: string): void {
     child.unref();
   } catch {
     // Best-effort only.
-  }
-}
-
-function writeProviderOutputs(
-  outputDir: string,
-  reports: ProviderReport[],
-  results: ProviderDispatchResult[],
-): void {
-  for (const result of results) {
-    const report = reports.find(
-      (candidate) =>
-        candidate.id === result.provider &&
-        candidate.fallbackFor === result.fallbackFor,
-    );
-    if (!report?.outputFile || !report.metaFile) continue;
-
-    safeWriteFile(join(outputDir, report.outputFile), result.text);
-    safeWriteFile(
-      join(outputDir, report.metaFile),
-      JSON.stringify(
-        {
-          provider: result.provider,
-          tier: result.tier,
-          model: result.model,
-          durationMs: result.durationMs,
-          citationCount: result.citations.length,
-          tokenUsage: result.tokenUsage,
-          usage: result.usage,
-          metering: result.metering,
-          citations: result.citations,
-        },
-        null,
-        2,
-      ),
-    );
   }
 }

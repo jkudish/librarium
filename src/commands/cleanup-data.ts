@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, parse, resolve, sep } from 'node:path';
-import type { AsyncTaskHandle, RunManifest } from '../types.js';
+import type { RunManifest } from '../types.js';
 import { isRunManifest } from './browse-data.js';
 
 /**
@@ -64,38 +64,33 @@ export function formatSize(bytes: number): string {
 }
 
 /**
- * Detect whether a run directory still has pending or running async tasks.
- * Checks async-tasks.json first (authoritative), falling back to the
- * run.json provider statuses when the async file is absent.
+ * Detect whether the authoritative run manifest has pending/running tasks.
  */
 export function hasPendingAsync(dir: string): boolean {
-  const tasksPath = join(dir, 'async-tasks.json');
-  if (existsSync(tasksPath)) {
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(tasksPath, 'utf-8'));
-      if (Array.isArray(parsed)) {
-        return (parsed as AsyncTaskHandle[]).some(
-          (t) =>
-            t != null && (t.status === 'pending' || t.status === 'running'),
-        );
-      }
-    } catch {
-      // Fall through to manifest check.
-    }
-  }
-
   const manifestPath = join(dir, 'run.json');
   if (existsSync(manifestPath)) {
     try {
       const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
       if (isRunManifest(parsed)) {
-        return (parsed as RunManifest).providers.some(
-          (provider) => provider.status === 'async-pending',
+        const manifest = parsed as RunManifest;
+        return (
+          manifest.status === 'awaiting_async' ||
+          manifest.providers.some(
+            (provider) =>
+              provider.task !== undefined &&
+              provider.task.retrievedAt === undefined &&
+              ['pending', 'running', 'completed'].includes(
+                provider.task.status,
+              ),
+          )
         );
       }
     } catch {
-      // Ignore corrupt manifest.
+      // A corrupt authoritative manifest may contain the only remote handle.
+      return true;
     }
+    // Unsupported/invalid manifests are conservatively protected.
+    return true;
   }
   return false;
 }

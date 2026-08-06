@@ -45,6 +45,7 @@ describe('MCP check_async retrieval persists metering', () => {
       id: 'perplexity-sonar-deep',
       displayName: 'Mock deep',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_PPLX_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'perplexity-sonar-deep',
@@ -61,11 +62,21 @@ describe('MCP check_async retrieval persists metering', () => {
         durationMs: 10,
         usage: { costUsd: 0.42, totalTokens: 100 },
       }),
+      submit: async (query) => ({
+        provider: 'perplexity-sonar-deep',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      poll: async () => ({ status: 'completed' }),
     };
     registerProvider(provider);
 
     const manifest: RunManifest = {
-      version: 1,
+      schemaVersion: 2,
+      revision: 0,
+      status: 'awaiting_async',
       timestamp: 1_781_136_000,
       slug: 'async-meter',
       query: 'q',
@@ -81,20 +92,15 @@ describe('MCP check_async retrieval persists metering', () => {
           citationCount: 0,
           outputFile: '',
           metaFile: '',
+          task: {
+            taskId: 'task-1',
+            submittedAt: 1,
+            status: 'completed',
+          },
         },
       ],
       sources: { total: 0, unique: 0, file: 'sources.json' },
-      asyncTasks: [
-        {
-          provider: 'perplexity-sonar-deep',
-          taskId: 'task-1',
-          query: 'q',
-          submittedAt: 1,
-          status: 'completed',
-          outputDir: dir,
-        },
-      ],
-      exitCode: 0,
+      exitCode: null,
     };
     writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
 
@@ -131,14 +137,19 @@ describe('MCP check_async retrieval persists metering', () => {
     expect(report?.status).toBe('success');
     expect(report?.metering?.kind).toBe('native_cost');
     expect(report?.metering?.actual?.source).toBe('provider_reported');
-    expect(updated.asyncTasks).toEqual([]);
+    expect(report?.task).toMatchObject({
+      taskId: 'task-1',
+      status: 'completed',
+      retrievedAt: expect.any(Number),
+    });
   });
 
-  it('keeps the completed handle when run.json cannot be reconciled', async () => {
+  it('does not recover tasks from a corrupt run.json', async () => {
     const provider: Provider = {
       id: 'perplexity-sonar-deep',
       displayName: 'Mock deep',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_PPLX_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'perplexity-sonar-deep',
@@ -154,6 +165,14 @@ describe('MCP check_async retrieval persists metering', () => {
         citations: [],
         durationMs: 1,
       }),
+      submit: async (query) => ({
+        provider: 'perplexity-sonar-deep',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      poll: async () => ({ status: 'completed' }),
     };
     registerProvider(provider);
     saveAsyncTasks(dir, [
@@ -169,17 +188,7 @@ describe('MCP check_async retrieval persists metering', () => {
     writeFileSync(join(dir, 'run.json'), '{ malformed');
 
     const result = await checkAsyncTasks(dir, true);
-
-    expect(result.retrieved).toBe(0);
-    expect(result.tasks[0]).toMatchObject({
-      status: 'completed',
-      retrieveError: 'Retrieved result, but could not update run.json',
-    });
-    const persisted = JSON.parse(
-      readFileSync(join(dir, 'async-tasks.json'), 'utf8'),
-    );
-    expect(persisted).toHaveLength(1);
-    expect(persisted[0].taskId).toBe('task-1');
+    expect(result).toMatchObject({ retrieved: 0, tasks: [] });
   });
 });
 
@@ -206,6 +215,7 @@ describe('MCP check_async poll state persistence', () => {
       id: 'mock-async',
       displayName: 'Mock async',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'mock-async',
@@ -218,6 +228,20 @@ describe('MCP check_async poll state persistence', () => {
         status: 'cancelled',
         rawStatus: 'CANCELLED',
         message: 'cancelled by provider',
+      }),
+      submit: async (query) => ({
+        provider: 'mock-async',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      retrieve: async () => ({
+        provider: 'mock-async',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
       }),
     };
     registerProvider(provider);
@@ -237,16 +261,16 @@ describe('MCP check_async poll state persistence', () => {
       providerStatus: 'CANCELLED',
       error: 'cancelled by provider',
     });
-    const persisted = JSON.parse(
-      readFileSync(join(dir, 'async-tasks.json'), 'utf8'),
-    );
-    expect(persisted[0]).toMatchObject({
+    const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(persisted.providers[0].task).toMatchObject({
       status: 'cancelled',
       providerStatus: 'CANCELLED',
       lastPollError: 'cancelled by provider',
     });
-    expect(persisted[0].completedAt).toEqual(expect.any(Number));
-    expect(persisted[0].lastPolledAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.lastPolledAt).toEqual(
+      expect.any(Number),
+    );
   });
 
   it('keeps an unknown raw status retryable while persisting its diagnostic', async () => {
@@ -254,6 +278,7 @@ describe('MCP check_async poll state persistence', () => {
       id: 'mock-unknown',
       displayName: 'Mock unknown',
       tier: 'deep-research',
+      execution: 'background',
       envVar: 'MOCK_KEY',
       execute: async (): Promise<ProviderResult> => ({
         provider: 'mock-unknown',
@@ -266,6 +291,20 @@ describe('MCP check_async poll state persistence', () => {
         status: 'running',
         rawStatus: 'MIGRATING',
         message: 'Unknown remote status: MIGRATING',
+      }),
+      submit: async (query) => ({
+        provider: 'mock-unknown',
+        taskId: 'unused',
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+      }),
+      retrieve: async () => ({
+        provider: 'mock-unknown',
+        tier: 'deep-research',
+        content: '',
+        citations: [],
+        durationMs: 0,
       }),
     };
     registerProvider(provider);
@@ -285,15 +324,13 @@ describe('MCP check_async poll state persistence', () => {
       providerStatus: 'MIGRATING',
       error: 'Unknown remote status: MIGRATING',
     });
-    const persisted = JSON.parse(
-      readFileSync(join(dir, 'async-tasks.json'), 'utf8'),
-    );
-    expect(persisted[0]).toMatchObject({
+    const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(persisted.providers[0].task).toMatchObject({
       status: 'running',
       providerStatus: 'MIGRATING',
       lastPollError: 'Unknown remote status: MIGRATING',
     });
-    expect(persisted[0].completedAt).toBeUndefined();
+    expect(persisted.providers[0].task.completedAt).toBeUndefined();
   });
 
   it('terminalizes a pending task whose retired provider is no longer registered', async () => {
@@ -313,15 +350,13 @@ describe('MCP check_async poll state persistence', () => {
       providerStatus: 'unsupported_provider',
       error: 'Provider openai-deep does not support polling after this upgrade',
     });
-    const persisted = JSON.parse(
-      readFileSync(join(dir, 'async-tasks.json'), 'utf8'),
-    );
-    expect(persisted[0]).toMatchObject({
+    const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+    expect(persisted.providers[0].task).toMatchObject({
       status: 'failed',
       providerStatus: 'unsupported_provider',
       lastPollError:
         'Provider openai-deep does not support polling after this upgrade',
     });
-    expect(persisted[0].completedAt).toEqual(expect.any(Number));
+    expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
   });
 });

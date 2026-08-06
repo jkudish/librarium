@@ -13,6 +13,7 @@ describe('librarium/node entry', () => {
   let originalCwd: string;
   let loadCustomProviders: typeof import('../src/node-entry.js').loadCustomProviders;
   let registerCustomProviders: typeof import('../src/node-entry.js').registerCustomProviders;
+  let executeResearchRun: typeof import('../src/node-entry.js').executeResearchRun;
   let getProvider: typeof import('../src/adapters/index.js').getProvider;
   let getAllProviders: typeof import('../src/adapters/index.js').getAllProviders;
   let registerProvider: typeof import('../src/adapters/index.js').registerProvider;
@@ -27,6 +28,7 @@ describe('librarium/node entry', () => {
     const nodeEntry = await import('../src/node-entry.js');
     loadCustomProviders = nodeEntry.loadCustomProviders;
     registerCustomProviders = nodeEntry.registerCustomProviders;
+    executeResearchRun = nodeEntry.executeResearchRun;
     const registry = await import('../src/adapters/index.js');
     getProvider = registry.getProvider;
     getAllProviders = registry.getAllProviders;
@@ -43,6 +45,7 @@ describe('librarium/node entry', () => {
   it('exposes the documented load/register API', () => {
     expect(typeof loadCustomProviders).toBe('function');
     expect(typeof registerCustomProviders).toBe('function');
+    expect(typeof executeResearchRun).toBe('function');
   });
 
   function writeNpmProvider(id: string): void {
@@ -69,6 +72,7 @@ describe('librarium/node entry', () => {
         `  id: '${id}',`,
         "  displayName: 'Lib Provider',",
         "  tier: 'ai-grounded',",
+        "  execution: 'inline',",
         "  envVar: '',",
         '  requiresApiKey: false,',
         '  async execute(query) {',

@@ -60,12 +60,33 @@ export interface DispatchOptions {
    * repository benchmark, can disable fallback dispatch explicitly.
    */
   allowFallbacks?: boolean;
+  /** Provider lookup dependency. Defaults to Librarium's process registry. */
+  providerRegistry?: ProviderLookup;
 }
+
+export interface ProviderLookup {
+  getProvider(id: string): Provider | undefined;
+}
+
+export const defaultProviderLookup: ProviderLookup = { getProvider };
 
 export interface DispatchResult {
   reports: ProviderReport[];
   results: ProviderDispatchResult[];
   asyncTasks: AsyncTaskHandle[];
+}
+
+export class AcceptedTaskPersistenceError extends Error {
+  constructor(
+    readonly handle: AsyncTaskHandle,
+    cause: unknown,
+  ) {
+    super(
+      `Accepted background task ${handle.provider}/${handle.taskId}, but its handle could not be persisted: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+    this.name = 'AcceptedTaskPersistenceError';
+  }
 }
 
 export async function dispatch(
@@ -81,6 +102,7 @@ export async function dispatch(
     budget,
     estimatedBudget,
   } = options;
+  const providerRegistry = options.providerRegistry ?? defaultProviderLookup;
   const queryForTier = (tier: Provider['tier']): string =>
     options.tierQueries?.[tier] ?? query;
   // Single metering normalization path: static kind + network-free estimate +
@@ -163,7 +185,7 @@ export async function dispatch(
     const fallbackId = config.providers[id]?.fallback;
     if (!fallbackId) return null;
 
-    const fallbackProvider = getProvider(fallbackId);
+    const fallbackProvider = providerRegistry.getProvider(fallbackId);
     if (!fallbackProvider) return null;
 
     const fallbackConfig = config.providers[fallbackId];
@@ -276,7 +298,7 @@ export async function dispatch(
 
   const tasks = providerIds.map((id) =>
     limit(async (): Promise<void> => {
-      const provider = getProvider(id);
+      const provider = providerRegistry.getProvider(id);
       if (!provider) {
         const metering = meteringFor(id);
         results.push({
@@ -360,33 +382,43 @@ export async function dispatch(
 
       onProgress?.({ providerId: id, event: 'started' });
 
-      // For deep-research providers in async/mixed mode, use submit
-      if (
-        provider.tier === 'deep-research' &&
-        mode !== 'sync' &&
-        provider.submit
-      ) {
+      // Background providers expose a complete persisted-task lifecycle.
+      if (provider.execution === 'background' && mode !== 'sync') {
         try {
           const handle = await provider.submit(queryForTier(provider.tier), {
             timeout: config.defaults.asyncTimeout,
           });
+          const pendingMetering = meteringFor(id);
+          const submittedReport: ProviderReport = {
+            id,
+            tier: provider.tier,
+            status: 'async-pending',
+            durationMs: 0,
+            wordCount: 0,
+            citationCount: 0,
+            outputFile: '',
+            metaFile: '',
+            metering: pendingMetering,
+          };
+          // Persist every accepted remote handle before any retrieval or
+          // fallback work can throw. This is the paid-task write-ahead edge.
+          try {
+            onProgress?.({
+              providerId: id,
+              event: 'async-submitted',
+              report: submittedReport,
+              task: handle,
+            });
+          } catch (error) {
+            throw new AcceptedTaskPersistenceError(handle, error);
+          }
 
-          if (
-            handle.status === 'cancelled' ||
-            ((handle.status === 'completed' || handle.status === 'failed') &&
-              !provider.retrieve)
-          ) {
+          if (handle.status === 'cancelled') {
             const terminalError =
               handle.lastPollError ??
-              (handle.status === 'cancelled'
-                ? handle.providerStatus
-                  ? `Task was cancelled (${handle.providerStatus})`
-                  : 'Task was cancelled'
-                : handle.status === 'failed'
-                  ? handle.providerStatus
-                    ? `Task failed (${handle.providerStatus})`
-                    : 'Task failed during submission'
-                  : 'Task completed, but the provider does not support retrieval');
+              (handle.providerStatus
+                ? `Task was cancelled (${handle.providerStatus})`
+                : 'Task was cancelled');
             const structured = createDispatchResult(
               id,
               provider.tier,
@@ -402,9 +434,24 @@ export async function dispatch(
             );
             results.push(structured);
             const report = createReport(id, provider.tier, structured);
+            report.task = {
+              taskId: handle.taskId,
+              submittedAt: handle.submittedAt,
+              status: 'cancelled',
+              completedAt: handle.completedAt ?? Date.now(),
+              ...(handle.providerStatus
+                ? { providerStatus: handle.providerStatus }
+                : {}),
+              lastPollError: terminalError,
+            };
             reports.push(report);
             recordBudget(report);
-            onProgress?.({ providerId: id, event: 'error', report });
+            onProgress?.({
+              providerId: id,
+              event: 'error',
+              report,
+              task: handle,
+            });
             const fallbackReport = await tryFallback(id, report);
             if (fallbackReport) {
               reports.push(fallbackReport);
@@ -421,10 +468,7 @@ export async function dispatch(
 
           // If submit is already terminal, retrieve immediately and treat it
           // as a synchronous result.
-          if (
-            (handle.status === 'completed' || handle.status === 'failed') &&
-            provider.retrieve
-          ) {
+          if (handle.status === 'completed' || handle.status === 'failed') {
             const result = await provider.retrieve(handle);
             const structured = createDispatchResult(
               id,
@@ -434,11 +478,28 @@ export async function dispatch(
             );
             results.push(structured);
             const report = createReport(id, provider.tier, structured);
+            const retrievedAt = result.error ? undefined : Date.now();
+            report.task = {
+              taskId: handle.taskId,
+              submittedAt: handle.submittedAt,
+              status: handle.status,
+              completedAt: handle.completedAt ?? Date.now(),
+              ...(retrievedAt !== undefined ? { retrievedAt } : {}),
+              ...(handle.providerStatus
+                ? { providerStatus: handle.providerStatus }
+                : {}),
+              ...(result.error ? { lastPollError: result.error } : {}),
+            };
             reports.push(report);
             recordBudget(report);
 
             if (result.error) {
-              onProgress?.({ providerId: id, event: 'error', report });
+              onProgress?.({
+                providerId: id,
+                event: 'error',
+                report,
+                task: handle,
+              });
               const fallbackReport = await tryFallback(id, report);
               if (fallbackReport) {
                 reports.push(fallbackReport);
@@ -458,7 +519,12 @@ export async function dispatch(
                 }
               }
             } else {
-              onProgress?.({ providerId: id, event: 'completed', report });
+              onProgress?.({
+                providerId: id,
+                event: 'completed',
+                report,
+                task: handle,
+              });
             }
             return;
           }
@@ -468,7 +534,6 @@ export async function dispatch(
           // since there is no synchronous result to evaluate. Fallback only fires
           // when a provider completes immediately with an error (handled above).
           asyncTasks.push(handle);
-          const pendingMetering = meteringFor(id);
           results.push({
             provider: id,
             tier: provider.tier,
@@ -479,47 +544,34 @@ export async function dispatch(
             durationMs: 0,
             metering: pendingMetering,
           });
-          const pendingReport: ProviderReport = {
-            id,
-            tier: provider.tier,
-            status: 'async-pending',
-            durationMs: 0,
-            wordCount: 0,
-            citationCount: 0,
-            outputFile: '',
-            metaFile: '',
-            metering: pendingMetering,
-          };
-          reports.push(pendingReport);
-          onProgress?.({
-            providerId: id,
-            event: 'async-submitted',
-            report: pendingReport,
-          });
+          reports.push(submittedReport);
           return;
         } catch (error) {
-          if (error instanceof UnsafeToRetrySubmissionError) {
-            const structured = createDispatchResult(
-              id,
-              provider.tier,
-              {
-                provider: id,
-                tier: provider.tier,
-                content: '',
-                citations: [],
-                durationMs: 0,
-                error: error.message,
-              },
-              providerConfig,
-            );
-            results.push(structured);
-            const report = createReport(id, provider.tier, structured);
-            reports.push(report);
-            recordBudget(report);
-            onProgress?.({ providerId: id, event: 'error', report });
-            return;
-          }
-          // Fall through to sync execution
+          if (error instanceof AcceptedTaskPersistenceError) throw error;
+          const detail = error instanceof Error ? error.message : String(error);
+          const message =
+            error instanceof UnsafeToRetrySubmissionError
+              ? detail
+              : `Background submission failed and was not retried because the remote task may have been accepted: ${detail}`;
+          const structured = createDispatchResult(
+            id,
+            provider.tier,
+            {
+              provider: id,
+              tier: provider.tier,
+              content: '',
+              citations: [],
+              durationMs: 0,
+              error: message,
+            },
+            providerConfig,
+          );
+          results.push(structured);
+          const report = createReport(id, provider.tier, structured);
+          reports.push(report);
+          recordBudget(report);
+          onProgress?.({ providerId: id, event: 'error', report });
+          return;
         }
       }
 
@@ -621,7 +673,11 @@ export async function dispatch(
     }),
   );
 
-  await Promise.allSettled(tasks);
+  const settled = await Promise.allSettled(tasks);
+  const rejected = settled.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (rejected) throw rejected.reason;
   return { reports, results, asyncTasks };
 }
 

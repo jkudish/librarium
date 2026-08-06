@@ -1,4 +1,5 @@
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -8,7 +9,7 @@ import type {
   ProviderTier,
   ProviderUsage,
 } from '../types.js';
-import { BaseProvider } from './base.js';
+import { BackgroundBaseProvider } from './base.js';
 
 interface PerplexityMessage {
   role: string;
@@ -62,6 +63,9 @@ interface AsyncSonarEnvelope {
 }
 
 const ASYNC_SONAR_URL = 'https://api.perplexity.ai/v1/async/sonar';
+const SONAR_DEEP_MODEL = getBuiltinProviderDefaultModel(
+  'perplexity-sonar-deep',
+);
 
 const ASYNC_STATUS_MAP: Record<string, AsyncTaskHandle['status']> = {
   CREATED: 'pending',
@@ -77,7 +81,7 @@ const ASYNC_STATUS_MAP: Record<string, AsyncTaskHandle['status']> = {
  * Uses the sonar-deep-research model via the Chat Completions API for comprehensive research queries.
  * Tier: deep-research (async capable)
  */
-export class PerplexitySonarDeepProvider extends BaseProvider {
+export class PerplexitySonarDeepProvider extends BackgroundBaseProvider {
   readonly id = 'perplexity-sonar-deep';
   readonly tier: ProviderTier = 'deep-research';
 
@@ -95,7 +99,7 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-deep-research',
+            model: SONAR_DEEP_MODEL,
             messages: [{ role: 'user', content: query }],
           },
           timeout: options.timeout * 1000,
@@ -126,7 +130,7 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
         content,
         citations,
         durationMs,
-        model: data.model ?? 'sonar-deep-research',
+        model: data.model ?? SONAR_DEEP_MODEL,
         tokenUsage: {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
@@ -165,13 +169,12 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
         headers: { Authorization: `Bearer ${apiKey}` },
         body: {
           request: {
-            model: 'sonar-deep-research',
+            model: SONAR_DEEP_MODEL,
             messages: [{ role: 'user', content: query }],
           },
         },
         timeout: 30000,
         signal: options.signal,
-        maxRetries: 0,
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
@@ -291,7 +294,7 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
         content: completion.choices?.[0]?.message?.content ?? '',
         citations: this.extractAsyncCitations(completion),
         durationMs: this.taskDurationMs(data, start),
-        model: completion.model ?? data.model ?? 'sonar-deep-research',
+        model: completion.model ?? data.model ?? SONAR_DEEP_MODEL,
         tokenUsage: {
           input: completion.usage?.prompt_tokens,
           output: completion.usage?.completion_tokens,
@@ -349,7 +352,7 @@ export class PerplexitySonarDeepProvider extends BaseProvider {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
           body: {
-            model: 'sonar-deep-research',
+            model: SONAR_DEEP_MODEL,
             messages: [{ role: 'user', content: 'ping' }],
             max_tokens: 5,
           },

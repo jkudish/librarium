@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        librarium supports three provider tiers: **deep-research** (async, thorough), **ai-grounded** (fast, cited), and **raw-search** (results only). If you know of an API that fits one of these tiers, open a request here.
+        librarium supports four provider tiers: **deep-research** (async, thorough), **ai-grounded** (fast, cited), **raw-search** (results only), and opt-in **llm** adapters. If you know of an API that fits one of these tiers, open a request here.
 
   - type: input
     id: provider_name
@@ -30,6 +30,7 @@ body:
         - deep-research (async, thorough synthesis)
         - ai-grounded (fast, AI-summarized with citations)
         - raw-search (search results only)
+        - llm (opt-in model answer)
         - Not sure
     validations:
       required: true
