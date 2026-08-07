@@ -227,13 +227,19 @@ describe('Perplexity Pro Search provider', () => {
     expect(stream.error).not.toContain(secret);
     expect(stream.error).toContain('[REDACTED]');
 
-    const boundaryPrefix = 'x'.repeat(190);
+    const leakedPrefix = secret.slice(0, -1);
+    const serializedValueStart =
+      JSON.stringify({ error: '' }).indexOf('""') + 1;
+    const httpBoundaryPrefix = 'x'.repeat(
+      200 - serializedValueStart - leakedPrefix.length,
+    );
+    const streamBoundaryPrefix = 'x'.repeat(200 - leakedPrefix.length);
     const boundaryHttp = await new PerplexityProSearchProvider({
       apiKey: secret,
       httpStreamClient: async () =>
         streamResponse(
           streamFromStrings([
-            JSON.stringify({ error: `${boundaryPrefix}${secret}` }),
+            JSON.stringify({ error: `${httpBoundaryPrefix}${secret}` }),
           ]),
           { status: 401, headers: { 'content-type': 'application/json' } },
         ),
@@ -244,7 +250,7 @@ describe('Perplexity Pro Search provider', () => {
         streamResponse(
           streamFromStrings([
             event(
-              { error: { message: `${boundaryPrefix}${secret}` } },
+              { error: { message: `${streamBoundaryPrefix}${secret}` } },
               'error',
             ),
           ]),
@@ -252,7 +258,8 @@ describe('Perplexity Pro Search provider', () => {
     }).execute('redact boundary stream', { timeout: 5 });
     for (const result of [boundaryHttp, boundaryStream]) {
       expect(result.error).not.toContain(secret);
-      expect(result.error).not.toContain(secret.slice(0, -1));
+      expect(result.error).not.toContain(leakedPrefix);
+      expect(result.error).toContain('[REDACTED]');
     }
   });
 
