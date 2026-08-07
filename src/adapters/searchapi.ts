@@ -7,25 +7,15 @@ import {
   searchApiOptionsSchema,
 } from '../core/searchapi.js';
 import type {
-  Citation,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
 } from '../types.js';
 import { BaseProvider, type BaseProviderOptions } from './base.js';
-
-interface SearchApiOrganicResult {
-  title?: string;
-  link?: string;
-  snippet?: string;
-  position?: number;
-}
-
-interface SearchApiResponse {
-  organic_results?: SearchApiOrganicResult[];
-  search_information?: { total_results?: number };
-  error?: unknown;
-}
+import {
+  renderSearchApiGoogleResponse,
+  type SearchApiGoogleResponse,
+} from './searchapi-google.js';
 
 export interface SearchApiProviderOptions extends BaseProviderOptions {
   zeroRetention?: boolean;
@@ -73,7 +63,7 @@ export class SearchApiProvider extends BaseProvider {
         retry: this.retry,
       });
 
-      const response = await this.request<SearchApiResponse>(
+      const response = await this.request<SearchApiGoogleResponse>(
         request.url,
         request.options,
       );
@@ -112,15 +102,13 @@ export class SearchApiProvider extends BaseProvider {
         };
       }
 
-      const results = data.organic_results ?? [];
-      const citations = this.extractCitations(results);
-      const content = this.buildContent(results);
+      const parsed = renderSearchApiGoogleResponse(data, this.id);
 
       return {
         provider: this.id,
         tier: this.tier,
-        content,
-        citations,
+        content: parsed.content,
+        citations: parsed.citations,
         durationMs,
       };
     } catch (err) {
@@ -150,7 +138,7 @@ export class SearchApiProvider extends BaseProvider {
         retry: this.retry,
       });
 
-      const response = await this.request<SearchApiResponse>(
+      const response = await this.request<SearchApiGoogleResponse>(
         request.url,
         request.options,
       );
@@ -183,34 +171,5 @@ export class SearchApiProvider extends BaseProvider {
         ),
       };
     }
-  }
-
-  private buildContent(results: SearchApiOrganicResult[]): string {
-    if (results.length === 0) return 'No results found.';
-
-    const parts: string[] = [];
-
-    for (const result of results) {
-      const title = result.title ?? 'Untitled';
-      const link = result.link ?? '';
-      parts.push(`### [${title}](${link})`);
-      if (result.snippet) {
-        parts.push(result.snippet);
-      }
-      parts.push('');
-    }
-
-    return parts.join('\n');
-  }
-
-  private extractCitations(results: SearchApiOrganicResult[]): Citation[] {
-    return results
-      .filter((r) => r.link)
-      .map((result) => ({
-        url: result.link!,
-        title: result.title,
-        snippet: result.snippet,
-        provider: this.id,
-      }));
   }
 }

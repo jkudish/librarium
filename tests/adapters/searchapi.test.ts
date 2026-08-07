@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getProvider, initializeProviders } from '../../src/adapters/index.js';
 import { getBuiltInProviderDescriptor } from '../../src/adapters/provider-descriptors.js';
 import { SearchApiProvider } from '../../src/adapters/searchapi.js';
+import type { SearchApiGoogleResponse } from '../../src/adapters/searchapi-google.js';
 import { dispatch } from '../../src/core/dispatcher.js';
 import type {
   HttpClient,
@@ -455,5 +456,318 @@ describe('SearchAPI request and privacy contract', () => {
         parameters: { zero_retention: false },
       }),
     ).toThrow('must use the zeroRetention option');
+  });
+});
+
+describe('SearchAPI Google evidence sections', () => {
+  const sectionFixtures: Array<{
+    name: string;
+    heading: string;
+    data: SearchApiGoogleResponse;
+  }> = [
+    {
+      name: 'embedded AI Overview',
+      heading: 'AI Overview',
+      data: {
+        ai_overview: {
+          page_token: 'synthetic-overview-token',
+          text_blocks: [
+            { type: 'header', answer: 'Synthetic answer' },
+            { type: 'paragraph', answer: 'Fixture-only overview content.' },
+            {
+              type: 'unordered_list',
+              items: [{ type: 'paragraph', answer: 'Fixture detail.' }],
+            },
+          ],
+          reference_links: [
+            {
+              title: 'Overview evidence',
+              link: 'https://overview.example.test/evidence',
+              snippet: 'Synthetic citation evidence.',
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: 'top stories',
+      heading: 'Top Stories',
+      data: {
+        top_stories: [
+          {
+            title: 'Synthetic story',
+            link: 'https://stories.example.test/article',
+            source: 'Synthetic News',
+            date: 'today',
+          },
+        ],
+      },
+    },
+    {
+      name: 'discussions and forums',
+      heading: 'Discussions & Forums',
+      data: {
+        discussions_and_forums: [
+          {
+            title: 'Synthetic discussion',
+            link: 'https://forums.example.test/thread',
+            source: 'Synthetic Forum',
+            date: 'today',
+            posts: '12 posts',
+          },
+        ],
+      },
+    },
+    {
+      name: 'inline videos',
+      heading: 'Inline Videos',
+      data: {
+        inline_videos: [
+          {
+            title: 'Synthetic video',
+            link: 'https://videos.example.test/watch',
+            source: 'Synthetic Video',
+            channel: 'Fixture Channel',
+            length: '2:00',
+          },
+        ],
+      },
+    },
+    {
+      name: 'Knowledge Graph sources',
+      heading: 'Knowledge Graph Sources',
+      data: {
+        knowledge_graph: {
+          source: {
+            name: 'Synthetic Knowledge Source',
+            link: 'https://knowledge.example.test/source',
+          },
+        },
+      },
+    },
+  ];
+
+  for (const fixture of sectionFixtures) {
+    it(`renders ${fixture.name} independently with one ordinary Google request`, async () => {
+      const httpClient = vi.fn(async () => response(200, fixture.data));
+      const result = await new SearchApiProvider({
+        apiKey: SYNTHETIC_KEY,
+        httpClient: asHttpClient(httpClient),
+      }).execute('synthetic section', { timeout: 3 });
+
+      expect(result.content).toContain(`## ${fixture.heading}`);
+      expect(result.citations).toHaveLength(1);
+      expect(result.citations[0]).toMatchObject({ provider: 'searchapi' });
+      expect(httpClient).toHaveBeenCalledOnce();
+
+      const [rawUrl] = httpClient.mock.calls[0] as unknown as [string];
+      const url = new URL(rawUrl);
+      expect(url.searchParams.get('engine')).toBe('google');
+      expect(url.searchParams.has('page_token')).toBe(false);
+    });
+  }
+
+  it('appends all enriched sections after organic results in a stable order', async () => {
+    const data: SearchApiGoogleResponse = {
+      organic_results: [
+        {
+          title: 'Organic baseline',
+          link: 'https://organic.example.test/result',
+          snippet: 'Existing organic content.',
+        },
+      ],
+      ...Object.assign({}, ...sectionFixtures.map((fixture) => fixture.data)),
+    };
+    const httpClient = vi.fn(async () => response(200, data));
+    const result = await new SearchApiProvider({
+      apiKey: SYNTHETIC_KEY,
+      httpClient: asHttpClient(httpClient),
+    }).execute('all sections', { timeout: 3 });
+
+    expect(result.content).toMatch(
+      /^### \[Organic baseline\]\(https:\/\/organic\.example\.test\/result\)\nExisting organic content\./,
+    );
+    const headings = [
+      '## AI Overview',
+      '## Top Stories',
+      '## Discussions & Forums',
+      '## Inline Videos',
+      '## Knowledge Graph Sources',
+    ];
+    for (const [index, heading] of headings.entries()) {
+      expect(result.content.indexOf(heading)).toBeGreaterThan(
+        index === 0 ? 0 : result.content.indexOf(headings[index - 1]!),
+      );
+    }
+    expect(result.citations).toHaveLength(6);
+    expect(
+      result.citations.every((citation) => citation.provider === 'searchapi'),
+    ).toBe(true);
+    expect(httpClient).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the historic organic-only Markdown, citations, and empty response behavior', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(200, {
+          organic_results: [
+            {
+              title: 'First organic result',
+              link: 'https://organic.example.test/first',
+              snippet: 'First snippet.',
+            },
+            {
+              title: 'Second organic result',
+              link: 'https://organic.example.test/second',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(response(200, { organic_results: [] }));
+    const provider = new SearchApiProvider({
+      apiKey: SYNTHETIC_KEY,
+      httpClient: asHttpClient(httpClient),
+    });
+
+    await expect(
+      provider.execute('organic', { timeout: 3 }),
+    ).resolves.toMatchObject({
+      content:
+        '### [First organic result](https://organic.example.test/first)\nFirst snippet.\n\n### [Second organic result](https://organic.example.test/second)\n',
+      citations: [
+        { url: 'https://organic.example.test/first', provider: 'searchapi' },
+        { url: 'https://organic.example.test/second', provider: 'searchapi' },
+      ],
+    });
+    await expect(
+      provider.execute('empty', { timeout: 3 }),
+    ).resolves.toMatchObject({
+      content: 'No results found.',
+      citations: [],
+    });
+  });
+
+  it('drops malformed optional blocks without failing the organic response', async () => {
+    const httpClient = vi.fn(async () =>
+      response(200, {
+        organic_results: [
+          {
+            title: 'Organic baseline',
+            link: 'https://organic.example.test/result',
+          },
+        ],
+        ai_overview: { markdown: 42, text_blocks: [null, 'not a block'] },
+        top_stories: [null, { title: 'Missing link' }, 'not a result'],
+        discussions_and_forums: 'not an array',
+        inline_videos: [{ title: 'Data URL', link: 'data:text/plain,unsafe' }],
+        knowledge_graph: {
+          source: {
+            name: 'Google navigation',
+            link: 'https://www.google.com/search?q=fixture',
+          },
+        },
+      }),
+    );
+
+    const result = await new SearchApiProvider({
+      apiKey: SYNTHETIC_KEY,
+      httpClient: asHttpClient(httpClient),
+    }).execute('malformed optional sections', { timeout: 3 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe(
+      '### [Organic baseline](https://organic.example.test/result)\n',
+    );
+    expect(result.citations).toEqual([
+      {
+        url: 'https://organic.example.test/result',
+        title: 'Organic baseline',
+        snippet: undefined,
+        provider: 'searchapi',
+      },
+    ]);
+  });
+
+  it('keeps only valid external evidence citations and deduplicates across sections', async () => {
+    const httpClient = vi.fn(async () =>
+      response(200, {
+        organic_results: [
+          {
+            title: 'Primary source',
+            link: 'https://evidence.example.test/primary',
+          },
+          {
+            title: 'Duplicate source',
+            link: 'https://evidence.example.test/primary',
+          },
+        ],
+        ai_overview: {
+          markdown: 'Synthetic overview.',
+          reference_links: [
+            {
+              title: 'Duplicate overview source',
+              link: 'https://evidence.example.test/primary',
+            },
+            {
+              title: 'Valid overview source',
+              link: 'http://evidence.example.test/overview',
+            },
+            {
+              title: 'Provider history',
+              link: 'https://www.searchapi.io/api/v1/searches/synthetic',
+            },
+            { title: 'Data image', link: 'data:image/png;base64,synthetic' },
+            { title: 'Malformed', link: 'not a url' },
+          ],
+        },
+        top_stories: [
+          {
+            title: 'Google navigation',
+            link: 'https://www.google.com/search?q=fixture',
+          },
+          { title: 'Valid story', link: 'https://evidence.example.test/story' },
+        ],
+        discussions_and_forums: [
+          {
+            title: 'Google Maps navigation',
+            link: 'https://maps.google.com/?q=fixture',
+          },
+        ],
+        inline_videos: [
+          {
+            title: 'Malformed protocol',
+            link: 'ftp://evidence.example.test/video',
+          },
+        ],
+        knowledge_graph: {
+          sources: [
+            {
+              name: 'Duplicate Knowledge source',
+              link: 'https://evidence.example.test/story',
+            },
+            {
+              name: 'Valid Knowledge source',
+              link: 'https://evidence.example.test/knowledge',
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await new SearchApiProvider({
+      apiKey: SYNTHETIC_KEY,
+      httpClient: asHttpClient(httpClient),
+    }).execute('citation filtering', { timeout: 3 });
+
+    expect(result.citations.map((citation) => citation.url)).toEqual([
+      'https://evidence.example.test/primary',
+      'http://evidence.example.test/overview',
+      'https://evidence.example.test/story',
+      'https://evidence.example.test/knowledge',
+    ]);
+    expect(
+      result.citations.every((citation) => citation.provider === 'searchapi'),
+    ).toBe(true);
   });
 });
