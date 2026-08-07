@@ -110,15 +110,19 @@ export function estimateMetering(
     (cap.kind === 'native_tokens' && cap.defaultPerRequestUsd !== undefined)
   ) {
     const perRequest = override.perRequestUsd ?? cap.defaultPerRequestUsd;
+    const units =
+      cap.kind === 'request_priced' ? (cap.defaultUnitsPerRequest ?? 1) : 1;
     const confidence: CostConfidence =
       override.perRequestUsd !== undefined ? 'configured' : 'estimated';
     const estimate: MeteringEstimate = {
-      billableUnits: 1,
+      billableUnits: units,
       unit: cap.unit ?? 'request',
       costConfidence: perRequest !== undefined ? confidence : 'unknown',
       pricingVersion: PRICING_VERSION,
     };
-    if (perRequest !== undefined) estimate.estimatedCostUsd = perRequest;
+    if (perRequest !== undefined) {
+      estimate.estimatedCostUsd = perRequest * units;
+    }
     return estimate;
   }
 

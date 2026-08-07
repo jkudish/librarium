@@ -131,7 +131,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 24 built-in provider adapters organized into four tiers:
+Librarium ships with 31 built-in provider adapters organized into four tiers:
 
 The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
 
@@ -152,6 +152,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | OpenAI Research (GPT-5.6 Sol) | `openai-research` | deep-research | `OPENAI_API_KEY` |
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
 | Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
+| Perplexity Pro Search | `perplexity-pro-search` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Gemini Grounded Search | `gemini-grounded` | ai-grounded | `GEMINI_API_KEY` |
 | Grok (xAI) | `grok` | ai-grounded | `XAI_API_KEY` |
 | ChatGPT Search (OpenRouter) | `openrouter-online` | ai-grounded | `OPENROUTER_API_KEY` |
@@ -159,6 +160,12 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
 | You.com Research | `you-research` | ai-grounded | `YOU_COM_API_KEY` |
 | Kagi FastGPT | `kagi-fastgpt` | ai-grounded | `KAGI_API_KEY` |
+| SearchAPI ChatGPT | `searchapi-chatgpt` | ai-grounded | `SEARCHAPI_API_KEY` |
+| SearchAPI Gemini | `searchapi-gemini` | ai-grounded | `SEARCHAPI_API_KEY` |
+| SearchAPI Perplexity | `searchapi-perplexity` | ai-grounded | `SEARCHAPI_API_KEY` |
+| SearchAPI Google AI Mode | `searchapi-google-ai-mode` | ai-grounded | `SEARCHAPI_API_KEY` |
+| SearchAPI Bing Copilot | `searchapi-bing-copilot` | ai-grounded | `SEARCHAPI_API_KEY` |
+| SearchAPI Google AI Overview | `searchapi-google-ai-overview` | ai-grounded | `SEARCHAPI_API_KEY` |
 | Perplexity Search | `perplexity-search` | raw-search | `PERPLEXITY_API_KEY` |
 | Brave Web Search | `brave-search` | raw-search | `BRAVE_API_KEY` |
 | Jina AI Search | `jina-search` | raw-search | `JINA_AI_API_KEY` |
@@ -176,6 +183,42 @@ Brave AI Answers uses Brave's streaming Answers endpoint so its grounded answer 
 ChatGPT Search (OpenRouter) keeps its GPT-4o Mini/Exa-backed search profile but
 uses OpenRouter's current `openrouter:web_search` server tool rather than the
 deprecated `:online` model suffix.
+
+### SearchAPI consumer surfaces
+
+The six `searchapi-*` answer adapters observe consumer-facing answers collected
+by SearchAPI. They are not the official OpenAI, Google, Microsoft, or
+Perplexity APIs, and they do not claim parity with a particular logged-in user,
+location, subscription, experiment cohort, or moment in the consumer product.
+Use the official `perplexity-sonar-pro`, `gemini-grounded`, and `grok` adapters
+when first-party API provenance matters.
+
+All six surfaces share SearchAPI as their upstream collection vendor. Separate
+provider IDs preserve which surface produced each answer and citation, but
+agreement between those results is correlated evidence, not six independent
+confirmations. SearchAPI also owns upstream collection and retention; Librarium
+can request `"options": { "zeroRetention": true }`, fails closed if that
+capability is rejected, and never silently retries without it, but cannot make
+a broader retention or compliance guarantee for SearchAPI.
+
+Librarium sends SearchAPI credentials in an `Authorization: Bearer` header and
+never places them in URLs. Bearer support across all seven SearchAPI request
+surfaces (the existing Google adapter plus the six answer adapters) remains
+**unverified until separately approved live validation**; no query-parameter
+credential fallback is implemented.
+
+The six new SearchAPI adapters are opt-in even when `SEARCHAPI_API_KEY` is
+present: interactive setup lists them unselected and `init --auto` leaves them
+disabled. Select a provider directly or explicitly choose `visibility`,
+`comprehensive`, or `all`. Explicit group selection is consent to call every
+configured, credentialed member of that group, including opt-in providers that
+are disabled for bare/default runs.
+
+`perplexity-pro-search` is the official Perplexity forced Pro Search lane. It
+uses streaming Sonar Pro with Pro search required and performs no hidden retry
+or downgraded second submission. Perplexity reports its actual cost only after a
+successful response, so Librarium cannot reserve a pre-dispatch dollar estimate
+for it. Sharing `PERPLEXITY_API_KEY` does not auto-enable this higher-cost lane.
 
 ### Provider ID Migration (Legacy Aliases)
 
@@ -216,7 +259,7 @@ Providers are categorized into four tiers based on their capabilities, latency, 
 
 - **raw-search** -- Traditional search engine results. Fast responses with many links and snippets, but no AI synthesis. Useful for broad link discovery and verifying specific facts.
 
-- **llm** -- Generic LLM answers from Claude, OpenAI, Gemini, or OpenRouter. They are provider-style model calls, not dedicated research/search APIs. Web search and citations are **on by default** for these adapters, and you can turn that off globally with `defaults.llmWebSearch: false` or per provider with `options.webSearch: false`. They stay **excluded from every grounded default group** (`quick`, `fast`, `raw`, `deep`, `comprehensive`, and `all`) so a normal grounded run does not silently add extra model calls. Opt in explicitly via `-p claude,openai-chat,...`, a custom group, or `--group llm`. Each provider takes a default model with a per-provider `model` config override.
+- **llm** -- Generic LLM answers from Claude, OpenAI, Gemini, or OpenRouter. They are provider-style model calls, not dedicated research/search APIs. Web search and citations are **on by default** for these adapters, and you can turn that off globally with `defaults.llmWebSearch: false` or per provider with `options.webSearch: false`. They stay **excluded from every grounded default group** (`quick`, `fast`, `raw`, `deep`, `visibility`, `comprehensive`, and `all`) so a normal grounded run does not silently add extra model calls. Opt in explicitly via `-p claude,openai-chat,...`, a custom group, or `--group llm`. Each provider takes a default model with a per-provider `model` config override.
 
 ### The LLM tier
 
@@ -425,6 +468,13 @@ Every provider declares a **metering kind** in its built-in descriptor, visible 
 | `manual_unmetered` | No reliable per-call metering | custom providers |
 
 For request- and credit-priced providers, librarium can produce a **network-free estimate** *before* a call runs. Estimates are guesses, never facts: they live under each result's `metering.estimate` (never in `usage.costUsd`), carry a `costConfidence` (`estimated` from a built-in default snapshot, `configured` when you supply pricing, `unknown` when there's no basis) and a `pricingVersion`. Plan-dependent credit providers emit unit metadata (`billableUnits`, `unit`) **without** an invented dollar figure until you configure a price via provider `options` (`perRequestUsd`, or `creditUsd` + `creditsPerRequest`).
+
+Request-priced estimates multiply the configured/default per-request price by
+the descriptor's logical request units. One-stage SearchAPI adapters reserve one
+unit; dedicated `searchapi-google-ai-overview` reserves two because its normal
+success path is a Google token request followed by an Overview request. These
+logical billing units describe provider operations and are distinct from
+low-level transport attempts or retries.
 
 Brave AI Answers is billed by searches plus input/output tokens, so librarium does not manufacture a single pre-dispatch dollar estimate — but Brave reports its own cost breakdown (an inline `<usage>` stream tag with an `X-Request-Total-Cost` dollar figure), which librarium surfaces as reported cost in `usage.costUsd`.
 
@@ -721,7 +771,7 @@ librarium mcp
 
 ## Groups
 
-Groups are named collections of provider IDs. Librarium ships with seven default groups:
+Groups are named collections of provider IDs. Librarium ships with eight default groups:
 
 | Group | Providers | Use Case |
 |---|---|---|
@@ -729,9 +779,23 @@ Groups are named collections of provider IDs. Librarium ships with seven default
 | `quick` | gemini-grounded, openrouter-online, brave-answers, exa, kagi-fastgpt | Fast AI-grounded answers |
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
+| `visibility` | searchapi-chatgpt, searchapi-gemini, searchapi-perplexity, searchapi-google-ai-mode, searchapi-bing-copilot, searchapi-google-ai-overview, perplexity-sonar-pro, gemini-grounded, grok | Explicit nine-surface answer visibility comparison |
 | `comprehensive` | All deep-research + all ai-grounded (including Grok) | Deep + AI-grounded combined |
 | `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
-| `all` | All 20 grounded providers (including Grok) | Maximum grounded coverage (excludes the `llm` tier) |
+| `all` | All 27 grounded providers (including Grok) | Maximum grounded coverage (excludes the `llm` tier) |
+
+`visibility`, `comprehensive`, and `all` are explicit cost boundaries. Choosing
+one may run credentialed members whose setup descriptor is opt-in and whose
+stored provider entry is disabled; a bare/default run still selects only
+enabled providers. The six SearchAPI answer surfaces are absent from `quick`,
+`fast`, `raw`, `deep`, and `llm`. Pro Search is in `comprehensive` and `all`,
+not `visibility`, `quick`, or `fast`.
+
+When loading older global config, Librarium upgrades an explicitly stored
+`comprehensive` or `all` roster only when it is an ordered exact match for the
+enumerated prior built-in roster after legacy provider aliases are
+canonicalized. Reordered, added/removed, absent, custom, and project-level
+group rosters are never rewritten; repeated loading is idempotent.
 
 ### Custom Groups
 
@@ -829,6 +893,23 @@ Each layer overrides the previous:
 - `groups`: project overrides global group names on conflict
 
 The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the runtime circuit breaker described in [Spend guardrails](#spend-guardrails)). The `--max-cost` flag wins over it. Omit it for no limit. The optional `defaults.maxEstimatedCostUsd` key sets a default pre-dispatch reservation ceiling (the estimated budget); the `--max-estimated-cost` flag wins over it.
+
+### Perplexity Search options
+
+`perplexity-search` accepts only documented camelCase options, which Librarium
+maps to the `/search` request: `maxResults`, two-letter `country`,
+`searchLanguageFilter`, `searchDomainAllowlist` or `searchDomainDenylist`,
+`searchContextSize`, `maxTokens`, `maxTokensPerPage`, and up to four unique
+non-empty `additionalQueries`. Allowlist and denylist conflict, as do
+`searchContextSize` and explicit token budgets; invalid or unknown options fail
+before HTTP. With no options, the existing single-query request shape and
+rendering limits remain unchanged.
+
+Additional queries are sent in the same upstream request, so Librarium meters
+the operation as one billed request estimate. Perplexity applies one rate-limit
+unit **per query**, however: the base query plus four additions can consume five
+rate-limit units even though only one HTTP request and one billed-request
+estimate appear in Librarium.
 
 ### Global Config Example
 
@@ -1535,9 +1616,10 @@ Groups:
   quick          -- Fast AI-grounded answers (seconds)
   deep           -- Thorough async research (minutes)
   fast           -- Quick results from multiple tiers
+  visibility     -- Explicit nine-surface answer visibility comparison
   comprehensive  -- Deep + AI-grounded combined
   llm            -- Opt-in LLM answers; web search/citations on by default
-  all            -- All 20 grounded providers (excludes the llm tier)
+  all            -- All 27 grounded providers (excludes the llm tier)
 
 Output lands in ./agents/librarium/<timestamp>-<slug>/:
   summary.md     -- Synthesized overview with stats

@@ -169,10 +169,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 24 providers', async () => {
+  it('initializeProviders registers all 31 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(24);
+    expect(all).toHaveLength(31);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -201,6 +201,13 @@ describe('registry', () => {
     expect(ids).toContain('openai-chat');
     expect(ids).toContain('gemini-chat');
     expect(ids).toContain('openrouter-chat');
+    expect(ids).toContain('searchapi-chatgpt');
+    expect(ids).toContain('searchapi-gemini');
+    expect(ids).toContain('searchapi-perplexity');
+    expect(ids).toContain('searchapi-google-ai-mode');
+    expect(ids).toContain('searchapi-bing-copilot');
+    expect(ids).toContain('searchapi-google-ai-overview');
+    expect(ids).toContain('perplexity-pro-search');
   });
 
   it('marks only providers with a complete task lifecycle as background', async () => {
@@ -220,7 +227,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(19);
+    ).toHaveLength(26);
   });
 
   it('injects credentials into every background built-in', async () => {

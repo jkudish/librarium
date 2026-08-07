@@ -99,7 +99,7 @@ describe('dist registry sharing (core + node)', () => {
   it('exports the built-in descriptor inventory from the packaged core', async () => {
     const core = (await import(DIST_CORE)) as CoreModule;
 
-    expect(core.BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(24);
+    expect(core.BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(31);
     expect(
       core.BUILTIN_PROVIDER_DESCRIPTORS.find(
         (descriptor) => descriptor.id === 'openai-research',
@@ -107,9 +107,20 @@ describe('dist registry sharing (core + node)', () => {
     ).toMatchObject({
       defaultModel: 'gpt-5.6-sol',
       capabilities: { execution: 'background', taskPersistence: 'remote' },
-      credential: { envVar: 'OPENAI_API_KEY', required: true },
+      credential: {
+        envVar: 'OPENAI_API_KEY',
+        required: true,
+        autoEnable: true,
+      },
       metering: { kind: 'native_tokens' },
     });
+    expect(core.SearchApiChatGptProvider).toBeTypeOf('function');
+    expect(core.SearchApiGeminiProvider).toBeTypeOf('function');
+    expect(core.SearchApiPerplexityProvider).toBeTypeOf('function');
+    expect(core.SearchApiGoogleAiModeProvider).toBeTypeOf('function');
+    expect(core.SearchApiBingCopilotProvider).toBeTypeOf('function');
+    expect(core.SearchApiGoogleAiOverviewProvider).toBeTypeOf('function');
+    expect(core.PerplexityProSearchProvider).toBeTypeOf('function');
   });
 
   it('keeps SearchAPI credentials out of built execute and health-check URLs', async () => {

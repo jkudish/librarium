@@ -104,9 +104,14 @@ export function loadConfig(globalPath?: string): Config {
     );
   }
   const config = ConfigSchema.parse(raw);
-  // Merge default groups with user groups (user groups take priority)
-  config.groups = { ...DEFAULT_GROUPS, ...config.groups };
+  const storedDefaultGroupRosters = captureStoredDefaultGroupRosters(
+    config.groups,
+  );
   const migrationWarnings = migrateLegacyProviderIds(config);
+  migratePriorCanonicalDefaultGroups(config, storedDefaultGroupRosters);
+  // Merge defaults only after inspecting explicitly stored global groups.
+  // User groups, including customized comprehensive/all rosters, win.
+  config.groups = { ...DEFAULT_GROUPS, ...config.groups };
 
   // Validate fallback references (non-fatal warnings)
   for (const warning of migrationWarnings) {
@@ -363,4 +368,100 @@ function migrateLegacyProviderIds(config: Config): string[] {
   }
 
   return warnings;
+}
+
+/**
+ * Ordered canonical rosters shipped immediately before the visibility/provider
+ * expansion. These are intentionally enumerated rather than inferred from git
+ * history or subset membership: only an exact stored default is safe to move.
+ */
+const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
+  Record<'comprehensive' | 'all', readonly (readonly string[])[]>
+> = {
+  comprehensive: [
+    [
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'perplexity-advanced-deep',
+      'openai-research',
+      'gemini-deep',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'kagi-fastgpt',
+    ],
+  ],
+  all: [
+    [
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'perplexity-advanced-deep',
+      'openai-research',
+      'gemini-deep',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'kagi-fastgpt',
+      'jina-search',
+      'firecrawl-search',
+      'perplexity-search',
+      'brave-search',
+      'searchapi',
+      'serpapi',
+      'tavily',
+    ],
+  ],
+};
+
+type StoredDefaultGroupRosters = Partial<
+  Record<'comprehensive' | 'all', readonly string[]>
+>;
+
+function captureStoredDefaultGroupRosters(
+  groups: Config['groups'],
+): StoredDefaultGroupRosters {
+  const captured: StoredDefaultGroupRosters = {};
+  for (const groupName of ['comprehensive', 'all'] as const) {
+    const storedMembers = groups[groupName];
+    if (storedMembers) {
+      // Canonicalize aliases without deduplication so additions and duplicate
+      // members cannot accidentally collapse into a recognized snapshot.
+      captured[groupName] = storedMembers.map(resolveProviderId);
+    }
+  }
+  return captured;
+}
+
+function migratePriorCanonicalDefaultGroups(
+  config: Config,
+  storedRosters: StoredDefaultGroupRosters,
+): void {
+  for (const groupName of ['comprehensive', 'all'] as const) {
+    const storedMembers = storedRosters[groupName];
+    if (!storedMembers) continue;
+    const matchesPriorSnapshot = PRIOR_CANONICAL_GROUP_SNAPSHOTS[
+      groupName
+    ].some((snapshot) => orderedExactMatch(storedMembers, snapshot));
+    if (matchesPriorSnapshot) {
+      config.groups[groupName] = [...DEFAULT_GROUPS[groupName]];
+    }
+  }
+}
+
+function orderedExactMatch(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((member, index) => member === expected[index])
+  );
 }

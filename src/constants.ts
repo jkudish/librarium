@@ -334,6 +334,17 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'firecrawl-search',
     'tavily',
   ],
+  visibility: [
+    'searchapi-chatgpt',
+    'searchapi-gemini',
+    'searchapi-perplexity',
+    'searchapi-google-ai-mode',
+    'searchapi-bing-copilot',
+    'searchapi-google-ai-overview',
+    'perplexity-sonar-pro',
+    'gemini-grounded',
+    'grok',
+  ],
   comprehensive: [
     'perplexity-sonar-deep',
     'perplexity-deep-research',
@@ -348,6 +359,13 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'exa',
     'you-research',
     'kagi-fastgpt',
+    'searchapi-chatgpt',
+    'searchapi-gemini',
+    'searchapi-perplexity',
+    'searchapi-google-ai-mode',
+    'searchapi-bing-copilot',
+    'searchapi-google-ai-overview',
+    'perplexity-pro-search',
   ],
   // Generic LLMs (tier `llm`). Opt-in only: excluded from every default
   // grounded group above and from `all`. They can use provider web search and
@@ -377,6 +395,13 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'searchapi',
     'serpapi',
     'tavily',
+    'searchapi-chatgpt',
+    'searchapi-gemini',
+    'searchapi-perplexity',
+    'searchapi-google-ai-mode',
+    'searchapi-bing-copilot',
+    'searchapi-google-ai-overview',
+    'perplexity-pro-search',
   ],
 };
 
@@ -471,19 +496,20 @@ export interface InitProviderChoice {
   keyPresent: boolean;
   /** Whether this provider is in the opt-in `llm` tier. */
   isLlm: boolean;
+  /** Whether setup requires an explicit user selection for this provider. */
+  isOptIn: boolean;
   /**
    * Whether `init --auto` should enable this provider, and whether interactive
    * `init` should pre-check it. True only when the key is present AND the
-   * provider is not in the opt-in `llm` tier.
+   * provider descriptor permits credential-based setup selection.
    */
   enableByDefault: boolean;
 }
 
 /**
  * Compute the per-provider init choices from the environment. Pure helper so
- * the opt-in policy (llm-tier providers are never enabled/pre-checked by
- * default) is testable without driving the interactive prompt. Order follows
- * `PROVIDER_ENV_VARS`.
+ * descriptor-owned opt-in policy is testable without driving the interactive
+ * prompt. Order follows `PROVIDER_ENV_VARS`.
  */
 export function computeInitProviderChoices(
   env: Record<string, string | undefined>,
@@ -491,12 +517,17 @@ export function computeInitProviderChoices(
   return Object.entries(PROVIDER_ENV_VARS).map(([id, envVar]) => {
     const keyPresent = !!env[envVar];
     const isLlm = isLlmTierProvider(id);
+    const definition = BUILTIN_PROVIDER_DEFINITIONS.find(
+      (candidate) => candidate.id === id,
+    );
+    const isOptIn = definition?.credential.autoEnable === false;
     return {
       id,
       envVar,
       keyPresent,
       isLlm,
-      enableByDefault: keyPresent && !isLlm,
+      isOptIn,
+      enableByDefault: keyPresent && !isOptIn,
     };
   });
 }

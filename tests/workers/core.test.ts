@@ -8,15 +8,21 @@ import {
   type HttpStreamClient,
   httpStreamRequest,
   initializeProviders,
+  PerplexityProSearchProvider,
   PerplexitySearchProvider,
   type Provider,
   type ProviderOptions,
   type ProviderResult,
   registerProvider,
+  SearchApiBingCopilotProvider,
+  SearchApiChatGptProvider,
+  SearchApiGeminiProvider,
+  SearchApiGoogleAiModeProvider,
+  SearchApiGoogleAiOverviewProvider,
+  SearchApiPerplexityProvider,
   SearchApiProvider,
 } from 'librarium/core';
 import { describe, expect, it } from 'vitest';
-import { PerplexityProSearchProvider } from '../../src/adapters/perplexity-pro-search.js';
 import {
   PRO_SEARCH_CONTENT,
   splitEveryByte,
@@ -48,7 +54,7 @@ function makeConfig(): Config {
 
 describe('librarium/core in workerd', () => {
   it('imports the core export, initializes adapters, and dispatches in memory', async () => {
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(24);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(31);
     await initializeProviders({
       credentials: { env: { GEMINI_API_KEY: 'test-key' } },
     });
@@ -118,6 +124,20 @@ describe('librarium/core in workerd', () => {
         fallbackFor: undefined,
       },
     ]);
+  });
+
+  it('exports every new adapter from the Worker-safe core entry', () => {
+    for (const ProviderConstructor of [
+      SearchApiChatGptProvider,
+      SearchApiGeminiProvider,
+      SearchApiPerplexityProvider,
+      SearchApiGoogleAiModeProvider,
+      SearchApiBingCopilotProvider,
+      SearchApiGoogleAiOverviewProvider,
+      PerplexityProSearchProvider,
+    ]) {
+      expect(ProviderConstructor).toBeTypeOf('function');
+    }
   });
 
   it('runs Perplexity Search through an injected Worker-safe transport', async () => {

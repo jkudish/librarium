@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { DEFAULT_GROUPS } from '../../src/constants.js';
 import { SINGLE } from '../fixtures/config/mock-config.js';
 import {
   delay,
@@ -13,14 +14,11 @@ const describeMaybe = ptyAvailable() ? describe : describe.skip;
 
 /**
  * Number of `↓` presses from the top of the provider-scope menu to reach the
- * committed `smoke` group. The menu is: "all enabled" (0), the seven default
- * groups (deep, quick, raw, fast, comprehensive, llm, all -> 1..7), then user
- * groups (smoke -> 8), then "pick specific providers". If librarium's
- * DEFAULT_GROUPS count changes this will land elsewhere — the test asserts the
- * confirm line names `group "smoke"` so that regression fails loudly rather
- * than silently running the wrong scope.
+ * committed `smoke` group. The menu is: "all enabled" (0), each default group,
+ * then user groups, then "pick specific providers". Derive the offset from the
+ * source-of-truth roster; the confirm assertion below still guards menu drift.
  */
-const DOWN_TO_SMOKE = 8;
+const DOWN_TO_SMOKE = Object.keys(DEFAULT_GROUPS).length + 1;
 
 describeMaybe(
   `wizard (bare invocation) [${ptyAvailable() ? 'pty' : skipReason()}]`,

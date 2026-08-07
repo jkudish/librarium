@@ -427,9 +427,16 @@ describe('SearchAPI request and privacy contract', () => {
   });
 
   it('contains no SearchAPI source construction that interpolates a URL key', () => {
-    const sources = ['src/adapters/searchapi.ts', 'src/core/searchapi.ts'].map(
-      (file) => readFileSync(resolve(process.cwd(), file), 'utf8'),
-    );
+    const sources = [
+      'src/adapters/searchapi.ts',
+      'src/adapters/searchapi-chatgpt.ts',
+      'src/adapters/searchapi-gemini.ts',
+      'src/adapters/searchapi-perplexity.ts',
+      'src/adapters/searchapi-google-ai-mode.ts',
+      'src/adapters/searchapi-bing-copilot.ts',
+      'src/adapters/searchapi-google-ai-overview.ts',
+      'src/core/searchapi.ts',
+    ].map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'));
 
     for (const source of sources) {
       expect(source).not.toMatch(/[?&]api_key=\$\{/);

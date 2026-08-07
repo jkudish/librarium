@@ -4,6 +4,7 @@ import {
   getBuiltinProviderDefinition,
   type ProviderDescriptorDefinition,
 } from '../core/provider-descriptor.js';
+import { searchApiOptionsSchema } from '../core/searchapi.js';
 import type { Config, Provider, ProviderConfig } from '../types.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
@@ -22,10 +23,20 @@ import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
-import { PerplexitySearchProvider } from './perplexity-search.js';
+import { PerplexityProSearchProvider } from './perplexity-pro-search.js';
+import {
+  PerplexitySearchProvider,
+  type PerplexitySearchProviderOptions,
+} from './perplexity-search.js';
 import { PerplexitySonarDeepProvider } from './perplexity-sonar-deep.js';
 import { PerplexitySonarProProvider } from './perplexity-sonar-pro.js';
 import { SearchApiProvider } from './searchapi.js';
+import { SearchApiBingCopilotProvider } from './searchapi-bing-copilot.js';
+import { SearchApiChatGptProvider } from './searchapi-chatgpt.js';
+import { SearchApiGeminiProvider } from './searchapi-gemini.js';
+import { SearchApiGoogleAiModeProvider } from './searchapi-google-ai-mode.js';
+import { SearchApiGoogleAiOverviewProvider } from './searchapi-google-ai-overview.js';
+import { SearchApiPerplexityProvider } from './searchapi-perplexity.js';
 import { SerpApiProvider } from './serpapi.js';
 import { TavilyProvider } from './tavily.js';
 import { YouResearchProvider } from './you-research.js';
@@ -63,6 +74,39 @@ function webSearch(context: BuiltInProviderFactoryContext): boolean {
     : (context.defaults?.llmWebSearch ?? true);
 }
 
+function searchApiZeroRetention(
+  providerConfig: ProviderConfig | undefined,
+): boolean {
+  return searchApiOptionsSchema.parse(providerConfig?.options ?? {})
+    .zeroRetention;
+}
+
+function perplexitySearchOptions(
+  providerConfig: ProviderConfig | undefined,
+): PerplexitySearchProviderOptions {
+  const configured = providerConfig?.options ?? {};
+  const options: PerplexitySearchProviderOptions = {};
+  const documentedKeys = [
+    'perRequestUsd',
+    'maxResults',
+    'country',
+    'searchLanguageFilter',
+    'searchDomainAllowlist',
+    'searchDomainDenylist',
+    'searchContextSize',
+    'maxTokens',
+    'maxTokensPerPage',
+    'additionalQueries',
+  ] as const;
+
+  for (const key of documentedKeys) {
+    if (configured[key] !== undefined) {
+      options[key] = configured[key];
+    }
+  }
+  return options;
+}
+
 const factories: Record<string, ProviderFactory> = {
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
   'perplexity-deep-research': () => new PerplexityDeepResearchProvider(),
@@ -86,7 +130,8 @@ const factories: Record<string, ProviderFactory> = {
   exa: () => new ExaProvider(),
   'you-research': () => new YouResearchProvider(),
   'kagi-fastgpt': () => new KagiFastGPTProvider(),
-  'perplexity-search': () => new PerplexitySearchProvider(),
+  'perplexity-search': ({ providerConfig }) =>
+    new PerplexitySearchProvider(perplexitySearchOptions(providerConfig)),
   'brave-search': () => new BraveSearchProvider(),
   'jina-search': () => new JinaSearchProvider(),
   'firecrawl-search': ({ providerConfig }) =>
@@ -103,8 +148,33 @@ const factories: Record<string, ProviderFactory> = {
     }),
   searchapi: ({ providerConfig }) =>
     new SearchApiProvider({
-      zeroRetention: option(providerConfig, 'zeroRetention') === true,
+      zeroRetention: searchApiZeroRetention(providerConfig),
     }),
+  'searchapi-chatgpt': ({ providerConfig }) =>
+    new SearchApiChatGptProvider({
+      zeroRetention: searchApiZeroRetention(providerConfig),
+    }),
+  'searchapi-gemini': ({ providerConfig }) =>
+    new SearchApiGeminiProvider({
+      zeroRetention: searchApiZeroRetention(providerConfig),
+    }),
+  'searchapi-perplexity': ({ providerConfig }) =>
+    new SearchApiPerplexityProvider({
+      zeroRetention: searchApiZeroRetention(providerConfig),
+    }),
+  'searchapi-google-ai-mode': ({ providerConfig }) =>
+    new SearchApiGoogleAiModeProvider({
+      zeroRetention: searchApiZeroRetention(providerConfig),
+    }),
+  'searchapi-bing-copilot': ({ providerConfig }) =>
+    new SearchApiBingCopilotProvider({
+      zeroRetention: searchApiZeroRetention(providerConfig),
+    }),
+  'searchapi-google-ai-overview': ({ providerConfig }) =>
+    new SearchApiGoogleAiOverviewProvider({
+      zeroRetention: searchApiZeroRetention(providerConfig),
+    }),
+  'perplexity-pro-search': () => new PerplexityProSearchProvider(),
   serpapi: () => new SerpApiProvider(),
   tavily: () => new TavilyProvider(),
   claude: (context) =>

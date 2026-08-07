@@ -177,7 +177,10 @@ export async function initializeProviders(
     const normalizedConfig = configured
       ? {
           ...configured,
-          options: options.success ? options.data : configured.options,
+          // Invalid raw options have already been rejected by the descriptor
+          // schema. Do not pass them to a factory where a coercion could turn
+          // a fail-closed configuration error into a live request.
+          options: options.success ? options.data : {},
         }
       : undefined;
     let provider: Provider;
