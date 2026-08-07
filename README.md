@@ -202,10 +202,11 @@ capability is rejected, and never silently retries without it, but cannot make
 a broader retention or compliance guarantee for SearchAPI.
 
 Librarium sends SearchAPI credentials in an `Authorization: Bearer` header and
-never places them in URLs. Bearer support across all seven SearchAPI request
-surfaces (the existing Google adapter plus the six answer adapters) remains
-**unverified until separately approved live validation**; no query-parameter
-credential fallback is implemented.
+never places them in URLs. Bearer authentication is live-validated across all
+seven SearchAPI request surfaces (the existing Google adapter plus the six
+answer adapters); no query-parameter credential fallback is implemented.
+Zero retention remains an account capability: Librarium sends it only when
+explicitly configured and fails closed if the account rejects it.
 
 The six new SearchAPI adapters are opt-in even when `SEARCHAPI_API_KEY` is
 present: interactive setup lists them unselected and `init --auto` leaves them
@@ -794,8 +795,10 @@ not `visibility`, `quick`, or `fast`.
 When loading older global config, Librarium upgrades an explicitly stored
 `comprehensive` or `all` roster only when it is an ordered exact match for the
 enumerated prior built-in roster after legacy provider aliases are
-canonicalized. Reordered, added/removed, absent, custom, and project-level
-group rosters are never rewritten; repeated loading is idempotent.
+canonicalized. Reordered, added/removed, custom, and project-level group
+rosters are never rewritten. An absent stored roster is not migrated, but the
+effective configuration still receives the current built-in default; repeated
+loading is idempotent.
 
 ### Custom Groups
 
@@ -839,7 +842,13 @@ background configuration. See OpenAI's
 
 ## Provider Fallback
 
-When a provider fails for any reason (exception, error response, timeout), librarium can automatically try a lighter alternative. Add an optional `fallback` field to any provider's config:
+When a provider fails (exception, error response, timeout), librarium can
+automatically try a lighter alternative unless that result explicitly blocks
+fallback. When `zeroRetention` is configured, any SearchAPI answer-adapter
+failure blocks fallback so Librarium never silently retries with weaker
+privacy. The dedicated Google AI Overview adapter blocks fallback on every
+failure to preserve its two-stage surface semantics. Add an optional `fallback`
+field to any provider's config:
 
 ```json
 {
@@ -860,6 +869,8 @@ When a provider fails for any reason (exception, error response, timeout), libra
 **Behavior:**
 
 - Fallback triggers after the primary provider's execution fails (error or timeout)
+- A provider result can set `preventFallback`; SearchAPI uses it to preserve
+  requested privacy, provenance, and product-surface semantics
 - Only single-level fallback is supported (a fallback's own fallback is ignored)
 - The fallback provider must be configured with a valid API key but can be `enabled: false` (it will only activate as a backup)
 - If the fallback provider is already running in the same dispatch (e.g., explicitly listed in `--providers`), it won't be triggered again
@@ -893,6 +904,39 @@ Each layer overrides the previous:
 - `groups`: project overrides global group names on conflict
 
 The optional `defaults.maxCostUsd` key sets a default cost budget for runs (the runtime circuit breaker described in [Spend guardrails](#spend-guardrails)). The `--max-cost` flag wins over it. Omit it for no limit. The optional `defaults.maxEstimatedCostUsd` key sets a default pre-dispatch reservation ceiling (the estimated budget); the `--max-estimated-cost` flag wins over it.
+
+### SearchAPI options
+
+All seven SearchAPI adapters share `SEARCHAPI_API_KEY`, use bearer
+authentication, and accept the same strict options:
+
+```json
+{
+  "providers": {
+    "searchapi-chatgpt": {
+      "apiKey": "$SEARCHAPI_API_KEY",
+      "enabled": false,
+      "options": {
+        "zeroRetention": true,
+        "perRequestUsd": 0.004
+      }
+    }
+  }
+}
+```
+
+- `zeroRetention` is boolean and defaults to `false`. When `true`, Librarium
+  sends `zero_retention=true`; rejection returns an actionable provider error,
+  blocks fallback, and never triggers an unprotected retry. SearchAPI documents
+  this capability for Enterprise accounts, so verify entitlement before
+  enabling it.
+- `perRequestUsd` is an optional positive local pricing override used only for
+  pre-dispatch estimates. It is not sent upstream and never becomes reported
+  cost.
+
+Unknown options fail before HTTP. The dedicated Google AI Overview adapter is
+a two-stage operation and reserves two logical request units, so the default
+`$0.004` per-unit estimate becomes `$0.008` for one Overview operation.
 
 ### Perplexity Search options
 

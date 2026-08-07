@@ -172,8 +172,9 @@ describe('README drift: providers, tiers, and groups', () => {
     expect(README).toContain('not the official OpenAI');
     expect(README).toContain('correlated evidence');
     expect(README).toContain(
-      'unverified until separately approved live validation',
+      'Bearer authentication is live-validated across all',
     );
+    expect(README).toContain('Zero retention remains an account capability');
     expect(README).toContain('interactive setup lists them unselected');
     expect(README).toContain('Perplexity reports its actual cost only after');
     expect(README).toMatch(

@@ -63,7 +63,7 @@
       "envVar": "XAI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-07"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "openrouter-online",
@@ -85,7 +85,7 @@
       "envVar": "KAGI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "brave-answers",
@@ -93,7 +93,7 @@
       "envVar": "BRAVE_API_KEY",
       "estimatedCostUsd": 0.012,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-07"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "exa",
@@ -129,7 +129,7 @@
       "envVar": "BRAVE_API_KEY",
       "estimatedCostUsd": 0.005,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "searchapi",
@@ -137,7 +137,7 @@
       "envVar": "SEARCHAPI_API_KEY",
       "estimatedCostUsd": 0.004,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "searchapi-chatgpt",
@@ -193,7 +193,7 @@
       "envVar": "SERPAPI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "tavily",

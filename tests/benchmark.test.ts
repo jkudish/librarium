@@ -147,7 +147,7 @@ describe('benchmark command and safety', () => {
           operation: 'provider:brave-search',
           perCallEstimateUsd: 0.005,
           costConfidence: 'estimated',
-          pricingVersion: '2026-06',
+          pricingVersion: '2026-08',
         }),
       ]),
     );
