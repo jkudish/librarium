@@ -64,6 +64,14 @@ export interface SearchApiGoogleSection {
   citations: Citation[];
 }
 
+/** Extract a usable opaque token without normalizing or mutating it. */
+export function extractSearchApiGoogleAiOverviewPageToken(
+  overview: unknown,
+): string | undefined {
+  const token = string(object(overview)?.page_token);
+  return token && token.trim() === token ? token : undefined;
+}
+
 interface SearchApiGoogleLinkItem {
   title?: string;
   name?: string;
