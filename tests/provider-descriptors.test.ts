@@ -13,9 +13,15 @@ import {
   PROVIDER_ID_ALIASES,
   validateDefaultGroups,
 } from '../src/constants.js';
+import type { HttpStreamClient } from '../src/core/http-client.js';
 import { getMeteringKind } from '../src/core/metering.js';
 import { PROVIDER_CATALOG } from '../src/core/provider-catalog.js';
 import { searchApiOptionsSchema } from '../src/core/searchapi.js';
+import {
+  completeProSearchEvents,
+  streamFromStrings,
+  streamResponse,
+} from './fixtures/perplexity-pro-search.js';
 
 describe('built-in provider descriptors', () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -165,6 +171,7 @@ describe('built-in provider descriptors', () => {
       getProvider('searchapi-chatgpt')?.execute('must not run', { timeout: 5 }),
     ).resolves.toMatchObject({
       error: 'Invalid options for searchapi-chatgpt',
+      preventFallback: true,
     });
     expect(httpClient).not.toHaveBeenCalled();
   });
@@ -202,6 +209,26 @@ describe('built-in provider descriptors', () => {
     for (const url of urls) {
       expect(new URL(url).searchParams.get('zero_retention')).toBe('true');
     }
+  });
+
+  it('injects the streaming transport through registry initialization', async () => {
+    const httpStreamClient = vi.fn<HttpStreamClient>(async () =>
+      streamResponse(streamFromStrings(completeProSearchEvents())),
+    );
+    await initializeProviders({
+      credentials: { env: { PERPLEXITY_API_KEY: 'synthetic-key' } },
+      httpStreamClient,
+    });
+
+    await expect(
+      getProvider('perplexity-pro-search')?.execute('registry Pro Search', {
+        timeout: 5,
+      }),
+    ).resolves.toMatchObject({
+      provider: 'perplexity-pro-search',
+      content: 'Split Pro Search content 😀.',
+    });
+    expect(httpStreamClient).toHaveBeenCalledOnce();
   });
 
   it('wires only documented Perplexity Search options through its factory', async () => {

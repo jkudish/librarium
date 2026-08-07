@@ -201,6 +201,53 @@ describe('dispatcher fallback', () => {
     expect(reports[0].fallbackFor).toBeUndefined();
   });
 
+  it('does not trigger a configured fallback for a fail-closed configuration error', async () => {
+    process.env.MOCK_PRIMARY_KEY = 'key-primary';
+    process.env.MOCK_FALLBACK_KEY = 'key-fallback';
+    const fallback = createSuccessProvider('fallback');
+    const fallbackExecute = vi.spyOn(fallback, 'execute');
+    registerProvider({
+      ...createSuccessProvider('primary'),
+      execute: async () => ({
+        provider: 'primary',
+        tier: 'ai-grounded',
+        content: '',
+        citations: [],
+        durationMs: 0,
+        error: 'Invalid options for primary',
+        preventFallback: true,
+      }),
+    });
+    registerProvider(fallback);
+
+    const { reports } = await dispatch({
+      config: makeConfig({
+        primary: {
+          apiKey: '$MOCK_PRIMARY_KEY',
+          enabled: true,
+          fallback: 'fallback',
+        },
+        fallback: {
+          apiKey: '$MOCK_FALLBACK_KEY',
+          enabled: true,
+        },
+      }),
+      providerIds: ['primary'],
+      query: 'private query',
+      outputDir: tmpDir,
+      mode: 'sync',
+      credentials: { env: process.env },
+    });
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      id: 'primary',
+      status: 'error',
+      error: 'Invalid options for primary',
+    });
+    expect(fallbackExecute).not.toHaveBeenCalled();
+  });
+
   it('does NOT trigger fallback when primary provider succeeds', async () => {
     process.env.MOCK_PRIMARY_KEY = 'key-primary';
     process.env.MOCK_FALLBACK_KEY = 'key-fallback';

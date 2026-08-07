@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PerplexitySearchProvider } from '../../src/adapters/perplexity-search.js';
-import type { HttpClient, HttpResponse } from '../../src/core/http-client.js';
+import type {
+  HttpClient,
+  HttpResponse,
+  HttpStreamClient,
+} from '../../src/core/http-client.js';
 
 function response<T>(data: T, status = 200): HttpResponse<T> {
   return {
@@ -30,6 +34,20 @@ function requestBody(mock: ReturnType<typeof vi.fn>): unknown {
 }
 
 describe('Perplexity Search provider', () => {
+  it('accepts the shared streaming dependency without treating it as a provider option', async () => {
+    const httpClient = transport({ id: 'stream-dependency', results: [] });
+    const httpStreamClient: HttpStreamClient = async () => {
+      throw new Error('unused');
+    };
+
+    await expect(
+      provider({ httpClient, httpStreamClient }).execute('base query', {
+        timeout: 10,
+      }),
+    ).resolves.toMatchObject({ content: 'No results found.', citations: [] });
+    expect(httpClient).toHaveBeenCalledOnce();
+  });
+
   it('preserves the no-options single-query request and legacy snippet limits', async () => {
     const httpClient = transport({
       id: 'search-1',

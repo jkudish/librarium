@@ -58,9 +58,10 @@ export class PerplexityProSearchProvider extends BaseProvider {
     options: ProviderOptions,
   ): Promise<ProviderResult> {
     const start = performance.now();
+    let apiKey: string | undefined;
 
     try {
-      const apiKey = this.getApiKey();
+      apiKey = this.getApiKey();
       const response = await this.streamRequest(PERPLEXITY_PRO_SEARCH_URL, {
         method: 'POST',
         headers: {
@@ -83,7 +84,10 @@ export class PerplexityProSearchProvider extends BaseProvider {
         const errorBody = await this.readBody(response.body);
         return this.errorResult(
           start,
-          this.formatError(response.status, this.parseBody(errorBody)),
+          redactPerplexityError(
+            this.formatError(response.status, this.parseBody(errorBody)),
+            apiKey,
+          ),
         );
       }
 
@@ -111,7 +115,10 @@ export class PerplexityProSearchProvider extends BaseProvider {
         usage: streamed.usage,
       };
     } catch (error) {
-      return this.errorResult(start, this.formatCatchError(error));
+      return this.errorResult(
+        start,
+        redactPerplexityError(this.formatCatchError(error), apiKey),
+      );
     }
   }
 
@@ -132,6 +139,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
     let completionChunkSeen = false;
     let terminalSeen = false;
     let doneMarkerSeen = false;
+    let proSearchTypeSeen = false;
     let usage: ProviderUsage | undefined;
     let terminalContent: string | undefined;
     let terminalSearchResults: PerplexitySearchResult[] = [];
@@ -167,7 +175,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
         );
       }
 
-      this.validateSearchType(payload);
+      proSearchTypeSeen = this.validateSearchType(payload) || proSearchTypeSeen;
       model = this.observeModel(payload, model);
       const object = payload.object;
       if (typeof object !== 'string') {
@@ -256,6 +264,11 @@ export class PerplexityProSearchProvider extends BaseProvider {
     if (!terminalSeen || !usage || !model || terminalContent === undefined) {
       throw new Error('Perplexity Pro Search stream ended before completion');
     }
+    if (!proSearchTypeSeen) {
+      throw new Error(
+        'Perplexity Pro Search response did not prove Pro search type',
+      );
+    }
     if (model !== SONAR_PRO_MODEL) {
       throw new Error(
         `Perplexity Pro Search returned unexpected model: ${model}`,
@@ -310,7 +323,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
     return payload.model;
   }
 
-  private validateSearchType(payload: JsonRecord): void {
+  private validateSearchType(payload: JsonRecord): boolean {
     const metadata = this.isRecord(payload.metadata) ? payload.metadata : {};
     const candidates = [
       payload.search_type,
@@ -330,6 +343,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
         );
       }
     }
+    return candidates.length > 0;
   }
 
   private firstChoice(payload: JsonRecord): JsonRecord {
@@ -509,4 +523,15 @@ export class PerplexityProSearchProvider extends BaseProvider {
   private isRecord(value: unknown): value is JsonRecord {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
+}
+
+function redactPerplexityError(text: string, apiKey?: string): string {
+  let redacted = text
+    .replace(/(Bearer\s+)[^\s"'\\]+/gi, '$1[REDACTED]')
+    .replace(
+      /("(?:api[_-]?key|token|authorization)"\s*:\s*")[^"]*"/gi,
+      '$1[REDACTED]"',
+    );
+  if (apiKey) redacted = redacted.split(apiKey).join('[REDACTED]');
+  return redacted;
 }

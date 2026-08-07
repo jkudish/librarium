@@ -200,6 +200,48 @@ describe('Perplexity Pro Search provider', () => {
     expect(httpStreamClient).toHaveBeenCalledOnce();
   });
 
+  it('redacts credentials echoed by HTTP and stream errors', async () => {
+    const secret = 'pplx-sensitive-test-key';
+    const http = await new PerplexityProSearchProvider({
+      apiKey: secret,
+      httpStreamClient: async () =>
+        streamResponse(
+          streamFromStrings([
+            JSON.stringify({ error: `Bearer ${secret}`, api_key: secret }),
+          ]),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        ),
+    }).execute('redact HTTP', { timeout: 5 });
+    expect(http.error).not.toContain(secret);
+    expect(http.error).toContain('[REDACTED]');
+
+    const stream = await new PerplexityProSearchProvider({
+      apiKey: secret,
+      httpStreamClient: async () =>
+        streamResponse(
+          streamFromStrings([
+            event({ error: { message: `Bearer ${secret}` } }, 'error'),
+          ]),
+        ),
+    }).execute('redact stream', { timeout: 5 });
+    expect(stream.error).not.toContain(secret);
+    expect(stream.error).toContain('[REDACTED]');
+  });
+
+  it('fails closed when the stream never proves Pro search type', async () => {
+    const events = completeProSearchEvents().map((frame) =>
+      frame
+        .replace(',"metadata":{"search_type":"pro"}', '')
+        .replace(',"search_type":"pro"', ''),
+    );
+    const result = await provider(async () =>
+      streamResponse(streamFromStrings(events)),
+    ).execute('missing Pro marker', { timeout: 5 });
+
+    expect(result.error).toContain('did not prove Pro search type');
+    expect(result.content).toBe('');
+  });
+
   it('leaves the standard perplexity-sonar-pro request contract unchanged', async () => {
     const httpClient: HttpClient = vi.fn(async <T>(_url, _options) => ({
       status: 200,

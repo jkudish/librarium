@@ -65,8 +65,14 @@ export class PerplexitySearchProvider extends BaseProvider {
   private readonly configuredOptions: Record<string, unknown>;
 
   constructor(options: PerplexitySearchProviderOptions = {}) {
-    const { apiKey, credentials, httpClient, ...configuredOptions } = options;
-    super({ apiKey, credentials, httpClient });
+    const {
+      apiKey,
+      credentials,
+      httpClient,
+      httpStreamClient,
+      ...configuredOptions
+    } = options;
+    super({ apiKey, credentials, httpClient, httpStreamClient });
     this.configuredOptions = configuredOptions;
   }
 

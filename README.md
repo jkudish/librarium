@@ -906,10 +906,9 @@ before HTTP. With no options, the existing single-query request shape and
 rendering limits remain unchanged.
 
 Additional queries are sent in the same upstream request, so Librarium meters
-the operation as one billed request estimate. Perplexity applies one rate-limit
-unit **per query**, however: the base query plus four additions can consume five
-rate-limit units even though only one HTTP request and one billed-request
-estimate appear in Librarium.
+the operation as one billed request estimate. Additional queries may consume
+provider rate-limit capacity independently; exact account behavior remains
+unverified until the separately approved live validation.
 
 ### Global Config Example
 

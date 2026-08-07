@@ -176,7 +176,9 @@ describe('README drift: providers, tiers, and groups', () => {
     );
     expect(README).toContain('interactive setup lists them unselected');
     expect(README).toContain('Perplexity reports its actual cost only after');
-    expect(README).toMatch(/one rate-limit\s+unit \*\*per query\*\*/);
+    expect(README).toMatch(
+      /exact account behavior remains\s+unverified until the separately approved live validation/,
+    );
     expect(README).toContain('logical billing units');
   });
 });
