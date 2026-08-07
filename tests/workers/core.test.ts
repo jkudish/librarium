@@ -5,6 +5,7 @@ import {
   GeminiGroundedProvider,
   getProvider,
   initializeProviders,
+  PerplexitySearchProvider,
   type Provider,
   type ProviderOptions,
   type ProviderResult,
@@ -106,6 +107,34 @@ describe('librarium/core in workerd', () => {
         error: undefined,
         fallbackFor: undefined,
       },
+    ]);
+  });
+
+  it('runs Perplexity Search through an injected Worker-safe transport', async () => {
+    const requests: unknown[] = [];
+    const provider = new PerplexitySearchProvider({
+      credentials: { env: { PERPLEXITY_API_KEY: 'test-key' } },
+      additionalQueries: ['worker perspective'],
+      httpClient: async (_url, options) => {
+        requests.push(options?.body);
+        return {
+          status: 200,
+          statusText: 'OK',
+          data: { id: 'worker-search', results: [] },
+          headers: {},
+          durationMs: 1,
+        };
+      },
+    });
+
+    await expect(
+      provider.execute('worker query', { timeout: 10 }),
+    ).resolves.toMatchObject({
+      content: 'No results found.',
+      citations: [],
+    });
+    expect(requests).toEqual([
+      { query: ['worker query', 'worker perspective'], max_results: 10 },
     ]);
   });
 });
