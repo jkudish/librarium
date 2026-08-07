@@ -1,10 +1,18 @@
+import type { HttpRetryPolicy } from '../core/http-client.js';
+import {
+  createSearchApiRequest,
+  formatSearchApiError,
+  formatSearchApiPayloadError,
+  redactSearchApiErrorText,
+  searchApiOptionsSchema,
+} from '../core/searchapi.js';
 import type {
   Citation,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
 } from '../types.js';
-import { BaseProvider } from './base.js';
+import { BaseProvider, type BaseProviderOptions } from './base.js';
 
 interface SearchApiOrganicResult {
   title?: string;
@@ -16,7 +24,12 @@ interface SearchApiOrganicResult {
 interface SearchApiResponse {
   organic_results?: SearchApiOrganicResult[];
   search_information?: { total_results?: number };
-  error?: string;
+  error?: unknown;
+}
+
+export interface SearchApiProviderOptions extends BaseProviderOptions {
+  zeroRetention?: boolean;
+  retry?: HttpRetryPolicy;
 }
 
 /**
@@ -27,23 +40,43 @@ interface SearchApiResponse {
 export class SearchApiProvider extends BaseProvider {
   readonly id = 'searchapi';
   readonly tier: ProviderTier = 'raw-search';
+  private readonly zeroRetention: boolean;
+  private readonly retry?: HttpRetryPolicy;
+
+  constructor(options: SearchApiProviderOptions = {}) {
+    super(options);
+    const parsed = searchApiOptionsSchema.parse(
+      options.zeroRetention === undefined
+        ? {}
+        : { zeroRetention: options.zeroRetention },
+    );
+    this.zeroRetention = parsed.zeroRetention;
+    this.retry = options.retry;
+  }
 
   async execute(
     query: string,
     options: ProviderOptions,
   ): Promise<ProviderResult> {
     const start = performance.now();
-    const apiKey = this.getApiKey();
+    let apiKey: string | undefined;
 
     try {
-      const encodedQuery = encodeURIComponent(query);
-      const url = `https://www.searchapi.io/api/v1/search?engine=google&q=${encodedQuery}&api_key=${apiKey}`;
-
-      const response = await this.request<SearchApiResponse>(url, {
-        method: 'GET',
+      apiKey = this.getApiKey();
+      const request = createSearchApiRequest({
+        apiKey,
+        engine: 'google',
+        parameters: { q: query },
+        zeroRetention: this.zeroRetention,
         timeout: options.timeout * 1000,
         signal: options.signal,
+        retry: this.retry,
       });
+
+      const response = await this.request<SearchApiResponse>(
+        request.url,
+        request.options,
+      );
 
       const durationMs = Math.round(performance.now() - start);
 
@@ -54,7 +87,14 @@ export class SearchApiProvider extends BaseProvider {
           content: '',
           citations: [],
           durationMs,
-          error: this.formatError(response.status, response.data),
+          ...(this.zeroRetention ? { preventFallback: true as const } : {}),
+          error: formatSearchApiError({
+            status: response.status,
+            data: response.data,
+            apiKey,
+            zeroRetention: this.zeroRetention,
+            credentialEnvVar: this.envVar,
+          }),
         };
       }
 
@@ -67,7 +107,8 @@ export class SearchApiProvider extends BaseProvider {
           content: '',
           citations: [],
           durationMs,
-          error: `SearchAPI error: ${data.error}`,
+          ...(this.zeroRetention ? { preventFallback: true as const } : {}),
+          error: formatSearchApiPayloadError(data.error, apiKey),
         };
       }
 
@@ -90,27 +131,56 @@ export class SearchApiProvider extends BaseProvider {
         content: '',
         citations: [],
         durationMs,
-        error: this.formatCatchError(err),
+        ...(this.zeroRetention ? { preventFallback: true as const } : {}),
+        error: redactSearchApiErrorText(this.formatCatchError(err), apiKey),
       };
     }
   }
 
   async test(): Promise<{ ok: boolean; error?: string }> {
+    let apiKey: string | undefined;
     try {
-      const apiKey = this.getApiKey();
-      const url = `https://www.searchapi.io/api/v1/search?engine=google&q=test&api_key=${apiKey}&num=1`;
-
-      const response = await this.request<SearchApiResponse>(url, {
-        method: 'GET',
+      apiKey = this.getApiKey();
+      const request = createSearchApiRequest({
+        apiKey,
+        engine: 'google',
+        parameters: { q: 'test', num: 1 },
+        zeroRetention: this.zeroRetention,
         timeout: 10000,
+        retry: this.retry,
       });
 
-      if (response.status === 200) return { ok: true };
-      return { ok: false, error: `HTTP ${response.status}` };
+      const response = await this.request<SearchApiResponse>(
+        request.url,
+        request.options,
+      );
+
+      if (response.status !== 200) {
+        return {
+          ok: false,
+          error: formatSearchApiError({
+            status: response.status,
+            data: response.data,
+            apiKey,
+            zeroRetention: this.zeroRetention,
+            credentialEnvVar: this.envVar,
+          }),
+        };
+      }
+      if (response.data.error) {
+        return {
+          ok: false,
+          error: formatSearchApiPayloadError(response.data.error, apiKey),
+        };
+      }
+      return { ok: true };
     } catch (err) {
       return {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: redactSearchApiErrorText(
+          err instanceof Error ? err.message : String(err),
+          apiKey,
+        ),
       };
     }
   }

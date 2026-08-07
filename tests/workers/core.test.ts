@@ -4,12 +4,14 @@ import {
   dispatch,
   GeminiGroundedProvider,
   getProvider,
+  type HttpClient,
   initializeProviders,
   PerplexitySearchProvider,
   type Provider,
   type ProviderOptions,
   type ProviderResult,
   registerProvider,
+  SearchApiProvider,
 } from 'librarium/core';
 import { describe, expect, it } from 'vitest';
 
@@ -136,5 +138,40 @@ describe('librarium/core in workerd', () => {
     expect(requests).toEqual([
       { query: ['worker query', 'worker perspective'], max_results: 10 },
     ]);
+  });
+
+  it('constructs SearchAPI requests with fetch-only Worker globals', async () => {
+    const calls: Array<{ url: string; options: Record<string, unknown> }> = [];
+    const httpClient: HttpClient = async <T>(url, options = {}) => {
+      calls.push({ url, options });
+      return {
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        data: { organic_results: [] } as T,
+        durationMs: 1,
+      };
+    };
+    const provider = new SearchApiProvider({
+      apiKey: 'worker-searchapi-synthetic-key',
+      httpClient,
+      zeroRetention: true,
+    });
+
+    await expect(
+      provider.execute('worker transport', { timeout: 5 }),
+    ).resolves.toMatchObject({
+      provider: 'searchapi',
+      content: 'No results found.',
+    });
+    expect(calls).toHaveLength(1);
+    const request = calls[0];
+    if (!request) throw new Error('SearchAPI request was not recorded');
+    const url = new URL(request.url);
+    expect(url.searchParams.has('api_key')).toBe(false);
+    expect(url.searchParams.get('zero_retention')).toBe('true');
+    expect(request.options.headers).toEqual({
+      Authorization: 'Bearer worker-searchapi-synthetic-key',
+    });
   });
 });

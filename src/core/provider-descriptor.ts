@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { MeteringKind, ProviderTier } from '../types.js';
+import { searchApiOptionsSchema } from './searchapi.js';
 
 export interface ProviderMeteringDescriptor {
   kind: MeteringKind;
@@ -469,6 +470,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 18,
     tier: 'raw-search',
     envVar: 'SEARCHAPI_API_KEY',
+    optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
       name: 'SearchAPI',

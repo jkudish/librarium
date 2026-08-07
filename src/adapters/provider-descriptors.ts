@@ -101,7 +101,10 @@ const factories: Record<string, ProviderFactory> = {
       categories: option(providerConfig, 'categories'),
       ignoreInvalidURLs: option(providerConfig, 'ignoreInvalidURLs'),
     }),
-  searchapi: () => new SearchApiProvider(),
+  searchapi: ({ providerConfig }) =>
+    new SearchApiProvider({
+      zeroRetention: option(providerConfig, 'zeroRetention') === true,
+    }),
   serpapi: () => new SerpApiProvider(),
   tavily: () => new TavilyProvider(),
   claude: (context) =>

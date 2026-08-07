@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type {
+  HttpClient,
+  HttpRequestOptions,
+} from '../../src/core/http-client.js';
 
 // Dist-level integration test for the shared provider registry.
 //
@@ -106,6 +110,41 @@ describe('dist registry sharing (core + node)', () => {
       credential: { envVar: 'OPENAI_API_KEY', required: true },
       metering: { kind: 'native_tokens' },
     });
+  });
+
+  it('keeps SearchAPI credentials out of built execute and health-check URLs', async () => {
+    const core = (await import(DIST_CORE)) as CoreModule;
+    const apiKey = 'dist-searchapi-synthetic-key';
+    const calls: Array<{ url: string; options?: HttpRequestOptions }> = [];
+    const httpClient: HttpClient = async <T>(url, options) => {
+      calls.push({ url, options });
+      return {
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        data: { organic_results: [] } as T,
+        durationMs: 1,
+      };
+    };
+    const provider = new core.SearchApiProvider({
+      apiKey,
+      httpClient,
+      zeroRetention: true,
+    });
+
+    await provider.execute('dist transport', { timeout: 4 });
+    await provider.test();
+
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      const url = new URL(call.url);
+      expect(url.searchParams.has('api_key')).toBe(false);
+      expect(url.searchParams.get('zero_retention')).toBe('true');
+      expect(call.url).not.toContain(apiKey);
+      expect(call.options?.headers).toEqual({
+        Authorization: `Bearer ${apiKey}`,
+      });
+    }
   });
 
   it('registerCustomProviders (node) is visible to getProvider/dispatch (core)', async () => {
