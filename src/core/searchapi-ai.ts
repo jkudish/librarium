@@ -127,7 +127,7 @@ function hasCompleteMarkdownLinks(markdown: string): boolean {
 function renderBlock(value: unknown, depth = 0): string[] {
   if (!isRecord(value) || typeof value.type !== 'string') return [];
   const blockType = value.type;
-  const body = text(value.text ?? value.content) ?? '';
+  const body = text(value.text ?? value.content ?? value.answer) ?? '';
   const children = childBlocks(value);
 
   switch (blockType) {
@@ -142,15 +142,22 @@ function renderBlock(value: unknown, depth = 0): string[] {
         depth,
       );
     }
+    case 'header':
+      return appendChildren(body ? [`## ${body}`] : [], children, depth);
     case 'quote':
       return appendChildren(body ? [`> ${body}`] : [], children, depth);
     case 'code':
+    case 'code_block':
+    case 'code_blocks': {
+      const code = text(value.code) ?? body;
       return appendChildren(
-        body ? [`\`\`\`\n${body}\n\`\`\``] : [],
+        code ? [`\`\`\`${text(value.language) ?? ''}\n${code}\n\`\`\``] : [],
         children,
         depth,
       );
+    }
     case 'list':
+    case 'unordered_list':
     case 'ordered_list': {
       const ordered = blockType === 'ordered_list';
       const items = children.flatMap((child, index) =>
@@ -183,7 +190,7 @@ function renderListItem(
   index?: number,
 ): string[] {
   if (!isRecord(value)) return [];
-  const body = text(value.text ?? value.content) ?? '';
+  const body = text(value.text ?? value.content ?? value.answer) ?? '';
   const prefix = `${'  '.repeat(depth)}${index === undefined ? '-' : `${index}.`} `;
   const rendered = body ? [`${prefix}${body}`] : [];
   return appendChildren(rendered, childBlocks(value), depth + 1);
