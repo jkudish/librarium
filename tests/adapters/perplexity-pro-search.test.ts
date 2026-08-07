@@ -263,7 +263,7 @@ describe('Perplexity Pro Search provider', () => {
     }
   });
 
-  it('fails closed when the stream never proves Pro search type', async () => {
+  it('accepts a markerless forced-Pro stream when its reasoning lifecycle proves Pro execution', async () => {
     const events = completeProSearchEvents().map((frame) =>
       frame
         .replace(',"metadata":{"search_type":"pro"}', '')
@@ -273,8 +273,36 @@ describe('Perplexity Pro Search provider', () => {
       streamResponse(streamFromStrings(events)),
     ).execute('missing Pro marker', { timeout: 5 });
 
-    expect(result.error).toContain('did not prove Pro search type');
-    expect(result.content).toBe('');
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe(PRO_SEARCH_CONTENT);
+    expect(result.model).toBe('sonar-pro');
+  });
+
+  it('accepts documented Pro classification metadata and rejects an explicit fast downgrade', async () => {
+    const classifiedEvents = (searchType: 'pro' | 'fast') => {
+      const events = completeProSearchEvents().map((frame) =>
+        frame
+          .replace(',"metadata":{"search_type":"pro"}', '')
+          .replace(',"search_type":"pro"', ''),
+      );
+      events[4] = events[4]!.replace(
+        '"object":"chat.completion.done",',
+        `"object":"chat.completion.done","search_metadata":{"search_type_used":"${searchType}"},`,
+      );
+      return events;
+    };
+
+    const pro = await provider(async () =>
+      streamResponse(streamFromStrings(classifiedEvents('pro'))),
+    ).execute('documented Pro metadata', { timeout: 5 });
+    expect(pro.error).toBeUndefined();
+    expect(pro.content).toBe(PRO_SEARCH_CONTENT);
+
+    const fast = await provider(async () =>
+      streamResponse(streamFromStrings(classifiedEvents('fast'))),
+    ).execute('documented fast metadata', { timeout: 5 });
+    expect(fast.error).toContain('downgraded to fast');
+    expect(fast.content).toBe('');
   });
 
   it('leaves the standard perplexity-sonar-pro request contract unchanged', async () => {

@@ -141,7 +141,6 @@ export class PerplexityProSearchProvider extends BaseProvider {
     let completionChunkSeen = false;
     let terminalSeen = false;
     let doneMarkerSeen = false;
-    let proSearchTypeSeen = false;
     let usage: ProviderUsage | undefined;
     let terminalContent: string | undefined;
     let terminalSearchResults: PerplexitySearchResult[] = [];
@@ -177,7 +176,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
         );
       }
 
-      proSearchTypeSeen = this.validateSearchType(payload) || proSearchTypeSeen;
+      this.validateSearchType(payload);
       model = this.observeModel(payload, model);
       const object = payload.object;
       if (typeof object !== 'string') {
@@ -266,11 +265,6 @@ export class PerplexityProSearchProvider extends BaseProvider {
     if (!terminalSeen || !usage || !model || terminalContent === undefined) {
       throw new Error('Perplexity Pro Search stream ended before completion');
     }
-    if (!proSearchTypeSeen) {
-      throw new Error(
-        'Perplexity Pro Search response did not prove Pro search type',
-      );
-    }
     if (model !== SONAR_PRO_MODEL) {
       throw new Error(
         `Perplexity Pro Search returned unexpected model: ${model}`,
@@ -325,13 +319,23 @@ export class PerplexityProSearchProvider extends BaseProvider {
     return payload.model;
   }
 
-  private validateSearchType(payload: JsonRecord): boolean {
+  /**
+   * Forced-Pro responses do not consistently echo their requested search
+   * type. Treat metadata as a downgrade guard when present; the required
+   * reasoning lifecycle, streamed terminal, model, and usage prove execution.
+   */
+  private validateSearchType(payload: JsonRecord): void {
     const metadata = this.isRecord(payload.metadata) ? payload.metadata : {};
+    const searchMetadata = this.isRecord(payload.search_metadata)
+      ? payload.search_metadata
+      : {};
     const candidates = [
       payload.search_type,
       payload.searchType,
       metadata.search_type,
       metadata.searchType,
+      searchMetadata.search_type_used,
+      searchMetadata.searchTypeUsed,
     ].filter((value) => value !== undefined && value !== null);
     for (const value of candidates) {
       if (typeof value !== 'string') {
@@ -345,7 +349,6 @@ export class PerplexityProSearchProvider extends BaseProvider {
         );
       }
     }
-    return candidates.length > 0;
   }
 
   private firstChoice(payload: JsonRecord): JsonRecord {
