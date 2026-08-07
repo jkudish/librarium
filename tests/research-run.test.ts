@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BaseProvider } from '../src/adapters/base.js';
+import type {
+  HttpStreamClient,
+  HttpStreamResponse,
+} from '../src/core/http-client.js';
 import {
   defaultRunManifestStore,
   executeResearchRun,
@@ -57,6 +61,44 @@ class EmbeddedProvider extends BaseProvider {
       durationMs: response.durationMs,
     };
   }
+}
+
+class StreamingEmbeddedProvider extends BaseProvider {
+  readonly id = 'streaming-embedded';
+  readonly tier = 'ai-grounded' as const;
+  readonly requiresApiKey = false;
+
+  async execute(
+    _query: string,
+    options: ProviderOptions,
+  ): Promise<ProviderResult> {
+    const response = await this.streamRequest(
+      'https://example.test/streaming-research',
+      { timeout: options.timeout, signal: options.signal },
+    );
+    return {
+      provider: this.id,
+      tier: this.tier,
+      content: await new Response(response.body).text(),
+      citations: [],
+      durationMs: response.durationMs,
+    };
+  }
+}
+
+function streamingResponse(content: string): HttpStreamResponse {
+  return {
+    status: 200,
+    statusText: 'OK',
+    headers: { 'content-type': 'text/plain' },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(content));
+        controller.close();
+      },
+    }),
+    durationMs: 1,
+  };
 }
 
 describe('executeResearchRun', () => {
@@ -334,6 +376,53 @@ describe('executeResearchRun', () => {
     const direct = await provider.execute('default', { timeout: 1 });
     expect(direct.content).toBe('Default transport');
     expect(defaultClient).toHaveBeenCalledOnce();
+  });
+
+  it('projects streaming transports run-locally without mutating the provider', async () => {
+    const outputDir = join(
+      tmpdir(),
+      `librarium-stream-client-${crypto.randomUUID()}`,
+    );
+    dirs.push(outputDir);
+    const defaultStreamClient: HttpStreamClient = vi.fn(async () =>
+      streamingResponse('Default streaming transport'),
+    );
+    const provider = new StreamingEmbeddedProvider({
+      httpStreamClient: defaultStreamClient,
+    });
+    const registry: ProviderRegistry = {
+      getProvider: () => provider,
+      getAllProviders: () => [provider],
+    };
+    const overrideStreamClient: HttpStreamClient = vi.fn(async () =>
+      streamingResponse('Projected streaming transport'),
+    );
+
+    const result = await executeResearchRun(
+      {
+        query: 'stream transport projection',
+        config: {
+          ...config,
+          defaults: { ...config.defaults, outputDir },
+          providers: { 'streaming-embedded': { enabled: true } },
+        },
+        providerIds: [provider.id],
+        outputDir,
+        slug: 'stream-transport-projection',
+      },
+      {
+        providerRegistry: registry,
+        httpStreamClient: overrideStreamClient,
+      },
+    );
+
+    expect(result.results[0]?.text).toBe('Projected streaming transport');
+    expect(overrideStreamClient).toHaveBeenCalledOnce();
+    expect(defaultStreamClient).not.toHaveBeenCalled();
+
+    const direct = await provider.execute('default stream', { timeout: 1 });
+    expect(direct.content).toBe('Default streaming transport');
+    expect(defaultStreamClient).toHaveBeenCalledOnce();
   });
 
   it('embeds accepted background tasks in the final manifest', async () => {

@@ -29,7 +29,7 @@ export function registerInitCommand(program: Command): void {
           let enabledCount = 0;
 
           for (const choice of computeInitProviderChoices(process.env)) {
-            const { id, envVar, keyPresent, isLlm, enableByDefault } = choice;
+            const { id, envVar, keyPresent, isOptIn, enableByDefault } = choice;
             const displayName = PROVIDER_DISPLAY_NAMES[id] || id;
 
             if (enableByDefault) {
@@ -39,13 +39,13 @@ export function registerInitCommand(program: Command): void {
               };
               console.log(`  [+] ${displayName} — ${envVar} found, enabled`);
               enabledCount++;
-            } else if (keyPresent && isLlm) {
-              // llm-tier providers are opt-in: never enabled by --auto even
-              // when their (shared) API key is present. Leave any existing
-              // config untouched.
+            } else if (keyPresent && isOptIn) {
+              // Descriptor-marked providers are opt-in: never enabled by
+              // --auto even when a shared API key is present. Leave any
+              // existing config untouched.
               if (!existingConfig.providers[id]) {
                 console.log(
-                  `  [ ] ${displayName} — ${envVar} found, but llm-tier providers are opt-in (enable with \`-p ${id}\` or \`--group llm\`)`,
+                  `  [ ] ${displayName} — ${envVar} found, but this provider is opt-in (enable explicitly with \`-p ${id}\` or a group)`,
                 );
               } else {
                 console.log(`  [~] ${displayName}: using existing config`);

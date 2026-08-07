@@ -125,7 +125,7 @@ describe('README drift: command flags', () => {
 describe('README drift: providers, tiers, and groups', () => {
   it('states the correct built-in provider count', () => {
     const providerCount = Object.keys(PROVIDER_ENV_VARS).length;
-    expect(providerCount).toBe(24); // tripwire: bump the prose below if this changes
+    expect(providerCount).toBe(31); // tripwire: bump the prose below if this changes
     expect(
       README.includes(`${providerCount} built-in provider adapters`),
       `README.md should say "${providerCount} built-in provider adapters" in the Providers intro.`,
@@ -141,9 +141,16 @@ describe('README drift: providers, tiers, and groups', () => {
     ).toEqual([]);
   });
 
+  it('names every built-in provider ID', () => {
+    const missing = Object.keys(PROVIDER_ENV_VARS).filter(
+      (id) => !README.includes(`\`${id}\``),
+    );
+    expect(missing).toEqual([]);
+  });
+
   it('names every default group', () => {
     const groupNames = Object.keys(DEFAULT_GROUPS);
-    expect(groupNames.length).toBe(7); // deep, quick, raw, fast, comprehensive, llm, all
+    expect(groupNames.length).toBe(8); // deep, quick, raw, fast, visibility, comprehensive, llm, all
     // Each group name appears as an inline code span in the Groups table.
     const missing = groupNames.filter(
       (name) => !README.includes(`\`${name}\``),
@@ -156,8 +163,23 @@ describe('README drift: providers, tiers, and groups', () => {
 
   it('keeps the grounded all-group count aligned with the registry', () => {
     const groundedCount = DEFAULT_GROUPS.all.length;
-    expect(groundedCount).toBe(20);
+    expect(groundedCount).toBe(27);
     expect(README).toContain(`All ${groundedCount} grounded providers`);
-    expect(README).not.toContain('All 21 grounded providers');
+    expect(README).not.toContain('All 20 grounded providers');
+  });
+
+  it('keeps visibility provenance, retention, and cost caveats documented', () => {
+    expect(README).toContain('not the official OpenAI');
+    expect(README).toContain('correlated evidence');
+    expect(README).toContain(
+      'Bearer authentication is live-validated across all',
+    );
+    expect(README).toContain('Zero retention remains an account capability');
+    expect(README).toContain('interactive setup lists them unselected');
+    expect(README).toContain('Perplexity reports its actual cost only after');
+    expect(README).toMatch(
+      /exact account behavior remains\s+unverified until the separately approved live validation/,
+    );
+    expect(README).toContain('logical billing units');
   });
 });

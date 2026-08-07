@@ -13,8 +13,25 @@ const GROUNDED_GROUPS = [
   'fast',
   'raw',
   'deep',
+  'visibility',
   'comprehensive',
   'all',
+] as const;
+
+const SEARCHAPI_SURFACES = [
+  'searchapi-chatgpt',
+  'searchapi-gemini',
+  'searchapi-perplexity',
+  'searchapi-google-ai-mode',
+  'searchapi-bing-copilot',
+  'searchapi-google-ai-overview',
+] as const;
+
+const VISIBILITY_PROVIDERS = [
+  ...SEARCHAPI_SURFACES,
+  'perplexity-sonar-pro',
+  'gemini-grounded',
+  'grok',
 ] as const;
 
 describe('default groups -- llm tier', () => {
@@ -32,7 +49,8 @@ describe('default groups -- llm tier', () => {
     }
   });
 
-  it('includes Grok only in the comprehensive and all grounded groups', () => {
+  it('includes Grok only in visibility, comprehensive, and all', () => {
+    expect(DEFAULT_GROUPS.visibility).toContain('grok');
     expect(DEFAULT_GROUPS.comprehensive).toContain('grok');
     expect(DEFAULT_GROUPS.all).toContain('grok');
     expect(DEFAULT_GROUPS.quick).not.toContain('grok');
@@ -41,12 +59,41 @@ describe('default groups -- llm tier', () => {
 });
 
 describe('default groups -- grok membership invariant', () => {
-  it('keeps grok out of every group except comprehensive and all', () => {
-    const allowed = new Set(['comprehensive', 'all']);
+  it('keeps grok out of every group except visibility, comprehensive, and all', () => {
+    const allowed = new Set(['visibility', 'comprehensive', 'all']);
     for (const [group, members] of Object.entries(DEFAULT_GROUPS)) {
       if (allowed.has(group)) expect(members).toContain('grok');
       else expect(members).not.toContain('grok');
     }
+  });
+});
+
+describe('default groups -- visibility expansion', () => {
+  it('defines exactly the nine-provider visibility roster in policy order', () => {
+    expect(DEFAULT_GROUPS.visibility).toEqual([...VISIBILITY_PROVIDERS]);
+  });
+
+  it('puts all SearchAPI surfaces in comprehensive/all and no other default group', () => {
+    for (const id of SEARCHAPI_SURFACES) {
+      expect(DEFAULT_GROUPS.comprehensive).toContain(id);
+      expect(DEFAULT_GROUPS.all).toContain(id);
+      for (const group of ['quick', 'fast', 'raw', 'deep', 'llm'] as const) {
+        expect(DEFAULT_GROUPS[group]).not.toContain(id);
+      }
+    }
+  });
+
+  it('keeps Pro Search in comprehensive/all but outside visibility/quick/fast', () => {
+    expect(DEFAULT_GROUPS.comprehensive).toContain('perplexity-pro-search');
+    expect(DEFAULT_GROUPS.all).toContain('perplexity-pro-search');
+    for (const group of ['visibility', 'quick', 'fast'] as const) {
+      expect(DEFAULT_GROUPS[group]).not.toContain('perplexity-pro-search');
+    }
+  });
+
+  it('has eight default groups and all 27 grounded providers', () => {
+    expect(Object.keys(DEFAULT_GROUPS)).toHaveLength(8);
+    expect(DEFAULT_GROUPS.all).toHaveLength(27);
   });
 });
 

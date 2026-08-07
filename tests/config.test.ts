@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_GROUPS } from '../src/constants.js';
 import {
   hasApiKey,
   loadConfig,
@@ -11,6 +12,59 @@ import {
   validateFallbacks,
 } from '../src/core/config.js';
 import type { Config, ProjectConfig } from '../src/types.js';
+
+const PRIOR_COMPREHENSIVE = [
+  'perplexity-sonar-deep',
+  'perplexity-deep-research',
+  'perplexity-advanced-deep',
+  'openai-research',
+  'gemini-deep',
+  'perplexity-sonar-pro',
+  'gemini-grounded',
+  'grok',
+  'openrouter-online',
+  'brave-answers',
+  'exa',
+  'you-research',
+  'kagi-fastgpt',
+] as const;
+
+const PRIOR_ALL = [
+  ...PRIOR_COMPREHENSIVE,
+  'jina-search',
+  'firecrawl-search',
+  'perplexity-search',
+  'brave-search',
+  'searchapi',
+  'serpapi',
+  'tavily',
+] as const;
+
+function storedConfig(groups?: Record<string, readonly string[]>) {
+  return {
+    version: 1,
+    defaults: {
+      outputDir: './agents/librarium',
+      maxParallel: 6,
+      timeout: 30,
+      asyncTimeout: 1800,
+      asyncPollInterval: 10,
+      mode: 'mixed',
+      llmWebSearch: true,
+    },
+    providers: {},
+    ...(groups
+      ? {
+          groups: Object.fromEntries(
+            Object.entries(groups).map(([name, members]) => [
+              name,
+              [...members],
+            ]),
+          ),
+        }
+      : {}),
+  };
+}
 
 describe('resolveEnvVar', () => {
   it('resolves $FOO from process.env', () => {
@@ -133,6 +187,147 @@ describe('loadConfig', () => {
       'perplexity-sonar-pro',
       'perplexity-sonar-deep',
     ]);
+  });
+
+  it('migrates only exact stored prior comprehensive and all rosters', () => {
+    const configPath = join(tmpDir, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        storedConfig({
+          comprehensive: PRIOR_COMPREHENSIVE,
+          all: PRIOR_ALL,
+        }),
+      ),
+    );
+
+    const config = loadConfig(configPath);
+    expect(config.groups.comprehensive).toEqual(DEFAULT_GROUPS.comprehensive);
+    expect(config.groups.all).toEqual(DEFAULT_GROUPS.all);
+  });
+
+  it('preserves reordered and added/removed stored rosters', () => {
+    const cases: Array<[string, 'comprehensive' | 'all', string[]]> = [
+      [
+        'reordered comprehensive',
+        'comprehensive',
+        [
+          PRIOR_COMPREHENSIVE[1],
+          PRIOR_COMPREHENSIVE[0],
+          ...PRIOR_COMPREHENSIVE.slice(2),
+        ],
+      ],
+      [
+        'reordered all',
+        'all',
+        [PRIOR_ALL[1], PRIOR_ALL[0], ...PRIOR_ALL.slice(2)],
+      ],
+      [
+        'added comprehensive',
+        'comprehensive',
+        [...PRIOR_COMPREHENSIVE, 'custom-provider'],
+      ],
+      [
+        'removed comprehensive',
+        'comprehensive',
+        PRIOR_COMPREHENSIVE.slice(0, -1),
+      ],
+      ['added all', 'all', [...PRIOR_ALL, 'custom-provider']],
+      ['removed all', 'all', PRIOR_ALL.slice(0, -1)],
+    ];
+
+    for (const [name, group, roster] of cases) {
+      const configPath = join(tmpDir, `${name.replaceAll(' ', '-')}.json`);
+      writeFileSync(
+        configPath,
+        JSON.stringify(storedConfig({ [group]: roster })),
+      );
+      expect(loadConfig(configPath).groups[group], name).toEqual(roster);
+    }
+  });
+
+  it('does not let an added alias duplicate collapse into a migratable snapshot', () => {
+    const configPath = join(tmpDir, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        storedConfig({
+          comprehensive: [...PRIOR_COMPREHENSIVE, 'openai-deep'],
+        }),
+      ),
+    );
+
+    expect(loadConfig(configPath).groups.comprehensive).toEqual(
+      PRIOR_COMPREHENSIVE,
+    );
+  });
+
+  it('uses current defaults when comprehensive/all are absent', () => {
+    const configPath = join(tmpDir, 'config.json');
+    writeFileSync(configPath, JSON.stringify(storedConfig()));
+
+    const config = loadConfig(configPath);
+    expect(config.groups.comprehensive).toEqual(DEFAULT_GROUPS.comprehensive);
+    expect(config.groups.all).toEqual(DEFAULT_GROUPS.all);
+  });
+
+  it('never applies the global roster migration to project groups', () => {
+    const configPath = join(tmpDir, 'config.json');
+    writeFileSync(configPath, JSON.stringify(storedConfig()));
+
+    const merged = mergeConfigs(loadConfig(configPath), {
+      groups: {
+        comprehensive: [...PRIOR_COMPREHENSIVE],
+        all: [...PRIOR_ALL],
+      },
+    });
+    expect(merged.groups.comprehensive).toEqual(PRIOR_COMPREHENSIVE);
+    expect(merged.groups.all).toEqual(PRIOR_ALL);
+  });
+
+  it('leaves already migrated rosters unchanged and is idempotent on rerun', () => {
+    const configPath = join(tmpDir, 'config.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        storedConfig({
+          comprehensive: DEFAULT_GROUPS.comprehensive,
+          all: DEFAULT_GROUPS.all,
+        }),
+      ),
+    );
+
+    const first = loadConfig(configPath);
+    const second = loadConfig(configPath);
+    expect(first.groups.comprehensive).toEqual(DEFAULT_GROUPS.comprehensive);
+    expect(first.groups.all).toEqual(DEFAULT_GROUPS.all);
+    expect(second.groups).toEqual(first.groups);
+  });
+
+  it('canonicalizes recognized historical aliases before snapshot matching', () => {
+    for (const openAiAlias of ['openai-deep', 'openai-deep-o3']) {
+      const configPath = join(tmpDir, `${openAiAlias}.json`);
+      const withHistoricalAliases = (members: readonly string[]) =>
+        members.map((id) => {
+          if (id === 'openai-research') return openAiAlias;
+          if (id === 'perplexity-sonar-deep') return 'perplexity-deep';
+          if (id === 'perplexity-sonar-pro') return 'perplexity-sonar';
+          return id;
+        });
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          storedConfig({
+            comprehensive: withHistoricalAliases(PRIOR_COMPREHENSIVE),
+            all: withHistoricalAliases(PRIOR_ALL),
+          }),
+        ),
+      );
+
+      const config = loadConfig(configPath);
+      expect(config.groups.comprehensive).toEqual(DEFAULT_GROUPS.comprehensive);
+      expect(config.groups.all).toEqual(DEFAULT_GROUPS.all);
+    }
   });
 });
 

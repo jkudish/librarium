@@ -34,6 +34,10 @@ const VALID_GROUPS = new Set([
   'all',
 ]);
 
+// `visibility` is intentionally not suggested: it is a specialized,
+// explicitly selected comparison of consumer answer surfaces, while refine's
+// existing policy chooses only by query depth/search shape.
+
 const REFINE_PROMPT = `Rewrite the research query below into three variants tuned for different search systems.
 Respond with strict JSON only, no prose, no code fences, exactly this shape:
 {"deepResearch": "...", "aiGrounded": "...", "rawSearch": "...", "suggestedGroup": "..."}

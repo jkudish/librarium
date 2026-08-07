@@ -130,6 +130,8 @@ export interface ProviderResult {
   usage?: ProviderUsage;
   metering?: ProviderMetering;
   error?: string;
+  /** Fail closed when this result must not trigger a configured fallback. */
+  preventFallback?: true;
 }
 
 // Structured result returned by the core dispatcher for library consumers
@@ -147,6 +149,8 @@ export interface ProviderDispatchResult {
   metering?: ProviderMetering;
   error?: string;
   fallbackFor?: string;
+  /** Propagated provider policy that prevents fallback dispatch. */
+  preventFallback?: true;
 }
 
 // Handle for async deep-research tasks
@@ -508,6 +512,8 @@ export interface ProviderReport {
   metering?: ProviderMetering;
   error?: string;
   fallbackFor?: string;
+  /** Propagated provider policy that prevents fallback dispatch. */
+  preventFallback?: true;
   /** Present only for providers submitted through a background lifecycle. */
   task?: RunTaskState;
 }

@@ -74,7 +74,14 @@ describe('CLI integration', () => {
 
   it('groups shows default group names', () => {
     const output = run('groups');
-    for (const group of ['deep', 'quick', 'raw']) {
+    for (const group of [
+      'deep',
+      'quick',
+      'raw',
+      'visibility',
+      'comprehensive',
+      'all',
+    ]) {
       expect(output).toContain(group);
     }
   });

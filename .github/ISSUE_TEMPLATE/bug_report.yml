@@ -69,6 +69,7 @@ body:
         - openai-research
         - gemini-deep
         - perplexity-sonar-pro
+        - perplexity-pro-search
         - gemini-grounded
         - grok
         - openrouter-online
@@ -81,6 +82,12 @@ body:
         - jina-search
         - firecrawl-search
         - searchapi
+        - searchapi-chatgpt
+        - searchapi-gemini
+        - searchapi-perplexity
+        - searchapi-google-ai-mode
+        - searchapi-bing-copilot
+        - searchapi-google-ai-overview
         - serpapi
         - tavily
         - claude

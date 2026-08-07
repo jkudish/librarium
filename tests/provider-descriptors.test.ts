@@ -4,6 +4,7 @@ import {
   getProvider,
   initializeProviders,
 } from '../src/adapters/index.js';
+import { PerplexitySearchOptionsSchema } from '../src/adapters/perplexity-search-options.js';
 import { BUILTIN_PROVIDER_DESCRIPTORS } from '../src/adapters/provider-descriptors.js';
 import {
   DEFAULT_GROUPS,
@@ -12,15 +13,22 @@ import {
   PROVIDER_ID_ALIASES,
   validateDefaultGroups,
 } from '../src/constants.js';
+import type { HttpStreamClient } from '../src/core/http-client.js';
 import { getMeteringKind } from '../src/core/metering.js';
 import { PROVIDER_CATALOG } from '../src/core/provider-catalog.js';
+import { searchApiOptionsSchema } from '../src/core/searchapi.js';
+import {
+  completeProSearchEvents,
+  streamFromStrings,
+  streamResponse,
+} from './fixtures/perplexity-pro-search.js';
 
 describe('built-in provider descriptors', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(24);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(31);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -81,7 +89,210 @@ describe('built-in provider descriptors', () => {
       'openai-chat',
       'gemini-chat',
       'openrouter-chat',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+      'perplexity-pro-search',
     ]);
+  });
+
+  it('declares descriptor-owned setup policy for shared credentials', () => {
+    const optIn = BUILTIN_PROVIDER_DESCRIPTORS.filter(
+      ({ credential }) => !credential.autoEnable,
+    ).map(({ id }) => id);
+
+    expect(optIn).toEqual(
+      expect.arrayContaining([
+        'searchapi-chatgpt',
+        'searchapi-gemini',
+        'searchapi-perplexity',
+        'searchapi-google-ai-mode',
+        'searchapi-bing-copilot',
+        'searchapi-google-ai-overview',
+        'perplexity-pro-search',
+        'claude',
+        'openai-chat',
+        'gemini-chat',
+        'openrouter-chat',
+      ]),
+    );
+    expect(
+      BUILTIN_PROVIDER_DESCRIPTORS.find(({ id }) => id === 'searchapi')
+        ?.credential.autoEnable,
+    ).toBe(true);
+    expect(
+      BUILTIN_PROVIDER_DESCRIPTORS.find(
+        ({ id }) => id === 'perplexity-sonar-pro',
+      )?.credential.autoEnable,
+    ).toBe(true);
+  });
+
+  it('uses strict typed option schemas for the new integration surfaces', () => {
+    for (const id of [
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+    ]) {
+      expect(
+        BUILTIN_PROVIDER_DESCRIPTORS.find((descriptor) => descriptor.id === id)
+          ?.optionsSchema,
+      ).toBe(searchApiOptionsSchema);
+    }
+    expect(
+      BUILTIN_PROVIDER_DESCRIPTORS.find(({ id }) => id === 'perplexity-search')
+        ?.optionsSchema,
+    ).toBe(PerplexitySearchOptionsSchema);
+    expect(
+      BUILTIN_PROVIDER_DESCRIPTORS.find(
+        ({ id }) => id === 'perplexity-pro-search',
+      )?.optionsSchema.safeParse({ undocumented: true }).success,
+    ).toBe(false);
+  });
+
+  it('fails closed on invalid SearchAPI zeroRetention options', async () => {
+    const httpClient = vi.fn();
+    const result = await initializeProviders({
+      httpClient,
+      providers: {
+        'searchapi-chatgpt': { options: { zeroRetention: 'yes' } },
+      },
+    });
+
+    expect(result.warnings.join('\n')).toContain(
+      'Invalid options for searchapi-chatgpt',
+    );
+    await expect(
+      getProvider('searchapi-chatgpt')?.execute('must not run', { timeout: 5 }),
+    ).resolves.toMatchObject({
+      error: 'Invalid options for searchapi-chatgpt',
+      preventFallback: true,
+    });
+    expect(httpClient).not.toHaveBeenCalled();
+  });
+
+  it('wires valid zeroRetention through every new SearchAPI factory', async () => {
+    const ids = [
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+    ];
+    const urls: string[] = [];
+    const httpClient = vi.fn(async <T>(url: string) => {
+      urls.push(url);
+      return {
+        status: 200,
+        headers: {},
+        data: {} as T,
+      };
+    });
+    await initializeProviders({
+      credentials: { env: { SEARCHAPI_API_KEY: 'synthetic-key' } },
+      httpClient,
+      providers: Object.fromEntries(
+        ids.map((id) => [id, { options: { zeroRetention: true } }]),
+      ),
+    });
+
+    for (const id of ids) {
+      await getProvider(id)?.execute('factory privacy check', { timeout: 5 });
+    }
+    expect(urls).toHaveLength(ids.length);
+    for (const url of urls) {
+      expect(new URL(url).searchParams.get('zero_retention')).toBe('true');
+    }
+  });
+
+  it('injects the streaming transport through registry initialization', async () => {
+    const httpStreamClient = vi.fn<HttpStreamClient>(async () =>
+      streamResponse(streamFromStrings(completeProSearchEvents())),
+    );
+    await initializeProviders({
+      credentials: { env: { PERPLEXITY_API_KEY: 'synthetic-key' } },
+      httpStreamClient,
+    });
+
+    await expect(
+      getProvider('perplexity-pro-search')?.execute('registry Pro Search', {
+        timeout: 5,
+      }),
+    ).resolves.toMatchObject({
+      provider: 'perplexity-pro-search',
+      content: 'Split Pro Search content 😀.',
+    });
+    expect(httpStreamClient).toHaveBeenCalledOnce();
+  });
+
+  it('wires only documented Perplexity Search options through its factory', async () => {
+    const httpClient = vi.fn(async () => ({
+      status: 200,
+      headers: {},
+      data: { id: 'synthetic', results: [] },
+    }));
+    const result = await initializeProviders({
+      credentials: { env: { PERPLEXITY_API_KEY: 'synthetic-key' } },
+      httpClient,
+      providers: {
+        'perplexity-search': {
+          options: {
+            maxResults: 3,
+            country: 'ca',
+            searchLanguageFilter: ['en'],
+            searchDomainDenylist: ['example.test'],
+            maxTokens: 400,
+            maxTokensPerPage: 100,
+            additionalQueries: ['second query'],
+          },
+        },
+      },
+    });
+
+    expect(result.warnings).toEqual([]);
+    await getProvider('perplexity-search')?.execute('base query', {
+      timeout: 5,
+    });
+    expect(httpClient).toHaveBeenCalledWith(
+      'https://api.perplexity.ai/search',
+      expect.objectContaining({
+        body: {
+          query: ['base query', 'second query'],
+          max_results: 3,
+          country: 'CA',
+          search_language_filter: ['en'],
+          search_domain_filter: ['-example.test'],
+          max_tokens: 400,
+          max_tokens_per_page: 100,
+        },
+      }),
+    );
+  });
+
+  it('rejects unknown Perplexity Search options before HTTP', async () => {
+    const httpClient = vi.fn();
+    const result = await initializeProviders({
+      httpClient,
+      providers: {
+        'perplexity-search': { options: { undocumented: true } },
+      },
+    });
+
+    expect(result.warnings.join('\n')).toContain(
+      'Invalid options for perplexity-search',
+    );
+    await expect(
+      getProvider('perplexity-search')?.execute('must not run', { timeout: 5 }),
+    ).resolves.toMatchObject({
+      error: 'Invalid options for perplexity-search',
+    });
+    expect(httpClient).not.toHaveBeenCalled();
   });
 
   it('applies the OpenAI research defaults through provider initialization', async () => {

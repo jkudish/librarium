@@ -10,7 +10,9 @@ triggers:
 
 # Librarium -- Multi-Provider Deep Research
 
-Run research queries across 24 search, deep-research, and LLM provider adapters in parallel, collect results, deduplicate sources, and produce structured output.
+Run research queries across 31 search, deep-research, answer-engine, and LLM
+provider adapters in parallel, collect results, deduplicate sources, and
+produce structured output.
 
 ## Prerequisites
 
@@ -23,18 +25,23 @@ Run research queries across 24 search, deep-research, and LLM provider adapters 
 ### Phase 1: Query Analysis
 Analyze the user's research question. Determine:
 - Is this a technical, business, or general knowledge query?
-- Which provider group is best suited? (`quick` for fast answers, `deep` for thorough research, `comprehensive` for important decisions, `all` for maximum grounded coverage, `llm` for direct model answers with web search enabled by default)
+- Which provider group is best suited? (`quick` for fast answers, `deep` for
+  thorough research, `visibility` for an explicit nine-surface answer-engine
+  comparison, `comprehensive` for important decisions, `all` for all 27
+  grounded providers, `llm` for direct model answers with web search enabled by
+  default)
 - What execution mode? (`sync` for quick queries, `mixed` for deep research)
 
 ### Phase 2: Provider Selection
 Select providers based on query type:
 - **Technical queries**: Use `comprehensive` group (deep research + AI-grounded)
 - **Quick facts**: Use `quick` group (AI-grounded only, fast)
-- **Competitive research**: Use `all` group (maximum coverage)
-- **Specific provider**: Use `--providers` flag (accepts canonical IDs or display names, e.g. `-p "Exa Search,brave-search"`)
 - **Competitive research**: Use `all` group (maximum grounded coverage)
+- **Answer visibility**: Use `visibility` only when you deliberately want the
+  nine-surface consumer/first-party comparison
 - **Direct model answers**: Use `llm` group (Claude, OpenAI, Gemini, OpenRouter). Web search is enabled by default; disable `llmWebSearch` for an ungrounded baseline with no citations.
-- **Specific provider**: Use `--providers` flag
+- **Specific provider**: Use `--providers` (canonical IDs or display names,
+  e.g. `-p "Exa Search,brave-search"`)
 
 ### Phase 3: Dispatch
 Run the query:
@@ -71,6 +78,7 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium run <query>` | Run research query |
 | `librarium run <query> --group quick` | Fast AI-grounded search |
 | `librarium run <query> --group deep` | Deep research (async) |
+| `librarium run <query> --group visibility` | Compare nine answer-engine surfaces |
 | `librarium run <query> --group all` | All providers |
 | `librarium answer <query>` | Fan out (default `quick`) and synthesize one grounded, cited answer to `answer.md` |
 | `librarium run <query> --max-cost 0.50` | Stop launching providers once API-reported cost crosses the budget |
@@ -99,9 +107,19 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 | Tier | Providers | Speed | Depth |
 |------|-----------|-------|-------|
 | deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-research, gemini-deep | Minutes | Comprehensive |
-| ai-grounded | perplexity-sonar-pro, brave-answers, exa, you-research, kagi-fastgpt | Seconds | Good |
-| raw-search | perplexity-search, brave-search, jina-search, searchapi, serpapi, tavily | Fast | Links only |
+| ai-grounded | perplexity-sonar-pro, perplexity-pro-search, gemini-grounded, grok, openrouter-online, brave-answers, exa, you-research, kagi-fastgpt, six SearchAPI answer surfaces | Seconds | Grounded answers and observed consumer surfaces |
+| raw-search | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Fast | Links and SERP evidence |
 | llm | claude, openai-chat, gemini-chat, openrouter-chat | Seconds | Model-native web search by default; optionally ungrounded |
+
+### Visibility and privacy boundary
+
+The six SearchAPI answer adapters observe consumer-facing ChatGPT, Gemini,
+Perplexity, Google AI Mode, Bing Copilot, and Google AI Overview output through
+one upstream vendor. Treat agreement among them as correlated visibility
+evidence, not independent corroboration or parity with a particular logged-in
+user. Librarium uses bearer authentication and supports explicit
+`options.zeroRetention`; a rejected retention request fails closed and is never
+retried without the option.
 
 ## Output Structure
 
@@ -109,5 +127,5 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 ./agents/librarium/{timestamp}-{slug}/
   prompt.md, run.json, summary.md, sources.json
   {provider}.md, {provider}.meta.json
-  async-tasks.json (if applicable)
+  answer.md (when using `librarium answer`)
 ```

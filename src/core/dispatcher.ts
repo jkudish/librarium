@@ -182,6 +182,7 @@ export async function dispatch(
     errorReport: ProviderReport,
   ): Promise<ProviderReport | null> {
     if (options.allowFallbacks === false) return null;
+    if (errorReport.preventFallback === true) return null;
     const fallbackId = config.providers[id]?.fallback;
     if (!fallbackId) return null;
 
@@ -741,6 +742,7 @@ function createDispatchResult(
     metering: buildProviderMetering(providerId, providerConfig, usage),
     error: result.error,
     fallbackFor,
+    preventFallback: result.preventFallback,
   };
 }
 
@@ -769,5 +771,6 @@ function createReport(
     metering: result.metering,
     error: result.error,
     fallbackFor: result.fallbackFor,
+    preventFallback: result.preventFallback,
   };
 }

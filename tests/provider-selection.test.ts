@@ -138,6 +138,48 @@ describe('provider selection', () => {
     expect(ids).toEqual(['brave-search']);
   });
 
+  it('treats explicit comprehensive/all as opt-in to configured shared-key providers', () => {
+    const c = config();
+    c.providers['searchapi-chatgpt'] = {
+      enabled: false,
+      apiKey: '$SEARCHAPI_API_KEY',
+    };
+    c.providers['perplexity-pro-search'] = {
+      enabled: false,
+      apiKey: '$PERPLEXITY_API_KEY',
+    };
+    c.groups.comprehensive = ['searchapi-chatgpt', 'perplexity-pro-search'];
+    c.groups.all = [...c.groups.comprehensive];
+    const expandedProviders = [
+      ...providers,
+      provider('searchapi-chatgpt', 'SEARCHAPI_API_KEY'),
+      provider('perplexity-pro-search', 'PERPLEXITY_API_KEY'),
+    ];
+    const credentials = {
+      env: {
+        BRAVE_API_KEY: 'brave-key',
+        EXA_API_KEY: 'exa-key',
+        SEARCHAPI_API_KEY: 'searchapi-key',
+        PERPLEXITY_API_KEY: 'perplexity-key',
+      },
+    };
+
+    for (const group of ['comprehensive', 'all']) {
+      expect(
+        resolveProviderSelection(c, { group }, expandedProviders, {
+          requireUsable: true,
+          credentials,
+        }),
+      ).toEqual(['searchapi-chatgpt', 'perplexity-pro-search']);
+    }
+    expect(
+      resolveProviderSelection(c, {}, expandedProviders, {
+        requireUsable: true,
+        credentials,
+      }),
+    ).toEqual(['brave-search', 'exa']);
+  });
+
   it('fails when no usable provider remains', () => {
     expect(() =>
       resolveProviderSelection(config(), {}, providers, {

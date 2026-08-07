@@ -62,6 +62,13 @@ describe('parseRefineResponse', () => {
     expect(refined.suggestedGroup).toBeUndefined();
   });
 
+  it('does not suggest the explicit consumer-surface visibility group', () => {
+    const refined = parseRefineResponse(
+      VALID.replace('"quick"', '"visibility"'),
+    );
+    expect(refined.suggestedGroup).toBeUndefined();
+  });
+
   it('throws when variants are missing or empty', () => {
     expect(() => parseRefineResponse('{}')).toThrow();
     expect(() =>

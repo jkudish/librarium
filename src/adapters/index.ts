@@ -3,7 +3,7 @@ import {
   type CredentialContext,
   describeCredentialReference,
 } from '../core/credentials.js';
-import type { HttpClient } from '../core/http-client.js';
+import type { HttpClient, HttpStreamClient } from '../core/http-client.js';
 import { getMeteringKind } from '../core/metering.js';
 import {
   providerCredentialRef,
@@ -26,6 +26,7 @@ export type ProviderInitConfig = Partial<
 > & {
   credentials?: CredentialContext;
   httpClient?: HttpClient;
+  httpStreamClient?: HttpStreamClient;
 };
 
 export interface ProviderInitResult {
@@ -159,6 +160,7 @@ export async function initializeProviders(
   const providerConfig = config.providers ?? {};
   const credentials = config.credentials ?? {};
   const httpClient = config.httpClient;
+  const httpStreamClient = config.httpStreamClient;
   const warnings: string[] = [];
 
   for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -177,7 +179,10 @@ export async function initializeProviders(
     const normalizedConfig = configured
       ? {
           ...configured,
-          options: options.success ? options.data : configured.options,
+          // Invalid raw options have already been rejected by the descriptor
+          // schema. Do not pass them to a factory where a coercion could turn
+          // a fail-closed configuration error into a live request.
+          options: options.success ? options.data : {},
         }
       : undefined;
     let provider: Provider;
@@ -200,6 +205,7 @@ export async function initializeProviders(
         apiKey: normalizedConfig?.apiKey,
         credentials,
         httpClient,
+        httpStreamClient,
       });
     }
     provider.source = 'builtin';
@@ -222,6 +228,7 @@ function applyConfigurationError(provider: Provider, message: string): void {
     content: '',
     citations: [],
     durationMs: 0,
+    preventFallback: true,
     error: message,
   });
   provider.test = async () => ({ ok: false, error: message });

@@ -1,8 +1,10 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   HttpRequestAbortedError,
+  HttpRequestTimeoutError,
   HttpResponseTooLargeError,
   httpRequest,
+  httpStreamRequest,
 } from '../src/core/http-client.js';
 
 // Mock constants to reduce retry delays in tests
@@ -496,5 +498,170 @@ describe('httpRequest', () => {
         signal: controller.signal,
       }),
     ).rejects.toThrow('aborted');
+  });
+});
+
+describe('httpStreamRequest', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('exposes status, headers, and a readable response without buffering it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('streamed body', {
+        status: 202,
+        statusText: 'Accepted',
+        headers: {
+          'content-type': 'text/event-stream',
+          'x-request-id': 'synthetic-request',
+        },
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const response = await httpStreamRequest('https://api.example.com/stream', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer synthetic-key' },
+      body: { stream: true },
+    });
+
+    expect(response).toMatchObject({
+      status: 202,
+      statusText: 'Accepted',
+      headers: {
+        'content-type': 'text/event-stream',
+        'x-request-id': 'synthetic-request',
+      },
+    });
+    expect(await new Response(response.body).text()).toBe('streamed body');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer synthetic-key',
+      },
+      body: '{"stream":true}',
+    });
+  });
+
+  it('never retries a streaming request by default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('unavailable', {
+        status: 503,
+        statusText: 'Unavailable',
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const response = await httpStreamRequest(
+      'https://api.example.com/one-attempt',
+    );
+
+    expect(response.status).toBe(503);
+    expect(await new Response(response.body).text()).toBe('unavailable');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects retry-enabled policies before dispatch', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    await expect(
+      httpStreamRequest('https://api.example.com/no-retries', {
+        retry: { mode: 'safe' },
+      } as never),
+    ).rejects.toThrow('only support retry mode "never"');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an oversized declared streaming body before returning it', async () => {
+    const cancel = vi.fn();
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'content-length': '1025' }),
+      body: new ReadableStream({ cancel }),
+    });
+
+    await expect(
+      httpStreamRequest('https://api.example.com/declared-large'),
+    ).rejects.toBeInstanceOf(HttpResponseTooLargeError);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('errors the readable stream when its actual bytes exceed the bound', async () => {
+    const cancel = vi.fn();
+    const chunks = [new Uint8Array(700), new Uint8Array(400)];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const chunk = chunks.shift();
+        if (chunk) controller.enqueue(chunk);
+      },
+      cancel,
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(body, { status: 200 }));
+
+    const response = await httpStreamRequest(
+      'https://api.example.com/actual-large',
+    );
+    const reader = response.body.getReader();
+    await expect(reader.read()).resolves.toMatchObject({ done: false });
+    await expect(reader.read()).rejects.toBeInstanceOf(
+      HttpResponseTooLargeError,
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('preserves caller abort during body consumption', async () => {
+    const caller = new AbortController();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('first chunk'));
+      },
+      cancel,
+    });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(body, { status: 200 }));
+
+    const response = await httpStreamRequest('https://api.example.com/abort', {
+      signal: caller.signal,
+      timeout: 30_000,
+    });
+    const reader = response.body.getReader();
+    await expect(reader.read()).resolves.toMatchObject({ done: false });
+    const pending = reader.read();
+    caller.abort();
+
+    await expect(pending).rejects.toBeInstanceOf(HttpRequestAbortedError);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the timeout active during body consumption', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(body, { status: 200 }));
+
+    const response = await httpStreamRequest(
+      'https://api.example.com/body-timeout',
+      { timeout: 20 },
+    );
+    const reader = response.body.getReader();
+
+    await expect(reader.read()).rejects.toBeInstanceOf(HttpRequestTimeoutError);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 });

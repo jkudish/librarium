@@ -5,7 +5,16 @@ import {
   zshCompletions,
 } from '../src/commands/completions.js';
 
-const GROUPS = ['deep', 'quick', 'raw', 'fast', 'comprehensive', 'llm', 'all'];
+const GROUPS = [
+  'deep',
+  'quick',
+  'raw',
+  'fast',
+  'visibility',
+  'comprehensive',
+  'llm',
+  'all',
+];
 const COMMANDS = ['run', 'status', 'browse', 'html', 'refine', 'completions'];
 
 describe('shell completions', () => {
@@ -31,7 +40,7 @@ describe('shell completions', () => {
     expect(script).toContain('__fish_use_subcommand');
     for (const command of COMMANDS) expect(script).toContain(command);
     expect(script).toContain(
-      "-s g -l group -a 'deep quick raw fast comprehensive llm all'",
+      "-s g -l group -a 'deep quick raw fast visibility comprehensive llm all'",
     );
   });
 

@@ -13,6 +13,16 @@ const LLM_PROVIDERS = [
   'openrouter-chat',
 ] as const;
 
+const NEW_OPT_IN_PROVIDERS = [
+  'searchapi-chatgpt',
+  'searchapi-gemini',
+  'searchapi-perplexity',
+  'searchapi-google-ai-mode',
+  'searchapi-bing-copilot',
+  'searchapi-google-ai-overview',
+  'perplexity-pro-search',
+] as const;
+
 describe('isLlmTierProvider', () => {
   it('identifies the four opt-in llm providers', () => {
     for (const id of LLM_PROVIDERS) {
@@ -53,8 +63,26 @@ describe('computeInitProviderChoices (init opt-in policy)', () => {
       expect(choice).toBeDefined();
       expect(choice!.keyPresent).toBe(true);
       expect(choice!.isLlm).toBe(true);
+      expect(choice!.isOptIn).toBe(true);
       // The crux: key present but NOT enabled/pre-checked by default.
       expect(choice!.enableByDefault).toBe(false);
+    }
+  });
+
+  it('lists new shared-key providers but never selects them automatically', () => {
+    const choices = computeInitProviderChoices({
+      SEARCHAPI_API_KEY: 'searchapi-key',
+      PERPLEXITY_API_KEY: 'perplexity-key',
+    });
+
+    for (const id of NEW_OPT_IN_PROVIDERS) {
+      const choice = choices.find((candidate) => candidate.id === id);
+      expect(choice).toMatchObject({
+        id,
+        keyPresent: true,
+        isOptIn: true,
+        enableByDefault: false,
+      });
     }
   });
 
@@ -76,6 +104,7 @@ describe('computeInitProviderChoices (init opt-in policy)', () => {
       expect(choice).toBeDefined();
       expect(choice!.keyPresent).toBe(true);
       expect(choice!.isLlm).toBe(false);
+      expect(choice!.isOptIn).toBe(false);
       expect(choice!.enableByDefault).toBe(true);
     }
   });

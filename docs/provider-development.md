@@ -53,7 +53,7 @@ Your provider must match librarium's `Provider` shape:
 - Required fields:
   - `id` (must equal the config key)
   - `displayName`
-  - `tier` (`deep-research`, `ai-grounded`, `raw-search`)
+  - `tier` (`deep-research`, `ai-grounded`, `raw-search`, `llm`)
   - `envVar` (string, may be empty only when `requiresApiKey` is `false`)
   - `execution`: either `inline` or `background`
   - `execute(query, options)`
@@ -239,7 +239,7 @@ Runtime registration, constants, aliases, onboarding catalog, and metering are d
 To add one:
 
 1. **Adapter** -- `src/adapters/<id>.ts`, extending `BaseProvider` for inline execution or `BackgroundBaseProvider` for a complete remote-task lifecycle. Implement `execute` in both cases; background adapters also implement `submit`/`poll`/`retrieve`. Return `usage` when the API reports cost/tokens.
-2. **Descriptor definition** -- add the portable metadata entry in `src/core/provider-descriptor.ts`, including its metering declaration and a passthrough Zod schema for supported `options`.
+2. **Descriptor definition** -- add the portable metadata entry in `src/core/provider-descriptor.ts`, including its metering declaration and an appropriate Zod schema for the supported `options`.
 3. **Factory** -- add the constructor mapping in `src/adapters/provider-descriptors.ts`. `initializeProviders()` validates configured options, constructs adapters from this descriptor list, and checks the runtime adapter matches its declared ID, tier, execution mode, display name, and credential. Invalid options warn but do not unregister the adapter: Librarium blocks new `execute`, `submit`, and `test` work before HTTP while retaining `poll`/`retrieve` for existing background tasks and preserving reserved built-in IDs.
 4. **Group policy** -- place the canonical ID in the intended explicit groups in `src/constants.ts`. Every non-LLM built-in must appear in `all`; every LLM built-in must appear in `llm`.
 5. **Core export** -- `export * from './adapters/<id>.js'` in `src/core-entry.ts`.

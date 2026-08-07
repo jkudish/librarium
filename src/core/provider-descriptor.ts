@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { PerplexitySearchOptionsSchema } from '../adapters/perplexity-search-options.js';
 import type { MeteringKind, ProviderTier } from '../types.js';
+import { searchApiOptionsSchema } from './searchapi.js';
 
 export interface ProviderMeteringDescriptor {
   kind: MeteringKind;
@@ -40,6 +42,8 @@ export interface ProviderDescriptorDefinition {
   credential: {
     envVar: string;
     required: boolean;
+    /** Whether credential discovery may select this provider during setup. */
+    autoEnable: boolean;
   };
   metering: ProviderMeteringDescriptor;
   optionsSchema: z.ZodTypeAny;
@@ -118,16 +122,21 @@ type DefinitionInput = Omit<
 > & {
   aliases?: readonly string[];
   envVar: string;
+  autoEnable?: boolean;
   optionsSchema?: z.ZodTypeAny;
 };
 
 function define(input: DefinitionInput): ProviderDescriptorDefinition {
-  const { envVar, ...definition } = input;
+  const { autoEnable, envVar, ...definition } = input;
   return {
     aliases: [],
     optionsSchema: commonOptions,
     ...definition,
-    credential: { envVar, required: true },
+    credential: {
+      envVar,
+      required: true,
+      autoEnable: autoEnable ?? input.tier !== 'llm',
+    },
   };
 }
 
@@ -149,6 +158,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     metering: {
       kind: 'request_priced',
       defaultPerRequestUsd: 0.005,
+      defaultUnitsPerRequest: 1,
       unit: 'request',
     },
     capabilities: inline('always'),
@@ -321,6 +331,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 14,
     tier: 'raw-search',
     envVar: 'PERPLEXITY_API_KEY',
+    optionsSchema: PerplexitySearchOptionsSchema,
     display: {
       family: 'Perplexity',
       name: 'Perplexity Search',
@@ -329,7 +340,11 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       setupUrl: 'https://docs.perplexity.ai/docs/getting-started/quickstart',
       order: 133,
     },
-    metering: { kind: 'request_priced', unit: 'request' },
+    metering: {
+      kind: 'request_priced',
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
+    },
     capabilities: inline('always'),
   }),
   define({
@@ -423,6 +438,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     metering: {
       kind: 'request_priced',
       defaultPerRequestUsd: 0.015,
+      defaultUnitsPerRequest: 1,
       unit: 'request',
     },
     capabilities: inline('always'),
@@ -469,6 +485,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 18,
     tier: 'raw-search',
     envVar: 'SEARCHAPI_API_KEY',
+    optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
       name: 'SearchAPI',
@@ -480,6 +497,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     metering: {
       kind: 'request_priced',
       defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 1,
       unit: 'request',
     },
     capabilities: inline('always'),
@@ -500,8 +518,168 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     metering: {
       kind: 'request_priced',
       defaultPerRequestUsd: 0.015,
+      defaultUnitsPerRequest: 1,
       unit: 'request',
     },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'searchapi-chatgpt',
+    registrationOrder: 25,
+    tier: 'ai-grounded',
+    envVar: 'SEARCHAPI_API_KEY',
+    autoEnable: false,
+    optionsSchema: searchApiOptionsSchema,
+    display: {
+      family: 'SearchAPI',
+      name: 'SearchAPI ChatGPT',
+      description:
+        'SearchAPI-observed ChatGPT consumer answer with web search.',
+      bestFor: 'Comparing the cited answer visible on the ChatGPT surface.',
+      setupUrl: 'https://www.searchapi.io/',
+      order: 201,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'searchapi-gemini',
+    registrationOrder: 26,
+    tier: 'ai-grounded',
+    envVar: 'SEARCHAPI_API_KEY',
+    autoEnable: false,
+    optionsSchema: searchApiOptionsSchema,
+    display: {
+      family: 'SearchAPI',
+      name: 'SearchAPI Gemini',
+      description: 'SearchAPI-observed Gemini consumer answer.',
+      bestFor: 'Comparing the cited answer visible on the Gemini surface.',
+      setupUrl: 'https://www.searchapi.io/',
+      order: 202,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'searchapi-perplexity',
+    registrationOrder: 27,
+    tier: 'ai-grounded',
+    envVar: 'SEARCHAPI_API_KEY',
+    autoEnable: false,
+    optionsSchema: searchApiOptionsSchema,
+    display: {
+      family: 'SearchAPI',
+      name: 'SearchAPI Perplexity',
+      description: 'SearchAPI-observed Perplexity consumer answer.',
+      bestFor: 'Comparing the cited answer visible on the Perplexity surface.',
+      setupUrl: 'https://www.searchapi.io/',
+      order: 203,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'searchapi-google-ai-mode',
+    registrationOrder: 28,
+    tier: 'ai-grounded',
+    envVar: 'SEARCHAPI_API_KEY',
+    autoEnable: false,
+    optionsSchema: searchApiOptionsSchema,
+    display: {
+      family: 'SearchAPI',
+      name: 'SearchAPI Google AI Mode',
+      description: 'SearchAPI-observed Google AI Mode consumer answer.',
+      bestFor: 'Comparing Google AI Mode answer visibility and citations.',
+      setupUrl: 'https://www.searchapi.io/',
+      order: 204,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'searchapi-bing-copilot',
+    registrationOrder: 29,
+    tier: 'ai-grounded',
+    envVar: 'SEARCHAPI_API_KEY',
+    autoEnable: false,
+    optionsSchema: searchApiOptionsSchema,
+    display: {
+      family: 'SearchAPI',
+      name: 'SearchAPI Bing Copilot',
+      description: 'SearchAPI-observed Bing Copilot consumer answer.',
+      bestFor: 'Comparing Bing Copilot answer visibility and citations.',
+      setupUrl: 'https://www.searchapi.io/',
+      order: 205,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'searchapi-google-ai-overview',
+    registrationOrder: 30,
+    tier: 'ai-grounded',
+    envVar: 'SEARCHAPI_API_KEY',
+    autoEnable: false,
+    optionsSchema: searchApiOptionsSchema,
+    display: {
+      family: 'SearchAPI',
+      name: 'SearchAPI Google AI Overview',
+      description:
+        'Dedicated two-stage SearchAPI-observed Google AI Overview answer.',
+      bestFor: 'Comparing the dedicated Google AI Overview and its citations.',
+      setupUrl: 'https://www.searchapi.io/',
+      order: 206,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.004,
+      defaultUnitsPerRequest: 2,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'perplexity-pro-search',
+    registrationOrder: 31,
+    tier: 'ai-grounded',
+    envVar: 'PERPLEXITY_API_KEY',
+    autoEnable: false,
+    optionsSchema: z.object({}).strict(),
+    defaultModel: 'sonar-pro',
+    display: {
+      family: 'Perplexity',
+      name: 'Perplexity Pro Search',
+      description: 'Forced streaming Pro Search through the Perplexity API.',
+      bestFor: 'Higher-effort official Perplexity searches with native cost.',
+      setupUrl: 'https://docs.perplexity.ai/docs/getting-started/quickstart',
+      order: 21,
+    },
+    metering: { kind: 'native_cost' },
     capabilities: inline('always'),
   }),
   define({

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Answer-engine visibility group**: the new opt-in `visibility` group compares
+  exactly nine perspectives: SearchAPI-observed ChatGPT, Gemini, Perplexity,
+  Google AI Mode, Bing Copilot, and Google AI Overview, plus the first-party
+  Perplexity Sonar Pro, Gemini Grounded, and Grok adapters. SearchAPI surfaces
+  remain correlated observations from one collection vendor, not six
+  independent confirmations.
+- **SearchAPI consumer answer adapters** (`searchapi-chatgpt`,
+  `searchapi-gemini`, `searchapi-perplexity`, `searchapi-google-ai-mode`,
+  `searchapi-bing-copilot`, and the two-stage
+  `searchapi-google-ai-overview`): normalize Markdown, structured answer blocks,
+  citations, and model metadata while preserving surface attribution.
+- **Perplexity Pro Search** (`perplexity-pro-search`, ai-grounded tier): forces
+  streaming Sonar Pro Search, validates the Pro reasoning/completion lifecycle,
+  normalizes citations and provider-reported usage/cost, and performs no hidden
+  retry or downgraded second submission.
+- Validated Perplexity Search controls for multi-query input, country/language,
+  domain allow/deny filters, result limits, context size, and extraction-token
+  budgets.
+
 - **Configurable Firecrawl Search** (`firecrawl-search`, raw-search tier):
   supports validated web/news sources, per-source limits, locale/time filters,
   domain filtering, categories, and invalid-URL handling. Web and news results
@@ -26,6 +45,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   high-effort opt-in.
 
 ### Changed
+
+- SearchAPI now authenticates through `Authorization: Bearer` without placing
+  credentials in URLs. The strict `zeroRetention` option sends
+  `zero_retention=true` and fails closed with no fallback or privacy downgrade
+  when the account rejects it.
+- The existing SearchAPI Google adapter now normalizes AI Overview, top stories,
+  discussions, inline videos, and Knowledge Graph evidence from the same
+  request. The dedicated Google AI Overview adapter owns the separate immediate
+  page-token fetch and reserves two logical request units.
+- Librarium now ships 31 built-in adapters and eight default groups. New
+  SearchAPI answer surfaces remain opt-in during setup; explicit
+  `visibility`, `comprehensive`, or `all` selection is consent to call their
+  configured, credentialed members. Legacy canonical `comprehensive` and `all`
+  rosters migrate additively only when they exactly match a prior built-in
+  roster; customized groups are preserved.
 
 - Built-in providers now use typed descriptors as the single source for
   factories, tiers, display/catalog metadata, credential names, aliases,

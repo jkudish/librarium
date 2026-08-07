@@ -23,6 +23,11 @@ describe('metering registry: kinds', () => {
     expect(getMeteringKind('serpapi')).toBe('request_priced');
     expect(getMeteringKind('brave-search')).toBe('request_priced');
     expect(getMeteringKind('kagi-fastgpt')).toBe('request_priced');
+    expect(getMeteringKind('searchapi-chatgpt')).toBe('request_priced');
+    expect(getMeteringKind('searchapi-google-ai-overview')).toBe(
+      'request_priced',
+    );
+    expect(getMeteringKind('perplexity-pro-search')).toBe('native_cost');
     expect(getMeteringKind('tavily')).toBe('credit_priced');
     expect(getMeteringKind('firecrawl-search')).toBe('credit_priced');
     expect(getMeteringKind('jina-search')).toBe('api_unit_priced');
@@ -68,6 +73,39 @@ describe('metering registry: estimates', () => {
     });
     expect(est?.estimatedCostUsd).toBe(0.02);
     expect(est?.costConfidence).toBe('configured');
+  });
+
+  it('multiplies request prices by descriptor logical request units', () => {
+    expect(estimateMetering('searchapi-google-ai-overview')).toMatchObject({
+      billableUnits: 2,
+      unit: 'request',
+      estimatedCostUsd: 0.008,
+      costConfidence: 'estimated',
+    });
+    expect(
+      estimateMetering('searchapi-google-ai-overview', {
+        options: { perRequestUsd: 0.01 },
+      }),
+    ).toMatchObject({
+      billableUnits: 2,
+      estimatedCostUsd: 0.02,
+      costConfidence: 'configured',
+    });
+  });
+
+  it.each([
+    'searchapi',
+    'searchapi-chatgpt',
+    'searchapi-gemini',
+    'searchapi-perplexity',
+    'searchapi-google-ai-mode',
+    'searchapi-bing-copilot',
+    'serpapi',
+    'perplexity-search',
+    'brave-search',
+    'kagi-fastgpt',
+  ])('keeps %s at one logical request unit', (providerId) => {
+    expect(estimateMetering(providerId)?.billableUnits).toBe(1);
   });
 
   it('emits units WITHOUT a default USD figure for credit-priced providers', () => {

@@ -44,6 +44,13 @@
       "costConfidence": "unknown"
     },
     {
+      "id": "perplexity-pro-search",
+      "tier": "ai-grounded",
+      "envVar": "PERPLEXITY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
       "id": "gemini-grounded",
       "tier": "ai-grounded",
       "envVar": "GEMINI_API_KEY",
@@ -56,7 +63,7 @@
       "envVar": "XAI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-07"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "openrouter-online",
@@ -78,7 +85,7 @@
       "envVar": "KAGI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "brave-answers",
@@ -86,7 +93,7 @@
       "envVar": "BRAVE_API_KEY",
       "estimatedCostUsd": 0.012,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-07"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "exa",
@@ -122,7 +129,7 @@
       "envVar": "BRAVE_API_KEY",
       "estimatedCostUsd": 0.005,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "searchapi",
@@ -130,7 +137,55 @@
       "envVar": "SEARCHAPI_API_KEY",
       "estimatedCostUsd": 0.004,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "searchapi-chatgpt",
+      "tier": "ai-grounded",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.004,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "searchapi-gemini",
+      "tier": "ai-grounded",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.004,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "searchapi-perplexity",
+      "tier": "ai-grounded",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.004,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "searchapi-google-ai-mode",
+      "tier": "ai-grounded",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.004,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "searchapi-bing-copilot",
+      "tier": "ai-grounded",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.004,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "searchapi-google-ai-overview",
+      "tier": "ai-grounded",
+      "envVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsd": 0.008,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
     },
     {
       "id": "serpapi",
@@ -138,7 +193,7 @@
       "envVar": "SERPAPI_API_KEY",
       "estimatedCostUsd": 0.015,
       "costConfidence": "estimated",
-      "pricingVersion": "2026-06"
+      "pricingVersion": "2026-08"
     },
     {
       "id": "tavily",
@@ -213,6 +268,17 @@
       "firecrawl-search",
       "tavily"
     ],
+    "visibility": [
+      "searchapi-chatgpt",
+      "searchapi-gemini",
+      "searchapi-perplexity",
+      "searchapi-google-ai-mode",
+      "searchapi-bing-copilot",
+      "searchapi-google-ai-overview",
+      "perplexity-sonar-pro",
+      "gemini-grounded",
+      "grok"
+    ],
     "comprehensive": [
       "perplexity-sonar-deep",
       "perplexity-deep-research",
@@ -226,7 +292,14 @@
       "brave-answers",
       "exa",
       "you-research",
-      "kagi-fastgpt"
+      "kagi-fastgpt",
+      "searchapi-chatgpt",
+      "searchapi-gemini",
+      "searchapi-perplexity",
+      "searchapi-google-ai-mode",
+      "searchapi-bing-copilot",
+      "searchapi-google-ai-overview",
+      "perplexity-pro-search"
     ],
     "llm": ["claude", "openai-chat", "gemini-chat", "openrouter-chat"],
     "all": [
@@ -249,7 +322,14 @@
       "brave-search",
       "searchapi",
       "serpapi",
-      "tavily"
+      "tavily",
+      "searchapi-chatgpt",
+      "searchapi-gemini",
+      "searchapi-perplexity",
+      "searchapi-google-ai-mode",
+      "searchapi-bing-copilot",
+      "searchapi-google-ai-overview",
+      "perplexity-pro-search"
     ]
   },
   "candidateGroups": {
