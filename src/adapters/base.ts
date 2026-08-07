@@ -7,7 +7,11 @@ import {
   type HttpClient,
   type HttpRequestOptions,
   type HttpResponse,
+  type HttpStreamClient,
+  type HttpStreamRequestOptions,
+  type HttpStreamResponse,
   httpRequest,
+  httpStreamRequest,
 } from '../core/http-client.js';
 import type {
   AsyncPollResult,
@@ -24,6 +28,7 @@ export interface BaseProviderOptions {
   apiKey?: string;
   credentials?: CredentialContext;
   httpClient?: HttpClient;
+  httpStreamClient?: HttpStreamClient;
 }
 
 /**
@@ -42,11 +47,13 @@ export abstract class ProviderBase {
   private apiKeyRef?: string;
   private credentials: CredentialContext;
   private httpClient: HttpClient;
+  private httpStreamClient: HttpStreamClient;
 
   constructor(options: BaseProviderOptions = {}) {
     this.apiKeyRef = options.apiKey;
     this.credentials = options.credentials ?? {};
     this.httpClient = options.httpClient ?? httpRequest;
+    this.httpStreamClient = options.httpStreamClient ?? httpStreamRequest;
   }
 
   get displayName(): string {
@@ -61,6 +68,7 @@ export abstract class ProviderBase {
     this.apiKeyRef = options.apiKey;
     this.credentials = options.credentials ?? {};
     this.httpClient = options.httpClient ?? httpRequest;
+    this.httpStreamClient = options.httpStreamClient ?? httpStreamRequest;
   }
 
   /**
@@ -73,6 +81,16 @@ export abstract class ProviderBase {
       this,
     );
     clone.httpClient = httpClient;
+    return clone;
+  }
+
+  /** Create a run-local provider instance with a streaming transport. */
+  withHttpStreamClient(httpStreamClient: HttpStreamClient): this {
+    const clone = Object.assign(
+      Object.create(Object.getPrototypeOf(this)) as this,
+      this,
+    );
+    clone.httpStreamClient = httpStreamClient;
     return clone;
   }
 
@@ -98,6 +116,14 @@ export abstract class ProviderBase {
     options: HttpRequestOptions = {},
   ): Promise<HttpResponse<T>> {
     return this.httpClient<T>(url, options);
+  }
+
+  /** Make a bounded, one-attempt streaming HTTP request. */
+  protected async streamRequest(
+    url: string,
+    options: HttpStreamRequestOptions = {},
+  ): Promise<HttpStreamResponse> {
+    return this.httpStreamClient(url, options);
   }
 
   /**

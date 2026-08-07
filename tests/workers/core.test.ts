@@ -5,6 +5,8 @@ import {
   GeminiGroundedProvider,
   getProvider,
   type HttpClient,
+  type HttpStreamClient,
+  httpStreamRequest,
   initializeProviders,
   PerplexitySearchProvider,
   type Provider,
@@ -14,6 +16,12 @@ import {
   SearchApiProvider,
 } from 'librarium/core';
 import { describe, expect, it } from 'vitest';
+import { PerplexityProSearchProvider } from '../../src/adapters/perplexity-pro-search.js';
+import {
+  PRO_SEARCH_CONTENT,
+  splitEveryByte,
+  streamResponse,
+} from '../fixtures/perplexity-pro-search.js';
 
 function makeConfig(): Config {
   return {
@@ -172,6 +180,41 @@ describe('librarium/core in workerd', () => {
     expect(url.searchParams.get('zero_retention')).toBe('true');
     expect(request.options.headers).toEqual({
       Authorization: 'Bearer worker-searchapi-synthetic-key',
+    });
+  });
+
+  it('imports the streaming core transport and runs Pro Search in workerd', async () => {
+    expect(typeof httpStreamRequest).toBe('function');
+    const calls: Array<{ url: string; options: Record<string, unknown> }> = [];
+    const httpStreamClient: HttpStreamClient = async (url, options = {}) => {
+      calls.push({ url, options });
+      return streamResponse(splitEveryByte());
+    };
+    const provider = new PerplexityProSearchProvider({
+      apiKey: 'worker-perplexity-synthetic-key',
+      httpStreamClient,
+    });
+
+    await expect(
+      provider.execute('worker Pro Search', { timeout: 5 }),
+    ).resolves.toMatchObject({
+      provider: 'perplexity-pro-search',
+      content: PRO_SEARCH_CONTENT,
+      model: 'sonar-pro',
+      usage: { costUsd: 0.014138 },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      url: 'https://api.perplexity.ai/v1/sonar',
+      options: {
+        body: {
+          model: 'sonar-pro',
+          stream: true,
+          stream_mode: 'concise',
+          web_search_options: { search_type: 'pro' },
+        },
+        retry: { mode: 'never' },
+      },
     });
   });
 });

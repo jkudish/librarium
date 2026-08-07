@@ -21,7 +21,7 @@ import {
   type ProviderLookup,
 } from './dispatcher.js';
 import { safeWriteFile } from './fs-utils.js';
-import type { HttpClient } from './http-client.js';
+import type { HttpClient, HttpStreamClient } from './http-client.js';
 import { deduplicateSources } from './normalizer.js';
 import { buildPrompt } from './prompt-builder.js';
 import {
@@ -37,6 +37,7 @@ import { generateSummary } from './synthesis.js';
 export interface ProviderRegistry extends ProviderLookup {
   getAllProviders(): Provider[];
   withHttpClient?(httpClient: HttpClient): ProviderRegistry;
+  withHttpStreamClient?(httpStreamClient: HttpStreamClient): ProviderRegistry;
 }
 
 export const defaultProviderRegistry: ProviderRegistry = {
@@ -100,6 +101,7 @@ export interface ExecuteResearchRunDependencies {
   providerRegistry?: ProviderRegistry;
   taskStore?: RunManifestStore;
   httpClient?: HttpClient;
+  httpStreamClient?: HttpStreamClient;
   dispatch?: (options: DispatchOptions) => Promise<DispatchResult>;
   now?: () => number;
 }
@@ -172,9 +174,14 @@ export async function executeResearchRun(
 
   try {
     safeWriteFile(join(request.outputDir, 'prompt.md'), prompt);
-    const runRegistry = dependencies.httpClient
-      ? registryWithHttpClient(providerRegistry, dependencies.httpClient)
-      : providerRegistry;
+    const runRegistry =
+      dependencies.httpClient || dependencies.httpStreamClient
+        ? registryWithHttpClients(
+            providerRegistry,
+            dependencies.httpClient,
+            dependencies.httpStreamClient,
+          )
+        : providerRegistry;
 
     const dispatchStartedAt = now();
     const { reports, results, asyncTasks } = await dispatchRun({
@@ -299,26 +306,44 @@ export async function executeResearchRun(
   }
 }
 
-function registryWithHttpClient(
+function registryWithHttpClients(
   registry: ProviderRegistry,
-  httpClient: HttpClient,
+  httpClient?: HttpClient,
+  httpStreamClient?: HttpStreamClient,
 ): ProviderRegistry {
-  if (registry.withHttpClient) return registry.withHttpClient(httpClient);
+  let projected = registry;
+  let projectHttpLocally = httpClient !== undefined;
+  let projectStreamLocally = httpStreamClient !== undefined;
+
+  if (httpClient && projected.withHttpClient) {
+    projected = projected.withHttpClient(httpClient);
+    projectHttpLocally = false;
+  }
+  if (httpStreamClient && projected.withHttpStreamClient) {
+    projected = projected.withHttpStreamClient(httpStreamClient);
+    projectStreamLocally = false;
+  }
+  if (!projectHttpLocally && !projectStreamLocally) return projected;
 
   const clones = new WeakMap<Provider, Provider>();
   const runLocal = (provider: Provider | undefined): Provider | undefined => {
     if (!provider || !(provider instanceof ProviderBase)) return provider;
     const existing = clones.get(provider);
     if (existing) return existing;
-    const clone = provider.withHttpClient(httpClient);
+    let clone = provider;
+    if (projectHttpLocally && httpClient)
+      clone = clone.withHttpClient(httpClient);
+    if (projectStreamLocally && httpStreamClient) {
+      clone = clone.withHttpStreamClient(httpStreamClient);
+    }
     clones.set(provider, clone);
     return clone;
   };
 
   return {
-    getProvider: (id) => runLocal(registry.getProvider(id)),
+    getProvider: (id) => runLocal(projected.getProvider(id)),
     getAllProviders: () =>
-      registry
+      projected
         .getAllProviders()
         .map((provider) => runLocal(provider) as Provider),
   };
