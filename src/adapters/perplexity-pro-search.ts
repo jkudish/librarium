@@ -84,8 +84,9 @@ export class PerplexityProSearchProvider extends BaseProvider {
         const errorBody = await this.readBody(response.body);
         return this.errorResult(
           start,
-          redactPerplexityError(
-            this.formatError(response.status, this.parseBody(errorBody)),
+          this.formatProviderError(
+            response.status,
+            this.parseBody(errorBody),
             apiKey,
           ),
         );
@@ -100,7 +101,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
         );
       }
 
-      const streamed = await this.parseStream(response.body);
+      const streamed = await this.parseStream(response.body, apiKey);
       return {
         provider: this.id,
         tier: this.tier,
@@ -129,6 +130,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
 
   private async parseStream(
     body: ReadableStream<Uint8Array>,
+    apiKey: string,
   ): Promise<ParsedProSearchStream> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
@@ -166,7 +168,7 @@ export class PerplexityProSearchProvider extends BaseProvider {
       }
       if (event.type === 'error' || payload.error !== undefined) {
         throw new Error(
-          `Perplexity Pro Search stream error: ${this.errorDetail(payload)}`,
+          `Perplexity Pro Search stream error: ${this.errorDetail(payload, apiKey)}`,
         );
       }
       if (terminalSeen) {
@@ -499,14 +501,38 @@ export class PerplexityProSearchProvider extends BaseProvider {
     }
   }
 
-  private errorDetail(payload: JsonRecord): string {
+  private errorDetail(payload: JsonRecord, apiKey: string): string {
     const error = this.isRecord(payload.error) ? payload.error : payload;
     for (const candidate of [error.message, error.detail, error.type]) {
       if (typeof candidate === 'string' && candidate.trim()) {
-        return candidate.slice(0, 200);
+        return redactPerplexityError(candidate, apiKey).slice(0, 200);
       }
     }
     return 'provider-reported error';
+  }
+
+  private formatProviderError(
+    status: number,
+    data: unknown,
+    apiKey: string,
+  ): string {
+    let body: string;
+    try {
+      body = JSON.stringify(data);
+    } catch {
+      body = String(data);
+    }
+    const base = `API returned ${status}: ${redactPerplexityError(
+      body,
+      apiKey,
+    ).slice(0, 200)}`;
+    if (status === 401) {
+      return `${base} — check that ${this.envVar} is set and valid`;
+    }
+    if (status === 403) {
+      return `${base} — API key may lack required permissions`;
+    }
+    return base;
   }
 
   private errorResult(start: number, error: string): ProviderResult {

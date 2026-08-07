@@ -226,6 +226,34 @@ describe('Perplexity Pro Search provider', () => {
     }).execute('redact stream', { timeout: 5 });
     expect(stream.error).not.toContain(secret);
     expect(stream.error).toContain('[REDACTED]');
+
+    const boundaryPrefix = 'x'.repeat(190);
+    const boundaryHttp = await new PerplexityProSearchProvider({
+      apiKey: secret,
+      httpStreamClient: async () =>
+        streamResponse(
+          streamFromStrings([
+            JSON.stringify({ error: `${boundaryPrefix}${secret}` }),
+          ]),
+          { status: 401, headers: { 'content-type': 'application/json' } },
+        ),
+    }).execute('redact boundary HTTP', { timeout: 5 });
+    const boundaryStream = await new PerplexityProSearchProvider({
+      apiKey: secret,
+      httpStreamClient: async () =>
+        streamResponse(
+          streamFromStrings([
+            event(
+              { error: { message: `${boundaryPrefix}${secret}` } },
+              'error',
+            ),
+          ]),
+        ),
+    }).execute('redact boundary stream', { timeout: 5 });
+    for (const result of [boundaryHttp, boundaryStream]) {
+      expect(result.error).not.toContain(secret);
+      expect(result.error).not.toContain(secret.slice(0, -1));
+    }
   });
 
   it('fails closed when the stream never proves Pro search type', async () => {
