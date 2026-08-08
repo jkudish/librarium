@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 2,
+  "revision": 4,
+  "status": "completed",
+  "timestamp": 1700000000,
+  "completedAt": 1700000003000,
+  "slug": "background-retrieved-run",
+  "query": "normalized background query",
+  "mode": "async",
+  "outputDir": "/normalized/runs/background-retrieved-run",
+  "providers": [
+    {
+      "id": "perplexity-sonar-deep",
+      "tier": "deep-research",
+      "status": "success",
+      "durationMs": 0,
+      "wordCount": 42,
+      "citationCount": 2,
+      "outputFile": "perplexity-sonar-deep.md",
+      "metaFile": "perplexity-sonar-deep.meta.json",
+      "task": {
+        "taskId": "task-normalized-1",
+        "submittedAt": 1700000000000,
+        "status": "completed",
+        "lastPolledAt": 1700000001000,
+        "completedAt": 1700000002000,
+        "retrievedAt": 1700000003000,
+        "providerStatus": "COMPLETED"
+      }
+    }
+  ],
+  "sources": {
+    "total": 2,
+    "unique": 2,
+    "file": "sources.json"
+  },
+  "exitCode": 0
+}

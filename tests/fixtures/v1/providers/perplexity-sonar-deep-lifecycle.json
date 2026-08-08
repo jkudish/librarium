@@ -1,0 +1,59 @@
+{
+  "provider": "perplexity-sonar-deep",
+  "transport": "json",
+  "submit": {
+    "id": "task-normalized-1",
+    "model": "sonar-deep-research",
+    "created_at": 1700000000,
+    "status": "CREATED",
+    "response": null
+  },
+  "poll": [
+    {
+      "id": "task-normalized-1",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "task-normalized-1",
+      "status": "COMPLETED"
+    }
+  ],
+  "retrieve": {
+    "id": "task-normalized-1",
+    "model": "sonar-deep-research",
+    "created_at": 1700000000,
+    "started_at": 1700000010,
+    "completed_at": 1700000130,
+    "status": "COMPLETED",
+    "response": {
+      "id": "completion-normalized-1",
+      "model": "sonar-deep-research",
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "Deep findings from the normalized fixture."
+          }
+        }
+      ],
+      "citations": ["https://evidence.example.test/a"],
+      "search_results": [
+        {
+          "url": "https://evidence.example.test/a",
+          "title": "Source A",
+          "snippet": "Evidence about the research question."
+        },
+        {
+          "url": "https://evidence.example.test/b",
+          "title": "Source B"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 100,
+        "completion_tokens": 200,
+        "total_tokens": 300,
+        "cost": { "total_cost": 0.01 }
+      }
+    }
+  }
+}

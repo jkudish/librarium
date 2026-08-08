@@ -1,0 +1,15 @@
+{
+  "provider": "brave-answers",
+  "httpStatus": 400,
+  "response": {
+    "type": "ErrorResponse",
+    "error": {
+      "id": "provider-error-normalized-1",
+      "status": 400,
+      "detail": "The requested option is not subscribed in the current plan.",
+      "meta": { "component": "authentication" },
+      "code": "OPTION_NOT_IN_PLAN"
+    },
+    "time": 1700000000
+  }
+}

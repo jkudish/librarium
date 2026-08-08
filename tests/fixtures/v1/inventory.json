@@ -1,0 +1,397 @@
+{
+  "corpusVersion": 1,
+  "productLine": "librarium-v1",
+  "baselineCommit": "72c07dff44da209c41479b1a2e5525d09ba05940",
+  "purpose": "The smallest source-traceable v1 corpus needed to design and validate intentional v2 migration without preserving accidental implementation behavior.",
+  "sourceClassifications": {
+    "repository_contract_fixture": "A checked-in v1 adapter or transport fixture that already defined a provider-facing response boundary.",
+    "repository_behavior_scenario": "A compact JSON rendering of behavior covered by an existing v1 test or implementation path.",
+    "sanitized_live_shape": "A bounded, credential-free rendering of a provider shape recorded by a v1 test as live-observed, with volatile values replaced."
+  },
+  "fixtures": [
+    {
+      "id": "provider.raw-search.perplexity-search",
+      "path": "providers/perplexity-search-response.json",
+      "category": "provider_response",
+      "shape": "raw_search",
+      "providerIds": ["perplexity-search"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["tests/adapters/perplexity-search.test.ts"]
+      },
+      "neededFor": "Validate that v2 migration can preserve ordered raw search results, source URLs, titles, and snippets without copying a provider-specific adapter schema into the domain contract.",
+      "normalization": [
+        "Provider request identifiers use a stable normalized value.",
+        "Public URLs use the reserved example.test domain."
+      ]
+    },
+    {
+      "id": "provider.cited-streamed-answer.brave-answers",
+      "path": "providers/brave-answers-stream.json",
+      "category": "provider_response",
+      "shape": "cited_streamed_answer",
+      "providerIds": ["brave-answers"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["tests/adapters/brave-answers.test.ts"]
+      },
+      "neededFor": "Preserve the materially distinct v1 streamed-answer lane: incremental content, inline citation metadata, terminal usage, and a clean end-of-stream marker must map to one semantic cited answer.",
+      "normalization": [
+        "Citation URLs use example.test.",
+        "Token and cost values are small deterministic sentinels.",
+        "Provider request identifiers were removed.",
+        "This combines separately tested citation/title and live-observed usage-tag shapes; it is not classified as one live capture."
+      ]
+    },
+    {
+      "id": "provider.durable-background.perplexity-sonar-deep",
+      "path": "providers/perplexity-sonar-deep-lifecycle.json",
+      "category": "provider_lifecycle",
+      "shape": "durable_background_submit_poll_retrieve",
+      "providerIds": ["perplexity-sonar-deep"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["tests/adapters/perplexity-async.test.ts"]
+      },
+      "neededFor": "Validate lossless migration of a real v1 durable lifecycle across submit, pending/running poll states, terminal completion, retrieval, citations, and provider-reported usage.",
+      "normalization": [
+        "Task, completion, and request identifiers use stable normalized values.",
+        "Provider epoch timestamps use fixed sentinels.",
+        "Citation URLs use example.test."
+      ]
+    },
+    {
+      "id": "provider.consumer-surface.searchapi-google-ai-mode",
+      "path": "providers/searchapi-google-ai-mode-observation.json",
+      "category": "provider_response",
+      "shape": "consumer_surface_observation",
+      "providerIds": ["searchapi-google-ai-mode"],
+      "source": {
+        "classification": "repository_contract_fixture",
+        "references": [
+          "tests/fixtures/searchapi-answer-engines.ts",
+          "tests/adapters/searchapi-answer-engines.test.ts"
+        ]
+      },
+      "neededFor": "Keep the v1 consumer-surface adapter lane distinguishable from generic model or raw-search results while preserving its engine, answer body, and extracted references without claiming live collection.",
+      "normalization": [
+        "Reference URLs use example.test.",
+        "Surface context remains unknown because v1 did not prove account or personalization state.",
+        "This is a synthetic repository contract fixture, not evidence of a live collected observation."
+      ]
+    },
+    {
+      "id": "provider.safe-error.brave-answers",
+      "path": "providers/brave-answers-error.json",
+      "category": "provider_error",
+      "shape": "safe_provider_error",
+      "providerIds": ["brave-answers"],
+      "source": {
+        "classification": "sanitized_live_shape",
+        "references": ["tests/adapters/brave-answers.test.ts"]
+      },
+      "neededFor": "Validate that the v2 structured-error mapper can classify a materially useful provider error without retaining credentials, headers, raw request data, or unstable provider prose as contract.",
+      "normalization": [
+        "The provider error identifier and timestamp use stable sentinels.",
+        "No request headers or credentials are retained."
+      ]
+    },
+    {
+      "id": "artifact.completed",
+      "path": "artifacts/completed-run.json",
+      "category": "run_artifact",
+      "shape": "completed",
+      "providerIds": ["perplexity-search"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": [
+          "tests/fixtures/runs/sample-run/run.json",
+          "tests/run-manifest.test.ts",
+          "src/core/run-manifest.ts"
+        ]
+      },
+      "neededFor": "Preserve the minimum v1 completed-run evidence needed to reconstruct one successful provider result, source tallies, artifact filenames, and terminal exit semantics.",
+      "normalization": [
+        "Paths are rooted at /normalized.",
+        "Run timestamps use fixed sentinels.",
+        "Durations are zeroed.",
+        "Provider identity and usage counts are deterministic scenario values rather than copied sample-run values."
+      ]
+    },
+    {
+      "id": "artifact.recovered-partial",
+      "path": "artifacts/recovered-partial-run.json",
+      "category": "run_artifact",
+      "shape": "recovered_partial",
+      "providerIds": [
+        "perplexity-sonar-pro",
+        "brave-answers",
+        "perplexity-search"
+      ],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": [
+          "tests/dispatcher-fallback.test.ts",
+          "tests/run-manifest.test.ts",
+          "src/core/run-manifest.ts"
+        ]
+      },
+      "neededFor": "Represent both a recovered primary slot and an independent failed slot so v2 can preserve replacement provenance while distinguishing overall partial completion from full recovery.",
+      "normalization": [
+        "Paths are rooted at /normalized.",
+        "Run timestamps use fixed sentinels.",
+        "Durations are zeroed and diagnostics are provider-safe summaries."
+      ]
+    },
+    {
+      "id": "artifact.failed",
+      "path": "artifacts/failed-run.json",
+      "category": "run_artifact",
+      "shape": "failed",
+      "providerIds": ["perplexity-sonar-pro", "brave-answers"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": [
+          "tests/dispatcher-fallback.test.ts",
+          "tests/run-manifest.test.ts"
+        ]
+      },
+      "neededFor": "Validate that exhausted fallback attempts remain visible and deterministically produce a terminal failed outcome without treating either error string as a stable public message.",
+      "normalization": [
+        "Paths are rooted at /normalized.",
+        "Run timestamps use fixed sentinels.",
+        "Durations are zeroed and diagnostics are provider-safe summaries."
+      ]
+    },
+    {
+      "id": "artifact.background-pending",
+      "path": "artifacts/background-pending-run.json",
+      "category": "run_artifact",
+      "shape": "background_pending",
+      "providerIds": ["perplexity-sonar-deep"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": [
+          "tests/research-run.test.ts",
+          "tests/run-manifest.test.ts"
+        ]
+      },
+      "neededFor": "Preserve the write-ahead durable handle and non-terminal awaiting state required to resume v1 background work after process loss.",
+      "normalization": [
+        "Paths are rooted at /normalized.",
+        "Run and submission timestamps use fixed sentinels.",
+        "Task identifiers are stable normalized values and durations are zeroed."
+      ]
+    },
+    {
+      "id": "artifact.background-retrieved",
+      "path": "artifacts/background-retrieved-run.json",
+      "category": "run_artifact",
+      "shape": "background_retrieved",
+      "providerIds": ["perplexity-sonar-deep"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["tests/run-manifest.test.ts"]
+      },
+      "neededFor": "Validate that terminal retrieval replaces the pending report while retaining compact submit, completion, and retrieval audit data in the completed artifact.",
+      "normalization": [
+        "Paths are rooted at /normalized.",
+        "Run, submission, completion, and retrieval timestamps use fixed sentinels.",
+        "Task identifiers are stable normalized values and durations are zeroed."
+      ]
+    },
+    {
+      "id": "config.global-mixed",
+      "path": "configs/global-mixed.json",
+      "category": "config",
+      "shape": "global_config",
+      "providerIds": ["perplexity-sonar-deep", "perplexity-search"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["src/types.ts", "tests/config.test.ts"]
+      },
+      "neededFor": "Drive deterministic migration of the v1 global mixed default to v2 async while retaining provider settings and producing an explicit deprecation notice before execution.",
+      "normalization": [
+        "Credential values are environment-variable references.",
+        "Output paths are repository-relative."
+      ]
+    },
+    {
+      "id": "config.project-reserved-group",
+      "path": "configs/project-reserved-group.json",
+      "category": "config",
+      "shape": "project_config",
+      "providerIds": ["perplexity-search", "brave-search"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["src/types.ts", "tests/config.test.ts"]
+      },
+      "neededFor": "Prove that a project-defined v1 group colliding with the reserved quick name migrates to custom:quick without losing member order and with an identifying notice.",
+      "normalization": [
+        "Credential values are environment-variable references."
+      ]
+    },
+    {
+      "id": "config.trusted-custom-provider",
+      "path": "configs/trusted-custom-provider.json",
+      "category": "config",
+      "shape": "custom_provider_config",
+      "providerIds": ["acme-research"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": ["src/types.ts", "tests/custom-providers.test.ts"]
+      },
+      "neededFor": "Preserve explicit custom-provider trust, source declaration, options, and provider configuration so v2 migration does not silently execute untrusted code or discard a valid trusted integration.",
+      "normalization": [
+        "The custom package path and provider name are inert examples.",
+        "Credential values are environment-variable references."
+      ]
+    },
+    {
+      "id": "config.async-inline-rejection",
+      "path": "configs/async-inline-rejection.json",
+      "category": "config",
+      "shape": "project_config",
+      "providerIds": ["openai-research", "perplexity-search"],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": [
+          "src/types.ts",
+          "tests/adapters/openai-research.test.ts",
+          "tests/adapters/perplexity-search.test.ts"
+        ]
+      },
+      "neededFor": "Validate the locked v2 preflight boundary: an explicit async selection containing a v1 inline provider is rejected as a whole, lists the incompatible profile, and performs no network work.",
+      "normalization": [
+        "Credential values are environment-variable references."
+      ]
+    },
+    {
+      "id": "boundary.public-surfaces",
+      "path": "public-boundaries.json",
+      "category": "public_boundary",
+      "shape": "semantic_public_boundaries",
+      "providerIds": [],
+      "source": {
+        "classification": "repository_behavior_scenario",
+        "references": [
+          "package.json",
+          "src/commands/run.ts",
+          "src/mcp/shaping.ts",
+          "src/adapters/custom.ts",
+          "tests/integration/cli.test.ts",
+          "tests/mcp-server.test.ts",
+          "tests/custom-providers.test.ts"
+        ]
+      },
+      "neededFor": "Keep only the narrow v1 public semantics required to validate v2 exports, machine-readable CLI behavior, library/MCP outcomes, and the explicitly trusted custom-provider protocol.",
+      "normalization": [
+        "No generated bundle paths or internal class names are retained.",
+        "CLI and error wording is represented semantically rather than verbatim."
+      ]
+    }
+  ],
+  "requiredOutcomes": [
+    "completed",
+    "recovered_partial",
+    "failed",
+    "background_pending",
+    "background_retrieved"
+  ],
+  "migrationExpectations": [
+    {
+      "id": "global-mixed-to-async",
+      "inputFixture": "configs/global-mixed.json",
+      "action": "migrate",
+      "beforeNetwork": true,
+      "input": { "mode": "mixed" },
+      "output": { "mode": "async" },
+      "notice": {
+        "required": true,
+        "kind": "deprecation",
+        "mustIdentify": ["mixed", "async"]
+      },
+      "decision": "D-CF-001"
+    },
+    {
+      "id": "reserved-group-collision",
+      "inputFixture": "configs/project-reserved-group.json",
+      "action": "migrate",
+      "beforeNetwork": true,
+      "input": { "group": "quick" },
+      "output": { "group": "custom:quick" },
+      "notice": {
+        "required": true,
+        "kind": "namespace_migration",
+        "mustIdentify": ["quick", "custom:quick"]
+      },
+      "decision": "D-CF-003"
+    },
+    {
+      "id": "trusted-custom-provider-preserved",
+      "inputFixture": "configs/trusted-custom-provider.json",
+      "action": "migrate",
+      "beforeNetwork": true,
+      "output": {
+        "provider": "acme-research",
+        "trustRequired": true,
+        "sourceType": "script"
+      },
+      "notice": { "required": false },
+      "decision": "task-2563-public-boundary"
+    },
+    {
+      "id": "async-inline-rejected",
+      "inputFixture": "configs/async-inline-rejection.json",
+      "action": "reject",
+      "beforeNetwork": true,
+      "input": {
+        "mode": "async",
+        "selection": "durable-plus-inline"
+      },
+      "error": {
+        "mustIdentify": ["perplexity-search"],
+        "mustSuggest": ["sync", "exclude the incompatible provider"]
+      },
+      "decision": "D-CF-002"
+    }
+  ],
+  "compatibilityExclusions": [
+    {
+      "id": "exact_cli_prose",
+      "reason": "Meaning, JSON parseability, stream separation, and exit behavior are retained; exact human wording and formatting are not."
+    },
+    {
+      "id": "current_rosters",
+      "reason": "Provider, workflow, group, and MCP tool rosters evolve and are validated by version-specific feature tests rather than this compatibility corpus."
+    },
+    {
+      "id": "internal_classes",
+      "reason": "Adapter classes, module layout, private types, and implementation inheritance are not public interchange semantics."
+    },
+    {
+      "id": "generated_bundles",
+      "reason": "Compiled files, declarations, SEA assets, and bundle layouts are rebuilt and validated separately from source-level compatibility."
+    },
+    {
+      "id": "accidental_async_mixed_equivalence",
+      "reason": "V1 execution overlap between async and mixed is not retained; mixed migrates to async with notice and v2 async remains durable-only."
+    },
+    {
+      "id": "benchmark_and_eval_corpora",
+      "reason": "benchmark/fixtures/v1 and evaluation datasets measure quality and performance; they are not compatibility inputs."
+    },
+    {
+      "id": "new_v2_provider_history",
+      "reason": "No synthetic v1 history is created for grok-x-only, grok-combined, or any other provider introduced after v1."
+    },
+    {
+      "id": "volatile_values",
+      "reason": "Exact provider IDs, task IDs, paths, timestamps, durations, and request-specific error identifiers are normalized and not contract."
+    },
+    {
+      "id": "fallback_algorithm",
+      "reason": "Only primary, replacement, recovery, partial, and exhaustion outcomes are retained; v1 single-level scheduling and ordering are not frozen."
+    }
+  ]
+}

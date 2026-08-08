@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "revision": 1,
+  "status": "awaiting_async",
+  "timestamp": 1700000000,
+  "slug": "background-pending-run",
+  "query": "normalized background query",
+  "mode": "async",
+  "outputDir": "/normalized/runs/background-pending-run",
+  "providers": [
+    {
+      "id": "perplexity-sonar-deep",
+      "tier": "deep-research",
+      "status": "async-pending",
+      "durationMs": 0,
+      "wordCount": 0,
+      "citationCount": 0,
+      "outputFile": "",
+      "metaFile": "",
+      "task": {
+        "taskId": "task-normalized-1",
+        "submittedAt": 1700000000000,
+        "status": "pending",
+        "providerStatus": "CREATED"
+      }
+    }
+  ],
+  "sources": {
+    "total": 0,
+    "unique": 0,
+    "file": "sources.json"
+  },
+  "exitCode": null
+}

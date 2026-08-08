@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "defaults": {
+    "outputDir": "./agents/librarium",
+    "maxParallel": 2,
+    "timeout": 60,
+    "asyncTimeout": 1800,
+    "asyncPollInterval": 15,
+    "mode": "sync",
+    "llmWebSearch": true
+  },
+  "providers": {
+    "acme-research": {
+      "apiKey": "$ACME_RESEARCH_API_KEY",
+      "enabled": true,
+      "options": { "region": "ca" }
+    }
+  },
+  "customProviders": {
+    "acme-research": {
+      "type": "script",
+      "command": "node",
+      "args": ["./providers/acme-research.mjs"],
+      "options": { "tag": "internal-research" }
+    }
+  },
+  "trustedProviderIds": ["acme-research"],
+  "groups": {
+    "internal": ["acme-research"]
+  }
+}

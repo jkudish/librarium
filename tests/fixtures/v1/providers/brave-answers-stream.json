@@ -1,0 +1,51 @@
+{
+  "provider": "brave-answers",
+  "transport": "sse",
+  "responseHeaders": {
+    "content-type": "text/event-stream"
+  },
+  "events": [
+    {
+      "data": {
+        "model": "brave-pro",
+        "choices": [
+          {
+            "delta": {
+              "content": "Finding <citation>{\"start_index\":8,\"end_index\":18,\"number\":1,\"url\":\"https://evidence.example.test/source\",\"title\":\"Source title\",\"snippet\":\"Source excerpt\"}</citation> confirmed."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "data": {
+        "model": "brave-pro",
+        "choices": [
+          {
+            "delta": {
+              "content": "<usage>{\"X-Request-Requests\":1,\"X-Request-Queries\":1,\"X-Request-Tokens-In\":12,\"X-Request-Tokens-Out\":4,\"X-Request-Total-Cost\":0.001}</usage>"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "data": {
+        "model": "brave-pro",
+        "choices": [
+          {
+            "delta": { "content": "" },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 12,
+          "completion_tokens": 4
+        }
+      }
+    },
+    {
+      "data": "[DONE]"
+    }
+  ]
+}
