@@ -1,0 +1,495 @@
+{
+  "snapshot_format_version": "1.0.0",
+  "contract_set": "librarium_contracts",
+  "generated_at": "2026-08-08T00:00:00Z",
+  "owner": "typescript_librarium",
+  "ownership_policy": "canonical_upstream",
+  "checksum_algorithm": "sha256",
+  "checksum_file": "checksums.sha256",
+  "versions": {
+    "domain": "1.0.0",
+    "artifacts": "1.0.0",
+    "custom_provider": "1.0.0",
+    "interchange": "1.0.0"
+  },
+  "semantic_rules": [
+    {
+      "rule_id": "extensions.bounded_namespaced_json",
+      "version": "1.0.0",
+      "description": "Extensions are namespaced, JSON-safe, size/depth bounded, and secret-free."
+    },
+    {
+      "rule_id": "request.preflight_plan_compatibility",
+      "version": "1.0.0",
+      "description": "Primary and reserve profiles are validated before provider execution."
+    },
+    {
+      "rule_id": "durable_handle.public_task_reference",
+      "version": "1.0.0",
+      "description": "provider_task_id is a non-secret public reference; resume credentials and signed polling material remain adapter-local."
+    },
+    {
+      "rule_id": "grounding.search_results_inapplicable",
+      "version": "1.0.0",
+      "description": "Search-results profiles, requirements, and search-only result facts omit answer-grounding semantics."
+    },
+    {
+      "rule_id": "surface_context.explicit_constraint_only",
+      "version": "1.0.0",
+      "description": "Surface context is descriptive unless constrained; then every explicitly constrained field must match for primary and fallback profiles."
+    },
+    {
+      "rule_id": "lifecycle.monotonic_order",
+      "version": "1.0.0",
+      "description": "Lifecycle is a separate request-keyed event stream whose sequence and time are ordered and whose terminal events are final."
+    },
+    {
+      "rule_id": "artifacts.run_manifest_thin_envelope",
+      "version": "1.0.0",
+      "description": "Run manifests contain only producer metadata, normalized request and response, generation time, version identity, and bounded extensions."
+    },
+    {
+      "rule_id": "response.attempt_usage_accounting",
+      "version": "1.0.0",
+      "description": "Attempts may record exact usage and cost even when no result is returned."
+    },
+    {
+      "rule_id": "response.lossless_references",
+      "version": "1.0.0",
+      "description": "Slots, attempts, replacements, results, and provenance references agree."
+    },
+    {
+      "rule_id": "response.status_coherence",
+      "version": "1.0.0",
+      "description": "Response status reports the exact pending, successful, partially successful, failed, cancelled, or mixed-unsuccessful slot state."
+    },
+    {
+      "rule_id": "source.locator_required",
+      "version": "1.0.0",
+      "description": "Citations and normalized sources identify their source with an HTTP(S) URL or an opaque provider reference."
+    },
+    {
+      "rule_id": "custom_provider.result_binding",
+      "version": "1.0.0",
+      "description": "Custom-provider result identifiers, profile, collection provider, and response envelope agree."
+    },
+    {
+      "rule_id": "custom_provider.task_binding",
+      "version": "1.0.0",
+      "description": "Custom-provider poll responses preserve the polled durable task identity while distinguishing nonterminal progress from terminal status."
+    },
+    {
+      "rule_id": "artifacts.run_manifest_execution_plan",
+      "version": "1.0.0",
+      "description": "Run manifest response slots and attempts exactly implement the request primary and eligible ordered fallback plan."
+    },
+    {
+      "rule_id": "verification.consumer_owned_policy",
+      "version": "1.0.0",
+      "description": "Evidence facts cross the boundary without a universal verified boolean or threshold."
+    }
+  ],
+  "files": [
+    {
+      "path": "schema/domain.schema.json",
+      "role": "schema",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "schema/artifacts.schema.json",
+      "role": "schema",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "schema/custom-provider.schema.json",
+      "role": "schema",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "schema/interchange.schema.json",
+      "role": "schema",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/index.json",
+      "role": "fixture_index",
+      "areas": [
+        "artifacts",
+        "custom_provider",
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/interchange-request.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/search-results-request.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/locale-only-surface-context.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/partial-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/lifecycle-trace.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/run-manifest.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/valid/custom-provider-exchange.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/valid/custom-provider-terminal-poll-exchange.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/valid/artifact-reader.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/valid/unsuccessful-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/specialized-data-record-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/request-unknown-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/request-non-utc-timestamp.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/async-non-durable-profile.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/incompatible-fallback.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/secret-extension.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/error-missing-fallback-allowed.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/lifecycle-out-of-order.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/result-attempt-reference.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/monetary-float.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/citation-source-kind.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/provenance-request-reference.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/durable-handle-timestamp.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/partial-outcome-shape.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/missing-surface-context.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/unknown-constrained-account-context.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/unknown-constrained-personalization.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/fallback-surface-context.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/search-profile-grounding-policy.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/search-requirement-grounding-policy.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/answer-missing-grounding-policy.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/run-manifest-storage-field.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/request-timestamp-missing-seconds.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/nested-camel-case-secret.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/decimal-too-long.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/citation-non-http-url.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/citation-missing-locator.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-selected-attempt-status.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-effective-profile.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-collection-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-replacement-provenance.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-mixed-unsuccessful-status.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/lifecycle-failed-without-error.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/lifecycle-succeeded-with-error.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/custom-provider-terminal-handle.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/custom-provider-progress-terminal-handle.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/custom-provider-status-handle-binding.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/custom-provider-result-identifiers.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/run-manifest-slot-order.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/run-manifest-fallback-candidate.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/run-manifest-primary-profile.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/source-category-too-long.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "interchange_version": "1.0.0",
+  "message_type": "request",
+  "request_id": "req-search-results-001",
+  "requested_at": "2026-08-08T00:00:00Z",
+  "mode": "sync",
+  "query": "Find recent example market sources.",
+  "slots": [
+    {
+      "slot_id": "slot-search-results",
+      "position": 0,
+      "requirements": {
+        "result_kind": "search_results",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_methods": [
+          "search_endpoint"
+        ]
+      },
+      "primary": {
+        "identity": {
+          "provider_id": "brave-search",
+          "profile_id": "web-results"
+        },
+        "result_kind": "search_results",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_method": "search_endpoint",
+        "access_mode": "direct",
+        "operator_id": "brave",
+        "invocation": "inline",
+        "resumability": "none"
+      }
+    }
+  ],
+  "fallback_reserve": []
+}
