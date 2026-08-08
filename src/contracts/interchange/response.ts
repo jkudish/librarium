@@ -27,6 +27,10 @@ const attemptBase = {
   extensions: ExtensionsSchema.optional(),
 };
 
+function profileKey(profile: z.infer<typeof ExecutionProfileSchema>): string {
+  return `${profile.identity.provider_id}\u0000${profile.identity.profile_id}`;
+}
+
 export const StartedAttemptSchema = z.strictObject({
   ...attemptBase,
   attempt_status: z.literal('started'),
@@ -132,6 +136,8 @@ export const InterchangeResponseSchema = z
     const slots = new Map<string, (typeof response.slots)[number]>();
     const attempts = new Map<string, (typeof response.attempts)[number]>();
     const results = new Map<string, (typeof response.results)[number]>();
+    const consumedCandidateIds = new Set<string>();
+    const executedProfileKeys = new Set<string>();
 
     response.slots.forEach((slot, index) => {
       if (slots.has(slot.slot_id)) {
@@ -153,11 +159,47 @@ export const InterchangeResponseSchema = z
         });
       }
       attempts.set(attempt.attempt_id, attempt);
+      const executedProfileKey = profileKey(attempt.profile);
+      if (executedProfileKeys.has(executedProfileKey)) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Each provider profile may execute at most once across a response',
+          path: ['attempts', index, 'profile', 'identity'],
+        });
+      }
+      executedProfileKeys.add(executedProfileKey);
+      if (attempt.candidate_id !== undefined) {
+        if (consumedCandidateIds.has(attempt.candidate_id)) {
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'Each fallback candidate may be consumed at most once across a response',
+            path: ['attempts', index, 'candidate_id'],
+          });
+        }
+        consumedCandidateIds.add(attempt.candidate_id);
+      }
       if (!slots.has(attempt.slot_id)) {
         ctx.addIssue({
           code: 'custom',
           message: 'Attempt references an unknown slot',
           path: ['attempts', index, 'slot_id'],
+        });
+      }
+      if (
+        'durable_handle' in attempt &&
+        attempt.durable_handle &&
+        !providerIdentitiesEqual(
+          attempt.durable_handle.provider,
+          attempt.profile.identity,
+        )
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Attempt durable-handle provider must match the attempt profile identity',
+          path: ['attempts', index, 'durable_handle', 'provider'],
         });
       }
       if (attempt.replaces_attempt_id) {
@@ -170,14 +212,20 @@ export const InterchangeResponseSchema = z
             path: ['attempts', index, 'replaces_attempt_id'],
           });
         } else if (
-          'error' in replaced &&
-          replaced.error &&
-          !replaced.error.fallback_allowed
+          replaced.attempt_status !== 'failed' &&
+          replaced.attempt_status !== 'timed_out'
         ) {
           ctx.addIssue({
             code: 'custom',
             message:
-              'An attempt with fallback_allowed=false cannot be replaced',
+              'Replacement attempts may only follow a failed or timed-out attempt',
+            path: ['attempts', index, 'replaces_attempt_id'],
+          });
+        } else if (!replaced.error.fallback_allowed) {
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'Replacement attempts require fallback_allowed=true on the replaced error',
             path: ['attempts', index, 'replaces_attempt_id'],
           });
         }

@@ -75,6 +75,48 @@ export const ExecutionProfileSchema = z
         path: ['resumability'],
       });
     }
+    if (
+      profile.result_kind === 'surface_observation' &&
+      profile.surface_id === undefined
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Surface-observation profiles require surface_id',
+        path: ['surface_id'],
+      });
+    }
+    if (profile.observation_mode === 'surface_snapshot') {
+      if (profile.result_kind !== 'surface_observation') {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Surface-snapshot profiles must produce surface observations',
+          path: ['result_kind'],
+        });
+      }
+      if (profile.retrieval_method !== 'surface_collector') {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Surface-snapshot profiles must use the surface_collector retrieval method',
+          path: ['retrieval_method'],
+        });
+      }
+      if (profile.collector_id === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Surface-snapshot profiles require collector_id',
+          path: ['collector_id'],
+        });
+      }
+      if (profile.access_mode !== 'collected') {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Surface-snapshot profiles must use collected access',
+          path: ['access_mode'],
+        });
+      }
+    }
   });
 
 export const DurableHandleStatusSchema = z.enum([

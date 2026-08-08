@@ -59,6 +59,21 @@
       "description": "Slots, attempts, replacements, results, and provenance references agree."
     },
     {
+      "rule_id": "response.fallback_replacement_policy",
+      "version": "1.0.0",
+      "description": "Fallback attempts replace only failed or timed-out attempts whose error explicitly permits fallback."
+    },
+    {
+      "rule_id": "response.fallback_consumption",
+      "version": "1.0.0",
+      "description": "Each fallback candidate and provider profile executes at most once across a response."
+    },
+    {
+      "rule_id": "response.semantic_profile_coherence",
+      "version": "1.0.0",
+      "description": "Result semantic facts remain within and identify the effective execution profile."
+    },
+    {
       "rule_id": "response.status_coherence",
       "version": "1.0.0",
       "description": "Response status reports the exact pending, successful, partially successful, failed, cancelled, or mixed-unsuccessful slot state."
@@ -79,9 +94,29 @@
       "description": "Custom-provider poll responses preserve the polled durable task identity while distinguishing nonterminal progress from terminal status."
     },
     {
+      "rule_id": "durable_handle.profile_identity_binding",
+      "version": "1.0.0",
+      "description": "Attempt durable handles identify the same provider profile as their owning attempt."
+    },
+    {
       "rule_id": "artifacts.run_manifest_execution_plan",
       "version": "1.0.0",
       "description": "Run manifest response slots and attempts exactly implement the request primary and eligible ordered fallback plan."
+    },
+    {
+      "rule_id": "surface_observation.fallback_lane",
+      "version": "1.0.0",
+      "description": "Surface-snapshot fallbacks preserve observation mode, collector lane, and measured surface."
+    },
+    {
+      "rule_id": "surface_observation.profile_invariants",
+      "version": "1.0.0",
+      "description": "Surface observations identify their measured surface, while snapshots use an identified surface collector."
+    },
+    {
+      "rule_id": "artifacts.sources_reference_integrity",
+      "version": "1.0.0",
+      "description": "Source and citation identities are unique, and every source citation reference resolves."
     },
     {
       "rule_id": "verification.consumer_owned_policy",
@@ -143,6 +178,13 @@
     },
     {
       "path": "fixtures/valid/locale-only-surface-context.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/api-proxy-surface-request.json",
       "role": "fixture",
       "areas": [
         "interchange"
@@ -366,6 +408,13 @@
       ]
     },
     {
+      "path": "fixtures/invalid/compound-secret-extension.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
       "path": "fixtures/invalid/decimal-too-long.json",
       "role": "fixture",
       "areas": [
@@ -409,6 +458,62 @@
     },
     {
       "path": "fixtures/invalid/response-replacement-provenance.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-replacement-of-succeeded.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-attempt-handle-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-semantic-facts.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-observation-mode.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-measured-surface.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-required-grounding.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-none-grounding.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-fallback-candidate-reuse.json",
       "role": "fixture",
       "areas": [
         "interchange"
@@ -464,6 +569,13 @@
       ]
     },
     {
+      "path": "fixtures/invalid/custom-provider-retrieve-running-handle.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
       "path": "fixtures/invalid/run-manifest-slot-order.json",
       "role": "fixture",
       "areas": [
@@ -479,6 +591,76 @@
     },
     {
       "path": "fixtures/invalid/run-manifest-primary-profile.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/run-manifest-fallback-candidate-reuse.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/fallback-surface-lane.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/fallback-surface-identity.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/surface-profile-missing-identity.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/surface-snapshot-retrieval.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/surface-snapshot-access.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/sources-dangling-citation.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/sources-duplicate-identity.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/sources-duplicate-citation-identity.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/sources-duplicate-reference.json",
       "role": "fixture",
       "areas": [
         "artifacts"

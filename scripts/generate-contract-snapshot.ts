@@ -316,6 +316,20 @@ invalidNestedCamelCaseSecret.extensions = {
   },
 };
 
+const invalidCompoundSecretExtension = clone(representativeRequest);
+invalidCompoundSecretExtension.extensions = {
+  'com.example:metadata': {
+    openaiApiKey: 'fixture-secret-value-must-never-appear-in-errors',
+    githubaccesstoken: 'fixture-secret-value-must-never-appear-in-errors',
+    authorizationHeader: 'fixture-secret-value-must-never-appear-in-errors',
+    databasepassword: 'fixture-secret-value-must-never-appear-in-errors',
+    providerRawResponse: 'fixture-secret-value-must-never-appear-in-errors',
+    stripeSecretKey: 'fixture-secret-value-must-never-appear-in-errors',
+    awsSecretAccessKey: 'fixture-secret-value-must-never-appear-in-errors',
+    api_key_2: 'fixture-secret-value-must-never-appear-in-errors',
+  },
+};
+
 const invalidDecimalTooLong = clone(representativePartialResponse) as Record<
   string,
   any
@@ -430,6 +444,259 @@ invalidRunManifestPrimaryProfile.response.attempts[0]!.profile = clone(
   invalidRunManifestPrimaryProfile.request.fallback_reserve[0]!.profile,
 );
 
+const invalidReplacementOfSucceeded = clone(
+  representativePartialResponse,
+) as Record<string, any>;
+invalidReplacementOfSucceeded.attempts[0].attempt_status = 'succeeded';
+invalidReplacementOfSucceeded.attempts[0].result_id = 'result-grounded-primary';
+delete invalidReplacementOfSucceeded.attempts[0].error;
+const succeededPrimaryResult = clone(invalidReplacementOfSucceeded.results[0]);
+succeededPrimaryResult.result_id = 'result-grounded-primary';
+succeededPrimaryResult.attempt_id = 'attempt-grounded-primary';
+succeededPrimaryResult.semantic_facts.retrieval_methods = ['model_search_tool'];
+succeededPrimaryResult.provenance.attempt_id = 'attempt-grounded-primary';
+succeededPrimaryResult.provenance.requested_profile = clone(
+  invalidReplacementOfSucceeded.attempts[0].profile,
+);
+succeededPrimaryResult.provenance.effective_profile = clone(
+  invalidReplacementOfSucceeded.attempts[0].profile,
+);
+succeededPrimaryResult.provenance.collection.provider = clone(
+  invalidReplacementOfSucceeded.attempts[0].profile.identity,
+);
+succeededPrimaryResult.provenance.collection.operator_id =
+  invalidReplacementOfSucceeded.attempts[0].profile.operator_id;
+delete succeededPrimaryResult.provenance.replaced_attempt_id;
+succeededPrimaryResult.citations[0].provenance.provider = clone(
+  invalidReplacementOfSucceeded.attempts[0].profile.identity,
+);
+succeededPrimaryResult.citations[0].provenance.operator_id =
+  invalidReplacementOfSucceeded.attempts[0].profile.operator_id;
+invalidReplacementOfSucceeded.results.push(succeededPrimaryResult);
+
+const invalidFallbackCandidateReuse = clone(
+  representativeRunManifest,
+) as Record<string, any>;
+const reusedCandidate =
+  invalidFallbackCandidateReuse.request.fallback_reserve[0];
+reusedCandidate.eligible_slot_ids.push('slot-research');
+const secondPrimaryProfile = clone(
+  invalidFallbackCandidateReuse.request.slots[0].primary,
+);
+secondPrimaryProfile.identity = {
+  ...secondPrimaryProfile.identity,
+  provider_id: 'perplexity-sonar-pro-secondary',
+};
+invalidFallbackCandidateReuse.request.slots[1].requirements = clone(
+  invalidFallbackCandidateReuse.request.slots[0].requirements,
+);
+invalidFallbackCandidateReuse.request.slots[1].primary = secondPrimaryProfile;
+const secondPrimaryAttempt = {
+  attempt_id: 'attempt-secondary-primary',
+  slot_id: 'slot-research',
+  attempt_number: 1,
+  profile: secondPrimaryProfile,
+  started_at: '2026-08-08T00:00:06Z',
+  attempt_status: 'failed',
+  finished_at: '2026-08-08T00:00:07Z',
+  error: {
+    code: 'provider_unavailable',
+    message: 'The provider did not return a usable response.',
+    category: 'provider',
+    retryable: true,
+    fallback_allowed: true,
+  },
+};
+const secondFallbackAttempt = clone(
+  invalidFallbackCandidateReuse.response.attempts[1],
+);
+secondFallbackAttempt.attempt_id = 'attempt-secondary-fallback';
+secondFallbackAttempt.slot_id = 'slot-research';
+secondFallbackAttempt.replaces_attempt_id = 'attempt-secondary-primary';
+secondFallbackAttempt.result_id = 'result-secondary-fallback';
+secondFallbackAttempt.started_at = '2026-08-08T00:00:08Z';
+secondFallbackAttempt.finished_at = '2026-08-08T00:00:10Z';
+const secondFallbackResult = clone(
+  invalidFallbackCandidateReuse.response.results[0],
+);
+secondFallbackResult.result_id = 'result-secondary-fallback';
+secondFallbackResult.slot_id = 'slot-research';
+secondFallbackResult.attempt_id = 'attempt-secondary-fallback';
+secondFallbackResult.provenance.slot_id = 'slot-research';
+secondFallbackResult.provenance.attempt_id = 'attempt-secondary-fallback';
+secondFallbackResult.provenance.requested_profile = secondPrimaryProfile;
+secondFallbackResult.provenance.replaced_attempt_id =
+  'attempt-secondary-primary';
+secondFallbackResult.completed_at = '2026-08-08T00:00:10Z';
+invalidFallbackCandidateReuse.response.slots[1] = {
+  slot_id: 'slot-research',
+  slot_status: 'succeeded',
+  selected_attempt_id: 'attempt-secondary-fallback',
+  result_id: 'result-secondary-fallback',
+};
+invalidFallbackCandidateReuse.response.attempts = [
+  ...invalidFallbackCandidateReuse.response.attempts.slice(0, 2),
+  secondPrimaryAttempt,
+  secondFallbackAttempt,
+];
+invalidFallbackCandidateReuse.response.results.push(secondFallbackResult);
+invalidFallbackCandidateReuse.response.response_status = 'succeeded';
+
+const invalidResponseFallbackCandidateReuse = clone(
+  invalidFallbackCandidateReuse.response,
+);
+
+const invalidFallbackSurfaceLane = clone(representativeSurfaceContextRequest);
+invalidFallbackSurfaceLane.fallback_reserve[0]!.profile.observation_mode =
+  'api_output';
+invalidFallbackSurfaceLane.fallback_reserve[0]!.profile.retrieval_method =
+  'model_only';
+invalidFallbackSurfaceLane.fallback_reserve[0]!.profile.access_mode = 'direct';
+delete invalidFallbackSurfaceLane.fallback_reserve[0]!.profile.collector_id;
+
+const invalidFallbackSurfaceIdentity = clone(
+  representativeSurfaceContextRequest,
+);
+invalidFallbackSurfaceIdentity.fallback_reserve[0]!.profile.surface_id =
+  'chatgpt_search';
+
+const invalidAttemptHandleProvider = clone(representativePartialResponse);
+invalidAttemptHandleProvider.attempts[2]!.durable_handle!.provider = {
+  ...invalidAttemptHandleProvider.attempts[2]!.durable_handle!.provider,
+  provider_id: 'different-provider',
+};
+
+const invalidRetrieveRunningHandle = {
+  request: {
+    protocol_version: '1.0.0',
+    message_type: 'retrieve',
+    request_id: representativeCustomProviderExchange.request.request_id,
+    attempt_id: representativeCustomProviderExchange.request.attempt_id,
+    sent_at: '2026-08-08T00:00:10Z',
+    durable_handle: {
+      ...clone(representativePartialResponse.attempts[2]!.durable_handle!),
+      status: 'running',
+    },
+  },
+  response: clone(representativeCustomProviderExchange.response),
+};
+
+const invalidResultSemanticFacts = clone(representativePartialResponse);
+invalidResultSemanticFacts.results[0]!.semantic_facts.result_kinds = [
+  'model_answer',
+];
+
+const invalidResultObservationMode = clone(representativePartialResponse);
+invalidResultObservationMode.results[0]!.semantic_facts.observation_mode =
+  'surface_snapshot';
+
+const invalidResultMeasuredSurface = clone(representativePartialResponse);
+invalidResultMeasuredSurface.results[0]!.semantic_facts.measured_surface_id =
+  'unexpected_surface';
+
+const invalidResultRequiredGrounding = clone(representativePartialResponse);
+invalidResultRequiredGrounding.results[0]!.semantic_facts.grounding_outcome =
+  'not_used';
+
+const invalidResultNoneGrounding = clone(representativePartialResponse);
+invalidResultNoneGrounding.attempts[1]!.profile.grounding_policy = 'none';
+invalidResultNoneGrounding.results[0]!.provenance.effective_profile
+  .grounding_policy = 'none';
+
+const invalidSurfaceProfileMissingIdentity = clone(
+  representativeSurfaceContextRequest,
+) as Record<string, any>;
+delete invalidSurfaceProfileMissingIdentity.slots[0].primary.surface_id;
+
+const invalidSurfaceSnapshotRetrieval = clone(
+  representativeSurfaceContextRequest,
+);
+invalidSurfaceSnapshotRetrieval.slots[0]!.primary.retrieval_method =
+  'model_only';
+
+const invalidSurfaceSnapshotAccess = clone(
+  representativeSurfaceContextRequest,
+);
+invalidSurfaceSnapshotAccess.slots[0]!.primary.access_mode = 'direct';
+
+const representativeApiProxySurfaceRequest = clone(
+  representativeSurfaceContextRequest,
+);
+const apiProxyProfile = {
+  identity: {
+    provider_id: 'google-gemini-api',
+    profile_id: 'google-ai-mode-api-proxy',
+  },
+  result_kind: 'surface_observation' as const,
+  grounding_policy: 'optional' as const,
+  observation_mode: 'api_output' as const,
+  corpora: ['web' as const],
+  retrieval_method: 'model_only' as const,
+  access_mode: 'direct' as const,
+  operator_id: 'google',
+  surface_id: 'google_ai_mode',
+  surface_context: clone(
+    representativeSurfaceContextRequest.slots[0]!.primary.surface_context!,
+  ),
+  invocation: 'inline' as const,
+  resumability: 'none' as const,
+};
+representativeApiProxySurfaceRequest.slots[0]!.requirements.observation_mode =
+  'api_output';
+representativeApiProxySurfaceRequest.slots[0]!.requirements.retrieval_methods =
+  ['model_only'];
+representativeApiProxySurfaceRequest.slots[0]!.primary = apiProxyProfile;
+representativeApiProxySurfaceRequest.fallback_reserve[0]!.profile = {
+  ...apiProxyProfile,
+  identity: {
+    provider_id: 'openai-api',
+    profile_id: 'google-ai-mode-api-proxy-comparison',
+  },
+  operator_id: 'openai',
+};
+
+const representativeSourcesArtifact = {
+  artifact_name: 'sources' as const,
+  artifact_version: '1.0.0' as const,
+  generated_at: '2026-08-08T00:00:11Z',
+  request_id: representativePartialResponse.request_id,
+  sources: [
+    {
+      source_id: 'source-001',
+      canonical_url:
+        representativePartialResponse.results[0]!.citations[0]!.url,
+      source_kind:
+        representativePartialResponse.results[0]!.citations[0]!.source_kind,
+      citation_ids: [
+        representativePartialResponse.results[0]!.citations[0]!.citation_id,
+      ],
+    },
+  ],
+  citations: [clone(representativePartialResponse.results[0]!.citations[0]!)],
+};
+
+const invalidSourcesDanglingCitation = clone(representativeSourcesArtifact);
+invalidSourcesDanglingCitation.sources[0]!.citation_ids = [
+  'citation-does-not-exist',
+];
+
+const invalidSourcesDuplicateIdentity = clone(representativeSourcesArtifact);
+invalidSourcesDuplicateIdentity.sources.push(
+  clone(invalidSourcesDuplicateIdentity.sources[0]!),
+);
+
+const invalidSourcesDuplicateCitationIdentity = clone(
+  representativeSourcesArtifact,
+);
+invalidSourcesDuplicateCitationIdentity.citations.push(
+  clone(invalidSourcesDuplicateCitationIdentity.citations[0]!),
+);
+
+const invalidSourcesDuplicateReference = clone(representativeSourcesArtifact);
+invalidSourcesDuplicateReference.sources[0]!.citation_ids.push(
+  invalidSourcesDuplicateReference.sources[0]!.citation_ids[0]!,
+);
+
 const representativeSpecializedResponse = clone(representativePartialResponse);
 const specializedProfile = clone(
   representativeSpecializedResponse.attempts[1]!.profile,
@@ -480,6 +747,14 @@ const fixtureDefinitions = [
     valid: true,
     path: 'fixtures/valid/locale-only-surface-context.json',
     payload: representativeSurfaceContextRequest,
+  },
+  {
+    id: 'valid.api_proxy_surface_request',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: true,
+    path: 'fixtures/valid/api-proxy-surface-request.json',
+    payload: representativeApiProxySurfaceRequest,
   },
   {
     id: 'valid.partial_response',
@@ -754,6 +1029,15 @@ const fixtureDefinitions = [
     payload: invalidNestedCamelCaseSecret,
   },
   {
+    id: 'invalid.compound_secret_extension',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: false,
+    expected_issue_path: '/extensions/com.example:metadata/openaiApiKey',
+    path: 'fixtures/invalid/compound-secret-extension.json',
+    payload: invalidCompoundSecretExtension,
+  },
+  {
     id: 'invalid.decimal_too_long',
     area: 'interchange',
     schema: 'interchange_response',
@@ -815,6 +1099,78 @@ const fixtureDefinitions = [
     expected_issue_path: '/results/0/provenance/replaced_attempt_id',
     path: 'fixtures/invalid/response-replacement-provenance.json',
     payload: invalidReplacementProvenance,
+  },
+  {
+    id: 'invalid.response_replacement_of_succeeded',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/attempts/1/replaces_attempt_id',
+    path: 'fixtures/invalid/response-replacement-of-succeeded.json',
+    payload: invalidReplacementOfSucceeded,
+  },
+  {
+    id: 'invalid.response_attempt_handle_provider',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/attempts/2/durable_handle/provider',
+    path: 'fixtures/invalid/response-attempt-handle-provider.json',
+    payload: invalidAttemptHandleProvider,
+  },
+  {
+    id: 'invalid.response_semantic_facts',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/result_kinds',
+    path: 'fixtures/invalid/response-semantic-facts.json',
+    payload: invalidResultSemanticFacts,
+  },
+  {
+    id: 'invalid.response_observation_mode',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/observation_mode',
+    path: 'fixtures/invalid/response-observation-mode.json',
+    payload: invalidResultObservationMode,
+  },
+  {
+    id: 'invalid.response_measured_surface',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/measured_surface_id',
+    path: 'fixtures/invalid/response-measured-surface.json',
+    payload: invalidResultMeasuredSurface,
+  },
+  {
+    id: 'invalid.response_required_grounding',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/grounding_outcome',
+    path: 'fixtures/invalid/response-required-grounding.json',
+    payload: invalidResultRequiredGrounding,
+  },
+  {
+    id: 'invalid.response_none_grounding',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/grounding_outcome',
+    path: 'fixtures/invalid/response-none-grounding.json',
+    payload: invalidResultNoneGrounding,
+  },
+  {
+    id: 'invalid.response_fallback_candidate_reuse',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/attempts/3/candidate_id',
+    path: 'fixtures/invalid/response-fallback-candidate-reuse.json',
+    payload: invalidResponseFallbackCandidateReuse,
   },
   {
     id: 'invalid.response_mixed_unsuccessful_status',
@@ -880,6 +1236,15 @@ const fixtureDefinitions = [
     payload: invalidCustomProviderResultIdentifiers,
   },
   {
+    id: 'invalid.custom_provider_retrieve_running_handle',
+    area: 'custom_provider',
+    schema: 'custom_provider_exchange',
+    valid: false,
+    expected_issue_path: '/request/durable_handle/status',
+    path: 'fixtures/invalid/custom-provider-retrieve-running-handle.json',
+    payload: invalidRetrieveRunningHandle,
+  },
+  {
     id: 'invalid.run_manifest_slot_order',
     area: 'artifacts',
     schema: 'run_manifest',
@@ -905,6 +1270,96 @@ const fixtureDefinitions = [
     expected_issue_path: '/response/attempts/0',
     path: 'fixtures/invalid/run-manifest-primary-profile.json',
     payload: invalidRunManifestPrimaryProfile,
+  },
+  {
+    id: 'invalid.run_manifest_fallback_candidate_reuse',
+    area: 'artifacts',
+    schema: 'run_manifest',
+    valid: false,
+    expected_issue_path: '/response/attempts/3/candidate_id',
+    path: 'fixtures/invalid/run-manifest-fallback-candidate-reuse.json',
+    payload: invalidFallbackCandidateReuse,
+  },
+  {
+    id: 'invalid.fallback_surface_lane',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: false,
+    expected_issue_path: '/fallback_reserve/0/eligible_slot_ids/0',
+    path: 'fixtures/invalid/fallback-surface-lane.json',
+    payload: invalidFallbackSurfaceLane,
+  },
+  {
+    id: 'invalid.fallback_surface_identity',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: false,
+    expected_issue_path: '/fallback_reserve/0/eligible_slot_ids/0',
+    path: 'fixtures/invalid/fallback-surface-identity.json',
+    payload: invalidFallbackSurfaceIdentity,
+  },
+  {
+    id: 'invalid.surface_profile_missing_identity',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: false,
+    expected_issue_path: '/slots/0/primary/surface_id',
+    path: 'fixtures/invalid/surface-profile-missing-identity.json',
+    payload: invalidSurfaceProfileMissingIdentity,
+  },
+  {
+    id: 'invalid.surface_snapshot_retrieval',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: false,
+    expected_issue_path: '/slots/0/primary/retrieval_method',
+    path: 'fixtures/invalid/surface-snapshot-retrieval.json',
+    payload: invalidSurfaceSnapshotRetrieval,
+  },
+  {
+    id: 'invalid.surface_snapshot_access',
+    area: 'interchange',
+    schema: 'interchange_request',
+    valid: false,
+    expected_issue_path: '/slots/0/primary/access_mode',
+    path: 'fixtures/invalid/surface-snapshot-access.json',
+    payload: invalidSurfaceSnapshotAccess,
+  },
+  {
+    id: 'invalid.sources_dangling_citation',
+    area: 'artifacts',
+    schema: 'sources_artifact',
+    valid: false,
+    expected_issue_path: '/sources/0/citation_ids/0',
+    path: 'fixtures/invalid/sources-dangling-citation.json',
+    payload: invalidSourcesDanglingCitation,
+  },
+  {
+    id: 'invalid.sources_duplicate_identity',
+    area: 'artifacts',
+    schema: 'sources_artifact',
+    valid: false,
+    expected_issue_path: '/sources/1/source_id',
+    path: 'fixtures/invalid/sources-duplicate-identity.json',
+    payload: invalidSourcesDuplicateIdentity,
+  },
+  {
+    id: 'invalid.sources_duplicate_citation_identity',
+    area: 'artifacts',
+    schema: 'sources_artifact',
+    valid: false,
+    expected_issue_path: '/citations/1/citation_id',
+    path: 'fixtures/invalid/sources-duplicate-citation-identity.json',
+    payload: invalidSourcesDuplicateCitationIdentity,
+  },
+  {
+    id: 'invalid.sources_duplicate_reference',
+    area: 'artifacts',
+    schema: 'sources_artifact',
+    valid: false,
+    expected_issue_path: '/sources/0/citation_ids/1',
+    path: 'fixtures/invalid/sources-duplicate-reference.json',
+    payload: invalidSourcesDuplicateReference,
   },
   {
     id: 'invalid.source_category_too_long',
@@ -942,6 +1397,10 @@ const schemaTargets = {
     schema_path: 'schema/artifacts.schema.json',
     schema_ref: '#/$defs/historical_reader',
   },
+  sources_artifact: {
+    schema_path: 'schema/artifacts.schema.json',
+    schema_ref: '#/$defs/sources',
+  },
 } as const;
 
 const semanticFixtureRules: Record<string, string> = {
@@ -949,6 +1408,7 @@ const semanticFixtureRules: Record<string, string> = {
   'invalid.incompatible_fallback': 'request.preflight_plan_compatibility',
   'invalid.secret_extension': 'extensions.bounded_namespaced_json',
   'invalid.nested_camel_case_secret': 'extensions.bounded_namespaced_json',
+  'invalid.compound_secret_extension': 'extensions.bounded_namespaced_json',
   'invalid.lifecycle_out_of_order': 'lifecycle.monotonic_order',
   'invalid.result_attempt_reference': 'response.lossless_references',
   'invalid.provenance_request_reference': 'response.lossless_references',
@@ -971,6 +1431,17 @@ const semanticFixtureRules: Record<string, string> = {
   'invalid.response_effective_profile': 'response.lossless_references',
   'invalid.response_collection_provider': 'response.lossless_references',
   'invalid.response_replacement_provenance': 'response.lossless_references',
+  'invalid.response_replacement_of_succeeded':
+    'response.fallback_replacement_policy',
+  'invalid.response_attempt_handle_provider':
+    'durable_handle.profile_identity_binding',
+  'invalid.response_semantic_facts': 'response.semantic_profile_coherence',
+  'invalid.response_observation_mode': 'response.semantic_profile_coherence',
+  'invalid.response_measured_surface': 'response.semantic_profile_coherence',
+  'invalid.response_required_grounding': 'response.semantic_profile_coherence',
+  'invalid.response_none_grounding': 'response.semantic_profile_coherence',
+  'invalid.response_fallback_candidate_reuse':
+    'response.fallback_consumption',
   'invalid.response_mixed_unsuccessful_status': 'response.status_coherence',
   'invalid.custom_provider_result_identifiers':
     'custom_provider.result_binding',
@@ -981,6 +1452,22 @@ const semanticFixtureRules: Record<string, string> = {
     'artifacts.run_manifest_execution_plan',
   'invalid.run_manifest_primary_profile':
     'artifacts.run_manifest_execution_plan',
+  'invalid.run_manifest_fallback_candidate_reuse':
+    'artifacts.run_manifest_execution_plan',
+  'invalid.fallback_surface_lane': 'surface_observation.fallback_lane',
+  'invalid.fallback_surface_identity': 'surface_observation.fallback_lane',
+  'invalid.surface_profile_missing_identity':
+    'surface_observation.profile_invariants',
+  'invalid.surface_snapshot_retrieval':
+    'surface_observation.profile_invariants',
+  'invalid.surface_snapshot_access':
+    'surface_observation.profile_invariants',
+  'invalid.sources_dangling_citation': 'artifacts.sources_reference_integrity',
+  'invalid.sources_duplicate_identity': 'artifacts.sources_reference_integrity',
+  'invalid.sources_duplicate_citation_identity':
+    'artifacts.sources_reference_integrity',
+  'invalid.sources_duplicate_reference':
+    'artifacts.sources_reference_integrity',
 };
 
 const fixtureFiles = fixtureDefinitions.map((fixture) =>
@@ -1089,6 +1576,24 @@ const manifest = {
         'Slots, attempts, replacements, results, and provenance references agree.',
     },
     {
+      rule_id: 'response.fallback_replacement_policy',
+      version: '1.0.0',
+      description:
+        'Fallback attempts replace only failed or timed-out attempts whose error explicitly permits fallback.',
+    },
+    {
+      rule_id: 'response.fallback_consumption',
+      version: '1.0.0',
+      description:
+        'Each fallback candidate and provider profile executes at most once across a response.',
+    },
+    {
+      rule_id: 'response.semantic_profile_coherence',
+      version: '1.0.0',
+      description:
+        'Result semantic facts remain within and identify the effective execution profile.',
+    },
+    {
       rule_id: 'response.status_coherence',
       version: '1.0.0',
       description:
@@ -1113,10 +1618,34 @@ const manifest = {
         'Custom-provider poll responses preserve the polled durable task identity while distinguishing nonterminal progress from terminal status.',
     },
     {
+      rule_id: 'durable_handle.profile_identity_binding',
+      version: '1.0.0',
+      description:
+        'Attempt durable handles identify the same provider profile as their owning attempt.',
+    },
+    {
       rule_id: 'artifacts.run_manifest_execution_plan',
       version: '1.0.0',
       description:
         'Run manifest response slots and attempts exactly implement the request primary and eligible ordered fallback plan.',
+    },
+    {
+      rule_id: 'surface_observation.fallback_lane',
+      version: '1.0.0',
+      description:
+        'Surface-snapshot fallbacks preserve observation mode, collector lane, and measured surface.',
+    },
+    {
+      rule_id: 'surface_observation.profile_invariants',
+      version: '1.0.0',
+      description:
+        'Surface observations identify their measured surface, while snapshots use an identified surface collector.',
+    },
+    {
+      rule_id: 'artifacts.sources_reference_integrity',
+      version: '1.0.0',
+      description:
+        'Source and citation identities are unique, and every source citation reference resolves.',
     },
     {
       rule_id: 'verification.consumer_owned_policy',

@@ -1,0 +1,88 @@
+{
+  "interchange_version": "1.0.0",
+  "message_type": "request",
+  "request_id": "req-surface-context-001",
+  "requested_at": "2026-08-08T00:00:00Z",
+  "mode": "sync",
+  "query": "Observe the Google AI Mode consumer surface for this prompt.",
+  "slots": [
+    {
+      "slot_id": "slot-surface-observation",
+      "position": 0,
+      "requirements": {
+        "result_kind": "surface_observation",
+        "grounding_policy": "optional",
+        "observation_mode": "surface_snapshot",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_methods": [
+          "surface_collector"
+        ],
+        "surface_id": "google_ai_mode",
+        "surface_context_constraint": {
+          "locale": "en-CA"
+        }
+      },
+      "primary": {
+        "identity": {
+          "provider_id": "searchapi-google-ai-mode",
+          "profile_id": "google-ai-mode-en-ca"
+        },
+        "result_kind": "surface_observation",
+        "grounding_policy": "optional",
+        "observation_mode": "surface_snapshot",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_method": "surface_collector",
+        "access_mode": "collected",
+        "operator_id": "google",
+        "collector_id": "searchapi",
+        "surface_id": "google_ai_mode",
+        "surface_context": {
+          "account_context": "unknown",
+          "locale": "en-CA",
+          "country": "CA",
+          "personalization": "unknown"
+        },
+        "invocation": "inline",
+        "resumability": "none"
+      }
+    }
+  ],
+  "fallback_reserve": [
+    {
+      "candidate_id": "fallback-surface-observation-001",
+      "position": 0,
+      "profile": {
+        "identity": {
+          "provider_id": "serpapi-google-ai-mode",
+          "profile_id": "google-ai-mode-en-ca"
+        },
+        "result_kind": "surface_observation",
+        "grounding_policy": "optional",
+        "observation_mode": "surface_snapshot",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_method": "surface_collector",
+        "access_mode": "collected",
+        "operator_id": "google",
+        "collector_id": "serpapi",
+        "surface_id": "chatgpt_search",
+        "surface_context": {
+          "account_context": "unknown",
+          "locale": "en-CA",
+          "country": "CA",
+          "personalization": "unknown"
+        },
+        "invocation": "inline",
+        "resumability": "none"
+      },
+      "eligible_slot_ids": [
+        "slot-surface-observation"
+      ]
+    }
+  ]
+}

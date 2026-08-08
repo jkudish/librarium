@@ -27,6 +27,10 @@ const artifactHeader = {
   extensions: ExtensionsSchema.optional(),
 };
 
+function profileKey(profile: z.infer<typeof ExecutionProfileSchema>): string {
+  return `${profile.identity.provider_id}\u0000${profile.identity.profile_id}`;
+}
+
 export const ArtifactProducerSchema = z.strictObject({
   id: OpaqueIdSchema,
   version: OpaqueIdSchema,
@@ -42,6 +46,9 @@ export const RunManifestArtifactSchema = z
     response: InterchangeResponseSchema,
   })
   .superRefine((manifest, ctx) => {
+    const consumedCandidateIds = new Set<string>();
+    const executedProfileKeys = new Set<string>();
+
     if (manifest.request.request_id !== manifest.response.request_id) {
       ctx.addIssue({
         code: 'custom',
@@ -75,6 +82,42 @@ export const RunManifestArtifactSchema = z
       );
       let previousCandidatePosition = -1;
       slotAttempts.forEach((attempt, attemptIndex) => {
+        const responseAttemptIndex =
+          manifest.response.attempts.indexOf(attempt);
+        const executedProfileKey = profileKey(attempt.profile);
+        if (executedProfileKeys.has(executedProfileKey)) {
+          ctx.addIssue({
+            code: 'custom',
+            message:
+              'Each provider profile may execute at most once across the run manifest',
+            path: [
+              'response',
+              'attempts',
+              responseAttemptIndex,
+              'profile',
+              'identity',
+            ],
+          });
+        }
+        executedProfileKeys.add(executedProfileKey);
+
+        if (attempt.candidate_id !== undefined) {
+          if (consumedCandidateIds.has(attempt.candidate_id)) {
+            ctx.addIssue({
+              code: 'custom',
+              message:
+                'Each fallback candidate may be consumed at most once across all slots',
+              path: [
+                'response',
+                'attempts',
+                responseAttemptIndex,
+                'candidate_id',
+              ],
+            });
+          }
+          consumedCandidateIds.add(attempt.candidate_id);
+        }
+
         if (attempt.attempt_number !== attemptIndex + 1) {
           ctx.addIssue({
             code: 'custom',
@@ -83,7 +126,7 @@ export const RunManifestArtifactSchema = z
             path: [
               'response',
               'attempts',
-              manifest.response.attempts.indexOf(attempt),
+              responseAttemptIndex,
               'attempt_number',
             ],
           });
@@ -99,11 +142,7 @@ export const RunManifestArtifactSchema = z
               code: 'custom',
               message:
                 'The first attempt for a slot must execute its requested primary profile',
-              path: [
-                'response',
-                'attempts',
-                manifest.response.attempts.indexOf(attempt),
-              ],
+              path: ['response', 'attempts', responseAttemptIndex],
             });
           }
           return;
@@ -125,7 +164,7 @@ export const RunManifestArtifactSchema = z
             path: [
               'response',
               'attempts',
-              manifest.response.attempts.indexOf(attempt),
+              responseAttemptIndex,
               'candidate_id',
             ],
           });
@@ -138,7 +177,7 @@ export const RunManifestArtifactSchema = z
             path: [
               'response',
               'attempts',
-              manifest.response.attempts.indexOf(attempt),
+              responseAttemptIndex,
               'replaces_attempt_id',
             ],
           });
@@ -151,7 +190,7 @@ export const RunManifestArtifactSchema = z
             path: [
               'response',
               'attempts',
-              manifest.response.attempts.indexOf(attempt),
+              responseAttemptIndex,
               'candidate_id',
             ],
           });
@@ -182,14 +221,59 @@ export const ProviderMetadataArtifactSchema = z.strictObject({
   providers: z.array(ProviderMetadataEntrySchema).max(1_000),
 });
 
-export const SourcesArtifactSchema = z.strictObject({
-  ...artifactHeader,
-  artifact_name: z.literal('sources'),
-  artifact_version: z.literal(ARTIFACT_VERSIONS.sources),
-  request_id: OpaqueIdSchema,
-  sources: z.array(NormalizedSourceSchema).max(100_000),
-  citations: z.array(CitationSchema).max(100_000),
-});
+export const SourcesArtifactSchema = z
+  .strictObject({
+    ...artifactHeader,
+    artifact_name: z.literal('sources'),
+    artifact_version: z.literal(ARTIFACT_VERSIONS.sources),
+    request_id: OpaqueIdSchema,
+    sources: z.array(NormalizedSourceSchema).max(100_000),
+    citations: z.array(CitationSchema).max(100_000),
+  })
+  .superRefine((artifact, ctx) => {
+    const citationIds = new Set<string>();
+    artifact.citations.forEach((citation, index) => {
+      if (citationIds.has(citation.citation_id)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'citation_id values must be unique',
+          path: ['citations', index, 'citation_id'],
+        });
+      }
+      citationIds.add(citation.citation_id);
+    });
+
+    const sourceIds = new Set<string>();
+    artifact.sources.forEach((source, sourceIndex) => {
+      if (sourceIds.has(source.source_id)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'source_id values must be unique',
+          path: ['sources', sourceIndex, 'source_id'],
+        });
+      }
+      sourceIds.add(source.source_id);
+
+      const sourceCitationIds = new Set<string>();
+      source.citation_ids.forEach((citationId, citationIndex) => {
+        if (sourceCitationIds.has(citationId)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Source citation_ids must be unique',
+            path: ['sources', sourceIndex, 'citation_ids', citationIndex],
+          });
+        }
+        sourceCitationIds.add(citationId);
+        if (!citationIds.has(citationId)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: 'Source citation_ids must reference an artifact citation',
+            path: ['sources', sourceIndex, 'citation_ids', citationIndex],
+          });
+        }
+      });
+    });
+  });
 
 const jsonlHeader = {
   ...artifactHeader,

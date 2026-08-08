@@ -49,6 +49,7 @@ const fixtureSchemas = {
   'schema/artifacts.schema.json#/$defs/historical_reader':
     HistoricalArtifactReaderSchema,
   'schema/artifacts.schema.json#/$defs/run_manifest': RunManifestArtifactSchema,
+  'schema/artifacts.schema.json#/$defs/sources': SourcesArtifactSchema,
   'schema/custom-provider.schema.json#/$defs/exchange':
     CustomProviderExchangeSchema,
   'schema/interchange.schema.json#/$defs/request': InterchangeRequestSchema,
@@ -74,6 +75,10 @@ function listFiles(directory: string): string[] {
     const path = join(directory, entry.name);
     return entry.isDirectory() ? listFiles(path) : [path];
   });
+}
+
+function portableRelative(from: string, to: string): string {
+  return relative(from, to).replaceAll('\\', '/');
 }
 
 function collectSemanticKeys(
@@ -198,6 +203,10 @@ const BENIGN_EXTENSION_KEY_CASES = [
   'max_tokens',
   'totalTokens',
   'input_tokens',
+  'cache_creation_tokens',
+  'cache_read_tokens',
+  'thinking_tokens',
+  'num_tokens',
   'auth_method',
   'authentication_method',
   'authorizationStatus',
@@ -215,6 +224,23 @@ const BENIGN_EXTENSION_KEY_CASES = [
   'monkey',
   'presign_enabled',
   'signing_algorithm',
+] as const;
+
+const COMPOUND_FORBIDDEN_EXTENSION_KEY_CASES = [
+  'openaiApiKey',
+  'openaiapikey',
+  'githubAccessToken',
+  'githubaccesstoken',
+  'authorizationHeader',
+  'authorizationheader',
+  'databasePassword',
+  'databasepassword',
+  'providerRawResponse',
+  'providerrawresponse',
+  'stripeSecretKey',
+  'awsSecretAccessKey',
+  'api_key_2',
+  'apikey2',
 ] as const;
 
 describe('canonical v2 contracts', () => {
@@ -448,6 +474,17 @@ describe('canonical v2 contracts', () => {
           'com.example:metadata': { [key]: 'public-metadata' },
         }).success,
       ).toBe(true);
+    },
+  );
+
+  it.each(COMPOUND_FORBIDDEN_EXTENSION_KEY_CASES)(
+    'rejects compound secret-bearing extension key %s',
+    (key) => {
+      expect(
+        ExtensionsSchema.safeParse({
+          'com.example:metadata': { [key]: 'must-not-leak' },
+        }).success,
+      ).toBe(false);
     },
   );
 
@@ -808,6 +845,218 @@ describe('canonical v2 contracts', () => {
     }
   });
 
+  it('permits fallback replacement only after an explicitly allowed failure or timeout', () => {
+    const response = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'partial-response.json'),
+    );
+
+    for (const status of ['submitted', 'started', 'succeeded', 'cancelled']) {
+      const invalid = structuredClone(response);
+      const replaced = invalid.attempts[0];
+      replaced.attempt_status = status;
+      if (status === 'submitted') {
+        delete replaced.finished_at;
+        delete replaced.error;
+        replaced.durable_handle = {
+          ...structuredClone(invalid.attempts[2].durable_handle),
+          handle_id: 'handle-grounded-primary',
+          provider_task_id: 'provider-task-grounded-primary',
+          provider: structuredClone(replaced.profile.identity),
+          submitted_at: replaced.started_at,
+          status: 'pending',
+        };
+        delete replaced.durable_handle.last_observed_at;
+      }
+      if (status === 'started') {
+        delete replaced.finished_at;
+        delete replaced.error;
+      }
+      if (status === 'succeeded') {
+        delete replaced.error;
+        replaced.result_id = 'result-grounded-primary';
+        const primaryResult = structuredClone(invalid.results[0]);
+        primaryResult.result_id = replaced.result_id;
+        primaryResult.attempt_id = replaced.attempt_id;
+        primaryResult.semantic_facts.retrieval_methods = [
+          replaced.profile.retrieval_method,
+        ];
+        primaryResult.provenance.attempt_id = replaced.attempt_id;
+        primaryResult.provenance.requested_profile = structuredClone(
+          replaced.profile,
+        );
+        primaryResult.provenance.effective_profile = structuredClone(
+          replaced.profile,
+        );
+        primaryResult.provenance.collection.provider = structuredClone(
+          replaced.profile.identity,
+        );
+        primaryResult.provenance.collection.operator_id =
+          replaced.profile.operator_id;
+        delete primaryResult.provenance.replaced_attempt_id;
+        primaryResult.citations[0].provenance.provider = structuredClone(
+          replaced.profile.identity,
+        );
+        primaryResult.citations[0].provenance.operator_id =
+          replaced.profile.operator_id;
+        invalid.results.push(primaryResult);
+      }
+      const result = InterchangeResponseSchema.safeParse(invalid);
+      expect(result.success, status).toBe(false);
+      if (result.success) continue;
+      expect(
+        result.error.issues.map((issue) => issuePointer(issue.path)),
+        status,
+      ).toContain('/attempts/1/replaces_attempt_id');
+    }
+
+    const forbiddenFailure = structuredClone(response);
+    forbiddenFailure.attempts[0].error.fallback_allowed = false;
+    const forbiddenFailureResult =
+      InterchangeResponseSchema.safeParse(forbiddenFailure);
+    expect(forbiddenFailureResult.success).toBe(false);
+    if (!forbiddenFailureResult.success) {
+      expect(
+        forbiddenFailureResult.error.issues.map((issue) =>
+          issuePointer(issue.path),
+        ),
+      ).toContain('/attempts/1/replaces_attempt_id');
+    }
+
+    const allowedTimeout = structuredClone(response);
+    allowedTimeout.attempts[0].attempt_status = 'timed_out';
+    expect(InterchangeResponseSchema.safeParse(allowedTimeout).success).toBe(
+      true,
+    );
+  });
+
+  it('binds durable handles to the attempt provider identity', () => {
+    const response = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'partial-response.json'),
+    );
+    response.attempts[2].durable_handle.provider = {
+      ...response.attempts[2].durable_handle.provider,
+      provider_id: 'different-provider',
+    };
+    expect(InterchangeResponseSchema.safeParse(response).success).toBe(false);
+  });
+
+  it('binds result semantic facts to the effective execution profile', () => {
+    const response = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'partial-response.json'),
+    );
+    const mutations: Array<[string, (value: Record<string, any>) => void]> = [
+      [
+        'result kind',
+        (value) => {
+          value.results[0].semantic_facts.result_kinds = ['model_answer'];
+        },
+      ],
+      [
+        'corpus',
+        (value) => {
+          value.results[0].semantic_facts.corpora = ['x'];
+        },
+      ],
+      [
+        'retrieval method',
+        (value) => {
+          value.results[0].semantic_facts.retrieval_methods = ['model_only'];
+        },
+      ],
+      [
+        'observation mode',
+        (value) => {
+          value.results[0].semantic_facts.observation_mode = 'surface_snapshot';
+        },
+      ],
+      [
+        'measured surface',
+        (value) => {
+          value.results[0].semantic_facts.measured_surface_id =
+            'unexpected_surface';
+        },
+      ],
+      [
+        'required grounding outcome',
+        (value) => {
+          value.results[0].semantic_facts.grounding_outcome = 'not_used';
+        },
+      ],
+      [
+        'none grounding outcome',
+        (value) => {
+          value.attempts[1].profile.grounding_policy = 'none';
+          value.results[0].provenance.effective_profile.grounding_policy =
+            'none';
+        },
+      ],
+    ];
+
+    for (const [name, mutate] of mutations) {
+      const invalid = structuredClone(response);
+      mutate(invalid);
+      expect(InterchangeResponseSchema.safeParse(invalid).success, name).toBe(
+        false,
+      );
+    }
+  });
+
+  it('distinguishes direct API surface proxies from collected surface snapshots', () => {
+    const apiProxy = {
+      identity: {
+        provider_id: 'google-gemini-api',
+        profile_id: 'google-ai-mode-api-proxy',
+      },
+      result_kind: 'surface_observation',
+      grounding_policy: 'optional',
+      observation_mode: 'api_output',
+      corpora: ['web'],
+      retrieval_method: 'model_only',
+      access_mode: 'direct',
+      operator_id: 'google',
+      surface_id: 'google_ai_mode',
+      invocation: 'inline',
+      resumability: 'none',
+    };
+    expect(ExecutionProfileSchema.safeParse(apiProxy).success).toBe(true);
+    expect(
+      ExecutionProfileSchema.safeParse({
+        ...apiProxy,
+        surface_id: undefined,
+      }).success,
+    ).toBe(false);
+
+    const request = readJson<Record<string, any>>(
+      join(
+        snapshotRoot,
+        'fixtures',
+        'valid',
+        'locale-only-surface-context.json',
+      ),
+    );
+    const laneChange = structuredClone(request);
+    laneChange.fallback_reserve[0].profile = apiProxy;
+    expect(InterchangeRequestSchema.safeParse(laneChange).success).toBe(false);
+
+    const surfaceChange = structuredClone(request);
+    surfaceChange.fallback_reserve[0].profile.surface_id = 'chatgpt_search';
+    expect(InterchangeRequestSchema.safeParse(surfaceChange).success).toBe(
+      false,
+    );
+
+    const missingCollector = structuredClone(request.slots[0].primary);
+    delete missingCollector.collector_id;
+    expect(ExecutionProfileSchema.safeParse(missingCollector).success).toBe(
+      false,
+    );
+
+    const directSnapshot = structuredClone(request.slots[0].primary);
+    directSnapshot.access_mode = 'direct';
+    expect(ExecutionProfileSchema.safeParse(directSnapshot).success).toBe(
+      false,
+    );
+  });
+
   it('represents a terminal failed-and-cancelled response without misreporting', () => {
     const response = readJson<Record<string, any>>(
       join(snapshotRoot, 'fixtures', 'valid', 'unsuccessful-response.json'),
@@ -919,6 +1168,47 @@ describe('canonical v2 contracts', () => {
     }
   });
 
+  it('consumes each fallback reserve candidate only once across all slots', () => {
+    const manifest = readJson<Record<string, any>>(
+      join(
+        snapshotRoot,
+        'fixtures',
+        'invalid',
+        'run-manifest-fallback-candidate-reuse.json',
+      ),
+    );
+    const result = RunManifestArtifactSchema.safeParse(manifest);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.map((issue) => issuePointer(issue.path)),
+      ).toContain('/response/attempts/3/candidate_id');
+      expect(
+        result.error.issues.map((issue) => issuePointer(issue.path)),
+      ).toContain('/response/attempts/3/profile/identity');
+    }
+  });
+
+  it('enforces candidate and profile consumption in standalone responses', () => {
+    const response = readJson<Record<string, any>>(
+      join(
+        snapshotRoot,
+        'fixtures',
+        'invalid',
+        'response-fallback-candidate-reuse.json',
+      ),
+    );
+    const result = InterchangeResponseSchema.safeParse(response);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((issue) =>
+        issuePointer(issue.path),
+      );
+      expect(paths).toContain('/attempts/3/candidate_id');
+      expect(paths).toContain('/attempts/3/profile/identity');
+    }
+  });
+
   it('validates every independently versioned artifact family', () => {
     const request = readJson<Record<string, any>>(
       join(snapshotRoot, 'fixtures', 'valid', 'interchange-request.json'),
@@ -978,6 +1268,64 @@ describe('canonical v2 contracts', () => {
 
     for (const artifact of artifacts) {
       expect(ArtifactSchema.parse(artifact)).toEqual(artifact);
+    }
+  });
+
+  it('requires unique and resolved source and citation identities', () => {
+    const response = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'partial-response.json'),
+    );
+    const citation = response.results[0].citations[0];
+    const artifact = {
+      artifact_name: 'sources',
+      artifact_version: '1.0.0',
+      generated_at: '2026-08-08T00:00:11Z',
+      request_id: response.request_id,
+      sources: [
+        {
+          source_id: 'source-001',
+          canonical_url: citation.url,
+          source_kind: citation.source_kind,
+          citation_ids: [citation.citation_id],
+        },
+      ],
+      citations: [citation],
+    };
+    expect(SourcesArtifactSchema.safeParse(artifact).success).toBe(true);
+
+    const mutations: Array<[string, (value: Record<string, any>) => void]> = [
+      [
+        'duplicate source id',
+        (value) => {
+          value.sources.push(structuredClone(value.sources[0]));
+        },
+      ],
+      [
+        'duplicate citation id',
+        (value) => {
+          value.citations.push(structuredClone(value.citations[0]));
+        },
+      ],
+      [
+        'duplicate source citation reference',
+        (value) => {
+          value.sources[0].citation_ids.push(value.sources[0].citation_ids[0]);
+        },
+      ],
+      [
+        'dangling source citation reference',
+        (value) => {
+          value.sources[0].citation_ids = ['citation-does-not-exist'];
+        },
+      ],
+    ];
+
+    for (const [name, mutate] of mutations) {
+      const invalid = structuredClone(artifact);
+      mutate(invalid);
+      expect(SourcesArtifactSchema.safeParse(invalid).success, name).toBe(
+        false,
+      );
     }
   });
 
@@ -1150,6 +1498,15 @@ describe('canonical v2 contracts', () => {
       retrieveExchange,
     );
 
+    for (const status of ['pending', 'running', 'failed', 'cancelled']) {
+      const invalidRetrieve = structuredClone(retrieveExchange);
+      invalidRetrieve.request.durable_handle.status = status;
+      expect(
+        CustomProviderExchangeSchema.safeParse(invalidRetrieve).success,
+        status,
+      ).toBe(false);
+    }
+
     const mismatchedResult = structuredClone(retrieveExchange);
     mismatchedResult.response.result.provenance.slot_id = 'slot-mismatch';
     expect(
@@ -1237,7 +1594,7 @@ describe('canonical v2 contracts', () => {
 
 describe('offline contract snapshot', () => {
   it('guards generator writes against traversal and absolute targets', () => {
-    const root = join('/tmp', 'librarium-contracts');
+    const root = join(tmpdir(), 'librarium-contracts');
     expect(resolveSnapshotWritePath(root, 'schema/domain.schema.json')).toBe(
       join(root, 'schema', 'domain.schema.json'),
     );
@@ -1247,7 +1604,7 @@ describe('offline contract snapshot', () => {
       '.',
       '../outside.json',
       'schema/../../outside.json',
-      '/tmp/outside.json',
+      join(tmpdir(), 'outside.json'),
       String.raw`..\outside.json`,
       String.raw`C:\outside.json`,
     ]) {
@@ -1298,7 +1655,7 @@ describe('offline contract snapshot', () => {
       readJson(join(snapshotRoot, 'manifest.json')),
     );
     const actualFiles = listFiles(snapshotRoot)
-      .map((path) => relative(snapshotRoot, path))
+      .map((path) => portableRelative(snapshotRoot, path))
       .sort();
     const expectedFiles = [
       ...manifest.files.map((file) => file.path),
@@ -1344,9 +1701,9 @@ describe('offline contract snapshot', () => {
       expect(path).toMatch(
         /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/,
       );
-      expect(relative(snapshotRoot, join(snapshotRoot, path))).not.toMatch(
-        /^\.\./,
-      );
+      expect(
+        portableRelative(snapshotRoot, join(snapshotRoot, path)),
+      ).not.toMatch(/^\.\./);
       const actual = createHash('sha256')
         .update(readFileSync(join(snapshotRoot, path)))
         .digest('hex');
@@ -1390,7 +1747,7 @@ describe('offline contract snapshot', () => {
   it('publishes four composable schema bundles instead of one monolith', () => {
     const schemaFiles = listFiles(join(snapshotRoot, 'schema'));
     expect(
-      schemaFiles.map((path) => relative(snapshotRoot, path)).sort(),
+      schemaFiles.map((path) => portableRelative(snapshotRoot, path)).sort(),
     ).toEqual([
       'schema/artifacts.schema.json',
       'schema/custom-provider.schema.json',

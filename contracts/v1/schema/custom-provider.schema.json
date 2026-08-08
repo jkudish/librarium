@@ -751,13 +751,7 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": [
-                        "pending",
-                        "running",
-                        "succeeded",
-                        "failed",
-                        "cancelled"
-                      ]
+                      "const": "succeeded"
                     },
                     "extensions": {
                       "type": "object",
@@ -3384,13 +3378,7 @@
                 },
                 "status": {
                   "type": "string",
-                  "enum": [
-                    "pending",
-                    "running",
-                    "succeeded",
-                    "failed",
-                    "cancelled"
-                  ]
+                  "const": "succeeded"
                 },
                 "extensions": {
                   "type": "object",

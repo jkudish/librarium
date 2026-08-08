@@ -31,6 +31,10 @@ const FORBIDDEN_EXTENSION_KEY_NAMES = new Set([
   'client_tokens',
   'client_secret',
   'client_secrets',
+  'secret_key',
+  'secret_keys',
+  'secret_access_key',
+  'secret_access_keys',
   'refresh_token',
   'refresh_tokens',
   'resume_token',
@@ -84,6 +88,10 @@ const FORBIDDEN_EXTENSION_KEY_NAMES = new Set([
   'request_headers',
   'response_header',
   'response_headers',
+  'authorization_header',
+  'authorization_headers',
+  'header',
+  'headers',
   'raw_body',
   'raw_bodies',
   'raw_provider',
@@ -106,15 +114,77 @@ const FORBIDDEN_FUSED_EXTENSION_KEY_NAMES = new Set(
   [...FORBIDDEN_EXTENSION_KEY_NAMES].map((key) => key.replaceAll('_', '')),
 );
 
-const isForbiddenNormalizedExtensionKey = (key: string): boolean =>
-  FORBIDDEN_EXTENSION_KEY_NAMES.has(key) ||
-  FORBIDDEN_FUSED_EXTENSION_KEY_NAMES.has(key.replaceAll('_', ''));
+const FORBIDDEN_FUSED_EXTENSION_KEY_SUFFIXES = [
+  ...FORBIDDEN_FUSED_EXTENSION_KEY_NAMES,
+].filter((key) => key.length >= 6 && key !== 'tokens');
+
+const BENIGN_TOKEN_QUALIFIERS = new Set([
+  'accepted',
+  'cached',
+  'cache_creation',
+  'cache_read',
+  'completion',
+  'input',
+  'max',
+  'num',
+  'output',
+  'prompt',
+  'reasoning',
+  'rejected',
+  'total',
+  'thinking',
+]);
+
+const hasSensitiveTokenSuffix = (key: string): boolean => {
+  const words = key.split('_');
+  const suffix = words.at(-1);
+  if (suffix !== 'token' && suffix !== 'tokens') return false;
+  const qualifier = words.slice(0, -1).join('_');
+  return ![...BENIGN_TOKEN_QUALIFIERS].some(
+    (benign) => qualifier === benign || qualifier.endsWith(`_${benign}`),
+  );
+};
+
+const isForbiddenNormalizedExtensionKey = (key: string): boolean => {
+  if (
+    [...FORBIDDEN_EXTENSION_KEY_NAMES].some((forbidden) => {
+      if (key === forbidden) return true;
+      if (!key.endsWith(`_${forbidden}`)) return false;
+      return forbidden === 'token' || forbidden === 'tokens'
+        ? hasSensitiveTokenSuffix(key)
+        : true;
+    })
+  ) {
+    return true;
+  }
+
+  const fused = key.replaceAll('_', '');
+  const benignFusedTokenSuffix = [...BENIGN_TOKEN_QUALIFIERS].some(
+    (qualifier) => {
+      const fusedQualifier = qualifier.replaceAll('_', '');
+      return (
+        fused.endsWith(`${fusedQualifier}token`) ||
+        fused.endsWith(`${fusedQualifier}tokens`)
+      );
+    },
+  );
+  return (
+    FORBIDDEN_FUSED_EXTENSION_KEY_NAMES.has(fused) ||
+    (!benignFusedTokenSuffix &&
+      (fused.endsWith('token') || fused.endsWith('tokens'))) ||
+    FORBIDDEN_FUSED_EXTENSION_KEY_SUFFIXES.some((forbidden) =>
+      fused.endsWith(forbidden),
+    )
+  );
+};
 
 const isForbiddenExtensionKey = (key: string): boolean => {
-  const candidates = [normalizeExtensionKey(key)];
+  const normalized = normalizeExtensionKey(key);
+  const candidates = [normalized, normalized.replace(/_?\d+$/, '')];
   const namespaceSeparator = key.lastIndexOf(':');
   if (namespaceSeparator >= 0) {
-    candidates.push(normalizeExtensionKey(key.slice(namespaceSeparator + 1)));
+    const localName = normalizeExtensionKey(key.slice(namespaceSeparator + 1));
+    candidates.push(localName, localName.replace(/_?\d+$/, ''));
   }
   return candidates.some(isForbiddenNormalizedExtensionKey);
 };

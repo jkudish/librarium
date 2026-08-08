@@ -26,6 +26,12 @@ checksum, and validates it without network access. PHP has no runtime dependency
 on this package, its CLI artifacts, or Node. Updates are explicit reviewed
 vendor changes; they are never regenerated silently in the PHP repository.
 
+Versioned Git tags and GitHub releases are the canonical distribution channel
+for this snapshot. Consumers vendor `contracts/v1/` from the matching repository
+revision and verify `checksums.sha256`. The snapshot is intentionally excluded
+from the npm package: npm remains the distribution channel for Librarium's
+compiled TypeScript runtime, not the cross-language contract corpus.
+
 Each implementation maps idiomatic runtime types losslessly to the wire
 contract. Laravel DTOs, enums, events, exceptions, queues, and persistence stay
 inside the PHP implementation. TypeScript runtime APIs and provider-native
@@ -53,6 +59,13 @@ a `surface_context_constraint`, the profile must declare context and every
 explicitly constrained field must match. Unconstrained unknown fields do not
 affect eligibility or fallback compatibility.
 
+Every surface observation identifies its measured `surface_id`. A
+`surface_snapshot` is collected evidence and therefore uses a named
+`surface_collector`; its fallbacks preserve the observation mode, collector
+lane, and measured surface. Explicitly labelled first-party API proxy profiles
+may instead use `api_output`, `model_only`, and `direct`. They are a separate
+visibility comparison lane and cannot replace a snapshot slot.
+
 The contract records evidence, source, correlation, and provenance facts. It
 does not define a universal `verified` boolean, truth threshold, or source
 independence rule.
@@ -72,9 +85,16 @@ For durable custom-provider work, `submitted` and `progress` responses carry
 only nonterminal `pending` or `running` handles. A `poll` exchange reports task
 completion with a small `status` response carrying a terminal `succeeded`,
 `failed`, or `cancelled` handle; it does not carry the result itself. `retrieve`
-remains the durable result-fetch exchange. Response request and attempt IDs must
-match their request, and progress/status handles must preserve the polled
+remains the durable result-fetch exchange and accepts only a `succeeded` handle.
+Optimistic retrieval is outside contract v1. Response request and attempt IDs
+must match their request, and progress/status handles must preserve the polled
 handle ID, public provider task ID, and provider identity.
+
+Fallback attempts replace only failed or timed-out attempts whose structured
+error explicitly permits fallback. Each fallback reserve candidate and provider
+profile is consumed at most once across a run. Source artifacts require unique
+source and citation identities, unique citation references within each source,
+and references that resolve to an included citation.
 
 `request_completed` lifecycle events use `succeeded`, `partial`, or
 `unsuccessful`, matching the corresponding response status. Pure request

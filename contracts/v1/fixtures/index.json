@@ -26,6 +26,14 @@
       "schema_ref": "#/$defs/request"
     },
     {
+      "id": "valid.api_proxy_surface_request",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/api-proxy-surface-request.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request"
+    },
+    {
       "id": "valid.partial_response",
       "area": "interchange",
       "valid": true,
@@ -335,6 +343,17 @@
       "expected_issue_path": "/extensions/com.example:publicMetadata/accountContext/refreshToken"
     },
     {
+      "id": "invalid.compound_secret_extension",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/compound-secret-extension.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "extensions.bounded_namespaced_json",
+      "expected_issue_path": "/extensions/com.example:metadata/openaiApiKey"
+    },
+    {
       "id": "invalid.decimal_too_long",
       "area": "interchange",
       "valid": false,
@@ -410,6 +429,94 @@
       "expected_issue_path": "/results/0/provenance/replaced_attempt_id"
     },
     {
+      "id": "invalid.response_replacement_of_succeeded",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-replacement-of-succeeded.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.fallback_replacement_policy",
+      "expected_issue_path": "/attempts/1/replaces_attempt_id"
+    },
+    {
+      "id": "invalid.response_attempt_handle_provider",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-attempt-handle-provider.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "durable_handle.profile_identity_binding",
+      "expected_issue_path": "/attempts/2/durable_handle/provider"
+    },
+    {
+      "id": "invalid.response_semantic_facts",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-semantic-facts.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/result_kinds"
+    },
+    {
+      "id": "invalid.response_observation_mode",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-observation-mode.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/observation_mode"
+    },
+    {
+      "id": "invalid.response_measured_surface",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-measured-surface.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/measured_surface_id"
+    },
+    {
+      "id": "invalid.response_required_grounding",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-required-grounding.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/grounding_outcome"
+    },
+    {
+      "id": "invalid.response_none_grounding",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-none-grounding.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/grounding_outcome"
+    },
+    {
+      "id": "invalid.response_fallback_candidate_reuse",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-fallback-candidate-reuse.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.fallback_consumption",
+      "expected_issue_path": "/attempts/3/candidate_id"
+    },
+    {
       "id": "invalid.response_mixed_unsuccessful_status",
       "area": "interchange",
       "valid": false,
@@ -483,6 +590,16 @@
       "expected_issue_path": "/response/result/provenance"
     },
     {
+      "id": "invalid.custom_provider_retrieve_running_handle",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-retrieve-running-handle.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/request/durable_handle/status"
+    },
+    {
       "id": "invalid.run_manifest_slot_order",
       "area": "artifacts",
       "valid": false,
@@ -514,6 +631,116 @@
       "enforcement": "semantic_rule",
       "semantic_rule_id": "artifacts.run_manifest_execution_plan",
       "expected_issue_path": "/response/attempts/0"
+    },
+    {
+      "id": "invalid.run_manifest_fallback_candidate_reuse",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/run-manifest-fallback-candidate-reuse.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.run_manifest_execution_plan",
+      "expected_issue_path": "/response/attempts/3/candidate_id"
+    },
+    {
+      "id": "invalid.fallback_surface_lane",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/fallback-surface-lane.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.fallback_lane",
+      "expected_issue_path": "/fallback_reserve/0/eligible_slot_ids/0"
+    },
+    {
+      "id": "invalid.fallback_surface_identity",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/fallback-surface-identity.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.fallback_lane",
+      "expected_issue_path": "/fallback_reserve/0/eligible_slot_ids/0"
+    },
+    {
+      "id": "invalid.surface_profile_missing_identity",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/surface-profile-missing-identity.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.profile_invariants",
+      "expected_issue_path": "/slots/0/primary/surface_id"
+    },
+    {
+      "id": "invalid.surface_snapshot_retrieval",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/surface-snapshot-retrieval.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.profile_invariants",
+      "expected_issue_path": "/slots/0/primary/retrieval_method"
+    },
+    {
+      "id": "invalid.surface_snapshot_access",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/surface-snapshot-access.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.profile_invariants",
+      "expected_issue_path": "/slots/0/primary/access_mode"
+    },
+    {
+      "id": "invalid.sources_dangling_citation",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-dangling-citation.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/sources/0/citation_ids/0"
+    },
+    {
+      "id": "invalid.sources_duplicate_identity",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-duplicate-identity.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/sources/1/source_id"
+    },
+    {
+      "id": "invalid.sources_duplicate_citation_identity",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-duplicate-citation-identity.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/citations/1/citation_id"
+    },
+    {
+      "id": "invalid.sources_duplicate_reference",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-duplicate-reference.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/sources/0/citation_ids/1"
     },
     {
       "id": "invalid.source_category_too_long",

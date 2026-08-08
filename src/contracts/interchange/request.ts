@@ -138,6 +138,34 @@ function compatibilityIssues(
   return issues;
 }
 
+function fallbackCompatibilityIssues(
+  slot: z.infer<typeof RequestSlotSchema>,
+  profile: ExecutionProfile,
+): string[] {
+  const issues = compatibilityIssues(slot.requirements, profile);
+
+  if (
+    slot.primary.result_kind === 'surface_observation' &&
+    profile.observation_mode !== slot.primary.observation_mode
+  ) {
+    issues.push('observation_mode:primary');
+  }
+  if (
+    slot.primary.result_kind === 'surface_observation' &&
+    profile.surface_id !== slot.primary.surface_id
+  ) {
+    issues.push('surface_id:primary');
+  }
+  if (
+    slot.primary.observation_mode === 'surface_snapshot' &&
+    profile.retrieval_method !== slot.primary.retrieval_method
+  ) {
+    issues.push('retrieval_method:primary');
+  }
+
+  return issues;
+}
+
 export const InterchangeRequestSchema = z
   .strictObject({
     interchange_version: z.literal(INTERCHANGE_VERSION),
@@ -255,8 +283,8 @@ export const InterchangeRequestSchema = z
           });
           return;
         }
-        const incompatible = compatibilityIssues(
-          slot.requirements,
+        const incompatible = fallbackCompatibilityIssues(
+          slot,
           candidate.profile,
         );
         if (incompatible.length > 0) {

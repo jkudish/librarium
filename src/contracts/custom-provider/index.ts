@@ -45,10 +45,14 @@ export const CustomProviderPollRequestSchema = z.strictObject({
   durable_handle: DurableHandleSchema,
 });
 
+const SucceededDurableHandleSchema = DurableHandleSchema.extend({
+  status: z.literal('succeeded'),
+});
+
 export const CustomProviderRetrieveRequestSchema = z.strictObject({
   ...requestHeader,
   message_type: z.literal('retrieve'),
-  durable_handle: DurableHandleSchema,
+  durable_handle: SucceededDurableHandleSchema,
 });
 
 export const CustomProviderRequestSchema = z
