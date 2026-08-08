@@ -44,6 +44,7 @@ jobs:
     if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
 
     strategy:
+      fail-fast: false
       matrix:
         include:
           # Linux — full suite

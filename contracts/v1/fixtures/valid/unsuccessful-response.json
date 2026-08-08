@@ -1,0 +1,122 @@
+{
+  "interchange_version": "1.0.0",
+  "message_type": "response",
+  "request_id": "req-contract-001",
+  "response_status": "unsuccessful",
+  "emitted_at": "2026-08-08T00:00:11Z",
+  "slots": [
+    {
+      "slot_id": "slot-grounded",
+      "slot_status": "failed",
+      "selected_attempt_id": "attempt-grounded-primary",
+      "error": {
+        "code": "provider_unavailable",
+        "message": "The provider did not return a usable response.",
+        "category": "provider",
+        "retryable": true,
+        "fallback_allowed": true,
+        "provider_code": "upstream_unavailable"
+      }
+    },
+    {
+      "slot_id": "slot-research",
+      "slot_status": "cancelled",
+      "selected_attempt_id": "attempt-research-cancelled",
+      "error": {
+        "code": "research_timed_out",
+        "message": "The research task exceeded the allowed completion window.",
+        "category": "timeout",
+        "retryable": true,
+        "fallback_allowed": false
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "attempt_id": "attempt-grounded-primary",
+      "slot_id": "slot-grounded",
+      "attempt_number": 1,
+      "profile": {
+        "identity": {
+          "provider_id": "perplexity-sonar-pro",
+          "profile_id": "grounded-web",
+          "model_id": "sonar-pro"
+        },
+        "result_kind": "grounded_answer",
+        "grounding_policy": "required",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_method": "model_search_tool",
+        "access_mode": "direct",
+        "operator_id": "perplexity",
+        "invocation": "inline",
+        "resumability": "none"
+      },
+      "started_at": "2026-08-08T00:00:01Z",
+      "attempt_status": "failed",
+      "finished_at": "2026-08-08T00:00:02Z",
+      "error": {
+        "code": "provider_unavailable",
+        "message": "The provider did not return a usable response.",
+        "category": "provider",
+        "retryable": true,
+        "fallback_allowed": true,
+        "provider_code": "upstream_unavailable"
+      }
+    },
+    {
+      "attempt_id": "attempt-research-cancelled",
+      "slot_id": "slot-research",
+      "attempt_number": 1,
+      "profile": {
+        "identity": {
+          "provider_id": "openai-research",
+          "profile_id": "deep-web-news",
+          "model_id": "o4-deep-research"
+        },
+        "result_kind": "research_report",
+        "grounding_policy": "required",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web",
+          "news"
+        ],
+        "retrieval_method": "research_agent",
+        "access_mode": "direct",
+        "operator_id": "openai",
+        "invocation": "background",
+        "resumability": "durable"
+      },
+      "started_at": "2026-08-08T00:00:06Z",
+      "attempt_status": "cancelled",
+      "finished_at": "2026-08-08T00:00:10Z",
+      "error": {
+        "code": "research_timed_out",
+        "message": "The research task exceeded the allowed completion window.",
+        "category": "timeout",
+        "retryable": true,
+        "fallback_allowed": false
+      }
+    }
+  ],
+  "results": [],
+  "errors": [
+    {
+      "code": "provider_unavailable",
+      "message": "The provider did not return a usable response.",
+      "category": "provider",
+      "retryable": true,
+      "fallback_allowed": true,
+      "provider_code": "upstream_unavailable"
+    },
+    {
+      "code": "research_timed_out",
+      "message": "The research task exceeded the allowed completion window.",
+      "category": "timeout",
+      "retryable": true,
+      "fallback_allowed": false
+    }
+  ]
+}

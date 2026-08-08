@@ -1,0 +1,290 @@
+{
+  "interchange_version": "1.0.0",
+  "message_type": "response",
+  "request_id": "req-contract-001",
+  "response_status": "partial",
+  "emitted_at": "2026-08-08T00:00:11Z",
+  "slots": [
+    {
+      "slot_id": "slot-grounded",
+      "slot_status": "succeeded",
+      "selected_attempt_id": "attempt-grounded-fallback",
+      "result_id": "result-grounded-fallback"
+    },
+    {
+      "slot_id": "slot-research",
+      "slot_status": "failed",
+      "selected_attempt_id": "attempt-research-primary",
+      "error": {
+        "code": "research_timed_out",
+        "message": "The research task exceeded the allowed completion window.",
+        "category": "timeout",
+        "retryable": true,
+        "fallback_allowed": false
+      }
+    }
+  ],
+  "attempts": [
+    {
+      "attempt_id": "attempt-grounded-primary",
+      "slot_id": "slot-grounded",
+      "attempt_number": 1,
+      "profile": {
+        "identity": {
+          "provider_id": "perplexity-sonar-pro",
+          "profile_id": "grounded-web",
+          "model_id": "sonar-pro"
+        },
+        "result_kind": "grounded_answer",
+        "grounding_policy": "required",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_method": "model_search_tool",
+        "access_mode": "direct",
+        "operator_id": "perplexity",
+        "invocation": "inline",
+        "resumability": "none"
+      },
+      "started_at": "2026-08-08T00:00:01Z",
+      "attempt_status": "failed",
+      "finished_at": "2026-08-08T00:00:02Z",
+      "error": {
+        "code": "provider_unavailable",
+        "message": "The provider did not return a usable response.",
+        "category": "provider",
+        "retryable": true,
+        "fallback_allowed": true,
+        "provider_code": "upstream_unavailable"
+      }
+    },
+    {
+      "attempt_id": "attempt-grounded-fallback",
+      "slot_id": "slot-grounded",
+      "attempt_number": 2,
+      "profile": {
+        "identity": {
+          "provider_id": "brave-answers",
+          "profile_id": "grounded-web"
+        },
+        "result_kind": "grounded_answer",
+        "grounding_policy": "required",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_method": "search_endpoint",
+        "access_mode": "direct",
+        "operator_id": "brave",
+        "invocation": "inline",
+        "resumability": "none"
+      },
+      "started_at": "2026-08-08T00:00:03Z",
+      "replaces_attempt_id": "attempt-grounded-primary",
+      "candidate_id": "fallback-grounded-001",
+      "attempt_status": "succeeded",
+      "finished_at": "2026-08-08T00:00:05Z",
+      "result_id": "result-grounded-fallback"
+    },
+    {
+      "attempt_id": "attempt-research-primary",
+      "slot_id": "slot-research",
+      "attempt_number": 1,
+      "profile": {
+        "identity": {
+          "provider_id": "openai-research",
+          "profile_id": "deep-web-news",
+          "model_id": "o4-deep-research"
+        },
+        "result_kind": "research_report",
+        "grounding_policy": "required",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web",
+          "news"
+        ],
+        "retrieval_method": "research_agent",
+        "access_mode": "direct",
+        "operator_id": "openai",
+        "invocation": "background",
+        "resumability": "durable"
+      },
+      "started_at": "2026-08-08T00:00:06Z",
+      "attempt_status": "timed_out",
+      "finished_at": "2026-08-08T00:00:10Z",
+      "error": {
+        "code": "research_timed_out",
+        "message": "The research task exceeded the allowed completion window.",
+        "category": "timeout",
+        "retryable": true,
+        "fallback_allowed": false
+      },
+      "durable_handle": {
+        "handle_id": "handle-research-001",
+        "provider_task_id": "provider-task-public-001",
+        "provider": {
+          "provider_id": "openai-research",
+          "profile_id": "deep-web-news",
+          "model_id": "o4-deep-research"
+        },
+        "submitted_at": "2026-08-08T00:00:06Z",
+        "last_observed_at": "2026-08-08T00:00:10Z",
+        "status": "failed"
+      },
+      "usage": {
+        "billable_units": [
+          {
+            "unit": "research_request",
+            "quantity_decimal": "1",
+            "source": "provider_reported"
+          }
+        ],
+        "actual_cost": {
+          "amount": {
+            "amount_decimal": "0.250000",
+            "currency": "USD"
+          },
+          "source": "provider_reported"
+        },
+        "completeness": "partial"
+      }
+    }
+  ],
+  "results": [
+    {
+      "result_id": "result-grounded-fallback",
+      "slot_id": "slot-grounded",
+      "attempt_id": "attempt-grounded-fallback",
+      "content_format": "markdown",
+      "content": "The example market announced a revised weekly outlook. [Source 1]",
+      "semantic_facts": {
+        "result_kinds": [
+          "grounded_answer"
+        ],
+        "grounding_outcome": "used",
+        "observation_mode": "api_output",
+        "corpora": [
+          "web"
+        ],
+        "retrieval_methods": [
+          "search_endpoint"
+        ],
+        "observed_at": "2026-08-08T00:00:05Z"
+      },
+      "citations": [
+        {
+          "citation_id": "citation-001",
+          "source_kind": "news_article",
+          "derivation": "provider_reported",
+          "url": "https://example.com/market/outlook",
+          "title": "Example Market Outlook",
+          "retrieved_at": "2026-08-08T00:00:04Z",
+          "provenance": {
+            "provider": {
+              "provider_id": "brave-answers",
+              "profile_id": "grounded-web"
+            },
+            "access_mode": "direct",
+            "operator_id": "brave",
+            "origin_key": "origin-example-newsroom",
+            "correlation_keys": {
+              "com.example:publisherGroup": "example-newsroom"
+            }
+          }
+        }
+      ],
+      "provenance": {
+        "request_id": "req-does-not-match",
+        "slot_id": "slot-grounded",
+        "attempt_id": "attempt-grounded-fallback",
+        "requested_profile": {
+          "identity": {
+            "provider_id": "perplexity-sonar-pro",
+            "profile_id": "grounded-web",
+            "model_id": "sonar-pro"
+          },
+          "result_kind": "grounded_answer",
+          "grounding_policy": "required",
+          "observation_mode": "api_output",
+          "corpora": [
+            "web"
+          ],
+          "retrieval_method": "model_search_tool",
+          "access_mode": "direct",
+          "operator_id": "perplexity",
+          "invocation": "inline",
+          "resumability": "none"
+        },
+        "effective_profile": {
+          "identity": {
+            "provider_id": "brave-answers",
+            "profile_id": "grounded-web"
+          },
+          "result_kind": "grounded_answer",
+          "grounding_policy": "required",
+          "observation_mode": "api_output",
+          "corpora": [
+            "web"
+          ],
+          "retrieval_method": "search_endpoint",
+          "access_mode": "direct",
+          "operator_id": "brave",
+          "invocation": "inline",
+          "resumability": "none"
+        },
+        "collection": {
+          "provider": {
+            "provider_id": "brave-answers",
+            "profile_id": "grounded-web"
+          },
+          "access_mode": "direct",
+          "operator_id": "brave",
+          "origin_key": "origin-brave-api",
+          "correlation_keys": {
+            "com.brave:requestId": "brave-request-public-001"
+          }
+        },
+        "replaced_attempt_id": "attempt-grounded-primary"
+      },
+      "usage": {
+        "input_tokens": 42,
+        "output_tokens": 81,
+        "total_tokens": 123,
+        "billable_units": [
+          {
+            "unit": "request",
+            "quantity_decimal": "1",
+            "source": "provider_reported"
+          }
+        ],
+        "actual_cost": {
+          "amount": {
+            "amount_decimal": "0.010000",
+            "currency": "USD"
+          },
+          "source": "provider_reported"
+        },
+        "estimated_cost": {
+          "amount": {
+            "amount_decimal": "0.009500",
+            "currency": "USD"
+          },
+          "source": "pricing_snapshot",
+          "pricing_version": "2026.8.0"
+        },
+        "completeness": "complete"
+      },
+      "completed_at": "2026-08-08T00:00:05Z"
+    }
+  ],
+  "errors": [
+    {
+      "code": "research_timed_out",
+      "message": "The research task exceeded the allowed completion window.",
+      "category": "timeout",
+      "retryable": true,
+      "fallback_allowed": false
+    }
+  ]
+}

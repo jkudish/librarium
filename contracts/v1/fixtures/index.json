@@ -1,0 +1,756 @@
+{
+  "fixture_index_version": "1.0.0",
+  "fixtures": [
+    {
+      "id": "valid.interchange_request",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/interchange-request.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request"
+    },
+    {
+      "id": "valid.search_results_request",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/search-results-request.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request"
+    },
+    {
+      "id": "valid.locale_only_surface_context",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/locale-only-surface-context.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request"
+    },
+    {
+      "id": "valid.api_proxy_surface_request",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/api-proxy-surface-request.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request"
+    },
+    {
+      "id": "valid.partial_response",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/partial-response.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "valid.lifecycle_trace",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/lifecycle-trace.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/lifecycle_trace"
+    },
+    {
+      "id": "valid.run_manifest",
+      "area": "artifacts",
+      "valid": true,
+      "path": "fixtures/valid/run-manifest.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest"
+    },
+    {
+      "id": "valid.custom_provider_exchange",
+      "area": "custom_provider",
+      "valid": true,
+      "path": "fixtures/valid/custom-provider-exchange.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange"
+    },
+    {
+      "id": "valid.custom_provider_terminal_poll_exchange",
+      "area": "custom_provider",
+      "valid": true,
+      "path": "fixtures/valid/custom-provider-terminal-poll-exchange.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange"
+    },
+    {
+      "id": "valid.artifact_reader",
+      "area": "artifacts",
+      "valid": true,
+      "path": "fixtures/valid/artifact-reader.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/historical_reader"
+    },
+    {
+      "id": "valid.unsuccessful_response",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/unsuccessful-response.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "valid.specialized_data_record_response",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/specialized-data-record-response.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "invalid.request_unknown_field",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/request-unknown-field.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "json_schema",
+      "expected_issue_path": ""
+    },
+    {
+      "id": "invalid.request_non_utc_timestamp",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/request-non-utc-timestamp.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/requested_at"
+    },
+    {
+      "id": "invalid.async_non_durable_profile",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/async-non-durable-profile.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "request.preflight_plan_compatibility",
+      "expected_issue_path": "/slots/0/primary/resumability"
+    },
+    {
+      "id": "invalid.incompatible_fallback",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/incompatible-fallback.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "request.preflight_plan_compatibility",
+      "expected_issue_path": "/fallback_reserve/0/eligible_slot_ids/0"
+    },
+    {
+      "id": "invalid.secret_extension",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/secret-extension.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "extensions.bounded_namespaced_json",
+      "expected_issue_path": "/extensions/com.example:authorization"
+    },
+    {
+      "id": "invalid.error_missing_fallback_allowed",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/error-missing-fallback-allowed.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/attempts/0/error/fallback_allowed"
+    },
+    {
+      "id": "invalid.lifecycle_out_of_order",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/lifecycle-out-of-order.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/lifecycle_trace",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "lifecycle.monotonic_order",
+      "expected_issue_path": "/2/sequence"
+    },
+    {
+      "id": "invalid.result_attempt_reference",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/result-attempt-reference.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/attempt_id"
+    },
+    {
+      "id": "invalid.monetary_float",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/monetary-float.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/attempts/2/usage/actual_cost/amount/amount_decimal"
+    },
+    {
+      "id": "invalid.citation_source_kind",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/citation-source-kind.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/results/0/citations/0/source_kind"
+    },
+    {
+      "id": "invalid.provenance_request_reference",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/provenance-request-reference.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance"
+    },
+    {
+      "id": "invalid.durable_handle_timestamp",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/durable-handle-timestamp.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/attempts/2/durable_handle/submitted_at"
+    },
+    {
+      "id": "invalid.partial_outcome_shape",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/partial-outcome-shape.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.status_coherence",
+      "expected_issue_path": "/response_status"
+    },
+    {
+      "id": "invalid.missing_surface_context",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/missing-surface-context.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_context.explicit_constraint_only",
+      "expected_issue_path": "/slots/0/primary"
+    },
+    {
+      "id": "invalid.unknown_constrained_account_context",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/unknown-constrained-account-context.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_context.explicit_constraint_only",
+      "expected_issue_path": "/slots/0/primary"
+    },
+    {
+      "id": "invalid.unknown_constrained_personalization",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/unknown-constrained-personalization.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_context.explicit_constraint_only",
+      "expected_issue_path": "/slots/0/primary"
+    },
+    {
+      "id": "invalid.fallback_surface_context",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/fallback-surface-context.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_context.explicit_constraint_only",
+      "expected_issue_path": "/fallback_reserve/0/eligible_slot_ids/0"
+    },
+    {
+      "id": "invalid.search_profile_grounding_policy",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/search-profile-grounding-policy.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "grounding.search_results_inapplicable",
+      "expected_issue_path": "/slots/0/primary/grounding_policy"
+    },
+    {
+      "id": "invalid.search_requirement_grounding_policy",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/search-requirement-grounding-policy.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "grounding.search_results_inapplicable",
+      "expected_issue_path": "/slots/0/requirements/grounding_policy"
+    },
+    {
+      "id": "invalid.answer_missing_grounding_policy",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/answer-missing-grounding-policy.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "grounding.search_results_inapplicable",
+      "expected_issue_path": "/slots/0/primary/grounding_policy"
+    },
+    {
+      "id": "invalid.run_manifest_storage_field",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/run-manifest-storage-field.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest",
+      "enforcement": "json_schema",
+      "expected_issue_path": ""
+    },
+    {
+      "id": "invalid.request_timestamp_missing_seconds",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/request-timestamp-missing-seconds.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/requested_at"
+    },
+    {
+      "id": "invalid.nested_camel_case_secret",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/nested-camel-case-secret.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "extensions.bounded_namespaced_json",
+      "expected_issue_path": "/extensions/com.example:publicMetadata/accountContext/refreshToken"
+    },
+    {
+      "id": "invalid.compound_secret_extension",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/compound-secret-extension.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "extensions.bounded_namespaced_json",
+      "expected_issue_path": "/extensions/com.example:metadata/openaiApiKey"
+    },
+    {
+      "id": "invalid.decimal_too_long",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/decimal-too-long.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/attempts/2/usage/actual_cost/amount/amount_decimal"
+    },
+    {
+      "id": "invalid.citation_non_http_url",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/citation-non-http-url.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/results/0/citations/0/url"
+    },
+    {
+      "id": "invalid.citation_missing_locator",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/citation-missing-locator.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "source.locator_required",
+      "expected_issue_path": "/results/0/citations/0/url"
+    },
+    {
+      "id": "invalid.response_selected_attempt_status",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-selected-attempt-status.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/slots/0/selected_attempt_id"
+    },
+    {
+      "id": "invalid.response_effective_profile",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-effective-profile.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance/effective_profile"
+    },
+    {
+      "id": "invalid.response_collection_provider",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-collection-provider.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance/collection/provider"
+    },
+    {
+      "id": "invalid.response_replacement_provenance",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-replacement-provenance.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance/replaced_attempt_id"
+    },
+    {
+      "id": "invalid.response_replacement_of_succeeded",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-replacement-of-succeeded.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.fallback_replacement_policy",
+      "expected_issue_path": "/attempts/1/replaces_attempt_id"
+    },
+    {
+      "id": "invalid.response_attempt_handle_provider",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-attempt-handle-provider.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "durable_handle.profile_identity_binding",
+      "expected_issue_path": "/attempts/2/durable_handle/provider"
+    },
+    {
+      "id": "invalid.response_semantic_facts",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-semantic-facts.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/result_kinds"
+    },
+    {
+      "id": "invalid.response_observation_mode",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-observation-mode.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/observation_mode"
+    },
+    {
+      "id": "invalid.response_measured_surface",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-measured-surface.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/measured_surface_id"
+    },
+    {
+      "id": "invalid.response_required_grounding",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-required-grounding.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/grounding_outcome"
+    },
+    {
+      "id": "invalid.response_none_grounding",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-none-grounding.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.semantic_profile_coherence",
+      "expected_issue_path": "/results/0/semantic_facts/grounding_outcome"
+    },
+    {
+      "id": "invalid.response_fallback_candidate_reuse",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-fallback-candidate-reuse.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.fallback_consumption",
+      "expected_issue_path": "/attempts/3/candidate_id"
+    },
+    {
+      "id": "invalid.response_mixed_unsuccessful_status",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-mixed-unsuccessful-status.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.status_coherence",
+      "expected_issue_path": "/response_status"
+    },
+    {
+      "id": "invalid.lifecycle_failed_without_error",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/lifecycle-failed-without-error.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/lifecycle_trace",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/2/data/error"
+    },
+    {
+      "id": "invalid.lifecycle_succeeded_with_error",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/lifecycle-succeeded-with-error.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/lifecycle_trace",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/5/data"
+    },
+    {
+      "id": "invalid.custom_provider_terminal_handle",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-terminal-handle.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/response/durable_handle/status"
+    },
+    {
+      "id": "invalid.custom_provider_progress_terminal_handle",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-progress-terminal-handle.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/response/durable_handle/status"
+    },
+    {
+      "id": "invalid.custom_provider_status_handle_binding",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-status-handle-binding.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "custom_provider.task_binding",
+      "expected_issue_path": "/response/durable_handle/handle_id"
+    },
+    {
+      "id": "invalid.custom_provider_result_identifiers",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-result-identifiers.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "custom_provider.result_binding",
+      "expected_issue_path": "/response/result/provenance"
+    },
+    {
+      "id": "invalid.custom_provider_retrieve_running_handle",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-retrieve-running-handle.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/request/durable_handle/status"
+    },
+    {
+      "id": "invalid.run_manifest_slot_order",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/run-manifest-slot-order.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.run_manifest_execution_plan",
+      "expected_issue_path": "/response/slots/0/slot_id"
+    },
+    {
+      "id": "invalid.run_manifest_fallback_candidate",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/run-manifest-fallback-candidate.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.run_manifest_execution_plan",
+      "expected_issue_path": "/response/attempts/1/candidate_id"
+    },
+    {
+      "id": "invalid.run_manifest_primary_profile",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/run-manifest-primary-profile.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.run_manifest_execution_plan",
+      "expected_issue_path": "/response/attempts/0"
+    },
+    {
+      "id": "invalid.run_manifest_fallback_candidate_reuse",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/run-manifest-fallback-candidate-reuse.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/run_manifest",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.run_manifest_execution_plan",
+      "expected_issue_path": "/response/attempts/3/candidate_id"
+    },
+    {
+      "id": "invalid.fallback_surface_lane",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/fallback-surface-lane.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.fallback_lane",
+      "expected_issue_path": "/fallback_reserve/0/eligible_slot_ids/0"
+    },
+    {
+      "id": "invalid.fallback_surface_identity",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/fallback-surface-identity.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.fallback_lane",
+      "expected_issue_path": "/fallback_reserve/0/eligible_slot_ids/0"
+    },
+    {
+      "id": "invalid.surface_profile_missing_identity",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/surface-profile-missing-identity.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.profile_invariants",
+      "expected_issue_path": "/slots/0/primary/surface_id"
+    },
+    {
+      "id": "invalid.surface_snapshot_retrieval",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/surface-snapshot-retrieval.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.profile_invariants",
+      "expected_issue_path": "/slots/0/primary/retrieval_method"
+    },
+    {
+      "id": "invalid.surface_snapshot_access",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/surface-snapshot-access.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/request",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "surface_observation.profile_invariants",
+      "expected_issue_path": "/slots/0/primary/access_mode"
+    },
+    {
+      "id": "invalid.sources_dangling_citation",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-dangling-citation.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/sources/0/citation_ids/0"
+    },
+    {
+      "id": "invalid.sources_duplicate_identity",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-duplicate-identity.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/sources/1/source_id"
+    },
+    {
+      "id": "invalid.sources_duplicate_citation_identity",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-duplicate-citation-identity.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/citations/1/citation_id"
+    },
+    {
+      "id": "invalid.sources_duplicate_reference",
+      "area": "artifacts",
+      "valid": false,
+      "path": "fixtures/invalid/sources-duplicate-reference.json",
+      "schema_path": "schema/artifacts.schema.json",
+      "schema_ref": "#/$defs/sources",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "artifacts.sources_reference_integrity",
+      "expected_issue_path": "/sources/0/citation_ids/1"
+    },
+    {
+      "id": "invalid.source_category_too_long",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/source-category-too-long.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/results/0/citations/0/source_category"
+    }
+  ]
+}

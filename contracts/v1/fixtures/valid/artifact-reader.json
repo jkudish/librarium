@@ -1,0 +1,9 @@
+{
+  "artifact_name": "run_manifest",
+  "current_version": "1.0.0",
+  "readable_versions": [
+    "1.0.0"
+  ],
+  "unknown_version_policy": "reject",
+  "migration_policy": "lossless_explicit"
+}
