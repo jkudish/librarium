@@ -1,0 +1,17 @@
+{
+  "provider": "searchapi-google-ai-mode",
+  "request": {
+    "engine": "google_ai_mode",
+    "query": "normalized surface query"
+  },
+  "response": {
+    "markdown": "## AI Mode answer\n\nA bounded consumer-surface observation.",
+    "reference_links": [
+      {
+        "link": "https://surface.example.test/source",
+        "title": "Observed source",
+        "snippet": "Evidence extracted from the measured surface."
+      }
+    ]
+  }
+}

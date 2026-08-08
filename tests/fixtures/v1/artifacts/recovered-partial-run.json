@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "revision": 3,
+  "status": "partial",
+  "timestamp": 1700000000,
+  "completedAt": 1700000001000,
+  "slug": "recovered-partial-run",
+  "query": "normalized recovered and partial query",
+  "mode": "sync",
+  "outputDir": "/normalized/runs/recovered-partial-run",
+  "providers": [
+    {
+      "id": "perplexity-sonar-pro",
+      "tier": "ai-grounded",
+      "status": "error",
+      "durationMs": 0,
+      "wordCount": 0,
+      "citationCount": 0,
+      "outputFile": "",
+      "metaFile": "",
+      "error": "Provider request failed safely"
+    },
+    {
+      "id": "brave-answers",
+      "tier": "ai-grounded",
+      "status": "success",
+      "durationMs": 0,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "brave-answers.md",
+      "metaFile": "brave-answers.meta.json",
+      "fallbackFor": "perplexity-sonar-pro"
+    },
+    {
+      "id": "perplexity-search",
+      "tier": "raw-search",
+      "status": "error",
+      "durationMs": 0,
+      "wordCount": 0,
+      "citationCount": 0,
+      "outputFile": "",
+      "metaFile": "",
+      "error": "Provider request timed out"
+    }
+  ],
+  "sources": {
+    "total": 1,
+    "unique": 1,
+    "file": "sources.json"
+  },
+  "exitCode": 1
+}
