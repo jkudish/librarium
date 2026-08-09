@@ -40,11 +40,15 @@ import {
   UsageSchema,
 } from '../src/contracts/domain/index.js';
 import {
+  ResearchResponseSchema,
+  ResearchResultSchema,
+} from '../src/contracts/interchange/index.js';
+import {
   EvidenceRequirementsSchema,
   InterchangeRequestSchema,
   InterchangeResponseSchema,
   LifecycleTraceSchema,
-} from '../src/contracts/interchange/index.js';
+} from '../src/contracts/interchange/internal.js';
 
 const snapshotRoot = join(process.cwd(), 'contracts', 'v1');
 
@@ -56,9 +60,14 @@ const fixtureSchemas = {
   'schema/artifacts.schema.json#/$defs/sources': SourcesArtifactSchema,
   'schema/custom-provider.schema.json#/$defs/exchange':
     CustomProviderExchangeSchema,
-  'schema/interchange.schema.json#/$defs/request': InterchangeRequestSchema,
-  'schema/interchange.schema.json#/$defs/response': InterchangeResponseSchema,
-  'schema/interchange.schema.json#/$defs/lifecycle_trace': LifecycleTraceSchema,
+  'schema/artifacts.schema.json#/$defs/execution_request':
+    InterchangeRequestSchema,
+  'schema/artifacts.schema.json#/$defs/execution_response':
+    InterchangeResponseSchema,
+  'schema/artifacts.schema.json#/$defs/lifecycle_trace': LifecycleTraceSchema,
+  'schema/interchange.schema.json#/$defs/research_response':
+    ResearchResponseSchema,
+  'schema/interchange.schema.json#/$defs/research_result': ResearchResultSchema,
 } satisfies Record<string, z.ZodType>;
 
 function readJson<T>(path: string): T {

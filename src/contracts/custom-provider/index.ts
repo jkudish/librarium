@@ -11,7 +11,7 @@ import {
   providerIdentitiesEqual,
   StructuredErrorSchema,
 } from '../domain/index.js';
-import { InterchangeResultSchema } from '../interchange/result.js';
+import { InterchangeResultSchema } from '../interchange/internal.js';
 
 export const CUSTOM_PROVIDER_PROTOCOL_VERSION = '1.0.0' as const;
 

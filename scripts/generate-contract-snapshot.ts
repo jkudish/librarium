@@ -52,9 +52,15 @@ import {
   SNAPSHOT_GENERATED_AT,
 } from '../src/contracts/examples.js';
 import {
+  ResearchErrorSchema,
+  RESEARCH_RESPONSE_CONTRACT_VERSION,
+  ResearchResponseSchema,
+  ResearchResultSchema,
+  ResearchResultProvenanceSchema,
+} from '../src/contracts/interchange/index.js';
+import {
   AttemptSchema,
   EvidenceRequirementsSchema,
-  INTERCHANGE_VERSION,
   InterchangeMessageSchema,
   InterchangeRequestSchema,
   InterchangeResponseSchema,
@@ -63,7 +69,7 @@ import {
   LifecycleTraceSchema,
   RequestSlotSchema,
   SlotOutcomeSchema,
-} from '../src/contracts/interchange/index.js';
+} from '../src/contracts/interchange/internal.js';
 import { resolveSnapshotWritePath } from './contract-snapshot-path.js';
 
 const root =
@@ -193,6 +199,11 @@ const schemaFiles = [
         provider_metadata: ProviderMetadataArtifactSchema,
         run_manifest: RunManifestArtifactSchema,
         sources: SourcesArtifactSchema,
+        execution_attempt: AttemptSchema,
+        execution_request: InterchangeRequestSchema,
+        execution_response: InterchangeResponseSchema,
+        execution_result: InterchangeResultSchema,
+        lifecycle_trace: LifecycleTraceSchema,
       },
     ),
   ),
@@ -214,16 +225,10 @@ const schemaFiles = [
       'https://librarium.dev/contracts/v1/interchange',
       'Librarium language-neutral interchange',
       {
-        attempt: AttemptSchema,
-        evidence_requirements: EvidenceRequirementsSchema,
-        lifecycle_event: LifecycleEventSchema,
-        lifecycle_trace: LifecycleTraceSchema,
-        message: InterchangeMessageSchema,
-        request: InterchangeRequestSchema,
-        request_slot: RequestSlotSchema,
-        response: InterchangeResponseSchema,
-        result: InterchangeResultSchema,
-        slot_outcome: SlotOutcomeSchema,
+        research_error: ResearchErrorSchema,
+        research_response: ResearchResponseSchema,
+        research_result: ResearchResultSchema,
+        research_result_provenance: ResearchResultProvenanceSchema,
       },
     ),
   ),
@@ -1074,6 +1079,170 @@ representativeSpecializedResponse.results[0]!.citations[0] = {
 const invalidSourceCategoryTooLong = clone(representativeSpecializedResponse);
 invalidSourceCategoryTooLong.results[0]!.citations[0]!.source_category =
   `a${'b'.repeat(128)}`;
+
+const toSharedResult = (result: typeof representativePartialResponse.results[number]) => {
+  const { slot_id: _slotId, attempt_id: _attemptId, provenance, ...shared } = result;
+  const {
+    request_id: _requestId,
+    slot_id: _provenanceSlotId,
+    attempt_id: _provenanceAttemptId,
+    replaced_attempt_id: _replacedAttemptId,
+    ...sharedProvenance
+  } = provenance;
+  return { ...shared, provenance: sharedProvenance };
+};
+
+const representativeSharedPartialResponse = {
+  generator: 'jkudish/librarium',
+  generator_version: '1.4.1',
+  request_id: representativePartialResponse.request_id,
+  status: 'partial' as const,
+  completed_at: representativePartialResponse.emitted_at,
+  results: representativePartialResponse.results.map(toSharedResult),
+  errors: [
+    {
+      provider: durableResearchProfile.identity,
+      error: representativePartialResponse.errors[0]!,
+      usage: representativePartialResponse.attempts[2]!.usage,
+    },
+  ],
+  sources: [
+    {
+      source_id: 'source-001',
+      canonical_url: representativePartialResponse.results[0]!.citations[0]!.url,
+      source_kind: representativePartialResponse.results[0]!.citations[0]!.source_kind,
+      citation_ids: [
+        representativePartialResponse.results[0]!.citations[0]!.citation_id,
+      ],
+    },
+  ],
+};
+
+const representativeSharedSucceededResponse = {
+  ...clone(representativeSharedPartialResponse),
+  status: 'succeeded' as const,
+  errors: [],
+};
+
+const representativeSharedFailedResponse = {
+  ...clone(representativeSharedPartialResponse),
+  status: 'failed' as const,
+  results: [],
+  sources: [],
+};
+
+const invalidSharedGenericVersion = {
+  ...clone(representativeSharedSucceededResponse),
+  version: '1.0.0',
+};
+const invalidSharedInterchangeVersion = {
+  ...clone(representativeSharedSucceededResponse),
+  interchange_version: '1.0.0',
+};
+const invalidSharedExecutionField = {
+  ...clone(representativeSharedSucceededResponse),
+  attempts: [],
+};
+const invalidSharedSlotField = {
+  ...clone(representativeSharedSucceededResponse),
+  slots: [],
+};
+const invalidSharedHandleField = {
+  ...clone(representativeSharedSucceededResponse),
+  durable_handle: {},
+};
+const invalidSharedLifecycleField = {
+  ...clone(representativeSharedSucceededResponse),
+  lifecycle: [],
+};
+const invalidSharedPendingStatus = {
+  ...clone(representativeSharedSucceededResponse),
+  status: 'pending',
+};
+const invalidSharedCancelledStatus = {
+  ...clone(representativeSharedFailedResponse),
+  status: 'cancelled',
+};
+const invalidSharedUnsuccessfulStatus = {
+  ...clone(representativeSharedFailedResponse),
+  status: 'unsuccessful',
+};
+const invalidSharedSubmittedStatus = {
+  ...clone(representativeSharedSucceededResponse),
+  status: 'submitted',
+};
+const invalidSharedRunningStatus = {
+  ...clone(representativeSharedSucceededResponse),
+  status: 'running',
+};
+const invalidSharedMissingReceipt = clone(representativeSharedSucceededResponse) as Record<string, unknown>;
+delete invalidSharedMissingReceipt.generator;
+const invalidSharedMalformedReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator_version: '1.4',
+};
+const invalidSharedBlankReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: ' ',
+};
+const invalidSharedBareScopeReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: '@scope',
+};
+const invalidSharedOversizedReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: 'a'.repeat(256),
+};
+const representativeSharedPhpSucceededResponse = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: 'jkudish/laravel-ai-librarium',
+  generator_version: '2.0.0-rc.1+build.7',
+};
+const invalidSharedResultExecutionField = clone(
+  representativeSharedSucceededResponse,
+) as Record<string, any>;
+invalidSharedResultExecutionField.results[0].attempt_id = 'attempt-internal';
+const invalidSharedCollectionProvider = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedCollectionProvider.results[0]!.provenance.collection.provider = {
+  ...invalidSharedCollectionProvider.results[0]!.provenance.collection.provider,
+  provider_id: 'other-provider',
+};
+const invalidSharedDuplicateCitationSource = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedDuplicateCitationSource.sources.push({
+  ...clone(invalidSharedDuplicateCitationSource.sources[0]!),
+  source_id: 'source-002',
+});
+const invalidSharedDanglingCitationSource = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedDanglingCitationSource.sources[0]!.citation_ids = [
+  'citation-does-not-exist',
+];
+const invalidSharedUnownedCitation = clone(representativeSharedSucceededResponse);
+invalidSharedUnownedCitation.sources = [];
+const invalidSharedTerminalShape = {
+  ...clone(representativeSharedSucceededResponse),
+  errors: [{ error: representativePartialResponse.errors[0]! }],
+};
+const invalidSharedSemanticProfile = clone(representativeSharedSucceededResponse);
+invalidSharedSemanticProfile.results[0]!.semantic_facts.result_kinds = [
+  'model_answer',
+];
+const invalidSharedEffectiveTarget = clone(representativeSharedSucceededResponse);
+invalidSharedEffectiveTarget.results[0]!.provenance.effective_target = {
+  source: 'provider_reported',
+  kind: 'agent',
+  target_id: 'wrong-kind',
+};
+const invalidSharedCitationProvider = clone(representativeSharedSucceededResponse);
+invalidSharedCitationProvider.results[0]!.citations[0]!.provenance.provider = {
+  ...invalidSharedCitationProvider.results[0]!.citations[0]!.provenance.provider,
+  provider_id: 'other-provider',
+};
 
 const fixtureDefinitions = [
   {
@@ -1993,21 +2162,245 @@ const fixtureDefinitions = [
   },
 ] as const;
 
+const sharedFixtureDefinitions = [
+  {
+    id: 'valid.research_response_succeeded',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-succeeded.json',
+    payload: representativeSharedSucceededResponse,
+  },
+  {
+    id: 'valid.research_response_php_succeeded',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-php-succeeded.json',
+    payload: representativeSharedPhpSucceededResponse,
+  },
+  {
+    id: 'valid.research_response_partial',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-partial.json',
+    payload: representativeSharedPartialResponse,
+  },
+  {
+    id: 'valid.research_response_failed',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-failed.json',
+    payload: representativeSharedFailedResponse,
+  },
+  {
+    id: 'invalid.research_response_missing_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-missing-receipt.json',
+    payload: invalidSharedMissingReceipt,
+  },
+  {
+    id: 'invalid.research_response_blank_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-blank-receipt.json',
+    payload: invalidSharedBlankReceipt,
+  },
+  {
+    id: 'invalid.research_response_bare_scope_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-bare-scope-receipt.json',
+    payload: invalidSharedBareScopeReceipt,
+  },
+  {
+    id: 'invalid.research_response_oversized_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-oversized-receipt.json',
+    payload: invalidSharedOversizedReceipt,
+  },
+  {
+    id: 'invalid.research_response_malformed_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator_version',
+    path: 'fixtures/invalid/research-response-malformed-receipt.json',
+    payload: invalidSharedMalformedReceipt,
+  },
+  {
+    id: 'invalid.research_response_generic_version',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/research-response-generic-version.json',
+    payload: invalidSharedGenericVersion,
+  },
+  {
+    id: 'invalid.research_response_interchange_version',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/research-response-interchange-version.json',
+    payload: invalidSharedInterchangeVersion,
+  },
+  {
+    id: 'invalid.research_response_execution_field',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/research-response-execution-field.json',
+    payload: invalidSharedExecutionField,
+  },
+  {
+    id: 'invalid.research_response_result_execution_field',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0',
+    path: 'fixtures/invalid/research-response-result-execution-field.json',
+    payload: invalidSharedResultExecutionField,
+  },
+  ...(
+    [
+      ['slot_field', invalidSharedSlotField],
+      ['handle_field', invalidSharedHandleField],
+      ['lifecycle_field', invalidSharedLifecycleField],
+    ] as const
+  ).map(([name, payload]) => ({
+    id: `invalid.research_response_${name}`,
+    area: 'interchange' as const,
+    schema: 'research_response' as const,
+    valid: false as const,
+    expected_issue_path: '',
+    path: `fixtures/invalid/research-response-${name.replaceAll('_', '-')}.json`,
+    payload,
+  })),
+  {
+    id: 'invalid.research_response_collection_provider',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/collection/provider',
+    path: 'fixtures/invalid/research-response-collection-provider.json',
+    payload: invalidSharedCollectionProvider,
+  },
+  {
+    id: 'invalid.research_response_duplicate_citation_source',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/sources/1/citation_ids/0',
+    path: 'fixtures/invalid/research-response-duplicate-citation-source.json',
+    payload: invalidSharedDuplicateCitationSource,
+  },
+  {
+    id: 'invalid.research_response_dangling_citation_source',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/sources/0/citation_ids/0',
+    path: 'fixtures/invalid/research-response-dangling-citation-source.json',
+    payload: invalidSharedDanglingCitationSource,
+  },
+  {
+    id: 'invalid.research_response_unowned_citation',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/citation_id',
+    path: 'fixtures/invalid/research-response-unowned-citation.json',
+    payload: invalidSharedUnownedCitation,
+  },
+  {
+    id: 'invalid.research_response_terminal_shape',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/errors',
+    path: 'fixtures/invalid/research-response-terminal-shape.json',
+    payload: invalidSharedTerminalShape,
+  },
+  {
+    id: 'invalid.research_response_semantic_profile',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/result_kinds',
+    path: 'fixtures/invalid/research-response-semantic-profile.json',
+    payload: invalidSharedSemanticProfile,
+  },
+  {
+    id: 'invalid.research_response_effective_target',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_target/kind',
+    path: 'fixtures/invalid/research-response-effective-target.json',
+    payload: invalidSharedEffectiveTarget,
+  },
+  {
+    id: 'invalid.research_response_citation_provider',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/provenance/provider',
+    path: 'fixtures/invalid/research-response-citation-provider.json',
+    payload: invalidSharedCitationProvider,
+  },
+  ...(
+    [
+      ['pending', invalidSharedPendingStatus],
+      ['cancelled', invalidSharedCancelledStatus],
+      ['unsuccessful', invalidSharedUnsuccessfulStatus],
+      ['submitted', invalidSharedSubmittedStatus],
+      ['running', invalidSharedRunningStatus],
+    ] as const
+  ).map(([status, payload]) => ({
+    id: `invalid.research_response_${status}_status`,
+    area: 'interchange' as const,
+    schema: 'research_response' as const,
+    valid: false as const,
+    expected_issue_path: '/status',
+    path: `fixtures/invalid/research-response-${status}-status.json`,
+    payload,
+  })),
+] as const;
+
 const schemaTargets = {
   provider_identity: {
     schema_path: 'schema/domain.schema.json',
     schema_ref: '#/$defs/provider_identity',
   },
   interchange_request: {
-    schema_path: 'schema/interchange.schema.json',
-    schema_ref: '#/$defs/request',
+    schema_path: 'schema/artifacts.schema.json',
+    schema_ref: '#/$defs/execution_request',
   },
   interchange_response: {
+    schema_path: 'schema/artifacts.schema.json',
+    schema_ref: '#/$defs/execution_response',
+  },
+  research_response: {
     schema_path: 'schema/interchange.schema.json',
-    schema_ref: '#/$defs/response',
+    schema_ref: '#/$defs/research_response',
   },
   lifecycle_trace: {
-    schema_path: 'schema/interchange.schema.json',
+    schema_path: 'schema/artifacts.schema.json',
     schema_ref: '#/$defs/lifecycle_trace',
   },
   run_manifest: {
@@ -2117,12 +2510,37 @@ const semanticFixtureRules: Record<string, string> = {
     'artifacts.sources_reference_integrity',
   'invalid.sources_duplicate_reference':
     'artifacts.sources_reference_integrity',
+  'invalid.research_response_collection_provider':
+    'research_response.result_provenance',
+  'invalid.research_response_duplicate_citation_source':
+    'research_response.source_integrity',
+  'invalid.research_response_dangling_citation_source':
+    'research_response.source_integrity',
+  'invalid.research_response_unowned_citation':
+    'research_response.source_integrity',
+  'invalid.research_response_terminal_shape':
+    'research_response.terminal_shape',
+  'invalid.research_response_semantic_profile':
+    'research_response.semantic_profile_coherence',
+  'invalid.research_response_effective_target':
+    'research_response.effective_target_coherence',
+  'invalid.research_response_citation_provider':
+    'citation.provider_identity_binding',
 };
 
-const fixtureFiles = fixtureDefinitions.map((fixture) =>
+const internalFixtureDefinitions = fixtureDefinitions.map((fixture) =>
+  fixture.area === 'interchange'
+    ? { ...fixture, area: 'artifacts' as const }
+    : fixture,
+);
+const allFixtureDefinitions = [
+  ...internalFixtureDefinitions,
+  ...sharedFixtureDefinitions,
+];
+const fixtureFiles = allFixtureDefinitions.map((fixture) =>
   write(fixture.path, fixture.payload),
 );
-const fixtureIndex = fixtureDefinitions.map((fixture) => {
+const fixtureIndex = allFixtureDefinitions.map((fixture) => {
   const target = schemaTargets[fixture.schema];
   const base = {
     id: fixture.id,
@@ -2167,7 +2585,7 @@ const manifest = {
     domain: DOMAIN_VERSION,
     artifacts: ARTIFACTS_VERSION,
     custom_provider: CUSTOM_PROVIDER_PROTOCOL_VERSION,
-    interchange: INTERCHANGE_VERSION,
+    interchange: RESEARCH_RESPONSE_CONTRACT_VERSION,
   },
   semantic_rules: [
     {
@@ -2326,6 +2744,42 @@ const manifest = {
       description:
         'Evidence facts cross the boundary without a universal verified boolean or threshold.',
     },
+    {
+      rule_id: 'research_response.terminal_shape',
+      version: '1.0.0',
+      description:
+        'Shared responses contain only terminal succeeded, partial, or failed outcomes with coherent results and errors.',
+    },
+    {
+      rule_id: 'research_response.producer_receipt',
+      version: '1.0.0',
+      description:
+        'Every shared response identifies its actual producing package and independent SemVer 2 package release.',
+    },
+    {
+      rule_id: 'research_response.result_provenance',
+      version: '1.0.0',
+      description:
+        'A terminal result collection identifies the effective producing profile without exposing execution attempts.',
+    },
+    {
+      rule_id: 'research_response.semantic_profile_coherence',
+      version: '1.0.0',
+      description:
+        'Terminal result facts remain within and identify the effective profile.',
+    },
+    {
+      rule_id: 'research_response.effective_target_coherence',
+      version: '1.0.0',
+      description:
+        'Provider-reported effective targets match a declared effective profile target kind.',
+    },
+    {
+      rule_id: 'research_response.source_integrity',
+      version: '1.0.0',
+      description:
+        'Every terminal response citation belongs to exactly one normalized source, and every source reference resolves.',
+    },
   ],
   files: [
     ...schemaFiles.map((path) => ({
@@ -2337,14 +2791,16 @@ const manifest = {
       path: fixtureIndexPath,
       role: 'fixture_index',
       areas: Array.from(
-        new Set(fixtureDefinitions.map((fixture) => fixture.area)),
+        new Set(
+          allFixtureDefinitions.map((fixture) => fixture.area),
+        ),
       ).sort(),
     },
     ...fixtureFiles.map((path) => ({
       path,
       role: 'fixture',
       areas: [
-        fixtureDefinitions.find((fixture) => fixture.path === path)!.area,
+        allFixtureDefinitions.find((fixture) => fixture.path === path)!.area,
       ],
     })),
   ],

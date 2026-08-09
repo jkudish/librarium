@@ -3,7 +3,10 @@
 `contracts/v1/` is the TypeScript Librarium repository's canonical, offline
 contract snapshot. It contains four deliberately separate schema bundles:
 domain leaves, TypeScript artifacts, the trusted custom-provider protocol, and
-the narrow TypeScript/PHP interchange.
+the narrow TypeScript/PHP interchange. The shared interchange is only the
+terminal `ResearchResponse` and `ResearchResult` boundary. Every response
+carries its actual producer receipt (`generator` and `generator_version`) and
+has only `succeeded`, `partial`, or `failed` status.
 
 The snapshot is generated from the Zod 4 schemas under `src/contracts/` with:
 
@@ -35,8 +38,10 @@ compiled TypeScript runtime, not the cross-language contract corpus.
 Each implementation maps idiomatic runtime types losslessly to the wire
 contract. Laravel DTOs, enums, events, exceptions, queues, and persistence stay
 inside the PHP implementation. TypeScript runtime APIs and provider-native
-payloads stay inside TypeScript and its adapters. Neither language recursively
-case-converts `extensions`.
+payloads stay inside TypeScript and its adapters. Requests, slots, attempts,
+durable handles, replacement chains, lifecycle events, and coordinator state
+are TypeScript execution-only validation, never PHP parity payloads. Neither
+language recursively case-converts `extensions`.
 
 ## Strictness and extensions
 
@@ -110,22 +115,24 @@ consumer requires a major version. A backward-compatible addition may use a
 minor version. Documentation, fixture coverage, or generator corrections that
 preserve payload compatibility and meaning may use a patch version.
 
-## Schema-derived TypeScript types
+## Shared terminal boundary and TypeScript-internal types
 
-Every runtime-crossing type under `src/contracts/` is inferred from its Zod
-schema. The approved compatibility map is:
+`ResearchResponse` and `ResearchResult` are the only approved shared runtime
+boundary. The table below is explicitly TypeScript-internal migration guidance
+for adapter and execution schemas; it is not a PHP parity map.
 
-| Existing public name | Proposed schema-derived destination |
+| Existing TypeScript name | TypeScript-internal schema destination |
 | --- | --- |
 | `Citation` | `Citation` |
 | `ProviderUsage`, `ProviderMetering` | explicit mappers to `Usage`, `CostRecord` |
 | `AsyncTaskHandle` | `DurableHandle` |
 | `ProgressEvent` | `LifecycleEvent` |
-| `ProviderResult` | `InterchangeResult` through an adapter mapper |
-| `ProviderDispatchResult` | `Attempt` + `SlotOutcome` + `InterchangeResult` |
+| `ProviderResult` | `InterchangeResult` through an internal adapter mapper |
+| `ProviderDispatchResult` | `Attempt` + `SlotOutcome` + `InterchangeResult` internally |
 | `RunManifest`, `ProviderReport`, `DeduplicatedSource` | independently versioned artifact types |
 | `ProviderTier` | no direct alias; replace with orthogonal `ExecutionProfile` facts |
 
 Existing v1 adapter types and parsers remain authoritative until their explicit
 migration. The contract foundation does not recursively transform
-provider-native payloads or expose them across the shared boundary.
+provider-native payloads or expose execution records across the shared
+boundary.

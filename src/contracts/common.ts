@@ -233,6 +233,27 @@ export const SemverSchema = z
     message: 'Expected an independent major.minor.patch contract version',
   });
 
+/** A package coordinate, not a contract family or artifact version. */
+export const PackageIdentitySchema = z
+  .string()
+  .min(1)
+  .max(CONTRACT_LIMITS.identifierLength)
+  .regex(
+    /^(?:[a-z0-9][a-z0-9._-]*|@?[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*)$/,
+    {
+      message: 'Expected a bounded package identity',
+    },
+  );
+
+/** SemVer 2 package releases, including prereleases and build metadata. */
+export const PackageReleaseSchema = z
+  .string()
+  .max(CONTRACT_LIMITS.identifierLength)
+  .regex(
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/,
+    { message: 'Expected a SemVer 2 package release' },
+  );
+
 export const SnakeCaseNameSchema = z
   .string()
   .min(1)

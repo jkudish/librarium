@@ -11,7 +11,7 @@ import type {
   InterchangeResponseSchema,
   InterchangeResultSchema,
   LifecycleTraceSchema,
-} from './interchange/index.js';
+} from './interchange/internal.js';
 
 export const SNAPSHOT_GENERATED_AT = '2026-08-08T00:00:00Z';
 

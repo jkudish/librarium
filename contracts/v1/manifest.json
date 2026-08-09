@@ -142,6 +142,36 @@
       "rule_id": "verification.consumer_owned_policy",
       "version": "1.0.0",
       "description": "Evidence facts cross the boundary without a universal verified boolean or threshold."
+    },
+    {
+      "rule_id": "research_response.terminal_shape",
+      "version": "1.0.0",
+      "description": "Shared responses contain only terminal succeeded, partial, or failed outcomes with coherent results and errors."
+    },
+    {
+      "rule_id": "research_response.producer_receipt",
+      "version": "1.0.0",
+      "description": "Every shared response identifies its actual producing package and independent SemVer 2 package release."
+    },
+    {
+      "rule_id": "research_response.result_provenance",
+      "version": "1.0.0",
+      "description": "A terminal result collection identifies the effective producing profile without exposing execution attempts."
+    },
+    {
+      "rule_id": "research_response.semantic_profile_coherence",
+      "version": "1.0.0",
+      "description": "Terminal result facts remain within and identify the effective profile."
+    },
+    {
+      "rule_id": "research_response.effective_target_coherence",
+      "version": "1.0.0",
+      "description": "Provider-reported effective targets match a declared effective profile target kind."
+    },
+    {
+      "rule_id": "research_response.source_integrity",
+      "version": "1.0.0",
+      "description": "Every terminal response citation belongs to exactly one normalized source, and every source reference resolves."
     }
   ],
   "files": [
@@ -243,63 +273,63 @@
       "path": "fixtures/valid/interchange-request.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/search-results-request.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/locale-only-surface-context.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/api-proxy-surface-request.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/partial-response.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/provider-reported-effective-target-response.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/nested-primary-effective-target-response.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/nested-underlying-effective-target-response.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/lifecycle-trace.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
@@ -334,14 +364,14 @@
       "path": "fixtures/valid/unsuccessful-response.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/valid/specialized-data-record-response.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
@@ -425,140 +455,140 @@
       "path": "fixtures/invalid/request-unknown-field.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/request-non-utc-timestamp.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/async-non-durable-profile.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/incompatible-fallback.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/secret-extension.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/error-missing-fallback-allowed.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/lifecycle-out-of-order.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/result-attempt-reference.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/monetary-float.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/citation-source-kind.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/provenance-request-reference.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/durable-handle-timestamp.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/partial-outcome-shape.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/missing-surface-context.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/unknown-constrained-account-context.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/unknown-constrained-personalization.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/fallback-surface-context.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/search-profile-grounding-policy.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/search-requirement-grounding-policy.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/answer-missing-grounding-policy.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
@@ -572,203 +602,203 @@
       "path": "fixtures/invalid/request-timestamp-missing-seconds.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/nested-camel-case-secret.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/compound-secret-extension.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/decimal-too-long.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/citation-non-http-url.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/citation-missing-locator.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/citation-provider-target.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-selected-attempt-status.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-effective-profile.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-effective-profile-target.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-requested-profile-target.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-collection-provider.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-collection-provider-target.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-replacement-provenance.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-replacement-of-succeeded.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-attempt-handle-provider.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-attempt-handle-target.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-semantic-facts.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-observation-mode.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-measured-surface.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-required-grounding.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-none-grounding.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-effective-target-source.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-effective-target-kind.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-not-applicable-effective-target.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-fallback-candidate-reuse.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/response-mixed-unsuccessful-status.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/lifecycle-failed-without-error.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/lifecycle-succeeded-with-error.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
@@ -845,35 +875,35 @@
       "path": "fixtures/invalid/fallback-surface-lane.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/fallback-surface-identity.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/surface-profile-missing-identity.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/surface-snapshot-retrieval.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
       "path": "fixtures/invalid/surface-snapshot-access.json",
       "role": "fixture",
       "areas": [
-        "interchange"
+        "artifacts"
       ]
     },
     {
@@ -906,6 +936,209 @@
     },
     {
       "path": "fixtures/invalid/source-category-too-long.json",
+      "role": "fixture",
+      "areas": [
+        "artifacts"
+      ]
+    },
+    {
+      "path": "fixtures/valid/research-response-succeeded.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/research-response-php-succeeded.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/research-response-partial.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/research-response-failed.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-missing-receipt.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-blank-receipt.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-bare-scope-receipt.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-oversized-receipt.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-malformed-receipt.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-generic-version.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-interchange-version.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-execution-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-result-execution-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-slot-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-handle-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-lifecycle-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-collection-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-duplicate-citation-source.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-dangling-citation-source.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-unowned-citation.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-terminal-shape.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-semantic-profile.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-effective-target.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-citation-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-pending-status.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-cancelled-status.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-unsuccessful-status.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-submitted-status.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-running-status.json",
       "role": "fixture",
       "areas": [
         "interchange"
