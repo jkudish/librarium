@@ -18,6 +18,7 @@ export type AsyncTaskStatus =
 
 // Provider options passed to execute/submit
 export interface ProviderOptions {
+  /** Relative operation timeout in seconds. */
   timeout: number;
   signal?: AbortSignal;
 }

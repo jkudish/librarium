@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -266,6 +266,62 @@ describe('custom providers', () => {
     expect(retrieved.content).toBe('retrieved:task-123');
     const health = await provider!.test!();
     expect(health.ok).toBe(true);
+  });
+
+  it('aborts and kills a hanging script provider operation', async () => {
+    const scriptPath = join(tmpDir, 'abortable-script-provider.mjs');
+    const pidPath = join(tmpDir, 'abortable-script-provider.pid');
+    writeFileSync(
+      scriptPath,
+      [
+        "import { readFileSync, writeFileSync } from 'node:fs';",
+        'const input = JSON.parse(readFileSync(0, "utf-8"));',
+        'if (input.operation === "describe") {',
+        '  process.stdout.write(JSON.stringify({ ok: true, data: {',
+        "    displayName: 'Abortable Script', tier: 'raw-search', execution: 'inline',",
+        '    requiresApiKey: false, capabilities: { execute: true }',
+        '  }}));',
+        '} else {',
+        '  writeFileSync(input.sourceOptions.pidPath, String(process.pid));',
+        '  setInterval(() => {}, 1000);',
+        '}',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const initResult = await initializeProviders({
+      providers: { abortable: { enabled: true } },
+      customProviders: {
+        abortable: {
+          type: 'script',
+          command: 'node',
+          args: [scriptPath],
+          options: { pidPath },
+        },
+      },
+      trustedProviderIds: ['abortable'],
+    });
+    expect(initResult.warnings).toEqual([]);
+
+    const provider = getProvider('abortable');
+    expect(provider?.execution).toBe('inline');
+    const controller = new AbortController();
+    const execution = provider!.execute('hang', {
+      timeout: 30,
+      signal: controller.signal,
+    });
+
+    await vi.waitFor(() => {
+      expect(readFileSync(pidPath, 'utf-8')).toMatch(/^\d+$/);
+    });
+    const childPid = Number(readFileSync(pidPath, 'utf-8'));
+    controller.abort();
+
+    await expect(execution).rejects.toThrow('was aborted');
+    await vi.waitFor(() => {
+      expect(() => process.kill(childPid, 0)).toThrow();
+    });
   });
 
   it('skips malformed script providers', async () => {

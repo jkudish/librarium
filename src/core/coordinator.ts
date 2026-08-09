@@ -182,6 +182,7 @@ export interface AttemptLaunch {
   readonly slot_id: string;
   readonly profile: ExecutionProfile;
   readonly binding: AdapterBindingIdentity;
+  readonly catalog_digest: string;
   readonly query: string;
   readonly deadline_at: string;
   readonly delivery_lease_id: string;
@@ -355,6 +356,17 @@ function attemptDeadlineError(): StructuredError {
     category: 'timeout',
     retryable: true,
     fallback_allowed: true,
+  };
+}
+
+function acceptedDurableDeadlineError(): StructuredError {
+  return {
+    code: 'accepted_durable_attempt_deadline_exceeded',
+    message:
+      'The accepted durable task exceeded the local attempt deadline and may still be running remotely.',
+    category: 'timeout',
+    retryable: true,
+    fallback_allowed: false,
   };
 }
 
@@ -725,6 +737,7 @@ function claimDispatchPendingAttempts(
       slot_id: attempt.slot_id,
       profile: attempt.profile,
       binding: profilePlanFor(state, attempt.profile).binding,
+      catalog_digest: state.catalog_digest,
       query: attempt.query,
       deadline_at: attempt.deadline_at,
       delivery_lease_id: deliveryLeaseId,
@@ -881,11 +894,6 @@ export function recordSubmissionAccepted(
     );
   }
   validateHandleProvider(attempt, handle);
-  if (handle.status !== 'pending' && handle.status !== 'running') {
-    throw new Error(
-      'A newly accepted durable handle must be pending or running.',
-    );
-  }
   attempt.status = 'submitted';
   attempt.durable_handle = handle;
   attempt.adapter_state_ref = adapterStateRef ?? attempt.adapter_state_ref;
@@ -1498,10 +1506,17 @@ export function advanceDeadlines(
         'submission_deadline_exceeded',
       );
     } else {
+      const error = current.durable_handle
+        ? acceptedDurableDeadlineError()
+        : attemptDeadlineError();
       next = finishAttemptUnchecked(
         next,
         current.attempt_id,
-        { outcome: 'timed_out', error: attemptDeadlineError() },
+        {
+          outcome: 'timed_out',
+          error,
+          durable_handle: current.durable_handle,
+        },
         dependencies,
       );
     }

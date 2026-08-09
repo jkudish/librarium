@@ -939,18 +939,10 @@ describe('durable handles and terminal mapping', () => {
     let state = startAll(preparedExecution({ primaries: [profile] }), deps);
     const attemptId = state.attempts[0]?.attempt_id ?? '';
 
-    expect(() =>
-      recordSubmissionAccepted(
-        state,
-        attemptId,
-        handle(profile, 'succeeded'),
-        deps,
-      ),
-    ).toThrow('must be pending or running');
     state = recordSubmissionAccepted(
       state,
       attemptId,
-      handle(profile, 'pending'),
+      handle(profile, 'succeeded'),
       deps,
       'adapter-state-ref',
     );

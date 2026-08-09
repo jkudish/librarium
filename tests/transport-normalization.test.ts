@@ -220,25 +220,45 @@ describe('shadow transport golden equality', () => {
 });
 
 describe('selector conflicts', () => {
-  it('rejects competing selectors consistently across all five transports', () => {
+  it('lets explicit providers override a group for CLI and MCP ingress with a notice', () => {
     const input = { query: 'q', providers: ['alpha'], group: 'quick' };
     for (const normalize of [
       normalizeCliRequest,
       normalizeMcpRequest,
       normalizeSilentMcpRequest,
-      normalizeConfigurationRequest,
     ]) {
       const result = normalize(input, FIXTURE_DEFAULTS);
-      expect(result.ok).toBe(false);
-      if (result.ok) continue;
-      expect(result.issues).toEqual([
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.request.selector).toEqual({
+        kind: 'targets',
+        targets: [{ provider_id: 'alpha' }],
+      });
+      expect(result.notices).toEqual([
         expect.objectContaining({
-          code: 'transport_selector_conflict',
+          code: 'transport_explicit_providers_override_group',
           phase: 'transport',
           path: '/group',
         }),
       ]);
     }
+  });
+
+  it('rejects providers plus group ambiguity for library and configuration', () => {
+    const configuration = normalizeConfigurationRequest(
+      { query: 'q', providers: ['alpha'], group: 'quick' },
+      FIXTURE_DEFAULTS,
+    );
+    expect(configuration.ok).toBe(false);
+    if (configuration.ok) return;
+    expect(configuration.issues).toEqual([
+      expect.objectContaining({
+        code: 'transport_selector_conflict',
+        phase: 'transport',
+        path: '/group',
+      }),
+    ]);
+
     const library = normalizeLibraryRequest(
       {
         query: 'q',
@@ -356,7 +376,7 @@ describe('transport budgets and legacy mode', () => {
     );
   });
 
-  it('preserves selector conflicts through compilation via the shadow helper', () => {
+  it('preserves approved selector precedence through the shadow helper', () => {
     const catalog = catalogFor([planningProfile(groundedProfile('alpha'))]);
     const compiled = compileNormalizedTransportRequest(
       normalizeCliRequest(
@@ -366,14 +386,14 @@ describe('transport budgets and legacy mode', () => {
       catalog,
       dependencies(),
     );
-    expect(compiled.ok).toBe(false);
-    if (compiled.ok) return;
-    expect(compiled.issues).toEqual([
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+    expect(compiled.notices).toContainEqual(
       expect.objectContaining({
-        code: 'transport_selector_conflict',
+        code: 'transport_explicit_providers_override_group',
         path: '/group',
       }),
-    ]);
+    );
 
     const rejected = compileNormalizedTransportRequest(
       normalizeLibraryRequest(

@@ -585,6 +585,7 @@ function validatePlanningMetadata(
   issues: PreparationIssue[],
 ): void {
   const keys = new Set<string>();
+  const bindingPairs = new Set<string>();
   for (const [index, entry] of entries.entries()) {
     const entryPath = `/catalog/profiles/${index}`;
     const parsedProfile = ExecutionProfileSchema.safeParse(entry.profile);
@@ -614,8 +615,10 @@ function validatePlanningMetadata(
       ['adapter_id', entry.binding.adapter_id],
       ['binding_id', entry.binding.binding_id],
     ] as const;
+    let bindingIsValid = true;
     for (const [field, value] of bindingFields) {
       if (!OpaqueIdSchema.safeParse(value).success) {
+        bindingIsValid = false;
         issues.push({
           code: 'invalid_adapter_binding_identity',
           phase: 'validation',
@@ -624,6 +627,23 @@ function validatePlanningMetadata(
           profile_key: key,
         });
       }
+    }
+    if (bindingIsValid) {
+      const bindingPair = JSON.stringify([
+        entry.binding.adapter_id,
+        entry.binding.binding_id,
+      ]);
+      if (bindingPairs.has(bindingPair)) {
+        issues.push({
+          code: 'catalog_binding_duplicate',
+          phase: 'validation',
+          path: `${entryPath}/binding`,
+          message:
+            'Each frozen adapter and binding identity pair may describe only one provider profile.',
+          profile_key: key,
+        });
+      }
+      bindingPairs.add(bindingPair);
     }
     const estimatedCost = entry.estimate?.estimated_cost_microusd;
     if (
