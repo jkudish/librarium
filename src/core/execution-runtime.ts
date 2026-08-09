@@ -13,7 +13,9 @@ import {
   recordAttemptRunning,
   recordLaunchDispatched,
   recordSubmissionAccepted,
+  recordTransientPollFailure,
   resumeCoordination,
+  type UnresolvedAcceptance,
 } from './coordinator.js';
 import {
   type CoordinationStateStore,
@@ -39,8 +41,12 @@ export interface AttemptExecutionContext {
   submissionAccepted(
     handle: DurableHandle,
     adapterStateRef?: string,
+  ): Promise<boolean>;
+  submissionAcceptanceUnknown(
+    adapterStateRef?: string,
+    reason?: UnresolvedAcceptance['reason'],
   ): Promise<void>;
-  submissionAcceptanceUnknown(adapterStateRef?: string): Promise<void>;
+  transientPollFailure(error: StructuredError): Promise<void>;
   running(): Promise<void>;
 }
 
@@ -69,9 +75,10 @@ export interface ExecutionRuntimeResult {
 }
 
 function executionFailure(error: unknown): StructuredError {
+  void error;
   return {
     code: 'attempt_execution_failed',
-    message: error instanceof Error ? error.message : String(error),
+    message: 'The attempt execution port failed.',
     category: 'internal',
     retryable: false,
     fallback_allowed: false,
@@ -102,8 +109,19 @@ export async function runPreparedExecution(
   prepared: PreparedResearchExecution,
   dependencies: ExecutionRuntimeDependencies,
 ): Promise<ExecutionRuntimeResult> {
-  const initial = createCoordinatorState(prepared, dependencies.coordinator);
-  await dependencies.store.create(initial);
+  const effectiveDependencies: ExecutionRuntimeDependencies = {
+    ...dependencies,
+    max_compare_and_swap_attempts:
+      dependencies.max_compare_and_swap_attempts ??
+      // A completion can race the remaining dispatch transitions in the same
+      // wave, so one updater may observe roughly two transitions per slot.
+      Math.max(16, prepared.policy.limits.max_concurrency * 2 + 2),
+  };
+  const initial = createCoordinatorState(
+    prepared,
+    effectiveDependencies.coordinator,
+  );
+  await effectiveDependencies.store.create(initial);
   const outputs = new Map<string, unknown>();
   const requestId = initial.request_id;
 
@@ -111,7 +129,11 @@ export async function runPreparedExecution(
     launch: AttemptLaunch,
   ): Promise<boolean> => {
     let dispatched = false;
-    await transition(dependencies, requestId, (state) => {
+    await transition(effectiveDependencies, requestId, (state) => {
+      // updateCoordinationState may invoke this callback more than once after
+      // a CAS conflict. Reset the decision on every observation so a stale
+      // delivery never inherits permission from a failed CAS attempt.
+      dispatched = false;
       const attempt = state.attempts.find(
         (candidate) => candidate.attempt_id === launch.attempt_id,
       );
@@ -126,7 +148,7 @@ export async function runPreparedExecution(
         state,
         launch.attempt_id,
         launch.delivery_lease_id,
-        dependencies.coordinator,
+        effectiveDependencies.coordinator,
       );
     });
     return dispatched;
@@ -138,47 +160,76 @@ export async function runPreparedExecution(
       mode: prepared.request.mode,
       poll_interval_ms: prepared.policy.limits.poll_interval_ms,
       submissionAccepted: async (handle, adapterStateRef) => {
-        await transition(dependencies, requestId, (state) =>
-          recordSubmissionAccepted(
-            state,
-            launch.attempt_id,
-            handle,
-            dependencies.coordinator,
-            adapterStateRef,
-          ),
+        const persisted = await transition(
+          effectiveDependencies,
+          requestId,
+          (state) =>
+            recordSubmissionAccepted(
+              state,
+              launch.attempt_id,
+              handle,
+              effectiveDependencies.coordinator,
+              adapterStateRef,
+            ),
+        );
+        const attempt = persisted.state.attempts.find(
+          (candidate) => candidate.attempt_id === launch.attempt_id,
+        );
+        return (
+          (attempt?.status === 'submitted' || attempt?.status === 'running') &&
+          attempt.durable_handle?.handle_id === handle.handle_id &&
+          attempt.durable_handle.provider_task_id === handle.provider_task_id
         );
       },
-      submissionAcceptanceUnknown: async (adapterStateRef) => {
-        await transition(dependencies, requestId, (state) =>
+      submissionAcceptanceUnknown: async (adapterStateRef, reason) => {
+        await transition(effectiveDependencies, requestId, (state) =>
           recordAcceptanceUnknown(
             state,
             launch.attempt_id,
-            dependencies.coordinator,
+            effectiveDependencies.coordinator,
             adapterStateRef,
+            reason,
+          ),
+        );
+      },
+      transientPollFailure: async (error) => {
+        await transition(effectiveDependencies, requestId, (state) =>
+          recordTransientPollFailure(
+            state,
+            launch.attempt_id,
+            error,
+            effectiveDependencies.coordinator,
           ),
         );
       },
       running: async () => {
-        await transition(dependencies, requestId, (state) =>
-          recordAttemptRunning(
+        await transition(effectiveDependencies, requestId, (state) => {
+          const attempt = state.attempts.find(
+            (candidate) => candidate.attempt_id === launch.attempt_id,
+          );
+          if (attempt?.status === 'running') return undefined;
+          return recordAttemptRunning(
             state,
             launch.attempt_id,
-            dependencies.coordinator,
-          ),
-        );
+            effectiveDependencies.coordinator,
+          );
+        });
       },
     };
 
     try {
       const result = await dependencies.attempts.execute(launch, context);
       if (result.kind === 'finished') {
-        const persisted = await transition(dependencies, requestId, (state) =>
-          recordAttemptFinished(
-            state,
-            launch.attempt_id,
-            result.finished,
-            dependencies.coordinator,
-          ),
+        const persisted = await transition(
+          effectiveDependencies,
+          requestId,
+          (state) =>
+            recordAttemptFinished(
+              state,
+              launch.attempt_id,
+              result.finished,
+              effectiveDependencies.coordinator,
+            ),
         );
         const persistedAttempt = persisted.state.attempts.find(
           (attempt) => attempt.attempt_id === launch.attempt_id,
@@ -191,14 +242,42 @@ export async function runPreparedExecution(
         ) {
           outputs.set(launch.attempt_id, result.output);
         }
+      } else {
+        let persisted = await effectiveDependencies.store.load(requestId);
+        let attempt = persisted?.state.attempts.find(
+          (candidate) => candidate.attempt_id === launch.attempt_id,
+        );
+        if (
+          result.kind === 'acceptance_unknown' &&
+          attempt?.status === 'submitting'
+        ) {
+          await context.submissionAcceptanceUnknown();
+          persisted = await effectiveDependencies.store.load(requestId);
+          attempt = persisted?.state.attempts.find(
+            (candidate) => candidate.attempt_id === launch.attempt_id,
+          );
+        }
+        const coherent =
+          result.kind === 'accepted'
+            ? prepared.request.mode === 'async' &&
+              (attempt?.status === 'submitted' ||
+                attempt?.status === 'running') &&
+              attempt.durable_handle !== undefined
+            : attempt?.status === 'acceptance_unknown' ||
+              persisted?.state.status !== 'running';
+        if (!coherent) {
+          throw new Error(
+            `Attempt port returned ${result.kind} without the matching persisted coordinator state.`,
+          );
+        }
       }
     } catch (error) {
-      await transition(dependencies, requestId, (state) =>
+      await transition(effectiveDependencies, requestId, (state) =>
         recordAttemptFinished(
           state,
           launch.attempt_id,
           { outcome: 'failed', error: executionFailure(error) },
-          dependencies.coordinator,
+          effectiveDependencies.coordinator,
         ),
       );
     }
@@ -206,10 +285,10 @@ export async function runPreparedExecution(
 
   for (;;) {
     const advanced = await resumeCoordination(
-      dependencies.store,
+      effectiveDependencies.store,
       requestId,
-      dependencies.coordinator,
-      dependencies.max_compare_and_swap_attempts,
+      effectiveDependencies.coordinator,
+      effectiveDependencies.max_compare_and_swap_attempts,
     );
     const state = advanced.state;
 
@@ -218,23 +297,9 @@ export async function runPreparedExecution(
       continue;
     }
 
-    // Async acceptance and future durable polling are deliberately held for
-    // B2. The B1 runner returns the persisted state instead of pretending that
-    // it can offer process-resumable status/retrieve semantics.
-    if (
-      state.status !== 'running' ||
-      prepared.request.mode === 'async' ||
-      state.attempts.some((attempt) =>
-        ['submitted', 'running', 'acceptance_unknown'].includes(attempt.status),
-      )
-    ) {
-      return {
-        state,
-        outputs_by_attempt: Object.freeze(Object.fromEntries(outputs)),
-      };
-    }
-
-    // A quiescent synchronous plan should have been finalized by the reducer.
+    // Async acceptance, acceptance uncertainty, and future durable resumption
+    // return the persisted state without pretending B1 is process-resumable.
+    // A coherent sync bridge finishes its durable lifecycle before returning.
     return {
       state,
       outputs_by_attempt: Object.freeze(Object.fromEntries(outputs)),

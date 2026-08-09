@@ -358,6 +358,17 @@ function attemptDeadlineError(): StructuredError {
   };
 }
 
+function acceptedDurableDeadlineError(): StructuredError {
+  return {
+    code: 'accepted_durable_attempt_deadline_exceeded',
+    message:
+      'The accepted durable task exceeded the local attempt deadline and may still be running remotely.',
+    category: 'timeout',
+    retryable: true,
+    fallback_allowed: false,
+  };
+}
+
 function requestDeadlineError(): StructuredError {
   return {
     code: 'request_deadline_exceeded',
@@ -1498,10 +1509,17 @@ export function advanceDeadlines(
         'submission_deadline_exceeded',
       );
     } else {
+      const error = current.durable_handle
+        ? acceptedDurableDeadlineError()
+        : attemptDeadlineError();
       next = finishAttemptUnchecked(
         next,
         current.attempt_id,
-        { outcome: 'timed_out', error: attemptDeadlineError() },
+        {
+          outcome: 'timed_out',
+          error,
+          durable_handle: current.durable_handle,
+        },
         dependencies,
       );
     }

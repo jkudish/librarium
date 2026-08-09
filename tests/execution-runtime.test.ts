@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
-import { InMemoryCoordinationStateStore } from '../src/core/coordinator-store.js';
+import type { CoordinatorState } from '../src/core/coordinator.js';
+import {
+  type CoordinationCompareAndSwapResult,
+  type CoordinationStateStore,
+  InMemoryCoordinationStateStore,
+  type VersionedCoordinationState,
+} from '../src/core/coordinator-store.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { profileIdentityKey } from '../src/core/execution-plan.js';
 import {
@@ -43,6 +49,7 @@ function profile(
 function prepared(
   primaries: readonly ExecutionProfile[],
   reserve: readonly ExecutionProfile[] = [],
+  mode: 'sync' | 'async' = 'sync',
 ): PreparedResearchExecution {
   const all = [...primaries, ...reserve];
   const plans = Object.fromEntries(
@@ -64,7 +71,7 @@ function prepared(
       message_type: 'request',
       request_id: 'runtime-request',
       requested_at: new Date(start).toISOString(),
-      mode: 'sync',
+      mode,
       query: 'runtime query',
       slots: primaries.map((item, position) => ({
         slot_id: `slot-${position}`,
@@ -114,6 +121,17 @@ function coordinatorDependencies() {
   };
 }
 
+function systemCoordinatorDependencies() {
+  let next = 0;
+  return {
+    clock: { now: Date.now },
+    ids: {
+      next: (scope: 'attempt' | 'event' | 'delivery_lease') =>
+        `${scope}-${++next}`,
+    },
+  };
+}
+
 function mutableCoordinatorDependencies() {
   let now = start;
   let next = 0;
@@ -139,6 +157,56 @@ function successfulResult(provider: string): ProviderResult {
   };
 }
 
+function resolvedBinding(providerId: string, provider: Provider) {
+  return {
+    binding: {
+      adapter_id: `adapter-${providerId}`,
+      binding_id: `binding-${providerId}`,
+    },
+    provider,
+  };
+}
+
+class LoseDispatchLeaseStore implements CoordinationStateStore {
+  readonly inner = new InMemoryCoordinationStateStore();
+  lostDispatch = false;
+
+  load(requestId: string): Promise<VersionedCoordinationState | undefined> {
+    return this.inner.load(requestId);
+  }
+
+  create(state: CoordinatorState): Promise<VersionedCoordinationState> {
+    return this.inner.create(state);
+  }
+
+  async compareAndSwap(
+    requestId: string,
+    expectedVersion: number,
+    state: CoordinatorState,
+  ): Promise<CoordinationCompareAndSwapResult> {
+    if (
+      !this.lostDispatch &&
+      state.attempts.some(
+        (attempt) =>
+          attempt.status === 'running' || attempt.status === 'submitting',
+      )
+    ) {
+      this.lostDispatch = true;
+      const wonElsewhere = await this.inner.compareAndSwap(
+        requestId,
+        expectedVersion,
+        state,
+      );
+      expect(wonElsewhere.ok).toBe(true);
+      return {
+        ok: false,
+        current: await this.inner.load(requestId),
+      };
+    }
+    return this.inner.compareAndSwap(requestId, expectedVersion, state);
+  }
+}
+
 describe('private prepared execution runtime', () => {
   it('executes only the frozen adapter binding and never performs provider selection', async () => {
     const exact: Provider = {
@@ -149,8 +217,10 @@ describe('private prepared execution runtime', () => {
       execution: 'inline',
       execute: vi.fn(async () => successfulResult('adapter-primary')),
     };
-    const resolveExactProvider = vi.fn((id: string) =>
-      id === 'adapter-primary' ? exact : undefined,
+    const resolveExactBinding = vi.fn((binding) =>
+      binding.adapter_id === 'adapter-primary'
+        ? resolvedBinding('primary', exact)
+        : undefined,
     );
     const plan = prepared([profile('primary')]);
     const store = new InMemoryCoordinationStateStore();
@@ -158,17 +228,19 @@ describe('private prepared execution runtime', () => {
       store,
       coordinator: coordinatorDependencies(),
       attempts: createNodeAttemptBridge({
-        resolveExactProvider,
+        resolveExactBinding,
         now: () => start,
       }),
     });
 
-    expect(resolveExactProvider).toHaveBeenCalledExactlyOnceWith(
-      'adapter-primary',
-    );
-    expect(exact.execute).toHaveBeenCalledExactlyOnceWith('runtime query', {
-      timeout: 10_000,
+    expect(resolveExactBinding).toHaveBeenCalledExactlyOnceWith({
+      adapter_id: 'adapter-primary',
+      binding_id: 'binding-primary',
     });
+    expect(exact.execute).toHaveBeenCalledExactlyOnceWith(
+      'runtime query',
+      expect.objectContaining({ timeout: 10_000, signal: expect.anything() }),
+    );
     expect(result.state.status).toBe('succeeded');
     expect(result.outputs_by_attempt).toEqual(
       expect.objectContaining({
@@ -209,16 +281,19 @@ describe('private prepared execution runtime', () => {
         store,
         coordinator: coordinatorDependencies(),
         attempts: createNodeAttemptBridge({
-          resolveExactProvider: (id) =>
-            id === 'adapter-durable' ? durable : undefined,
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === 'adapter-durable'
+              ? resolvedBinding('durable', durable)
+              : undefined,
           now: () => start,
         }),
       },
     );
 
-    expect(durable.submit).toHaveBeenCalledWith('runtime query', {
-      timeout: 20_000,
-    });
+    expect(durable.submit).toHaveBeenCalledWith(
+      'runtime query',
+      expect.objectContaining({ timeout: 20_000, signal: expect.anything() }),
+    );
     expect(durable.poll).toHaveBeenCalledOnce();
     expect(durable.retrieve).toHaveBeenCalledOnce();
     expect(result.state.status).toBe('succeeded');
@@ -253,11 +328,11 @@ describe('private prepared execution runtime', () => {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
         attempts: createNodeAttemptBridge({
-          resolveExactProvider: (id) =>
-            id === 'adapter-durable'
-              ? durable
-              : id === 'adapter-reserve'
-                ? fallback
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === 'adapter-durable'
+              ? resolvedBinding('durable', durable)
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', fallback)
                 : undefined,
           now: () => start,
         }),
@@ -401,5 +476,505 @@ describe('private prepared execution runtime', () => {
     expect(
       result.state.slots.every((slot) => slot.status === 'succeeded'),
     ).toBe(true);
+  });
+
+  it('rejects a resolver result whose binding id differs from the frozen launch', async () => {
+    const execute = vi.fn(async () => successfulResult('adapter-primary'));
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute,
+    };
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createNodeAttemptBridge({
+        resolveExactBinding: () => ({
+          binding: {
+            adapter_id: 'adapter-primary',
+            binding_id: 'different-binding',
+          },
+          provider,
+        }),
+        now: () => start,
+      }),
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'frozen_adapter_binding_unavailable',
+        fallback_allowed: false,
+      },
+    });
+  });
+
+  it('keeps polling through transient errors and repeated running states before fallback', async () => {
+    const pollSteps: Array<Error | { status: 'running' | 'failed' }> = [
+      new Error('Bearer secret-token'),
+      { status: 'running' },
+      { status: 'running' },
+      { status: 'failed' },
+    ];
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-durable',
+        taskId: 'task-running',
+        query: 'runtime query',
+        submittedAt: start,
+        status: 'pending' as const,
+      })),
+      poll: vi.fn(async () => {
+        const step = pollSteps.shift();
+        if (step instanceof Error) throw step;
+        if (!step) throw new Error('missing poll step');
+        return step;
+      }),
+      retrieve: vi.fn(),
+    };
+    const reserveExecute = vi.fn(async () =>
+      successfulResult('adapter-reserve'),
+    );
+    const reserve: Provider = {
+      id: 'adapter-reserve',
+      displayName: 'Reserve',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: reserveExecute,
+    };
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [profile('reserve')]),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createNodeAttemptBridge({
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === 'adapter-durable'
+              ? resolvedBinding('durable', durable)
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', reserve)
+                : undefined,
+          now: () => start,
+          wait: async () => {},
+        }),
+      },
+    );
+
+    expect(durable.poll).toHaveBeenCalledTimes(4);
+    expect(reserveExecute).toHaveBeenCalledOnce();
+    expect(result.state.status).toBe('succeeded');
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'failed',
+      durable_handle: { status: 'failed' },
+      error: {
+        code: 'provider_task_failed',
+        fallback_allowed: true,
+      },
+    });
+    expect(JSON.stringify(result.state)).not.toContain('secret-token');
+  });
+
+  it('returns an async accepted handle without polling or retrieving', async () => {
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-durable',
+        taskId: 'async-task',
+        query: 'runtime query',
+        submittedAt: start,
+        status: 'pending' as const,
+      })),
+      poll: vi.fn(),
+      retrieve: vi.fn(),
+    };
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [], 'async'),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createNodeAttemptBridge({
+          resolveExactBinding: () => resolvedBinding('durable', durable),
+          now: () => start,
+        }),
+      },
+    );
+
+    expect(result.state.status).toBe('running');
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'submitted',
+      durable_handle: { provider_task_id: 'async-task', status: 'pending' },
+    });
+    expect(result.outputs_by_attempt).toEqual({});
+    expect(durable.poll).not.toHaveBeenCalled();
+    expect(durable.retrieve).not.toHaveBeenCalled();
+  });
+
+  it('times out a hung inline call and executes an eligible fallback', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+    try {
+      const primary: Provider = {
+        id: 'adapter-primary',
+        displayName: 'Primary',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: vi.fn(() => new Promise<ProviderResult>(() => {})),
+      };
+      const reserveExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const reserve: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: reserveExecute,
+      };
+      const running = runPreparedExecution(
+        prepared([profile('primary')], [profile('reserve')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: systemCoordinatorDependencies(),
+          attempts: createNodeAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-primary'
+                ? resolvedBinding('primary', primary)
+                : binding.adapter_id === 'adapter-reserve'
+                  ? resolvedBinding('reserve', reserve)
+                  : undefined,
+            now: Date.now,
+          }),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await running;
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'timed_out',
+        error: { code: 'attempt_deadline_exceeded', fallback_allowed: true },
+      });
+      expect(reserveExecute).toHaveBeenCalledOnce();
+      expect(result.state.status).toBe('succeeded');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('turns a hung submit into acceptance uncertainty without fallback', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+    try {
+      const submit = vi.fn(() => new Promise<never>(() => {}));
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit,
+        poll: vi.fn(),
+        retrieve: vi.fn(),
+      };
+      const reserveExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const reserve: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: reserveExecute,
+      };
+      const running = runPreparedExecution(
+        prepared([profile('durable', 'background')], [profile('reserve')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: systemCoordinatorDependencies(),
+          attempts: createNodeAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-durable'
+                ? resolvedBinding('durable', durable)
+                : binding.adapter_id === 'adapter-reserve'
+                  ? resolvedBinding('reserve', reserve)
+                  : undefined,
+            now: Date.now,
+          }),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await running;
+      expect(submit).toHaveBeenCalledOnce();
+      expect(result.state.attempts[0]?.status).toBe('acceptance_unknown');
+      expect(result.state.unresolved_acceptances[0]).toMatchObject({
+        reason: 'submission_deadline_exceeded',
+      });
+      expect(reserveExecute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not fall back when an accepted durable poll exceeds its deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+    try {
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-durable',
+          taskId: 'hung-poll',
+          query: 'runtime query',
+          submittedAt: start,
+          status: 'pending' as const,
+        })),
+        poll: vi.fn(() => new Promise<never>(() => {})),
+        retrieve: vi.fn(),
+      };
+      const reserveExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const reserve: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: reserveExecute,
+      };
+      const running = runPreparedExecution(
+        prepared([profile('durable', 'background')], [profile('reserve')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: systemCoordinatorDependencies(),
+          attempts: createNodeAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-durable'
+                ? resolvedBinding('durable', durable)
+                : binding.adapter_id === 'adapter-reserve'
+                  ? resolvedBinding('reserve', reserve)
+                  : undefined,
+            now: Date.now,
+          }),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await running;
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'timed_out',
+        durable_handle: { provider_task_id: 'hung-poll', status: 'pending' },
+        error: {
+          code: 'accepted_durable_attempt_deadline_exceeded',
+          fallback_allowed: false,
+        },
+      });
+      expect(reserveExecute).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves a succeeded handle when retrieval fails and permits fallback', async () => {
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-durable',
+        taskId: 'retrieve-failure',
+        query: 'runtime query',
+        submittedAt: start,
+        status: 'pending' as const,
+      })),
+      poll: vi.fn(async () => ({ status: 'completed' as const })),
+      retrieve: vi.fn(async () => {
+        throw new Error('Authorization: secret-token');
+      }),
+    };
+    const reserveExecute = vi.fn(async () =>
+      successfulResult('adapter-reserve'),
+    );
+    const reserve: Provider = {
+      id: 'adapter-reserve',
+      displayName: 'Reserve',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: reserveExecute,
+    };
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [profile('reserve')]),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createNodeAttemptBridge({
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === 'adapter-durable'
+              ? resolvedBinding('durable', durable)
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', reserve)
+                : undefined,
+          now: () => start,
+        }),
+      },
+    );
+
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'failed',
+      durable_handle: { status: 'succeeded' },
+      error: { code: 'adapter_retrieve_failed', fallback_allowed: true },
+    });
+    expect(JSON.stringify(result.state)).not.toContain('secret-token');
+    expect(reserveExecute).toHaveBeenCalledOnce();
+    expect(result.state.status).toBe('succeeded');
+  });
+
+  it('does not spend a fallback after provider-side durable cancellation', async () => {
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-durable',
+        taskId: 'cancelled-task',
+        query: 'runtime query',
+        submittedAt: start,
+        status: 'pending' as const,
+      })),
+      poll: vi.fn(async () => ({ status: 'cancelled' as const })),
+      retrieve: vi.fn(),
+    };
+    const reserveExecute = vi.fn(async () =>
+      successfulResult('adapter-reserve'),
+    );
+    const reserve: Provider = {
+      id: 'adapter-reserve',
+      displayName: 'Reserve',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: reserveExecute,
+    };
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [profile('reserve')]),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createNodeAttemptBridge({
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === 'adapter-durable'
+              ? resolvedBinding('durable', durable)
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', reserve)
+                : undefined,
+          now: () => start,
+        }),
+      },
+    );
+
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'cancelled',
+      durable_handle: { status: 'cancelled' },
+      error: { code: 'provider_task_cancelled', fallback_allowed: false },
+    });
+    expect(reserveExecute).not.toHaveBeenCalled();
+  });
+
+  it('does not execute after losing the dispatch lease CAS race', async () => {
+    const store = new LoseDispatchLeaseStore();
+    const attempts: AttemptExecutionPort = { execute: vi.fn() };
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store,
+      coordinator: coordinatorDependencies(),
+      attempts,
+    });
+
+    expect(store.lostDispatch).toBe(true);
+    expect(attempts.execute).not.toHaveBeenCalled();
+    expect(result.state.attempts[0]?.status).toBe('running');
+  });
+
+  it('derives enough CAS retries for the maximum concurrent completion wave', async () => {
+    const primaries = Array.from({ length: 64 }, (_, index) =>
+      profile(`primary-${index}`),
+    );
+    const result = await runPreparedExecution(prepared(primaries), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: {
+        execute: async (launch) => ({
+          kind: 'finished',
+          finished: {
+            outcome: 'succeeded',
+            result_id: `result-${launch.attempt_id}`,
+          },
+        }),
+      },
+    });
+
+    expect(result.state.status).toBe('succeeded');
+    expect(result.state.attempts).toHaveLength(64);
+  });
+
+  it('bounds persisted provider diagnostics', async () => {
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: vi.fn(async () => ({
+        ...successfulResult('adapter-primary'),
+        error: `Bearer secret-token ${'x'.repeat(3_000)}`,
+      })),
+    };
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createNodeAttemptBridge({
+        resolveExactBinding: () => resolvedBinding('primary', provider),
+        now: () => start,
+      }),
+    });
+
+    expect(result.state.attempts[0]?.error).toEqual(
+      expect.objectContaining({
+        code: 'provider_reported_error',
+        message: 'The provider returned an error.',
+      }),
+    );
+    expect(JSON.stringify(result.state)).not.toContain('secret-token');
   });
 });
