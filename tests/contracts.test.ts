@@ -778,6 +778,12 @@ describe('canonical v2 contracts', () => {
       provider_reference: 'record-public-001',
     });
     expect(specialized.results[0]!.citations[0]).not.toHaveProperty('url');
+    expect(
+      specialized.results[0]!.provenance.requested_profile.corpora,
+    ).toEqual(['specialized']);
+    expect(
+      specialized.results[0]!.provenance.effective_profile.corpora,
+    ).toEqual(['specialized']);
     expect(specialized.sources[0]).toMatchObject({
       source_kind: 'data_record',
       provider_reference: 'record-public-001',

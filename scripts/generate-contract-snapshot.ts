@@ -1187,6 +1187,11 @@ const representativeSharedSpecializedDataRecordResponse = clone(
 representativeSharedSpecializedDataRecordResponse.results = [
   toSharedResult(representativeSpecializedResponse.results[0]!),
 ];
+representativeSharedSpecializedDataRecordResponse.results[0]!.provenance.requested_profile =
+  clone(
+    representativeSharedSpecializedDataRecordResponse.results[0]!.provenance
+      .effective_profile,
+  );
 representativeSharedSpecializedDataRecordResponse.sources = [
   {
     source_id: 'source-specialized-record-001',

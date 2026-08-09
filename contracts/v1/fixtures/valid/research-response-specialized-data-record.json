@@ -86,13 +86,13 @@
       "provenance": {
         "requested_profile": {
           "identity": {
-            "provider_id": "perplexity-sonar-pro",
+            "provider_id": "brave-answers",
             "profile_id": "grounded-web",
             "target": {
               "primary": {
                 "model_selection": "fixed",
                 "kind": "model",
-                "target_id": "sonar-pro"
+                "target_id": "brave"
               }
             }
           },
@@ -100,11 +100,11 @@
           "grounding_policy": "required",
           "observation_mode": "api_output",
           "corpora": [
-            "web"
+            "specialized"
           ],
-          "retrieval_method": "model_search_tool",
+          "retrieval_method": "search_endpoint",
           "access_mode": "direct",
-          "operator_id": "perplexity",
+          "operator_id": "brave",
           "invocation": "inline",
           "resumability": "none"
         },
