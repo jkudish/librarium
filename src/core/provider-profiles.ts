@@ -421,7 +421,10 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 140,
-        target: configurableTarget('model', 'deep-research-preview-04-2026'),
+        // The adapter submits the selected identifier as the API `agent`, so
+        // this is a configurable agent. The model behind that agent is a
+        // Google-owned runtime fact and is deliberately not invented here.
+        target: configurableTarget('agent', 'deep-research-preview-04-2026'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],

@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Corpus, ExecutionProfile } from '../contracts/domain/index.js';
 import type { NetworkFreeEstimate } from './execution-plan.js';
 import {
@@ -12,10 +13,29 @@ import {
 } from './provider-profiles.js';
 
 /**
+ * The provider configuration a binding resolves against.
+ *
+ * This is the v1 `ProviderConfig` shape, narrowed to the two fields that decide
+ * the executable strategy. `model` is deliberately top-level rather than an
+ * option: `src/adapters/provider-descriptors.ts` reads `providerConfig.model`
+ * for every model-configurable adapter, so that is the identifier the adapter
+ * actually sends. `options` stays behind `options_schema` and is never widened
+ * here.
+ */
+export interface ProfileBindingConfig {
+  readonly model?: string;
+  readonly options?: unknown;
+}
+
+/**
  * One implemented declaration binds to exactly one adapter strategy. The
  * binding turns a validated configuration into the single exact execution
  * profile that will run, plus a network-free estimate when -- and only when --
  * the price is exact and non-volatile.
+ *
+ * The record itself is shallow-frozen: metadata cannot be reassigned after
+ * construction, while the shared zod schema and the resolver closure are kept
+ * by reference rather than recursively frozen.
  */
 export interface ProfileBinding {
   readonly provider_id: string;
@@ -23,7 +43,7 @@ export interface ProfileBinding {
   readonly adapter_id: string;
   readonly binding_id: string;
   readonly options_schema: z.ZodTypeAny;
-  resolve(config: unknown): {
+  resolve(config?: ProfileBindingConfig): {
     readonly profile: ExecutionProfile;
     readonly estimate?: NetworkFreeEstimate;
   };
@@ -105,6 +125,46 @@ function bindingEstimate(adapterId: string): NetworkFreeEstimate | undefined {
   return networkFreeEstimate(definition.metering);
 }
 
+/**
+ * Project the configured target identifier into a `configurable` primary slot.
+ *
+ * Only a `configurable` declaration may be overridden: `fixed`,
+ * `provider_managed`, and `not_applicable` targets describe what the adapter
+ * does regardless of configuration, so they are returned untouched. A blank or
+ * whitespace-only value resolves to the declared default, exactly as every
+ * adapter's `options.model?.trim() || DEFAULT` does, and a value the contract
+ * cannot carry as an identifier is rejected so the profile is reported as
+ * misconfigured rather than resolved to something the adapter would not send.
+ */
+function configuredTargetProjection(
+  profile: ExecutionProfile,
+  configuredModel: string | undefined,
+): ExecutionProfile {
+  const primary = profile.identity.target.primary;
+  if (primary.model_selection !== 'configurable') return profile;
+
+  const targetId = configuredModel?.trim();
+  if (!targetId || targetId === primary.target_id) return profile;
+
+  const validated = OpaqueIdSchema.safeParse(targetId);
+  if (!validated.success) {
+    throw new ProfileBindingError(
+      `model: ${validated.error.issues[0]?.message ?? 'Invalid target identifier'}`,
+    );
+  }
+
+  return {
+    ...profile,
+    identity: {
+      ...profile.identity,
+      target: {
+        ...profile.identity.target,
+        primary: { ...primary, target_id: validated.data },
+      },
+    },
+  };
+}
+
 function bind(input: BindingInput): ProfileBinding {
   const optionsSchema = bindingOptionsSchema(input.adapter_id);
   const estimate = bindingEstimate(input.adapter_id);
@@ -112,7 +172,7 @@ function bind(input: BindingInput): ProfileBinding {
     input.provider_id,
     input.declaration,
   );
-  return {
+  return Object.freeze({
     provider_id: input.provider_id,
     profile_id: input.declaration.profile_id,
     adapter_id: input.adapter_id,
@@ -120,8 +180,8 @@ function bind(input: BindingInput): ProfileBinding {
       input.binding_id ??
       `${input.provider_id}.${input.declaration.profile_id}.${input.adapter_id}`,
     options_schema: optionsSchema,
-    resolve(config: unknown) {
-      const parsed = optionsSchema.safeParse(config ?? {});
+    resolve(config?: ProfileBindingConfig) {
+      const parsed = optionsSchema.safeParse(config?.options ?? {});
       if (!parsed.success) {
         throw new ProfileBindingError(
           parsed.error.issues
@@ -133,12 +193,15 @@ function bind(input: BindingInput): ProfileBinding {
         );
       }
       const options = (parsed.data ?? {}) as Record<string, unknown>;
-      const profile = input.project
+      const projected = input.project
         ? input.project(declared, options)
         : declared;
+      // The configured identifier is applied last so an options-driven strategy
+      // change (web search off, widened corpora) never discards it.
+      const profile = configuredTargetProjection(projected, config?.model);
       return { profile, ...(estimate && { estimate }) };
     },
-  };
+  });
 }
 
 /**

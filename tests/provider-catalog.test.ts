@@ -1327,3 +1327,391 @@ describe('provider catalog -- legacy tier boundary', () => {
     scan(BUILTIN_PROVIDER_CATALOG, '');
   });
 });
+
+// ---------------------------------------------------------------------------
+// #2556 corrections: target fidelity, catalog-owned selection policy, and
+// deterministic diagnostics for configured references.
+// ---------------------------------------------------------------------------
+
+/** Every profile whose adapter factory threads top-level `ProviderConfig.model`. */
+const CONFIGURABLE_TARGET_MATRIX = [
+  ['openai-research', 'research', 'openai-research', 'model', 'gpt-5.6-sol'],
+  [
+    'gemini-deep',
+    'research',
+    'gemini-deep',
+    'agent',
+    'deep-research-preview-04-2026',
+  ],
+  ['grok', 'web', 'grok', 'model', 'grok-4.5'],
+  ['claude', 'chat', 'claude', 'model', 'claude-sonnet-5'],
+  ['openai-chat', 'chat', 'openai-chat', 'model', 'gpt-5-mini'],
+  ['gemini-chat', 'chat', 'gemini-chat', 'model', 'gemini-3.6-flash'],
+  ['openrouter', 'chat', 'openrouter-chat', 'model', 'openai/gpt-5.6-terra'],
+] as const;
+
+describe('provider catalog -- configured target fidelity', () => {
+  it('resolves every configurable target to the configured identifier', () => {
+    for (const [
+      providerId,
+      profileId,
+      adapterId,
+      kind,
+      declared,
+    ] of CONFIGURABLE_TARGET_MATRIX) {
+      const configured = `${adapterId}-configured-target`;
+      const built = buildProviderCatalog({
+        providerConfigs: enabledConfigs({ [adapterId]: { model: configured } }),
+        credentials: allCredentials(),
+      });
+      const resolvedProfile = built.get(providerId, profileId);
+
+      expect(resolvedProfile?.profile.identity.target).toEqual({
+        primary: {
+          model_selection: 'configurable',
+          kind,
+          target_id: configured,
+        },
+      });
+      expect(resolvedProfile?.availability.selectable).toBe(true);
+      // The declaration still records today's default; only the resolved
+      // profile follows the configuration.
+      expect(resolvedProfile?.declaration.target.primary.target_id).toBe(
+        declared,
+      );
+    }
+  });
+
+  it('declares Gemini Deep as a configurable agent with no invented model', () => {
+    const target = catalog().get('gemini-deep', 'research')?.profile.identity
+      .target;
+    expect(target).toEqual({
+      primary: {
+        model_selection: 'configurable',
+        kind: 'agent',
+        target_id: 'deep-research-preview-04-2026',
+      },
+    });
+    expect(target?.underlying).toBeUndefined();
+  });
+
+  it('keeps the declared default for a missing or blank configured model', () => {
+    for (const model of [undefined, '', '   ']) {
+      const built = buildProviderCatalog({
+        providerConfigs: enabledConfigs({
+          claude: model === undefined ? {} : { model },
+        }),
+        credentials: allCredentials(),
+      });
+      expect(
+        built.get('claude', 'chat')?.profile.identity.target.primary.target_id,
+      ).toBe('claude-sonnet-5');
+    }
+  });
+
+  it('keeps a configured target when an option changes the strategy', () => {
+    const offline = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        claude: { model: 'claude-opus-custom', options: { webSearch: false } },
+      }),
+      credentials: allCredentials(),
+    }).get('claude', 'chat')?.profile;
+
+    expect(offline?.result_kind).toBe('model_answer');
+    expect(offline?.identity.target.primary.target_id).toBe(
+      'claude-opus-custom',
+    );
+  });
+
+  it('never makes a fixed, provider-managed, or not-applicable target configurable', () => {
+    const built = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        'brave-answers': { model: 'ignored-model' },
+        'openrouter-online': { model: 'ignored-model' },
+        'kagi-fastgpt': { model: 'ignored-preset' },
+        'you-research': { model: 'ignored-model' },
+        'searchapi-chatgpt': { model: 'ignored-model' },
+        exa: { model: 'ignored-model' },
+      }),
+      credentials: allCredentials(),
+    });
+
+    expect(
+      built.get('brave-answers', 'grounded')?.profile.identity.target.primary,
+    ).toEqual({ model_selection: 'fixed', kind: 'model', target_id: 'brave' });
+    expect(
+      built.get('openrouter', 'grounded')?.profile.identity.target.primary,
+    ).toEqual({
+      model_selection: 'fixed',
+      kind: 'model',
+      target_id: 'openai/gpt-4o-mini',
+    });
+    expect(
+      built.get('kagi-fastgpt', 'grounded')?.profile.identity.target.primary,
+    ).toEqual({
+      model_selection: 'fixed',
+      kind: 'preset',
+      target_id: 'fastgpt',
+    });
+    expect(
+      built.get('you-research', 'grounded')?.profile.identity.target.primary,
+    ).toEqual({ model_selection: 'provider_managed' });
+    expect(
+      built.get('searchapi-chatgpt', 'surface')?.profile.identity.target
+        .primary,
+    ).toEqual({ model_selection: 'provider_managed' });
+    expect(built.get('exa', 'search')?.profile.identity.target.primary).toEqual(
+      { model_selection: 'not_applicable' },
+    );
+  });
+
+  it('rejects a configured identifier the contract cannot carry', () => {
+    const resolvedProfile = buildProviderCatalog({
+      providerConfigs: enabledConfigs({ claude: { model: 'badmodel' } }),
+      credentials: allCredentials(),
+    }).get('claude', 'chat');
+
+    expect(resolvedProfile?.availability.configuration_valid).toBe(false);
+    expect(resolvedProfile?.availability.selectable).toBe(false);
+    expect(resolvedProfile?.availability.reasons).toContain(
+      'configuration_invalid',
+    );
+  });
+});
+
+describe('provider catalog -- catalog-owned selection policy', () => {
+  it('ignores caller mutations of groups, defaults, and reserve', () => {
+    const groups: Record<string, string[]> = { team: ['exa/search'] };
+    const defaults = [{ provider_id: 'exa', profile_id: 'search' }];
+    const reserve = [{ provider_id: 'brave-search', profile_id: 'search' }];
+    const built = buildProviderCatalog({
+      providerConfigs: enabledConfigs(),
+      credentials: allCredentials(),
+      groups,
+      defaults,
+      reserve,
+    });
+    const digest = built.digest;
+
+    groups.team = ['tavily/search'];
+    groups.extra = ['serpapi/search'];
+    defaults[0] = { provider_id: 'tavily', profile_id: 'search' };
+    reserve[0] = { provider_id: 'exa', profile_id: 'search' };
+
+    expect(keysOf(built.resolveGroup('custom:team') ?? [])).toEqual([
+      'exa/search',
+    ]);
+    expect(built.resolveGroup('custom:extra')).toBeUndefined();
+    expect(built.custom_group_ids).toEqual(['custom:team']);
+    expect(keysOf(built.resolveDefault())).toEqual(['exa/search']);
+    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([
+      'brave-search/search',
+    ]);
+    // The digest kept describing the behaviour the catalog actually has.
+    expect(built.digest).toBe(digest);
+  });
+
+  it('leaves caller-owned selection input unfrozen', () => {
+    const groups: Record<string, string[]> = { team: ['exa/search'] };
+    const defaults = [{ provider_id: 'exa', profile_id: 'search' }];
+    buildProviderCatalog({
+      providerConfigs: enabledConfigs(),
+      credentials: allCredentials(),
+      groups,
+      defaults,
+    });
+    expect(Object.isFrozen(groups)).toBe(false);
+    expect(Object.isFrozen(groups.team)).toBe(false);
+    expect(Object.isFrozen(defaults)).toBe(false);
+  });
+
+  it('rejects mutation of an exposed binding record', () => {
+    const bound = catalog().get('exa', 'search');
+    const binding = bound?.binding;
+    if (!binding) throw new Error('expected a bound profile');
+
+    expect(Object.isFrozen(binding)).toBe(true);
+    expect(() => {
+      (binding as { adapter_id: string }).adapter_id = 'changed';
+    }).toThrow(TypeError);
+    expect(() => {
+      (binding as { binding_id: string }).binding_id = 'changed';
+    }).toThrow(TypeError);
+    expect(() => {
+      (binding as { provider_id: string }).provider_id = 'changed';
+    }).toThrow(TypeError);
+    expect(() => {
+      (binding as { profile_id: string }).profile_id = 'changed';
+    }).toThrow(TypeError);
+    expect(() => {
+      (binding as { options_schema: unknown }).options_schema = undefined;
+    }).toThrow(TypeError);
+    expect(() => {
+      (binding as { resolve: unknown }).resolve = () => undefined;
+    }).toThrow(TypeError);
+    expect(() => {
+      (bound as { binding?: unknown }).binding = undefined;
+    }).toThrow(TypeError);
+
+    expect(catalog().get('exa', 'search')?.binding?.adapter_id).toBe('exa');
+    // Shallow only: the shared schema and resolver keep working.
+    expect(binding.options_schema).toBeDefined();
+    expect(binding.resolve({}).profile.identity.provider_id).toBe('exa');
+  });
+});
+
+describe('provider catalog -- custom group name collisions', () => {
+  const collisionCases = [
+    [
+      'raw first',
+      { team: ['brave-search/search'], 'custom:team': ['exa/search'] },
+    ],
+    [
+      'canonical first',
+      { 'custom:team': ['exa/search'], team: ['brave-search/search'] },
+    ],
+  ] as const;
+
+  for (const [label, groups] of collisionCases) {
+    it(`preserves the explicit custom group when declared ${label}`, () => {
+      const built = catalog({ groups });
+
+      expect(keysOf(built.resolveGroup('custom:team') ?? [])).toEqual([
+        'exa/search',
+      ]);
+      expect(built.custom_group_ids).toEqual(['custom:team']);
+      expect(built.issues).toEqual([
+        expect.objectContaining({
+          code: 'custom_group_name_collision',
+          phase: 'migration',
+          path: '/groups/team',
+        }),
+      ]);
+      expect(built.issues[0]?.message).toContain('custom:team');
+    });
+  }
+
+  it('does not mutate the caller-owned group record', () => {
+    const groups: Record<string, string[]> = {
+      team: ['brave-search/search'],
+      'custom:team': ['exa/search'],
+    };
+    catalog({ groups });
+    expect(groups).toEqual({
+      team: ['brave-search/search'],
+      'custom:team': ['exa/search'],
+    });
+  });
+});
+
+describe('provider catalog -- configured reference diagnostics', () => {
+  it('reports unknown default, reserve, and group references at stable paths', () => {
+    const built = catalog({
+      groups: { broken: ['nope/search', 'exa/nope', 'nope'] },
+      defaults: [{ provider_id: 'nope', profile_id: 'search' }],
+      reserve: [{ provider_id: 'exa', profile_id: 'nope' }],
+    });
+
+    expect(
+      built.issues.map((issue) => [issue.code, issue.path, issue.profile_key]),
+    ).toEqual([
+      ['configured_default_unknown_profile', '/defaults/0', 'nope/search'],
+      [
+        'custom_group_member_unknown_profile',
+        '/groups/broken/0',
+        'nope/search',
+      ],
+      ['custom_group_member_unknown_profile', '/groups/broken/1', 'exa/nope'],
+      ['custom_group_member_unknown_profile', '/groups/broken/2', 'nope'],
+      ['configured_reserve_unknown_profile', '/reserve/0', 'exa/nope'],
+    ]);
+    // Behaviour is unchanged: the invalid references still resolve to nothing.
+    expect(keysOf(built.resolveGroup('custom:broken') ?? [])).toEqual([]);
+    expect(keysOf(built.resolveDefault())).toEqual([]);
+    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([]);
+  });
+
+  it('reports planned, unbound references separately from unknown ones', () => {
+    const built = catalog({
+      groups: { future: ['parallel/research', 'valyu'] },
+      defaults: [{ provider_id: 'parallel', profile_id: 'research' }],
+      reserve: [{ provider_id: 'grok-x-only', profile_id: 'x' }],
+    });
+
+    expect(built.issues.map((issue) => [issue.code, issue.path])).toEqual([
+      ['configured_default_unbound_profile', '/defaults/0'],
+      ['custom_group_member_unbound_profile', '/groups/future/0'],
+      ['custom_group_member_unbound_profile', '/groups/future/1'],
+      ['configured_reserve_unbound_profile', '/reserve/0'],
+    ]);
+    expect(keysOf(built.resolveDefault())).toEqual([]);
+    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([]);
+  });
+
+  it('reports a malformed group member instead of silently truncating it', () => {
+    const built = catalog({
+      groups: { odd: ['exa/search/extra', '', 'exa/'] },
+    });
+
+    expect(built.issues.map((issue) => [issue.code, issue.path])).toEqual([
+      ['custom_group_member_malformed', '/groups/odd/0'],
+      ['custom_group_member_malformed', '/groups/odd/1'],
+      ['custom_group_member_malformed', '/groups/odd/2'],
+    ]);
+    expect(keysOf(built.resolveGroup('custom:odd') ?? [])).toEqual([]);
+  });
+
+  it('diagnoses only the invalid members of a mixed roster', () => {
+    const built = catalog({
+      groups: { mixed: ['exa/search', 'nope/search', 'tavily/search'] },
+      defaults: [
+        { provider_id: 'exa', profile_id: 'search' },
+        { provider_id: 'nope', profile_id: 'search' },
+      ],
+      reserve: [
+        { provider_id: 'nope', profile_id: 'search' },
+        { provider_id: 'brave-search', profile_id: 'search' },
+      ],
+    });
+
+    expect(built.issues.map((issue) => issue.path)).toEqual([
+      '/defaults/1',
+      '/groups/mixed/1',
+      '/reserve/0',
+    ]);
+    expect(keysOf(built.resolveGroup('custom:mixed') ?? [])).toEqual([
+      'exa/search',
+      'tavily/search',
+    ]);
+    expect(keysOf(built.resolveDefault())).toEqual(['exa/search']);
+    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([
+      'brave-search/search',
+    ]);
+  });
+
+  it('never reports a known but unavailable profile as a reference error', () => {
+    const built = buildProviderCatalog({
+      providerConfigs: enabledConfigs({ exa: { enabled: false } }),
+      credentials: allCredentials(),
+      groups: { team: ['exa/search'] },
+      defaults: [{ provider_id: 'exa', profile_id: 'search' }],
+      reserve: [{ provider_id: 'exa', profile_id: 'search' }],
+    });
+
+    expect(built.issues).toEqual([]);
+    expect(keysOf(built.resolveGroup('custom:team') ?? [])).toEqual([]);
+    expect(keysOf(built.resolveDefault())).toEqual([]);
+    // The planner still owns the availability notice for a reserve member.
+    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual(['exa/search']);
+  });
+
+  it('keeps a bare provider group member fanning out to its selectable profiles', () => {
+    const built = catalog({ groups: { team: ['openrouter'] } });
+
+    expect(built.issues).toEqual([]);
+    expect(keysOf(built.resolveGroup('custom:team') ?? [])).toEqual([
+      'openrouter/grounded',
+      'openrouter/chat',
+    ]);
+  });
+});

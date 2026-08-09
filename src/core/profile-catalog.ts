@@ -179,7 +179,16 @@ function resolveDeclaration(
   let estimate: NetworkFreeEstimate | undefined;
   let configurationValid = true;
   try {
-    const resolution = binding.resolve(providerConfig?.options ?? {});
+    // The whole provider config is handed over, not just `options`: the
+    // identifier an adapter actually sends comes from top-level `model`, and a
+    // resolved configurable target that ignored it would misdescribe the exact
+    // executable strategy.
+    const resolution = binding.resolve({
+      ...(providerConfig?.model !== undefined && {
+        model: providerConfig.model,
+      }),
+      options: providerConfig?.options ?? {},
+    });
     profile = resolution.profile;
     estimate = resolution.estimate;
   } catch {
@@ -248,7 +257,16 @@ export function buildProviderCatalog(
   );
   const byKey = new Map(resolved.map((item) => [profileKeyOf(item), item]));
 
-  const migration = migrateUserWorkflowNames(options.groups ?? {});
+  // The catalog owns its selection policy from here on. Groups, defaults, and
+  // the reserve are cloned and frozen before migration, digesting, and closure
+  // capture, so mutating the caller's objects afterwards can never change what
+  // an already-constructed catalog resolves -- or make the digest describe
+  // behaviour the catalog no longer has.
+  const configuredGroups = ownFrozen(options.groups ?? {});
+  const configuredDefaults = ownFrozen(options.defaults ?? []);
+  const configuredReserve = ownFrozen(options.reserve ?? []);
+
+  const migration = migrateUserWorkflowNames(configuredGroups);
   const notices: PreparationNotice[] = [...migration.notices];
   const issues: PreparationIssue[] = [...migration.issues];
 
@@ -293,38 +311,189 @@ export function buildProviderCatalog(
   // semantics. A reserved key only survives migration when it collided with an
   // existing `custom:<name>`; it stays bound to the built-in workflow and is
   // deliberately not reachable as a custom group.
-  const customGroups = new Map<string, readonly string[]>();
-  for (const [name, members] of Object.entries(migration.groups)) {
-    if (RESERVED_WORKFLOW_IDS.has(name)) continue;
-    customGroups.set(
-      isCustomWorkflowId(name) ? name : customWorkflowId(name),
-      members,
-    );
+  //
+  // Normalising `<name>` onto an already-explicit `custom:<name>` would destroy
+  // one of the user's two definitions, so the explicitly canonical spelling is
+  // taken first and always wins. The raw definition is left exactly as the
+  // caller wrote it and the collision is reported instead of resolved by
+  // guessing, which makes the outcome independent of declaration order.
+  const customGroups = new Map<
+    string,
+    { readonly source_name: string; readonly members: readonly string[] }
+  >();
+  const migratedNames = Object.keys(migration.groups).filter(
+    (name) => !RESERVED_WORKFLOW_IDS.has(name),
+  );
+  for (const name of migratedNames.filter(isCustomWorkflowId)) {
+    customGroups.set(name, {
+      source_name: name,
+      members: migration.groups[name] ?? [],
+    });
   }
+  for (const name of migratedNames.filter(
+    (item) => !isCustomWorkflowId(item),
+  )) {
+    const groupId = customWorkflowId(name);
+    const existing = customGroups.get(groupId);
+    if (existing) {
+      issues.push({
+        code: 'custom_group_name_collision',
+        phase: 'migration',
+        path: `/groups/${name}`,
+        message: `"${name}" is selected as "${groupId}", which is already defined explicitly. Rename or consolidate one of them; Librarium will not overwrite "${existing.source_name}".`,
+      });
+      continue;
+    }
+    customGroups.set(groupId, {
+      source_name: name,
+      members: migration.groups[name] ?? [],
+    });
+  }
+
+  /** Split a group member into its provider and optional profile reference. */
+  const parseGroupMember = (
+    member: string,
+  ):
+    | { readonly provider_id: string; readonly profile_id?: string }
+    | undefined => {
+    const parts = member.split('/');
+    if (parts.length > 2) return undefined;
+    const [providerId, profileId] = parts;
+    if (!providerId) return undefined;
+    if (parts.length === 2 && !profileId) return undefined;
+    return {
+      provider_id: providerId,
+      ...(profileId !== undefined && { profile_id: profileId }),
+    };
+  };
+
+  const groupMemberMatches = (member: string): ResolvedCatalogProfile[] => {
+    const parsed = parseGroupMember(member);
+    if (!parsed) return [];
+    // A bare provider id is a roster entry, not an explicit target: it
+    // intentionally fans out to that provider's profiles for legacy group
+    // compatibility. Ambiguity is only rejected by the explicit-target selector.
+    return resolved.filter(
+      (item) =>
+        item.profile.identity.provider_id === parsed.provider_id &&
+        (parsed.profile_id === undefined ||
+          item.declaration.profile_id === parsed.profile_id),
+    );
+  };
 
   const customGroupIdentities = (
     groupId: string,
   ): ProviderIdentity[] | undefined => {
-    const members = customGroups.get(groupId);
-    if (!members) return undefined;
+    const group = customGroups.get(groupId);
+    if (!group) return undefined;
     const identities: ProviderIdentity[] = [];
-    for (const member of members) {
-      const [providerId, profileId] = member.includes('/')
-        ? member.split('/', 2)
-        : [member, undefined];
-      const matches = resolved.filter(
-        (item) =>
-          item.profile.identity.provider_id === providerId &&
-          (profileId === undefined ||
-            item.declaration.profile_id === profileId),
-      );
-      for (const match of matches) {
+    for (const member of group.members) {
+      for (const match of groupMemberMatches(member)) {
         if (match.availability.selectable)
           identities.push(match.profile.identity);
       }
     }
     return identities;
   };
+
+  /**
+   * A configured reference that names nothing the catalog can ever execute is a
+   * configuration error, not an availability outcome. Both cases still resolve
+   * to an omission so the planner keeps behaving exactly as before, but neither
+   * disappears without an actionable, path-addressed diagnostic.
+   *
+   * A profile that exists and is bound but is disabled, uncredentialed, or
+   * misconfigured is deliberately *not* reported here: that is availability,
+   * and the planner already explains it.
+   */
+  const referenceIssue = (
+    kind: 'default' | 'reserve',
+    path: string,
+    key: string,
+  ): PreparationIssue | undefined => {
+    const found = byKey.get(key);
+    if (found?.binding) return undefined;
+    return found
+      ? {
+          code: `configured_${kind}_unbound_profile`,
+          phase: 'validation',
+          path,
+          message: `Configured ${kind} "${key}" is a planned profile with no implementation and can never be selected. Remove it or choose an implemented profile.`,
+          profile_key: key,
+        }
+      : {
+          code: `configured_${kind}_unknown_profile`,
+          phase: 'validation',
+          path,
+          message: `Configured ${kind} "${key}" is not a known provider profile. Check the provider and profile ids.`,
+          profile_key: key,
+        };
+  };
+
+  configuredDefaults.forEach((target, index) => {
+    const issue = referenceIssue(
+      'default',
+      `/defaults/${index}`,
+      catalogProfileKey(target.provider_id, target.profile_id),
+    );
+    if (issue) issues.push(issue);
+  });
+
+  configuredReserve.forEach((target, index) => {
+    const issue = referenceIssue(
+      'reserve',
+      `/reserve/${index}`,
+      catalogProfileKey(target.provider_id, target.profile_id),
+    );
+    if (issue) issues.push(issue);
+  });
+
+  for (const group of customGroups.values()) {
+    group.members.forEach((member, index) => {
+      const path = `/groups/${group.source_name}/${index}`;
+      if (!parseGroupMember(member)) {
+        issues.push({
+          code: 'custom_group_member_malformed',
+          phase: 'validation',
+          path,
+          message: `Group member "${member}" is not a provider id or a "provider/profile" reference.`,
+        });
+        return;
+      }
+      const matches = groupMemberMatches(member);
+      if (matches.length === 0) {
+        issues.push({
+          code: 'custom_group_member_unknown_profile',
+          phase: 'validation',
+          path,
+          message: `Group member "${member}" does not match any known provider profile. Check the provider and profile ids.`,
+          profile_key: member,
+        });
+        return;
+      }
+      if (!matches.some((match) => match.binding)) {
+        issues.push({
+          code: 'custom_group_member_unbound_profile',
+          phase: 'validation',
+          path,
+          message: `Group member "${member}" only matches planned profiles with no implementation and can never be selected. Remove it or choose an implemented profile.`,
+          profile_key: member,
+        });
+      }
+    });
+  }
+
+  issues.sort((left, right) =>
+    left.path === right.path
+      ? left.code < right.code
+        ? -1
+        : left.code > right.code
+          ? 1
+          : 0
+      : left.path < right.path
+        ? -1
+        : 1,
+  );
 
   const targetIdentities = (
     targets: readonly CatalogProfileTarget[],
@@ -380,12 +549,12 @@ export function buildProviderCatalog(
       members: workflowMembers(id).members,
     })),
     groups: Object.fromEntries(
-      [...customGroups].sort(([left], [right]) =>
-        left < right ? -1 : left > right ? 1 : 0,
-      ),
+      [...customGroups]
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([groupId, group]) => [groupId, group.members]),
     ),
-    defaults: options.defaults ?? [],
-    reserve: options.reserve ?? [],
+    defaults: configuredDefaults,
+    reserve: configuredReserve,
   });
 
   const catalog: ProviderCatalog = {
@@ -413,8 +582,8 @@ export function buildProviderCatalog(
       // An explicit default roster wins; otherwise v1 behaviour is preserved as
       // the ordered set of enabled, selectable profiles -- never `quick` and
       // never `all` by name.
-      if (options.defaults && options.defaults.length > 0) {
-        return targetIdentities(options.defaults, true);
+      if (configuredDefaults.length > 0) {
+        return targetIdentities(configuredDefaults, true);
       }
       return resolved
         .filter((item) => item.availability.selectable)
@@ -430,7 +599,7 @@ export function buildProviderCatalog(
       // notices to emit, so unavailable members are passed through rather than
       // silently dropped. Only duplicates of a primary are removed here, since
       // an identity may appear at most once globally.
-      return targetIdentities(options.reserve ?? [], false).filter(
+      return targetIdentities(configuredReserve, false).filter(
         (identity) =>
           !primaryKeys.has(
             catalogProfileKey(identity.provider_id, identity.profile_id),
