@@ -1,6 +1,6 @@
 {
-  "generator": "jkudish/laravel-ai-librarium",
-  "generator_version": "1.0.0-rc.1+build.7",
+  "generator": "jkudish/librarium",
+  "generator_version": "1.4.1",
   "request_id": "req-contract-001",
   "status": "succeeded",
   "completed_at": "2026-08-08T00:00:11Z",
@@ -148,6 +148,11 @@
           "correlation_keys": {
             "com.brave:requestId": "brave-request-public-001"
           }
+        },
+        "effective_target": {
+          "source": "provider_reported",
+          "kind": "model",
+          "target_id": "brave-reported-model"
         }
       }
     }

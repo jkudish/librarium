@@ -47,6 +47,7 @@ import {
   representativeRequest,
   representativeRunManifest,
   representativeSearchRequest,
+  surfaceObservationPrimaryProfile,
   representativeSurfaceContextRequest,
   representativeUnsuccessfulResponse,
   SNAPSHOT_GENERATED_AT,
@@ -1131,6 +1132,75 @@ const representativeSharedFailedResponse = {
   sources: [],
 };
 
+const representativeSharedEffectiveTargetResponse = clone(
+  representativeSharedSucceededResponse,
+);
+representativeSharedEffectiveTargetResponse.results[0]!.provenance.effective_target =
+  {
+    source: 'provider_reported',
+    kind: 'model',
+    target_id: 'brave-reported-model',
+  };
+
+const representativeSharedSurfaceObservationResponse = clone(
+  representativeSharedSucceededResponse,
+);
+const sharedSurfaceResult =
+  representativeSharedSurfaceObservationResponse.results[0]!;
+sharedSurfaceResult.provenance.requested_profile = clone(
+  surfaceObservationPrimaryProfile,
+);
+sharedSurfaceResult.provenance.effective_profile = clone(
+  surfaceObservationPrimaryProfile,
+);
+sharedSurfaceResult.provenance.collection = {
+  provider: clone(surfaceObservationPrimaryProfile.identity),
+  access_mode: 'collected',
+  operator_id: 'google',
+  collector_id: 'searchapi',
+  surface_id: 'google_ai_mode',
+  surface_context: clone(surfaceObservationPrimaryProfile.surface_context!),
+  origin_key: 'origin-searchapi-google-ai-mode',
+};
+sharedSurfaceResult.semantic_facts = {
+  result_kinds: ['surface_observation'],
+  grounding_outcome: 'not_used',
+  observation_mode: 'surface_snapshot',
+  corpora: ['web'],
+  retrieval_methods: ['surface_collector'],
+  measured_surface_id: 'google_ai_mode',
+  observed_at: '2026-08-08T00:00:05Z',
+};
+sharedSurfaceResult.citations[0]!.provenance = {
+  provider: clone(surfaceObservationPrimaryProfile.identity),
+  access_mode: 'collected',
+  operator_id: 'google',
+  collector_id: 'searchapi',
+  surface_id: 'google_ai_mode',
+  surface_context: clone(surfaceObservationPrimaryProfile.surface_context!),
+  origin_key: 'origin-searchapi-google-ai-mode',
+};
+
+const representativeSharedSpecializedDataRecordResponse = clone(
+  representativeSharedSucceededResponse,
+);
+representativeSharedSpecializedDataRecordResponse.results = [
+  toSharedResult(representativeSpecializedResponse.results[0]!),
+];
+representativeSharedSpecializedDataRecordResponse.sources = [
+  {
+    source_id: 'source-specialized-record-001',
+    provider_reference: 'record-public-001',
+    source_kind: 'data_record',
+    source_category: 'patent_record',
+    dataset_id: 'dataset-public-001',
+    citation_ids: [
+      representativeSharedSpecializedDataRecordResponse.results[0]!
+        .citations[0]!.citation_id,
+    ],
+  },
+];
+
 const invalidSharedGenericVersion = {
   ...clone(representativeSharedSucceededResponse),
   version: '1.0.0',
@@ -1196,7 +1266,7 @@ const invalidSharedOversizedReceipt = {
 const representativeSharedPhpSucceededResponse = {
   ...clone(representativeSharedSucceededResponse),
   generator: 'jkudish/laravel-ai-librarium',
-  generator_version: '2.0.0-rc.1+build.7',
+  generator_version: '1.0.0-rc.1+build.7',
 };
 const invalidSharedResultExecutionField = clone(
   representativeSharedSucceededResponse,
@@ -2194,6 +2264,30 @@ const sharedFixtureDefinitions = [
     valid: true,
     path: 'fixtures/valid/research-response-failed.json',
     payload: representativeSharedFailedResponse,
+  },
+  {
+    id: 'valid.research_response_provider_reported_effective_target',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-provider-reported-effective-target.json',
+    payload: representativeSharedEffectiveTargetResponse,
+  },
+  {
+    id: 'valid.research_response_surface_observation',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-surface-observation.json',
+    payload: representativeSharedSurfaceObservationResponse,
+  },
+  {
+    id: 'valid.research_response_specialized_data_record',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-specialized-data-record.json',
+    payload: representativeSharedSpecializedDataRecordResponse,
   },
   {
     id: 'invalid.research_response_missing_receipt',

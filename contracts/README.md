@@ -3,10 +3,11 @@
 `contracts/v1/` is the TypeScript Librarium repository's canonical, offline
 contract snapshot. It contains four deliberately separate schema bundles:
 domain leaves, TypeScript artifacts, the trusted custom-provider protocol, and
-the narrow TypeScript/PHP interchange. The shared interchange is only the
-terminal `ResearchResponse` and `ResearchResult` boundary. Every response
-carries its actual producer receipt (`generator` and `generator_version`) and
-has only `succeeded`, `partial`, or `failed` status.
+the narrow TypeScript/PHP interchange. `ResearchResponse` and `ResearchResult`
+form its shared terminal envelope, including their approved nested domain leaves
+such as citations, normalized sources, usage, errors, and provenance. Every
+response carries its actual producer receipt (`generator` and
+`generator_version`) and has only `succeeded`, `partial`, or `failed` status.
 
 The snapshot is generated from the Zod 4 schemas under `src/contracts/` with:
 
@@ -117,9 +118,10 @@ preserve payload compatibility and meaning may use a patch version.
 
 ## Shared terminal boundary and TypeScript-internal types
 
-`ResearchResponse` and `ResearchResult` are the only approved shared runtime
-boundary. The table below is explicitly TypeScript-internal migration guidance
-for adapter and execution schemas; it is not a PHP parity map.
+`ResearchResponse` and `ResearchResult`, including their approved nested domain
+leaves, are the shared runtime boundary. The table below is explicitly
+TypeScript-internal migration guidance for adapter and execution schemas; it is
+not a PHP parity map.
 
 | Existing TypeScript name | TypeScript-internal schema destination |
 | --- | --- |

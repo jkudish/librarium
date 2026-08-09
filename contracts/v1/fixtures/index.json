@@ -1091,6 +1091,30 @@
       "schema_ref": "#/$defs/research_response"
     },
     {
+      "id": "valid.research_response_provider_reported_effective_target",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/research-response-provider-reported-effective-target.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response"
+    },
+    {
+      "id": "valid.research_response_surface_observation",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/research-response-surface-observation.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response"
+    },
+    {
+      "id": "valid.research_response_specialized_data_record",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/research-response-specialized-data-record.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response"
+    },
+    {
       "id": "invalid.research_response_missing_receipt",
       "area": "interchange",
       "valid": false,

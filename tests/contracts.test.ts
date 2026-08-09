@@ -722,6 +722,68 @@ describe('canonical v2 contracts', () => {
     ).toBe(false);
   });
 
+  it('publishes shared terminal fixtures for effective targets, surface observations, and specialized records', () => {
+    const effectiveTarget = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-provider-reported-effective-target.json',
+        ),
+      ),
+    );
+    expect(effectiveTarget.results[0]!.provenance.effective_target).toEqual({
+      source: 'provider_reported',
+      kind: 'model',
+      target_id: 'brave-reported-model',
+    });
+
+    const surface = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-surface-observation.json',
+        ),
+      ),
+    );
+    expect(surface.results[0]!.provenance.effective_profile).toMatchObject({
+      observation_mode: 'surface_snapshot',
+      retrieval_method: 'surface_collector',
+      access_mode: 'collected',
+      collector_id: 'searchapi',
+      surface_id: 'google_ai_mode',
+    });
+    expect(surface.results[0]!.semantic_facts).toMatchObject({
+      observation_mode: 'surface_snapshot',
+      measured_surface_id: 'google_ai_mode',
+    });
+
+    const specialized = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-specialized-data-record.json',
+        ),
+      ),
+    );
+    expect(specialized.results[0]!.citations[0]).toMatchObject({
+      source_kind: 'data_record',
+      source_category: 'patent_record',
+      dataset_id: 'dataset-public-001',
+      provider_reference: 'record-public-001',
+    });
+    expect(specialized.results[0]!.citations[0]).not.toHaveProperty('url');
+    expect(specialized.sources[0]).toMatchObject({
+      source_kind: 'data_record',
+      provider_reference: 'record-public-001',
+    });
+  });
+
   it('keeps interchange semantic keys snake_case and excludes forbidden architecture fields', () => {
     const keys = new Set<string>();
     for (const fixture of fixtureIndex.fixtures.filter(

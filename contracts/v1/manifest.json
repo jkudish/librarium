@@ -970,6 +970,27 @@
       ]
     },
     {
+      "path": "fixtures/valid/research-response-provider-reported-effective-target.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/research-response-surface-observation.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/research-response-specialized-data-record.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
       "path": "fixtures/invalid/research-response-missing-receipt.json",
       "role": "fixture",
       "areas": [
