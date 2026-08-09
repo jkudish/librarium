@@ -14,6 +14,18 @@ import {
 } from '../domain/index.js';
 import { ResearchResultSchema } from './research-result.js';
 
+const compareRfc3339Utc = (left: string, right: string): number => {
+  const [leftSecond, leftFraction = ''] = left.slice(0, -1).split('.');
+  const [rightSecond, rightFraction = ''] = right.slice(0, -1).split('.');
+  if (leftSecond !== rightSecond) return leftSecond < rightSecond ? -1 : 1;
+
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const normalizedLeft = leftFraction.padEnd(width, '0');
+  const normalizedRight = rightFraction.padEnd(width, '0');
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+};
+
 /** Development snapshot family, deliberately independent of execution schemas. */
 export const RESEARCH_RESPONSE_CONTRACT_VERSION = '1.0.0' as const;
 
@@ -79,7 +91,7 @@ export const ResearchResponseSchema = z
       z.infer<typeof ResearchResultSchema>['citations'][number]
     >();
     response.results.forEach((result, resultIndex) => {
-      if (Date.parse(result.completed_at) > Date.parse(response.completed_at)) {
+      if (compareRfc3339Utc(result.completed_at, response.completed_at) > 0) {
         ctx.addIssue({
           code: 'custom',
           message: 'Response completed_at cannot precede a result completed_at',

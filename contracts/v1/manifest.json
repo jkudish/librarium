@@ -176,7 +176,7 @@
     {
       "rule_id": "research_response.profile_compatibility",
       "version": "1.0.0",
-      "description": "Effective terminal profiles preserve requested result, observation, grounding, corpus, and surface guarantees without exposing execution state."
+      "description": "Effective terminal profiles preserve requested result kind, observation lane, and measured surface without inferring hidden request requirements from provider capability profiles."
     },
     {
       "rule_id": "research_response.collection_profile_binding",
@@ -1153,7 +1153,7 @@
       ]
     },
     {
-      "path": "fixtures/invalid/research-response-requested-corpus.json",
+      "path": "fixtures/invalid/research-response-requested-result-kind.json",
       "role": "fixture",
       "areas": [
         "interchange"

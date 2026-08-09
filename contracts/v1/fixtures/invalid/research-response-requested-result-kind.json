@@ -94,11 +94,11 @@
               }
             }
           },
-          "result_kind": "grounded_answer",
+          "result_kind": "model_answer",
           "grounding_policy": "required",
           "observation_mode": "api_output",
           "corpora": [
-            "news"
+            "web"
           ],
           "retrieval_method": "model_search_tool",
           "access_mode": "direct",

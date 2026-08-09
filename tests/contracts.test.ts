@@ -793,6 +793,15 @@ describe('canonical v2 contracts', () => {
       measured_surface_id: 'google_ai_mode',
     });
 
+    const capabilityDifference = structuredClone(typescript.results[0]!);
+    capabilityDifference.provenance.requested_profile.corpora = ['web', 'news'];
+    capabilityDifference.provenance.effective_profile.corpora = ['web'];
+    capabilityDifference.provenance.effective_profile.grounding_policy =
+      'optional';
+    expect(ResearchResultSchema.safeParse(capabilityDifference).success).toBe(
+      true,
+    );
+
     const specialized = ResearchResponseSchema.parse(
       readJson(
         join(

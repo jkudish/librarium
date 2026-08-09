@@ -1333,15 +1333,15 @@
       "expected_issue_path": "/results/0/provenance/effective_profile"
     },
     {
-      "id": "invalid.research_response_requested_corpus",
+      "id": "invalid.research_response_requested_result_kind",
       "area": "interchange",
       "valid": false,
-      "path": "fixtures/invalid/research-response-requested-corpus.json",
+      "path": "fixtures/invalid/research-response-requested-result-kind.json",
       "schema_path": "schema/interchange.schema.json",
       "schema_ref": "#/$defs/research_response",
       "enforcement": "semantic_rule",
       "semantic_rule_id": "research_response.profile_compatibility",
-      "expected_issue_path": "/results/0/provenance/effective_profile/corpora/0"
+      "expected_issue_path": "/results/0/provenance/effective_profile/result_kind"
     },
     {
       "id": "invalid.research_response_citation_collection_binding",

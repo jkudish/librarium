@@ -68,26 +68,6 @@ export const ResearchResultSchema = z
         path: ['provenance', 'effective_profile', 'observation_mode'],
       });
     }
-    const groundingCompatible =
-      requested.grounding_policy === 'optional'
-        ? effective.grounding_policy === 'optional' ||
-          effective.grounding_policy === 'required'
-        : requested.grounding_policy === effective.grounding_policy;
-    if (!groundingCompatible) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Effective profile must satisfy requested grounding policy',
-        path: ['provenance', 'effective_profile', 'grounding_policy'],
-      });
-    }
-    requested.corpora.forEach((corpus, index) => {
-      if (!effective.corpora.includes(corpus))
-        ctx.addIssue({
-          code: 'custom',
-          message: 'Effective profile must include every requested corpus',
-          path: ['provenance', 'effective_profile', 'corpora', index],
-        });
-    });
     if (
       requested.result_kind === 'surface_observation' &&
       requested.surface_id !== effective.surface_id

@@ -1375,11 +1375,11 @@ const invalidSharedProfileExecutionField = clone(
 ) as Record<string, any>;
 invalidSharedProfileExecutionField.results[0].provenance.effective_profile.invocation =
   'inline';
-const invalidSharedRequestedCorpus = clone(
+const invalidSharedRequestedResultKind = clone(
   representativeSharedSucceededResponse,
 );
-invalidSharedRequestedCorpus.results[0]!.provenance.requested_profile.corpora =
-  ['news'];
+invalidSharedRequestedResultKind.results[0]!.provenance.requested_profile.result_kind =
+  'model_answer';
 const invalidSharedCitationCollectionBinding = clone(
   representativeSharedSucceededResponse,
 );
@@ -1388,7 +1388,9 @@ invalidSharedCitationCollectionBinding.results[0]!
 const invalidSharedSourceKind = clone(representativeSharedSucceededResponse);
 invalidSharedSourceKind.sources[0]!.source_kind = 'web_page';
 const invalidSharedChronology = clone(representativeSharedSucceededResponse);
-invalidSharedChronology.completed_at = '2026-08-08T00:00:04Z';
+invalidSharedChronology.results[0]!.completed_at =
+  '2026-08-08T00:00:05.0002Z';
+invalidSharedChronology.completed_at = '2026-08-08T00:00:05.0001Z';
 
 const fixtureDefinitions = [
   {
@@ -2542,13 +2544,14 @@ const sharedFixtureDefinitions = [
     payload: invalidSharedProfileExecutionField,
   },
   {
-    id: 'invalid.research_response_requested_corpus',
+    id: 'invalid.research_response_requested_result_kind',
     area: 'interchange',
     schema: 'research_response',
     valid: false,
-    expected_issue_path: '/results/0/provenance/effective_profile/corpora/0',
-    path: 'fixtures/invalid/research-response-requested-corpus.json',
-    payload: invalidSharedRequestedCorpus,
+    expected_issue_path:
+      '/results/0/provenance/effective_profile/result_kind',
+    path: 'fixtures/invalid/research-response-requested-result-kind.json',
+    payload: invalidSharedRequestedResultKind,
   },
   {
     id: 'invalid.research_response_citation_collection_binding',
@@ -2736,7 +2739,7 @@ const semanticFixtureRules: Record<string, string> = {
     'research_response.effective_target_coherence',
   'invalid.research_response_citation_provider':
     'citation.provider_identity_binding',
-  'invalid.research_response_requested_corpus':
+  'invalid.research_response_requested_result_kind':
     'research_response.profile_compatibility',
   'invalid.research_response_citation_collection_binding':
     'research_response.collection_profile_binding',
@@ -3001,7 +3004,7 @@ const manifest = {
       rule_id: 'research_response.profile_compatibility',
       version: '1.0.0',
       description:
-        'Effective terminal profiles preserve requested result, observation, grounding, corpus, and surface guarantees without exposing execution state.',
+        'Effective terminal profiles preserve requested result kind, observation lane, and measured surface without inferring hidden request requirements from provider capability profiles.',
     },
     {
       rule_id: 'research_response.collection_profile_binding',
