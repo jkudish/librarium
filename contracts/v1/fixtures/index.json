@@ -2,6 +2,70 @@
   "fixture_index_version": "1.0.0",
   "fixtures": [
     {
+      "id": "valid.target_configurable_model",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-configurable-model.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_configurable_agent",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-configurable-agent.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_fixed_preset_underlying_configurable_model",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-fixed-preset-underlying-configurable-model.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_provider_managed_known_kind",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-provider-managed-known-kind.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_provider_managed_unknown_kind",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-provider-managed-unknown-kind.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_provider_managed_agent_underlying_model",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-provider-managed-agent-underlying-model.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_distinct_kinds_shared_id",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-distinct-kinds-shared-id.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
+      "id": "valid.target_not_applicable",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-not-applicable.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
       "id": "valid.interchange_request",
       "area": "interchange",
       "valid": true,
@@ -38,6 +102,30 @@
       "area": "interchange",
       "valid": true,
       "path": "fixtures/valid/partial-response.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "valid.provider_reported_effective_target_response",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/provider-reported-effective-target-response.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "valid.nested_primary_effective_target_response",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/nested-primary-effective-target-response.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "valid.nested_underlying_effective_target_response",
+      "area": "interchange",
+      "valid": true,
+      "path": "fixtures/valid/nested-underlying-effective-target-response.json",
       "schema_path": "schema/interchange.schema.json",
       "schema_ref": "#/$defs/response"
     },
@@ -96,6 +184,126 @@
       "path": "fixtures/valid/specialized-data-record-response.json",
       "schema_path": "schema/interchange.schema.json",
       "schema_ref": "#/$defs/response"
+    },
+    {
+      "id": "invalid.target_configurable_missing_kind",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-configurable-missing-kind.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/kind"
+    },
+    {
+      "id": "invalid.target_configurable_missing_id",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-configurable-missing-id.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/target_id"
+    },
+    {
+      "id": "invalid.target_fixed_missing_kind",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-fixed-missing-kind.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/kind"
+    },
+    {
+      "id": "invalid.target_fixed_missing_id",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-fixed-missing-id.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/target_id"
+    },
+    {
+      "id": "invalid.target_provider_managed_id",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-provider-managed-id.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/target_id"
+    },
+    {
+      "id": "invalid.target_not_applicable_kind",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-not-applicable-kind.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/kind"
+    },
+    {
+      "id": "invalid.target_not_applicable_id",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-not-applicable-id.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.selection_coherence",
+      "expected_issue_path": "/target/primary/target_id"
+    },
+    {
+      "id": "invalid.target_underlying_primary_model",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-underlying-primary-model.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.underlying_coherence",
+      "expected_issue_path": "/target/underlying"
+    },
+    {
+      "id": "invalid.target_underlying_provider_managed",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-underlying-provider-managed.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.underlying_coherence",
+      "expected_issue_path": "/target/underlying/model_selection"
+    },
+    {
+      "id": "invalid.target_underlying_nested_agent",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-underlying-nested-agent.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "target.underlying_coherence",
+      "expected_issue_path": "/target/underlying/kind"
+    },
+    {
+      "id": "invalid.target_legacy_model_id",
+      "area": "domain",
+      "valid": false,
+      "path": "fixtures/invalid/target-legacy-model-id.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity",
+      "enforcement": "json_schema",
+      "expected_issue_path": ""
     },
     {
       "id": "invalid.request_unknown_field",
@@ -385,6 +593,17 @@
       "expected_issue_path": "/results/0/citations/0/url"
     },
     {
+      "id": "invalid.citation_provider_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/citation-provider-target.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "citation.provider_identity_binding",
+      "expected_issue_path": "/results/0/citations/0/provenance/provider"
+    },
+    {
       "id": "invalid.response_selected_attempt_status",
       "area": "interchange",
       "valid": false,
@@ -407,10 +626,43 @@
       "expected_issue_path": "/results/0/provenance/effective_profile"
     },
     {
+      "id": "invalid.response_effective_profile_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-effective-profile-target.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance/effective_profile"
+    },
+    {
+      "id": "invalid.response_requested_profile_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-requested-profile-target.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance/requested_profile"
+    },
+    {
       "id": "invalid.response_collection_provider",
       "area": "interchange",
       "valid": false,
       "path": "fixtures/invalid/response-collection-provider.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.lossless_references",
+      "expected_issue_path": "/results/0/provenance/collection/provider"
+    },
+    {
+      "id": "invalid.response_collection_provider_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-collection-provider-target.json",
       "schema_path": "schema/interchange.schema.json",
       "schema_ref": "#/$defs/response",
       "enforcement": "semantic_rule",
@@ -444,6 +696,17 @@
       "area": "interchange",
       "valid": false,
       "path": "fixtures/invalid/response-attempt-handle-provider.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "durable_handle.profile_identity_binding",
+      "expected_issue_path": "/attempts/2/durable_handle/provider"
+    },
+    {
+      "id": "invalid.response_attempt_handle_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-attempt-handle-target.json",
       "schema_path": "schema/interchange.schema.json",
       "schema_ref": "#/$defs/response",
       "enforcement": "semantic_rule",
@@ -504,6 +767,38 @@
       "enforcement": "semantic_rule",
       "semantic_rule_id": "response.semantic_profile_coherence",
       "expected_issue_path": "/results/0/semantic_facts/grounding_outcome"
+    },
+    {
+      "id": "invalid.response_effective_target_source",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-effective-target-source.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "json_schema",
+      "expected_issue_path": "/results/0/provenance/effective_target/source"
+    },
+    {
+      "id": "invalid.response_effective_target_kind",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-effective-target-kind.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.effective_target_coherence",
+      "expected_issue_path": "/results/0/provenance/effective_target/kind"
+    },
+    {
+      "id": "invalid.response_not_applicable_effective_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/response-not-applicable-effective-target.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "response.effective_target_coherence",
+      "expected_issue_path": "/results/0/provenance/effective_target"
     },
     {
       "id": "invalid.response_fallback_candidate_reuse",
@@ -588,6 +883,17 @@
       "enforcement": "semantic_rule",
       "semantic_rule_id": "custom_provider.result_binding",
       "expected_issue_path": "/response/result/provenance"
+    },
+    {
+      "id": "invalid.custom_provider_citation_target",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-citation-target.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "citation.provider_identity_binding",
+      "expected_issue_path": "/response/result/citations/0/provenance/provider"
     },
     {
       "id": "invalid.custom_provider_retrieve_running_handle",

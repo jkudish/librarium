@@ -1,0 +1,11 @@
+{
+  "provider_id": "example-provider-managed",
+  "profile_id": "answer",
+  "target": {
+    "primary": {
+      "model_selection": "provider_managed",
+      "kind": "model",
+      "target_id": "unreported-provider-target"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "provider_id": "example-provider-managed-agent",
+  "profile_id": "research",
+  "target": {
+    "primary": {
+      "model_selection": "provider_managed",
+      "kind": "agent"
+    },
+    "underlying": {
+      "model_selection": "configurable",
+      "kind": "model",
+      "target_id": "example-model-v3"
+    }
+  }
+}

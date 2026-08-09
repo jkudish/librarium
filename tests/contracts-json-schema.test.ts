@@ -1,5 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -201,6 +208,37 @@ describe('published Draft 2020-12 contracts', () => {
           );
         }
       }
+    } finally {
+      rmSync(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('rejects retired or otherwise unlisted snapshot files', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'librarium-stale-'));
+    const output = join(temporaryRoot, 'snapshot');
+
+    try {
+      mkdirSync(join(output, 'fixtures', 'invalid'), { recursive: true });
+      writeFileSync(
+        join(output, 'fixtures', 'invalid', 'retired-fixture.json'),
+        '{}\n',
+      );
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/generate-contract-snapshot.mjs'],
+        {
+          cwd: process.cwd(),
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            LIBRARIUM_CONTRACTS_OUTPUT: output,
+          },
+        },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Contract snapshot inventory mismatch');
+      expect(result.stderr).toContain('retired-fixture.json');
     } finally {
       rmSync(temporaryRoot, { force: true, recursive: true });
     }

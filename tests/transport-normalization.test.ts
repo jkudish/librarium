@@ -41,7 +41,17 @@ function groundedProfile(
   resumability: 'none' | 'durable' = 'none',
 ): ExecutionProfile {
   return {
-    identity: { provider_id: providerId, profile_id: 'grounded-web' },
+    identity: {
+      provider_id: providerId,
+      profile_id: 'grounded-web',
+      target: {
+        primary: {
+          model_selection: 'fixed',
+          kind: 'model',
+          target_id: `${providerId}-fixture-model`,
+        },
+      },
+    },
     result_kind: 'grounded_answer',
     grounding_policy: 'required',
     observation_mode: 'api_output',

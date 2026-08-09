@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { z } from 'zod/v4';
 import {
@@ -27,7 +27,10 @@ import {
   DurableHandleSchema,
   ExecutionProfileSchema,
   NormalizedSourceSchema,
+  ProfileTargetSchema,
+  ProfileTargetSlotSchema,
   ProviderIdentitySchema,
+  RuntimeEffectiveTargetSchema,
   SemanticFactsSchema,
   StructuredErrorSchema,
   SurfaceContextConstraintSchema,
@@ -77,6 +80,29 @@ function write(relativePath: string, value: unknown): string {
   const content = typeof value === 'string' ? value : canonicalJson(value);
   writeFileSync(resolveSnapshotWritePath(root, relativePath), content);
   return relativePath;
+}
+
+function listSnapshotFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? listSnapshotFiles(path) : [path];
+  });
+}
+
+function assertExactSnapshotInventory(expectedPaths: readonly string[]): void {
+  const actualPaths = listSnapshotFiles(root)
+    .map((path) => relative(root, path).replaceAll('\\', '/'))
+    .sort();
+  const expected = [...expectedPaths].sort();
+  if (JSON.stringify(actualPaths) === JSON.stringify(expected)) return;
+
+  const expectedSet = new Set(expected);
+  const actualSet = new Set(actualPaths);
+  const unexpected = actualPaths.filter((path) => !expectedSet.has(path));
+  const missing = expected.filter((path) => !actualSet.has(path));
+  throw new Error(
+    `Contract snapshot inventory mismatch; unexpected=[${unexpected.join(', ')}], missing=[${missing.join(', ')}]`,
+  );
 }
 
 function areaSchema(
@@ -140,7 +166,10 @@ const schemaFiles = [
         durable_handle: DurableHandleSchema,
         execution_profile: ExecutionProfileSchema,
         normalized_source: NormalizedSourceSchema,
+        profile_target: ProfileTargetSchema,
+        profile_target_slot: ProfileTargetSlotSchema,
         provider_identity: ProviderIdentitySchema,
+        runtime_effective_target: RuntimeEffectiveTargetSchema,
         semantic_facts: SemanticFactsSchema,
         structured_error: StructuredErrorSchema,
         surface_context: SurfaceContextSchema,
@@ -201,6 +230,187 @@ const schemaFiles = [
 ];
 
 const clone = <T>(value: T): T => structuredClone(value);
+
+const configurableModelIdentity = {
+  provider_id: 'example-configurable-model',
+  profile_id: 'chat',
+  target: {
+    primary: {
+      model_selection: 'configurable',
+      kind: 'model',
+      target_id: 'example-model-v1',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const configurableAgentIdentity = {
+  provider_id: 'example-configurable-agent',
+  profile_id: 'research',
+  target: {
+    primary: {
+      model_selection: 'configurable',
+      kind: 'agent',
+      target_id: 'example-research-agent',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const fixedModelIdentity = {
+  provider_id: 'example-fixed-model',
+  profile_id: 'grounded',
+  target: {
+    primary: {
+      model_selection: 'fixed',
+      kind: 'model',
+      target_id: 'example-fixed-model-v1',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const fixedPresetUnderlyingModelIdentity = {
+  provider_id: 'example-preset',
+  profile_id: 'deep-research',
+  target: {
+    primary: {
+      model_selection: 'fixed',
+      kind: 'preset',
+      target_id: 'deep-research',
+    },
+    underlying: {
+      model_selection: 'configurable',
+      kind: 'model',
+      target_id: 'example-model-v2',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const providerManagedKnownKindIdentity = {
+  provider_id: 'example-provider-managed',
+  profile_id: 'answer',
+  target: {
+    primary: {
+      model_selection: 'provider_managed',
+      kind: 'model',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const providerManagedUnknownKindIdentity = {
+  provider_id: 'example-provider-managed',
+  profile_id: 'unknown-target-kind',
+  target: {
+    primary: {
+      model_selection: 'provider_managed',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const providerManagedAgentUnderlyingIdentity = {
+  provider_id: 'example-provider-managed-agent',
+  profile_id: 'research',
+  target: {
+    primary: {
+      model_selection: 'provider_managed',
+      kind: 'agent',
+    },
+    underlying: {
+      model_selection: 'configurable',
+      kind: 'model',
+      target_id: 'example-model-v3',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const sharedIdNestedIdentity = {
+  provider_id: 'example-agent',
+  profile_id: 'shared-target-name',
+  target: {
+    primary: {
+      model_selection: 'fixed',
+      kind: 'agent',
+      target_id: 'shared-target-name',
+    },
+    underlying: {
+      model_selection: 'fixed',
+      kind: 'model',
+      target_id: 'shared-target-name',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const notApplicableIdentity = {
+  provider_id: 'example-search',
+  profile_id: 'search',
+  target: {
+    primary: {
+      model_selection: 'not_applicable',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const invalidConfigurableTargetMissingKind = clone(
+  configurableModelIdentity,
+) as Record<string, any>;
+delete invalidConfigurableTargetMissingKind.target.primary.kind;
+
+const invalidConfigurableTargetMissingId = clone(
+  configurableModelIdentity,
+) as Record<string, any>;
+delete invalidConfigurableTargetMissingId.target.primary.target_id;
+
+const invalidFixedTargetMissingKind = clone(fixedModelIdentity) as Record<
+  string,
+  any
+>;
+delete invalidFixedTargetMissingKind.target.primary.kind;
+
+const invalidFixedTargetMissingId = clone(fixedModelIdentity) as Record<
+  string,
+  any
+>;
+delete invalidFixedTargetMissingId.target.primary.target_id;
+
+const invalidProviderManagedTargetId = clone(
+  providerManagedKnownKindIdentity,
+) as Record<string, any>;
+invalidProviderManagedTargetId.target.primary.target_id =
+  'unreported-provider-target';
+
+const invalidNotApplicableTargetKind = clone(notApplicableIdentity) as Record<
+  string,
+  any
+>;
+invalidNotApplicableTargetKind.target.primary.kind = 'model';
+
+const invalidNotApplicableTargetId = clone(notApplicableIdentity) as Record<
+  string,
+  any
+>;
+invalidNotApplicableTargetId.target.primary.target_id = 'forbidden-target';
+
+const invalidUnderlyingPrimaryModel = clone(
+  fixedPresetUnderlyingModelIdentity,
+) as Record<string, any>;
+invalidUnderlyingPrimaryModel.target.primary.kind = 'model';
+
+const invalidUnderlyingProviderManaged = clone(
+  fixedPresetUnderlyingModelIdentity,
+) as Record<string, any>;
+invalidUnderlyingProviderManaged.target.underlying = {
+  model_selection: 'provider_managed',
+  kind: 'model',
+};
+
+const invalidUnderlyingNestedAgent = clone(
+  fixedPresetUnderlyingModelIdentity,
+) as Record<string, any>;
+invalidUnderlyingNestedAgent.target.underlying.kind = 'agent';
+
+const invalidLegacyModelId = clone(configurableModelIdentity) as Record<
+  string,
+  any
+>;
+invalidLegacyModelId.model_id = 'legacy-model-id';
 
 const invalidRequestUnknown = clone(representativeRequest) as Record<
   string,
@@ -347,6 +557,14 @@ const invalidCitationLocator = clone(representativePartialResponse) as Record<
 delete invalidCitationLocator.results[0].citations[0].url;
 delete invalidCitationLocator.results[0].citations[0].provider_reference;
 
+const invalidCitationProviderTarget = clone(representativePartialResponse);
+invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider =
+  clone(
+    invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider,
+  );
+invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider.target.primary.target_id =
+  'mismatched-citation-target';
+
 const invalidSelectedAttempt = clone(representativePartialResponse);
 invalidSelectedAttempt.slots[0]!.selected_attempt_id =
   'attempt-grounded-primary';
@@ -359,12 +577,34 @@ invalidEffectiveProfile
   .results[0]!.provenance.effective_profile.identity.profile_id =
   'mismatched-profile';
 
+const invalidEffectiveProfileTarget = clone(representativePartialResponse);
+invalidEffectiveProfileTarget.results[0]!.provenance.effective_profile = clone(
+  invalidEffectiveProfileTarget.results[0]!.provenance.effective_profile,
+);
+invalidEffectiveProfileTarget.results[0]!.provenance.effective_profile.identity.target.primary.target_id =
+  'mismatched-target';
+
+const invalidRequestedProfileTarget = clone(representativePartialResponse);
+invalidRequestedProfileTarget.results[0]!.provenance.requested_profile = clone(
+  invalidRequestedProfileTarget.results[0]!.provenance.requested_profile,
+);
+invalidRequestedProfileTarget.results[0]!.provenance.requested_profile.identity.target.primary.target_id =
+  'mismatched-requested-target';
+
 const invalidCollectionProvider = clone(representativePartialResponse);
 invalidCollectionProvider.results[0]!.provenance.collection.provider = clone(
   invalidCollectionProvider.results[0]!.provenance.collection.provider,
 );
 invalidCollectionProvider
   .results[0]!.provenance.collection.provider.profile_id = 'mismatched-profile';
+
+const invalidCollectionProviderTarget = clone(representativePartialResponse);
+invalidCollectionProviderTarget.results[0]!.provenance.collection.provider =
+  clone(
+    invalidCollectionProviderTarget.results[0]!.provenance.collection.provider,
+  );
+invalidCollectionProviderTarget.results[0]!.provenance.collection.provider.target.primary.target_id =
+  'mismatched-target';
 
 const invalidReplacementProvenance = clone(
   representativePartialResponse,
@@ -431,6 +671,17 @@ const invalidCustomProviderResultIdentifiers = clone(
 );
 invalidCustomProviderResultIdentifiers.response.result.provenance.slot_id =
   'slot-does-not-match';
+
+const invalidCustomProviderCitationTarget = clone(
+  representativeCustomProviderExchange,
+);
+invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance.provider =
+  clone(
+    invalidCustomProviderCitationTarget.response.result.citations[0]!
+      .provenance.provider,
+  );
+invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance.provider.target.primary.target_id =
+  'mismatched-custom-citation-target';
 
 const invalidRunManifestSlotOrder = clone(representativeRunManifest);
 invalidRunManifestSlotOrder.response.slots.reverse();
@@ -566,6 +817,13 @@ invalidAttemptHandleProvider.attempts[2]!.durable_handle!.provider = {
   provider_id: 'different-provider',
 };
 
+const invalidAttemptHandleTarget = clone(representativePartialResponse);
+invalidAttemptHandleTarget.attempts[2]!.durable_handle!.provider = clone(
+  invalidAttemptHandleTarget.attempts[2]!.durable_handle!.provider,
+);
+invalidAttemptHandleTarget.attempts[2]!.durable_handle!.provider.target.primary.target_id =
+  'different-target';
+
 const invalidRetrieveRunningHandle = {
   request: {
     protocol_version: '1.0.0',
@@ -603,6 +861,88 @@ invalidResultNoneGrounding.attempts[1]!.profile.grounding_policy = 'none';
 invalidResultNoneGrounding.results[0]!.provenance.effective_profile
   .grounding_policy = 'none';
 
+const representativeReportedEffectiveTargetResponse = clone(
+  representativePartialResponse,
+);
+representativeReportedEffectiveTargetResponse.results[0]!.provenance.effective_target =
+  {
+    source: 'provider_reported',
+    kind: 'model',
+    target_id: 'brave-reported-model',
+  };
+
+const representativeNestedPrimaryTargetResponse = clone(
+  representativePartialResponse,
+);
+const nestedTargetProfile = clone(
+  representativeNestedPrimaryTargetResponse.attempts[1]!.profile,
+);
+nestedTargetProfile.identity.target = {
+  primary: {
+    model_selection: 'fixed',
+    kind: 'preset',
+    target_id: 'answers',
+  },
+  underlying: {
+    model_selection: 'fixed',
+    kind: 'model',
+    target_id: 'brave',
+  },
+};
+representativeNestedPrimaryTargetResponse.attempts[1]!.profile =
+  clone(nestedTargetProfile);
+representativeNestedPrimaryTargetResponse.results[0]!.provenance.effective_profile =
+  clone(nestedTargetProfile);
+representativeNestedPrimaryTargetResponse.results[0]!.provenance.collection.provider =
+  clone(nestedTargetProfile.identity);
+representativeNestedPrimaryTargetResponse.results[0]!.citations[0]!.provenance.provider =
+  clone(nestedTargetProfile.identity);
+representativeNestedPrimaryTargetResponse.results[0]!.provenance.effective_target =
+  {
+    source: 'provider_reported',
+    kind: 'preset',
+    target_id: 'answers',
+  };
+
+const representativeNestedUnderlyingTargetResponse = clone(
+  representativeNestedPrimaryTargetResponse,
+);
+representativeNestedUnderlyingTargetResponse.results[0]!.provenance.effective_target =
+  {
+    source: 'provider_reported',
+    kind: 'model',
+    target_id: 'brave',
+  };
+
+const invalidEffectiveTargetSource = clone(
+  representativeReportedEffectiveTargetResponse,
+) as Record<string, any>;
+invalidEffectiveTargetSource.results[0].provenance.effective_target.source =
+  'configured';
+
+const invalidEffectiveTargetKind = clone(
+  representativeReportedEffectiveTargetResponse,
+);
+invalidEffectiveTargetKind.results[0]!.provenance.effective_target!.kind =
+  'agent';
+
+const invalidNotApplicableEffectiveTarget = clone(
+  representativeReportedEffectiveTargetResponse,
+);
+const notApplicableTargetProfile = clone(
+  invalidNotApplicableEffectiveTarget.attempts[1]!.profile,
+);
+notApplicableTargetProfile.identity.target = clone(notApplicableIdentity.target);
+invalidNotApplicableEffectiveTarget.attempts[1]!.profile = clone(
+  notApplicableTargetProfile,
+);
+invalidNotApplicableEffectiveTarget.results[0]!.provenance.effective_profile =
+  clone(notApplicableTargetProfile);
+invalidNotApplicableEffectiveTarget.results[0]!.provenance.collection.provider =
+  clone(notApplicableTargetProfile.identity);
+invalidNotApplicableEffectiveTarget.results[0]!.citations[0]!.provenance.provider =
+  clone(notApplicableTargetProfile.identity);
+
 const invalidSurfaceProfileMissingIdentity = clone(
   representativeSurfaceContextRequest,
 ) as Record<string, any>;
@@ -626,6 +966,12 @@ const apiProxyProfile = {
   identity: {
     provider_id: 'google-gemini-api',
     profile_id: 'google-ai-mode-api-proxy',
+    target: {
+      primary: {
+        model_selection: 'provider_managed' as const,
+        kind: 'model' as const,
+      },
+    },
   },
   result_kind: 'surface_observation' as const,
   grounding_policy: 'optional' as const,
@@ -651,6 +997,12 @@ representativeApiProxySurfaceRequest.fallback_reserve[0]!.profile = {
   identity: {
     provider_id: 'openai-api',
     profile_id: 'google-ai-mode-api-proxy-comparison',
+    target: {
+      primary: {
+        model_selection: 'provider_managed',
+        kind: 'model',
+      },
+    },
   },
   operator_id: 'openai',
 };
@@ -725,6 +1077,71 @@ invalidSourceCategoryTooLong.results[0]!.citations[0]!.source_category =
 
 const fixtureDefinitions = [
   {
+    id: 'valid.target_configurable_model',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-configurable-model.json',
+    payload: configurableModelIdentity,
+  },
+  {
+    id: 'valid.target_configurable_agent',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-configurable-agent.json',
+    payload: configurableAgentIdentity,
+  },
+  {
+    id: 'valid.target_fixed_preset_underlying_configurable_model',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path:
+      'fixtures/valid/target-fixed-preset-underlying-configurable-model.json',
+    payload: fixedPresetUnderlyingModelIdentity,
+  },
+  {
+    id: 'valid.target_provider_managed_known_kind',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-provider-managed-known-kind.json',
+    payload: providerManagedKnownKindIdentity,
+  },
+  {
+    id: 'valid.target_provider_managed_unknown_kind',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-provider-managed-unknown-kind.json',
+    payload: providerManagedUnknownKindIdentity,
+  },
+  {
+    id: 'valid.target_provider_managed_agent_underlying_model',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-provider-managed-agent-underlying-model.json',
+    payload: providerManagedAgentUnderlyingIdentity,
+  },
+  {
+    id: 'valid.target_distinct_kinds_shared_id',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-distinct-kinds-shared-id.json',
+    payload: sharedIdNestedIdentity,
+  },
+  {
+    id: 'valid.target_not_applicable',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-not-applicable.json',
+    payload: notApplicableIdentity,
+  },
+  {
     id: 'valid.interchange_request',
     area: 'interchange',
     schema: 'interchange_request',
@@ -763,6 +1180,30 @@ const fixtureDefinitions = [
     valid: true,
     path: 'fixtures/valid/partial-response.json',
     payload: representativePartialResponse,
+  },
+  {
+    id: 'valid.provider_reported_effective_target_response',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: true,
+    path: 'fixtures/valid/provider-reported-effective-target-response.json',
+    payload: representativeReportedEffectiveTargetResponse,
+  },
+  {
+    id: 'valid.nested_primary_effective_target_response',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: true,
+    path: 'fixtures/valid/nested-primary-effective-target-response.json',
+    payload: representativeNestedPrimaryTargetResponse,
+  },
+  {
+    id: 'valid.nested_underlying_effective_target_response',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: true,
+    path: 'fixtures/valid/nested-underlying-effective-target-response.json',
+    payload: representativeNestedUnderlyingTargetResponse,
   },
   {
     id: 'valid.lifecycle_trace',
@@ -819,6 +1260,105 @@ const fixtureDefinitions = [
     valid: true,
     path: 'fixtures/valid/specialized-data-record-response.json',
     payload: representativeSpecializedResponse,
+  },
+  {
+    id: 'invalid.target_configurable_missing_kind',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/kind',
+    path: 'fixtures/invalid/target-configurable-missing-kind.json',
+    payload: invalidConfigurableTargetMissingKind,
+  },
+  {
+    id: 'invalid.target_configurable_missing_id',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/target_id',
+    path: 'fixtures/invalid/target-configurable-missing-id.json',
+    payload: invalidConfigurableTargetMissingId,
+  },
+  {
+    id: 'invalid.target_fixed_missing_kind',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/kind',
+    path: 'fixtures/invalid/target-fixed-missing-kind.json',
+    payload: invalidFixedTargetMissingKind,
+  },
+  {
+    id: 'invalid.target_fixed_missing_id',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/target_id',
+    path: 'fixtures/invalid/target-fixed-missing-id.json',
+    payload: invalidFixedTargetMissingId,
+  },
+  {
+    id: 'invalid.target_provider_managed_id',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/target_id',
+    path: 'fixtures/invalid/target-provider-managed-id.json',
+    payload: invalidProviderManagedTargetId,
+  },
+  {
+    id: 'invalid.target_not_applicable_kind',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/kind',
+    path: 'fixtures/invalid/target-not-applicable-kind.json',
+    payload: invalidNotApplicableTargetKind,
+  },
+  {
+    id: 'invalid.target_not_applicable_id',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/primary/target_id',
+    path: 'fixtures/invalid/target-not-applicable-id.json',
+    payload: invalidNotApplicableTargetId,
+  },
+  {
+    id: 'invalid.target_underlying_primary_model',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/underlying',
+    path: 'fixtures/invalid/target-underlying-primary-model.json',
+    payload: invalidUnderlyingPrimaryModel,
+  },
+  {
+    id: 'invalid.target_underlying_provider_managed',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/underlying/model_selection',
+    path: 'fixtures/invalid/target-underlying-provider-managed.json',
+    payload: invalidUnderlyingProviderManaged,
+  },
+  {
+    id: 'invalid.target_underlying_nested_agent',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '/target/underlying/kind',
+    path: 'fixtures/invalid/target-underlying-nested-agent.json',
+    payload: invalidUnderlyingNestedAgent,
+  },
+  {
+    id: 'invalid.target_legacy_model_id',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/target-legacy-model-id.json',
+    payload: invalidLegacyModelId,
   },
   {
     id: 'invalid.request_unknown_field',
@@ -1065,6 +1605,15 @@ const fixtureDefinitions = [
     payload: invalidCitationLocator,
   },
   {
+    id: 'invalid.citation_provider_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/provenance/provider',
+    path: 'fixtures/invalid/citation-provider-target.json',
+    payload: invalidCitationProviderTarget,
+  },
+  {
     id: 'invalid.response_selected_attempt_status',
     area: 'interchange',
     schema: 'interchange_response',
@@ -1083,6 +1632,24 @@ const fixtureDefinitions = [
     payload: invalidEffectiveProfile,
   },
   {
+    id: 'invalid.response_effective_profile_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_profile',
+    path: 'fixtures/invalid/response-effective-profile-target.json',
+    payload: invalidEffectiveProfileTarget,
+  },
+  {
+    id: 'invalid.response_requested_profile_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/requested_profile',
+    path: 'fixtures/invalid/response-requested-profile-target.json',
+    payload: invalidRequestedProfileTarget,
+  },
+  {
     id: 'invalid.response_collection_provider',
     area: 'interchange',
     schema: 'interchange_response',
@@ -1090,6 +1657,15 @@ const fixtureDefinitions = [
     expected_issue_path: '/results/0/provenance/collection/provider',
     path: 'fixtures/invalid/response-collection-provider.json',
     payload: invalidCollectionProvider,
+  },
+  {
+    id: 'invalid.response_collection_provider_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/collection/provider',
+    path: 'fixtures/invalid/response-collection-provider-target.json',
+    payload: invalidCollectionProviderTarget,
   },
   {
     id: 'invalid.response_replacement_provenance',
@@ -1117,6 +1693,15 @@ const fixtureDefinitions = [
     expected_issue_path: '/attempts/2/durable_handle/provider',
     path: 'fixtures/invalid/response-attempt-handle-provider.json',
     payload: invalidAttemptHandleProvider,
+  },
+  {
+    id: 'invalid.response_attempt_handle_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/attempts/2/durable_handle/provider',
+    path: 'fixtures/invalid/response-attempt-handle-target.json',
+    payload: invalidAttemptHandleTarget,
   },
   {
     id: 'invalid.response_semantic_facts',
@@ -1162,6 +1747,33 @@ const fixtureDefinitions = [
     expected_issue_path: '/results/0/semantic_facts/grounding_outcome',
     path: 'fixtures/invalid/response-none-grounding.json',
     payload: invalidResultNoneGrounding,
+  },
+  {
+    id: 'invalid.response_effective_target_source',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_target/source',
+    path: 'fixtures/invalid/response-effective-target-source.json',
+    payload: invalidEffectiveTargetSource,
+  },
+  {
+    id: 'invalid.response_effective_target_kind',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_target/kind',
+    path: 'fixtures/invalid/response-effective-target-kind.json',
+    payload: invalidEffectiveTargetKind,
+  },
+  {
+    id: 'invalid.response_not_applicable_effective_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_target',
+    path: 'fixtures/invalid/response-not-applicable-effective-target.json',
+    payload: invalidNotApplicableEffectiveTarget,
   },
   {
     id: 'invalid.response_fallback_candidate_reuse',
@@ -1234,6 +1846,15 @@ const fixtureDefinitions = [
     expected_issue_path: '/response/result/provenance',
     path: 'fixtures/invalid/custom-provider-result-identifiers.json',
     payload: invalidCustomProviderResultIdentifiers,
+  },
+  {
+    id: 'invalid.custom_provider_citation_target',
+    area: 'custom_provider',
+    schema: 'custom_provider_exchange',
+    valid: false,
+    expected_issue_path: '/response/result/citations/0/provenance/provider',
+    path: 'fixtures/invalid/custom-provider-citation-target.json',
+    payload: invalidCustomProviderCitationTarget,
   },
   {
     id: 'invalid.custom_provider_retrieve_running_handle',
@@ -1373,6 +1994,10 @@ const fixtureDefinitions = [
 ] as const;
 
 const schemaTargets = {
+  provider_identity: {
+    schema_path: 'schema/domain.schema.json',
+    schema_ref: '#/$defs/provider_identity',
+  },
   interchange_request: {
     schema_path: 'schema/interchange.schema.json',
     schema_ref: '#/$defs/request',
@@ -1404,6 +2029,18 @@ const schemaTargets = {
 } as const;
 
 const semanticFixtureRules: Record<string, string> = {
+  'invalid.target_configurable_missing_kind':
+    'target.selection_coherence',
+  'invalid.target_configurable_missing_id': 'target.selection_coherence',
+  'invalid.target_fixed_missing_kind': 'target.selection_coherence',
+  'invalid.target_fixed_missing_id': 'target.selection_coherence',
+  'invalid.target_provider_managed_id': 'target.selection_coherence',
+  'invalid.target_not_applicable_kind': 'target.selection_coherence',
+  'invalid.target_not_applicable_id': 'target.selection_coherence',
+  'invalid.target_underlying_primary_model': 'target.underlying_coherence',
+  'invalid.target_underlying_provider_managed':
+    'target.underlying_coherence',
+  'invalid.target_underlying_nested_agent': 'target.underlying_coherence',
   'invalid.async_non_durable_profile': 'request.preflight_plan_compatibility',
   'invalid.incompatible_fallback': 'request.preflight_plan_compatibility',
   'invalid.secret_extension': 'extensions.bounded_namespaced_json',
@@ -1427,24 +2064,36 @@ const semanticFixtureRules: Record<string, string> = {
   'invalid.answer_missing_grounding_policy':
     'grounding.search_results_inapplicable',
   'invalid.citation_missing_locator': 'source.locator_required',
+  'invalid.citation_provider_target': 'citation.provider_identity_binding',
   'invalid.response_selected_attempt_status': 'response.lossless_references',
   'invalid.response_effective_profile': 'response.lossless_references',
+  'invalid.response_effective_profile_target': 'response.lossless_references',
+  'invalid.response_requested_profile_target': 'response.lossless_references',
   'invalid.response_collection_provider': 'response.lossless_references',
+  'invalid.response_collection_provider_target': 'response.lossless_references',
   'invalid.response_replacement_provenance': 'response.lossless_references',
   'invalid.response_replacement_of_succeeded':
     'response.fallback_replacement_policy',
   'invalid.response_attempt_handle_provider':
+    'durable_handle.profile_identity_binding',
+  'invalid.response_attempt_handle_target':
     'durable_handle.profile_identity_binding',
   'invalid.response_semantic_facts': 'response.semantic_profile_coherence',
   'invalid.response_observation_mode': 'response.semantic_profile_coherence',
   'invalid.response_measured_surface': 'response.semantic_profile_coherence',
   'invalid.response_required_grounding': 'response.semantic_profile_coherence',
   'invalid.response_none_grounding': 'response.semantic_profile_coherence',
+  'invalid.response_effective_target_kind':
+    'response.effective_target_coherence',
+  'invalid.response_not_applicable_effective_target':
+    'response.effective_target_coherence',
   'invalid.response_fallback_candidate_reuse':
     'response.fallback_consumption',
   'invalid.response_mixed_unsuccessful_status': 'response.status_coherence',
   'invalid.custom_provider_result_identifiers':
     'custom_provider.result_binding',
+  'invalid.custom_provider_citation_target':
+    'citation.provider_identity_binding',
   'invalid.custom_provider_status_handle_binding':
     'custom_provider.task_binding',
   'invalid.run_manifest_slot_order': 'artifacts.run_manifest_execution_plan',
@@ -1522,6 +2171,18 @@ const manifest = {
   },
   semantic_rules: [
     {
+      rule_id: 'target.selection_coherence',
+      version: '1.0.0',
+      description:
+        'Configurable and fixed target slots identify a kind and target_id, provider-managed slots omit target_id until runtime, and not-applicable slots omit both.',
+    },
+    {
+      rule_id: 'target.underlying_coherence',
+      version: '1.0.0',
+      description:
+        'Underlying targets exist only beneath primary agents or presets and identify a configurable or fixed model without creating nested target identities.',
+    },
+    {
       rule_id: 'extensions.bounded_namespaced_json',
       version: '1.0.0',
       description:
@@ -1585,13 +2246,19 @@ const manifest = {
       rule_id: 'response.fallback_consumption',
       version: '1.0.0',
       description:
-        'Each fallback candidate and provider profile executes at most once across a response.',
+        'Each fallback candidate and exact provider profile target executes at most once across a response.',
     },
     {
       rule_id: 'response.semantic_profile_coherence',
       version: '1.0.0',
       description:
         'Result semantic facts remain within and identify the effective execution profile.',
+    },
+    {
+      rule_id: 'response.effective_target_coherence',
+      version: '1.0.0',
+      description:
+        'Optional runtime effective targets are provider-reported facts whose kind matches a declared primary or underlying profile target.',
     },
     {
       rule_id: 'response.status_coherence',
@@ -1604,6 +2271,12 @@ const manifest = {
       version: '1.0.0',
       description:
         'Citations and normalized sources identify their source with an HTTP(S) URL or an opaque provider reference.',
+    },
+    {
+      rule_id: 'citation.provider_identity_binding',
+      version: '1.0.0',
+      description:
+        'Every citation identifies the same exact provider profile target as the producing effective execution profile.',
     },
     {
       rule_id: 'custom_provider.result_binding',
@@ -1693,6 +2366,7 @@ const checksums = filesToChecksum
   })
   .join('\n');
 write('checksums.sha256', `${checksums}\n`);
+assertExactSnapshotInventory([...filesToChecksum, 'checksums.sha256']);
 
 function schemaArea(
   path: string,

@@ -36,7 +36,17 @@ import {
 
 function inlineProfile(providerId: string): ExecutionProfile {
   return {
-    identity: { provider_id: providerId, profile_id: 'grounded-web' },
+    identity: {
+      provider_id: providerId,
+      profile_id: 'grounded-web',
+      target: {
+        primary: {
+          model_selection: 'fixed',
+          kind: 'model',
+          target_id: `${providerId}-fixture-model`,
+        },
+      },
+    },
     result_kind: 'grounded_answer',
     grounding_policy: 'required',
     observation_mode: 'api_output',
@@ -953,6 +963,21 @@ describe('durable handles and terminal mapping', () => {
           outcome: 'failed',
           error: providerFailure(false),
           durable_handle: wrongProfileHandle,
+        },
+        deps,
+      ),
+    ).toThrow('provider must match');
+    const wrongTargetProfile = structuredClone(profile);
+    wrongTargetProfile.identity.target.primary.target_id =
+      'different-durable-target';
+    expect(() =>
+      recordAttemptFinished(
+        state,
+        attemptId,
+        {
+          outcome: 'failed',
+          error: providerFailure(false),
+          durable_handle: handle(wrongTargetProfile, 'failed'),
         },
         deps,
       ),

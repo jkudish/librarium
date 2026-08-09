@@ -23,7 +23,12 @@
       "primary": {
         "identity": {
           "provider_id": "brave-search",
-          "profile_id": "web-results"
+          "profile_id": "web-results",
+          "target": {
+            "primary": {
+              "model_selection": "not_applicable"
+            }
+          }
         },
         "result_kind": "search_results",
         "observation_mode": "api_output",

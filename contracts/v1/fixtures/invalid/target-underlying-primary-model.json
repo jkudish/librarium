@@ -1,0 +1,16 @@
+{
+  "provider_id": "example-preset",
+  "profile_id": "deep-research",
+  "target": {
+    "primary": {
+      "model_selection": "fixed",
+      "kind": "model",
+      "target_id": "deep-research"
+    },
+    "underlying": {
+      "model_selection": "configurable",
+      "kind": "model",
+      "target_id": "example-model-v2"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "provider_id": "example-configurable-agent",
+  "profile_id": "research",
+  "target": {
+    "primary": {
+      "model_selection": "configurable",
+      "kind": "agent",
+      "target_id": "example-research-agent"
+    }
+  }
+}

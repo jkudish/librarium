@@ -1,0 +1,10 @@
+{
+  "provider_id": "example-configurable-model",
+  "profile_id": "chat",
+  "target": {
+    "primary": {
+      "model_selection": "configurable",
+      "target_id": "example-model-v1"
+    }
+  }
+}

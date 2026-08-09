@@ -32,6 +32,9 @@ import {
   ErrorCategorySchema,
   ExecutionProfileSchema,
   NormalizedSourceSchema,
+  ProviderIdentitySchema,
+  providerIdentityKey,
+  RuntimeEffectiveTargetSchema,
   SemanticFactsSchema,
   StructuredErrorSchema,
   UsageSchema,
@@ -46,6 +49,7 @@ import {
 const snapshotRoot = join(process.cwd(), 'contracts', 'v1');
 
 const fixtureSchemas = {
+  'schema/domain.schema.json#/$defs/provider_identity': ProviderIdentitySchema,
   'schema/artifacts.schema.json#/$defs/historical_reader':
     HistoricalArtifactReaderSchema,
   'schema/artifacts.schema.json#/$defs/run_manifest': RunManifestArtifactSchema,
@@ -279,6 +283,154 @@ describe('canonical v2 contracts', () => {
       ).toContain(fixture.expected_issue_path);
     },
   );
+
+  it('models configured target intent separately from provider-reported runtime fact', () => {
+    const configurableModel = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-configurable-model.json',
+        ),
+      ),
+    );
+    const presetWithUnderlying = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-fixed-preset-underlying-configurable-model.json',
+        ),
+      ),
+    );
+
+    expect(configurableModel.target.primary).toEqual({
+      model_selection: 'configurable',
+      kind: 'model',
+      target_id: 'example-model-v1',
+    });
+    expect(presetWithUnderlying.target).toMatchObject({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: {
+        model_selection: 'configurable',
+        kind: 'model',
+        target_id: 'example-model-v2',
+      },
+    });
+    expect(
+      RuntimeEffectiveTargetSchema.safeParse({
+        source: 'configured',
+        kind: 'model',
+        target_id: 'example-model-v1',
+      }).success,
+    ).toBe(false);
+    expect(configurableModel).not.toHaveProperty('model_id');
+  });
+
+  it('distinguishes target variants while rejecting an exact execution identity twice', () => {
+    const request = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'interchange-request.json'),
+    );
+    const firstSlot = structuredClone(request.slots[0]);
+    const secondSlot = structuredClone(firstSlot);
+    secondSlot.slot_id = 'slot-grounded-second-target';
+    secondSlot.position = 1;
+    secondSlot.primary.identity.target.primary.target_id = 'sonar-pro-second';
+    request.slots = [firstSlot, secondSlot];
+    request.fallback_reserve = [];
+
+    expect(InterchangeRequestSchema.safeParse(request).success).toBe(true);
+
+    const duplicate = structuredClone(request);
+    duplicate.slots[1].primary.identity.target.primary.target_id =
+      duplicate.slots[0].primary.identity.target.primary.target_id;
+    expect(InterchangeRequestSchema.safeParse(duplicate).success).toBe(false);
+  });
+
+  it('includes every target dimension in the canonical provider identity key', () => {
+    const configurableModel = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-configurable-model.json',
+        ),
+      ),
+    );
+    const presetWithUnderlying = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-fixed-preset-underlying-configurable-model.json',
+        ),
+      ),
+    );
+    const providerManagedAgent = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-provider-managed-agent-underlying-model.json',
+        ),
+      ),
+    );
+
+    const variants = [
+      {
+        base: configurableModel,
+        mutate(identity: Record<string, any>) {
+          identity.target.primary.model_selection = 'fixed';
+        },
+      },
+      {
+        base: configurableModel,
+        mutate(identity: Record<string, any>) {
+          identity.target.primary.kind = 'agent';
+        },
+      },
+      {
+        base: configurableModel,
+        mutate(identity: Record<string, any>) {
+          identity.target.primary.target_id = 'example-model-v2';
+        },
+      },
+      {
+        base: presetWithUnderlying,
+        mutate(identity: Record<string, any>) {
+          identity.target.underlying.model_selection = 'fixed';
+        },
+      },
+      {
+        base: presetWithUnderlying,
+        mutate(identity: Record<string, any>) {
+          identity.target.underlying.target_id = 'example-model-v3';
+        },
+      },
+      {
+        base: providerManagedAgent,
+        mutate(identity: Record<string, any>) {
+          delete identity.target.underlying;
+        },
+      },
+    ];
+
+    for (const { base, mutate } of variants) {
+      const changed = structuredClone(base);
+      mutate(changed);
+      const parsed = ProviderIdentitySchema.parse(changed);
+      expect(providerIdentityKey(parsed)).not.toBe(providerIdentityKey(base));
+    }
+  });
 
   it('locks the structured error vocabulary and required fallback policy', () => {
     expect(ErrorCategorySchema.options).toEqual([
@@ -1006,6 +1158,12 @@ describe('canonical v2 contracts', () => {
       identity: {
         provider_id: 'google-gemini-api',
         profile_id: 'google-ai-mode-api-proxy',
+        target: {
+          primary: {
+            model_selection: 'provider_managed',
+            kind: 'model',
+          },
+        },
       },
       result_kind: 'surface_observation',
       grounding_policy: 'optional',
@@ -1207,6 +1365,94 @@ describe('canonical v2 contracts', () => {
       expect(paths).toContain('/attempts/3/candidate_id');
       expect(paths).toContain('/attempts/3/profile/identity');
     }
+  });
+
+  it('treats target identity as part of response profile uniqueness', () => {
+    const response = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'partial-response.json'),
+    );
+    const additionalSlot = structuredClone(response.slots[1]);
+    additionalSlot.slot_id = 'slot-research-secondary-target';
+    additionalSlot.selected_attempt_id = 'attempt-research-secondary-target';
+    const additionalAttempt = structuredClone(response.attempts[2]);
+    additionalAttempt.attempt_id = 'attempt-research-secondary-target';
+    additionalAttempt.slot_id = additionalSlot.slot_id;
+    additionalAttempt.profile.identity.target.primary.target_id =
+      'o3-deep-research';
+    additionalAttempt.durable_handle.provider.target.primary.target_id =
+      'o3-deep-research';
+
+    const targetDistinct = structuredClone(response);
+    targetDistinct.slots.push(additionalSlot);
+    targetDistinct.attempts.push(additionalAttempt);
+    const targetDistinctResult =
+      InterchangeResponseSchema.safeParse(targetDistinct);
+    expect(
+      targetDistinctResult.success,
+      targetDistinctResult.success
+        ? undefined
+        : JSON.stringify(targetDistinctResult.error.issues),
+    ).toBe(true);
+
+    const exactDuplicate = structuredClone(targetDistinct);
+    exactDuplicate.attempts.at(-1).profile.identity.target.primary.target_id =
+      response.attempts[2].profile.identity.target.primary.target_id;
+    exactDuplicate.attempts.at(
+      -1,
+    ).durable_handle.provider.target.primary.target_id =
+      response.attempts[2].durable_handle.provider.target.primary.target_id;
+    expect(InterchangeResponseSchema.safeParse(exactDuplicate).success).toBe(
+      false,
+    );
+  });
+
+  it('treats target identity as part of run-manifest profile uniqueness', () => {
+    const manifest = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'run-manifest.json'),
+    );
+    const additionalRequestSlot = structuredClone(manifest.request.slots[1]);
+    additionalRequestSlot.slot_id = 'slot-research-secondary-target';
+    additionalRequestSlot.position = manifest.request.slots.length;
+    additionalRequestSlot.primary.identity.target.primary.target_id =
+      'o3-deep-research';
+
+    const additionalResponseSlot = structuredClone(manifest.response.slots[1]);
+    additionalResponseSlot.slot_id = additionalRequestSlot.slot_id;
+    additionalResponseSlot.selected_attempt_id =
+      'attempt-research-secondary-target';
+
+    const additionalAttempt = structuredClone(manifest.response.attempts[2]);
+    additionalAttempt.attempt_id = additionalResponseSlot.selected_attempt_id;
+    additionalAttempt.slot_id = additionalRequestSlot.slot_id;
+    additionalAttempt.profile.identity.target.primary.target_id =
+      'o3-deep-research';
+    additionalAttempt.durable_handle.provider.target.primary.target_id =
+      'o3-deep-research';
+
+    const targetDistinct = structuredClone(manifest);
+    targetDistinct.request.slots.push(additionalRequestSlot);
+    targetDistinct.response.slots.push(additionalResponseSlot);
+    targetDistinct.response.attempts.push(additionalAttempt);
+    expect(RunManifestArtifactSchema.safeParse(targetDistinct).success).toBe(
+      true,
+    );
+
+    const exactDuplicate = structuredClone(targetDistinct);
+    exactDuplicate.request.slots.at(
+      -1,
+    ).primary.identity.target.primary.target_id =
+      manifest.request.slots[1].primary.identity.target.primary.target_id;
+    exactDuplicate.response.attempts.at(
+      -1,
+    ).profile.identity.target.primary.target_id =
+      manifest.response.attempts[2].profile.identity.target.primary.target_id;
+    exactDuplicate.response.attempts.at(
+      -1,
+    ).durable_handle.provider.target.primary.target_id =
+      manifest.response.attempts[2].durable_handle.provider.target.primary.target_id;
+    expect(RunManifestArtifactSchema.safeParse(exactDuplicate).success).toBe(
+      false,
+    );
   });
 
   it('validates every independently versioned artifact family', () => {
@@ -1465,6 +1711,11 @@ describe('canonical v2 contracts', () => {
     result.provenance.attempt_id = 'attempt-research-primary';
     result.provenance.requested_profile = profile;
     result.provenance.effective_profile = profile;
+    result.provenance.effective_target = {
+      source: 'provider_reported',
+      kind: 'model',
+      target_id: 'o4-deep-research',
+    };
     result.provenance.collection.provider = profile.identity;
     result.provenance.collection.operator_id = profile.operator_id;
     delete result.provenance.replaced_attempt_id;

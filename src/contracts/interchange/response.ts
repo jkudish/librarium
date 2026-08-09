@@ -9,6 +9,7 @@ import {
   ExecutionProfileSchema,
   executionProfilesEqual,
   providerIdentitiesEqual,
+  providerIdentityKey,
   StructuredErrorSchema,
   UsageSchema,
 } from '../domain/index.js';
@@ -26,10 +27,6 @@ const attemptBase = {
   usage: UsageSchema.optional(),
   extensions: ExtensionsSchema.optional(),
 };
-
-function profileKey(profile: z.infer<typeof ExecutionProfileSchema>): string {
-  return `${profile.identity.provider_id}\u0000${profile.identity.profile_id}`;
-}
 
 export const StartedAttemptSchema = z.strictObject({
   ...attemptBase,
@@ -159,12 +156,12 @@ export const InterchangeResponseSchema = z
         });
       }
       attempts.set(attempt.attempt_id, attempt);
-      const executedProfileKey = profileKey(attempt.profile);
+      const executedProfileKey = providerIdentityKey(attempt.profile.identity);
       if (executedProfileKeys.has(executedProfileKey)) {
         ctx.addIssue({
           code: 'custom',
           message:
-            'Each provider profile may execute at most once across a response',
+            'Each exact provider profile target may execute at most once across a response',
           path: ['attempts', index, 'profile', 'identity'],
         });
       }
