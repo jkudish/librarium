@@ -3,7 +3,10 @@ import type {
   ExecutionProfile,
   StructuredError,
 } from './contracts/domain/index.js';
-import { ExecutionProfileSchema } from './contracts/domain/index.js';
+import {
+  ExecutionProfileSchema,
+  executionProfilesEqual,
+} from './contracts/domain/index.js';
 import type { AttemptLaunch } from './core/coordinator.js';
 import type { AdapterBindingIdentity } from './core/execution-plan.js';
 import type {
@@ -94,7 +97,7 @@ function profilesMatch(
   return (
     parsedExpected.success &&
     parsedActual.success &&
-    JSON.stringify(parsedExpected.data) === JSON.stringify(parsedActual.data)
+    executionProfilesEqual(parsedExpected.data, parsedActual.data)
   );
 }
 
@@ -135,11 +138,7 @@ function durableHandle(
   now: () => number,
 ): DurableHandle {
   const status: DurableHandle['status'] =
-    task.status === 'completed'
-      ? 'succeeded'
-      : task.status === 'failed' || task.status === 'cancelled'
-        ? task.status
-        : task.status;
+    task.status === 'completed' ? 'succeeded' : task.status;
   return {
     handle_id: launch.attempt_id,
     provider_task_id: task.taskId,

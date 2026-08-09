@@ -257,6 +257,45 @@ class AdvanceClockAfterLeaseStore implements CoordinationStateStore {
   }
 }
 
+class AdvanceClockAfterDispatchStore implements CoordinationStateStore {
+  readonly inner = new InMemoryCoordinationStateStore();
+  advanced = false;
+
+  constructor(private readonly advance: () => void) {}
+
+  load(requestId: string): Promise<VersionedCoordinationState | undefined> {
+    return this.inner.load(requestId);
+  }
+
+  create(state: CoordinatorState): Promise<VersionedCoordinationState> {
+    return this.inner.create(state);
+  }
+
+  async compareAndSwap(
+    requestId: string,
+    expectedVersion: number,
+    state: CoordinatorState,
+  ): Promise<CoordinationCompareAndSwapResult> {
+    const result = await this.inner.compareAndSwap(
+      requestId,
+      expectedVersion,
+      state,
+    );
+    if (
+      result.ok &&
+      !this.advanced &&
+      state.attempts.some(
+        (attempt) =>
+          attempt.status === 'running' || attempt.status === 'submitting',
+      )
+    ) {
+      this.advanced = true;
+      this.advance();
+    }
+    return result;
+  }
+}
+
 describe('private prepared execution runtime', () => {
   it('executes only the frozen adapter binding and never performs provider selection', async () => {
     const exact: Provider = {
@@ -618,6 +657,38 @@ describe('private prepared execution runtime', () => {
     },
   );
 
+  it('accepts semantically equal frozen profiles with reordered extension keys', async () => {
+    const plannedProfile = profile('primary');
+    plannedProfile.extensions = {
+      'com.librarium:test': { second: 2, first: 1 },
+    };
+    const resolvedProfile = profile('primary');
+    resolvedProfile.extensions = {
+      'com.librarium:test': { first: 1, second: 2 },
+    };
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: vi.fn(async () => successfulResult('adapter-primary')),
+    };
+
+    const result = await runPreparedExecution(prepared([plannedProfile]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createNodeAttemptBridge({
+        resolveExactBinding: () =>
+          resolvedBinding('primary', provider, resolvedProfile),
+        now: () => start,
+      }),
+    });
+
+    expect(provider.execute).toHaveBeenCalledOnce();
+    expect(result.state.status).toBe('succeeded');
+  });
+
   it('keeps polling through transient errors and repeated running states before fallback', async () => {
     const pollSteps: Array<Error | { status: 'running' | 'failed' }> = [
       new Error('Bearer secret-token'),
@@ -832,7 +903,7 @@ describe('private prepared execution runtime', () => {
     },
   );
 
-  it('keeps accepted durable work resumable after a local execution exception', async () => {
+  it('retains accepted durable work after a local execution exception', async () => {
     const result = await runPreparedExecution(
       prepared([profile('durable', 'background')], [], 'async'),
       {
@@ -1189,6 +1260,28 @@ describe('private prepared execution runtime', () => {
   it('does not dispatch after the request deadline wins the launch race', async () => {
     const dependencies = mutableCoordinatorDependencies();
     const store = new AdvanceClockAfterLeaseStore(() => {
+      dependencies.setNow(start + 60_000);
+    });
+    const attempts: AttemptExecutionPort = { execute: vi.fn() };
+
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store,
+      coordinator: dependencies,
+      attempts,
+    });
+
+    expect(store.advanced).toBe(true);
+    expect(attempts.execute).not.toHaveBeenCalled();
+    expect(result.state.status).toBe('unsuccessful');
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'timed_out',
+      error: { code: 'request_deadline_exceeded' },
+    });
+  });
+
+  it('does not invoke the port when the request deadline crosses after the dispatch CAS', async () => {
+    const dependencies = mutableCoordinatorDependencies();
+    const store = new AdvanceClockAfterDispatchStore(() => {
       dependencies.setNow(start + 60_000);
     });
     const attempts: AttemptExecutionPort = { execute: vi.fn() };

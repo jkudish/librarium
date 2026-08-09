@@ -166,10 +166,13 @@ export async function runPreparedExecution(
     const attempt = persisted.state.attempts.find(
       (candidate) => candidate.attempt_id === launch.attempt_id,
     );
+    const now = effectiveDependencies.coordinator.clock.now();
     return (
       dispatched &&
       (attempt?.status === 'running' || attempt?.status === 'submitting') &&
-      attempt.started_at !== undefined
+      attempt.started_at !== undefined &&
+      now < Date.parse(persisted.state.request_deadline_at) &&
+      now < Date.parse(launch.deadline_at)
     );
   };
 
@@ -299,8 +302,17 @@ export async function runPreparedExecution(
         attempt?.durable_handle &&
         (attempt.status === 'submitted' || attempt.status === 'running')
       ) {
-        await transition(effectiveDependencies, requestId, (state) =>
-          recordTransientPollFailure(
+        await transition(effectiveDependencies, requestId, (state) => {
+          const currentAttempt = state.attempts.find(
+            (candidate) => candidate.attempt_id === launch.attempt_id,
+          );
+          if (
+            currentAttempt?.status !== 'submitted' &&
+            currentAttempt?.status !== 'running'
+          ) {
+            return undefined;
+          }
+          return recordTransientPollFailure(
             state,
             launch.attempt_id,
             {
@@ -312,8 +324,8 @@ export async function runPreparedExecution(
               fallback_allowed: false,
             },
             effectiveDependencies.coordinator,
-          ),
-        );
+          );
+        });
         return;
       }
       await transition(effectiveDependencies, requestId, (state) =>
@@ -341,9 +353,10 @@ export async function runPreparedExecution(
       continue;
     }
 
-    // Async acceptance, acceptance uncertainty, and future durable resumption
-    // return the persisted state without pretending B1 is process-resumable.
-    // A coherent sync bridge finishes its durable lifecycle before returning.
+    // Async acceptance, acceptance uncertainty, local interruption after
+    // acceptance, and future durable resumption return persisted nonterminal
+    // state without pretending B1 is process-resumable. A coherent sync bridge
+    // otherwise finishes its durable lifecycle before returning.
     return {
       state,
       outputs_by_attempt: Object.freeze(Object.fromEntries(outputs)),

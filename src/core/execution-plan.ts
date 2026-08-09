@@ -615,8 +615,10 @@ function validatePlanningMetadata(
       ['adapter_id', entry.binding.adapter_id],
       ['binding_id', entry.binding.binding_id],
     ] as const;
+    let bindingIsValid = true;
     for (const [field, value] of bindingFields) {
       if (!OpaqueIdSchema.safeParse(value).success) {
+        bindingIsValid = false;
         issues.push({
           code: 'invalid_adapter_binding_identity',
           phase: 'validation',
@@ -626,10 +628,7 @@ function validatePlanningMetadata(
         });
       }
     }
-    if (
-      OpaqueIdSchema.safeParse(entry.binding.adapter_id).success &&
-      OpaqueIdSchema.safeParse(entry.binding.binding_id).success
-    ) {
+    if (bindingIsValid) {
       const bindingPair = JSON.stringify([
         entry.binding.adapter_id,
         entry.binding.binding_id,

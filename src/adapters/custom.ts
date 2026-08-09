@@ -522,12 +522,12 @@ function runScriptOperation(
       );
     });
 
-    child.on('close', (code, signal) => {
+    child.on('close', (code, terminationSignal) => {
       const trimmed = stdout.trim();
       if (!trimmed) {
         const detail = [
           code !== null ? `exit code ${code}` : null,
-          signal ? `signal ${signal}` : null,
+          terminationSignal ? `signal ${terminationSignal}` : null,
           stderr.trim() ? `stderr: ${stderr.trim().slice(0, 300)}` : null,
         ]
           .filter(Boolean)
@@ -564,10 +564,6 @@ function runScriptOperation(
       );
     }, Math.max(1, timeoutSeconds) * 1000);
     signal?.addEventListener('abort', onAbort, { once: true });
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
 
     child.stdin.write(JSON.stringify(envelope));
     child.stdin.end();
