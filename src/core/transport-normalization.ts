@@ -22,7 +22,7 @@ import type {
  * entrypoint: it exists so semantically equivalent raw inputs from every
  * transport provably compile to identical PreparedResearchExecution values.
  *
- * One common normalizer rejects conflicting selectors; each source contributes only a thin
+ * One common normalizer owns selector precedence; each source contributes only a thin
  * projection of the Checkpoint A semantic fields (query, mode including
  * legacy mixed, exactly one selector, fallback intent, limits, exact budgets,
  * exclusions, refinement). Presentation, output, and filesystem fields are
@@ -33,12 +33,10 @@ import type {
  * CanonicalTransportDefaults context. Selecting the built-in canonical values
  * is an explicit maintainer decision that remains open.
  *
- * Shadow-mapper decision: the v1 runtime resolves competing `providers` and
- * `group` selections by letting explicit providers win (see
- * resolveProviderSelection in src/core/provider-selection.ts). The approved v2
- * rule is that a canonical request has exactly one selector, so every raw
- * adapter rejects ambiguity with the same stable issue. Production v1
- * behavior is untouched.
+ * Approved selector policy: CLI/MCP/silent-MCP preserve the v1 compatibility
+ * rule that explicit providers beat a group and emit a deterministic notice.
+ * Library and configuration surfaces reject that ambiguity. A canonical
+ * request still always contains exactly one selector.
  */
 
 export type TransportSource =
@@ -186,13 +184,28 @@ function normalizeTransportRequest(
   } else {
     const [chosen, ...competing] = present;
     selector = chosen.selector;
-    for (const candidate of competing) {
-      issues.push({
-        code: 'transport_selector_conflict',
+    const explicitProvidersWin =
+      (source === 'cli' || source === 'mcp' || source === 'silent_mcp') &&
+      chosen.name === 'targets' &&
+      competing.length === 1 &&
+      competing[0]?.name === 'group';
+    if (explicitProvidersWin) {
+      const group = competing[0];
+      notices.push({
+        code: 'transport_explicit_providers_override_group',
         phase: 'transport',
-        path: candidate.rawPath,
-        message: `The ${candidate.name} selection competes with ${chosen.name}; a canonical request has exactly one selector. Remove one of them from the ${source} input.`,
+        path: group.rawPath,
+        message: `Explicit providers override the competing group selection for ${source}; the group was ignored.`,
       });
+    } else {
+      for (const candidate of competing) {
+        issues.push({
+          code: 'transport_selector_conflict',
+          phase: 'transport',
+          path: candidate.rawPath,
+          message: `The ${candidate.name} selection competes with ${chosen.name}; a canonical request has exactly one selector. Remove one of them from the ${source} input.`,
+        });
+      }
     }
   }
 

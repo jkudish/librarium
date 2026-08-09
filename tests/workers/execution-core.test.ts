@@ -10,6 +10,10 @@ import {
   type FrozenPlanningCatalog,
   prepareResearchExecution,
 } from '../../src/core/execution-plan.js';
+import {
+  type AttemptExecutionPort,
+  runPreparedExecution,
+} from '../../src/core/execution-runtime.js';
 import { CanonicalResearchRequestSchema } from '../../src/core/research-request.js';
 
 const profile: ExecutionProfile = {
@@ -111,6 +115,74 @@ describe('private execution architecture in workerd', () => {
     await expect(store.load(dispatched.request_id)).resolves.toMatchObject({
       version: 1,
       state: { request_id: dispatched.request_id },
+    });
+  });
+
+  it('runs a prepared plan through an injected port without Node APIs', async () => {
+    const catalog: FrozenPlanningCatalog = {
+      revision: 'worker-runtime-r1',
+      digest: 'worker-runtime-digest',
+      profiles: [
+        {
+          profile,
+          binding: {
+            adapter_id: 'worker-adapter',
+            binding_id: 'worker-binding',
+          },
+          estimate: { estimated_cost_microusd: '0' },
+          enabled: true,
+          credentialed: true,
+          configuration_valid: true,
+        },
+      ],
+      resolveGroup: () => undefined,
+      resolveDefault: () => [profile.identity],
+      resolveConfiguredReserve: () => [],
+    };
+    const prepared = prepareResearchExecution(
+      {
+        query: 'worker runtime query',
+        mode: 'sync',
+        selector: { kind: 'default' },
+        fallback: { kind: 'disabled' },
+        limits: {
+          max_concurrency: 1,
+          request_deadline_ms: 60_000,
+          inline_attempt_deadline_ms: 30_000,
+          background_attempt_deadline_ms: 60_000,
+          poll_interval_ms: 1_000,
+        },
+      },
+      catalog,
+      {
+        clock: { now: () => Date.parse('2026-08-08T12:00:00Z') },
+        ids: { next: (scope) => `runtime-${scope}` },
+      },
+    );
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+
+    let id = 0;
+    const attempts: AttemptExecutionPort = {
+      execute: async () => ({
+        kind: 'finished',
+        finished: { outcome: 'succeeded', result_id: 'worker-result' },
+        output: { worker_safe: true },
+      }),
+    };
+    const result = await runPreparedExecution(prepared.prepared, {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: {
+        clock: { now: () => Date.parse('2026-08-08T12:00:00Z') },
+        ids: {
+          next: (scope) => `runtime-${scope}-${++id}`,
+        },
+      },
+      attempts,
+    });
+    expect(result.state.status).toBe('succeeded');
+    expect(result.outputs_by_attempt).toEqual({
+      'runtime-attempt-2': { worker_safe: true },
     });
   });
 });
