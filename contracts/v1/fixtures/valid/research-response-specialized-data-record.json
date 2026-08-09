@@ -1,0 +1,166 @@
+{
+  "generator": "jkudish/librarium",
+  "generator_version": "1.4.1",
+  "request_id": "req-contract-001",
+  "status": "succeeded",
+  "completed_at": "2026-08-08T00:00:11Z",
+  "results": [
+    {
+      "result_id": "result-grounded-fallback",
+      "content_format": "markdown",
+      "content": "The example market announced a revised weekly outlook. [Source 1]",
+      "semantic_facts": {
+        "result_kinds": [
+          "grounded_answer"
+        ],
+        "grounding_outcome": "used",
+        "observation_mode": "api_output",
+        "corpora": [
+          "specialized"
+        ],
+        "retrieval_methods": [
+          "search_endpoint"
+        ],
+        "observed_at": "2026-08-08T00:00:05Z"
+      },
+      "citations": [
+        {
+          "citation_id": "citation-001",
+          "source_kind": "data_record",
+          "derivation": "provider_reported",
+          "title": "Example Market Outlook",
+          "retrieved_at": "2026-08-08T00:00:04Z",
+          "provenance": {
+            "provider": {
+              "provider_id": "brave-answers",
+              "profile_id": "grounded-web",
+              "target": {
+                "primary": {
+                  "model_selection": "fixed",
+                  "kind": "model",
+                  "target_id": "brave"
+                }
+              }
+            },
+            "access_mode": "direct",
+            "operator_id": "brave",
+            "origin_key": "origin-example-newsroom",
+            "correlation_keys": {
+              "com.example:publisherGroup": "example-newsroom"
+            }
+          },
+          "source_category": "patent_record",
+          "dataset_id": "dataset-public-001",
+          "provider_reference": "record-public-001"
+        }
+      ],
+      "usage": {
+        "input_tokens": 42,
+        "output_tokens": 81,
+        "total_tokens": 123,
+        "billable_units": [
+          {
+            "unit": "request",
+            "quantity_decimal": "1",
+            "source": "provider_reported"
+          }
+        ],
+        "actual_cost": {
+          "amount": {
+            "amount_decimal": "0.010000",
+            "currency": "USD"
+          },
+          "source": "provider_reported"
+        },
+        "estimated_cost": {
+          "amount": {
+            "amount_decimal": "0.009500",
+            "currency": "USD"
+          },
+          "source": "pricing_snapshot",
+          "pricing_version": "2026.8.0"
+        },
+        "completeness": "complete"
+      },
+      "completed_at": "2026-08-08T00:00:05Z",
+      "provenance": {
+        "requested_profile": {
+          "identity": {
+            "provider_id": "brave-answers",
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
+          },
+          "result_kind": "grounded_answer",
+          "grounding_policy": "required",
+          "observation_mode": "api_output",
+          "corpora": [
+            "specialized"
+          ],
+          "retrieval_method": "search_endpoint",
+          "access_mode": "direct",
+          "operator_id": "brave"
+        },
+        "effective_profile": {
+          "identity": {
+            "provider_id": "brave-answers",
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
+          },
+          "result_kind": "grounded_answer",
+          "grounding_policy": "required",
+          "observation_mode": "api_output",
+          "corpora": [
+            "specialized"
+          ],
+          "retrieval_method": "search_endpoint",
+          "access_mode": "direct",
+          "operator_id": "brave"
+        },
+        "collection": {
+          "provider": {
+            "provider_id": "brave-answers",
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
+          },
+          "access_mode": "direct",
+          "operator_id": "brave",
+          "origin_key": "origin-brave-api",
+          "correlation_keys": {
+            "com.brave:requestId": "brave-request-public-001"
+          }
+        }
+      }
+    }
+  ],
+  "errors": [],
+  "sources": [
+    {
+      "source_id": "source-specialized-record-001",
+      "provider_reference": "record-public-001",
+      "source_kind": "data_record",
+      "source_category": "patent_record",
+      "dataset_id": "dataset-public-001",
+      "citation_ids": [
+        "citation-001"
+      ]
+    }
+  ]
+}

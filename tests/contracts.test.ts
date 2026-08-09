@@ -40,11 +40,15 @@ import {
   UsageSchema,
 } from '../src/contracts/domain/index.js';
 import {
+  ResearchResponseSchema,
+  ResearchResultSchema,
+} from '../src/contracts/interchange/index.js';
+import {
   EvidenceRequirementsSchema,
   InterchangeRequestSchema,
   InterchangeResponseSchema,
   LifecycleTraceSchema,
-} from '../src/contracts/interchange/index.js';
+} from '../src/contracts/interchange/internal.js';
 
 const snapshotRoot = join(process.cwd(), 'contracts', 'v1');
 
@@ -56,9 +60,14 @@ const fixtureSchemas = {
   'schema/artifacts.schema.json#/$defs/sources': SourcesArtifactSchema,
   'schema/custom-provider.schema.json#/$defs/exchange':
     CustomProviderExchangeSchema,
-  'schema/interchange.schema.json#/$defs/request': InterchangeRequestSchema,
-  'schema/interchange.schema.json#/$defs/response': InterchangeResponseSchema,
-  'schema/interchange.schema.json#/$defs/lifecycle_trace': LifecycleTraceSchema,
+  'schema/artifacts.schema.json#/$defs/execution_request':
+    InterchangeRequestSchema,
+  'schema/artifacts.schema.json#/$defs/execution_response':
+    InterchangeResponseSchema,
+  'schema/artifacts.schema.json#/$defs/lifecycle_trace': LifecycleTraceSchema,
+  'schema/interchange.schema.json#/$defs/research_response':
+    ResearchResponseSchema,
+  'schema/interchange.schema.json#/$defs/research_result': ResearchResultSchema,
 } satisfies Record<string, z.ZodType>;
 
 function readJson<T>(path: string): T {
@@ -711,6 +720,115 @@ describe('canonical v2 contracts', () => {
         citation_ids: ['citation-001'],
       }).success,
     ).toBe(false);
+  });
+
+  it('publishes shared terminal fixtures for effective targets, surface observations, and specialized records', () => {
+    const typescript = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-succeeded.json',
+        ),
+      ),
+    );
+    expect(typescript).toMatchObject({
+      generator: 'jkudish/librarium',
+      generator_version: readJson<{ version: string }>(
+        join(process.cwd(), 'package.json'),
+      ).version,
+    });
+
+    const php = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-php-succeeded.json',
+        ),
+      ),
+    );
+    expect(php).toMatchObject({
+      generator: 'jkudish/laravel-ai-librarium',
+      generator_version: '1.0.0-rc.1+build.7',
+    });
+
+    const effectiveTarget = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-provider-reported-effective-target.json',
+        ),
+      ),
+    );
+    expect(effectiveTarget.results[0]!.provenance.effective_target).toEqual({
+      source: 'provider_reported',
+      kind: 'model',
+      target_id: 'brave-reported-model',
+    });
+
+    const surface = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-surface-observation.json',
+        ),
+      ),
+    );
+    expect(surface.results[0]!.provenance.effective_profile).toMatchObject({
+      observation_mode: 'surface_snapshot',
+      retrieval_method: 'surface_collector',
+      access_mode: 'collected',
+      collector_id: 'searchapi',
+      surface_id: 'google_ai_mode',
+    });
+    expect(surface.results[0]!.semantic_facts).toMatchObject({
+      observation_mode: 'surface_snapshot',
+      measured_surface_id: 'google_ai_mode',
+    });
+
+    const capabilityDifference = structuredClone(typescript.results[0]!);
+    capabilityDifference.provenance.requested_profile.corpora = ['web', 'news'];
+    capabilityDifference.provenance.effective_profile.corpora = ['web'];
+    capabilityDifference.provenance.effective_profile.grounding_policy =
+      'optional';
+    expect(ResearchResultSchema.safeParse(capabilityDifference).success).toBe(
+      true,
+    );
+
+    const specialized = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-specialized-data-record.json',
+        ),
+      ),
+    );
+    expect(specialized.results[0]!.citations[0]).toMatchObject({
+      source_kind: 'data_record',
+      source_category: 'patent_record',
+      dataset_id: 'dataset-public-001',
+      provider_reference: 'record-public-001',
+    });
+    expect(specialized.results[0]!.citations[0]).not.toHaveProperty('url');
+    expect(
+      specialized.results[0]!.provenance.requested_profile.corpora,
+    ).toEqual(['specialized']);
+    expect(
+      specialized.results[0]!.provenance.effective_profile.corpora,
+    ).toEqual(['specialized']);
+    expect(specialized.sources[0]).toMatchObject({
+      source_kind: 'data_record',
+      provider_reference: 'record-public-001',
+    });
   });
 
   it('keeps interchange semantic keys snake_case and excludes forbidden architecture fields', () => {

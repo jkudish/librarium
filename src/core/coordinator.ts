@@ -7,8 +7,8 @@ import {
   type StructuredError,
   StructuredErrorSchema,
 } from '../contracts/domain/index.js';
-import type { LifecycleEvent } from '../contracts/interchange/lifecycle.js';
-import { INTERCHANGE_VERSION } from '../contracts/interchange/request.js';
+import type { LifecycleEvent } from '../contracts/interchange/internal.js';
+import { INTERCHANGE_VERSION } from '../contracts/interchange/internal.js';
 import {
   assertCompareAndSwapAttemptBudget,
   type CoordinationStateStore,

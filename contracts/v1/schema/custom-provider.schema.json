@@ -262,6 +262,18 @@
                       ],
                       "additionalProperties": false
                     },
+                    "extensions": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128,
+                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                      },
+                      "additionalProperties": {
+                        "$ref": "#/$defs/exchange/$defs/__schema0"
+                      }
+                    },
                     "invocation": {
                       "type": "string",
                       "enum": [
@@ -276,18 +288,6 @@
                         "process_local",
                         "durable"
                       ]
-                    },
-                    "extensions": {
-                      "type": "object",
-                      "propertyNames": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128,
-                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                      },
-                      "additionalProperties": {
-                        "$ref": "#/$defs/exchange/$defs/__schema0"
-                      }
                     }
                   },
                   "required": [
@@ -585,6 +585,18 @@
                       ],
                       "additionalProperties": false
                     },
+                    "extensions": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 128,
+                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                      },
+                      "additionalProperties": {
+                        "$ref": "#/$defs/exchange/$defs/__schema0"
+                      }
+                    },
                     "invocation": {
                       "type": "string",
                       "enum": [
@@ -599,18 +611,6 @@
                         "process_local",
                         "durable"
                       ]
-                    },
-                    "extensions": {
-                      "type": "object",
-                      "propertyNames": {
-                        "type": "string",
-                        "minLength": 3,
-                        "maxLength": 128,
-                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                      },
-                      "additionalProperties": {
-                        "$ref": "#/$defs/exchange/$defs/__schema0"
-                      }
                     }
                   },
                   "required": [
@@ -1825,6 +1825,18 @@
                               ],
                               "additionalProperties": false
                             },
+                            "extensions": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                              },
+                              "additionalProperties": {
+                                "$ref": "#/$defs/exchange/$defs/__schema0"
+                              }
+                            },
                             "invocation": {
                               "type": "string",
                               "enum": [
@@ -1839,18 +1851,6 @@
                                 "process_local",
                                 "durable"
                               ]
-                            },
-                            "extensions": {
-                              "type": "object",
-                              "propertyNames": {
-                                "type": "string",
-                                "minLength": 3,
-                                "maxLength": 128,
-                                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                              },
-                              "additionalProperties": {
-                                "$ref": "#/$defs/exchange/$defs/__schema0"
-                              }
                             }
                           },
                           "required": [
@@ -2087,6 +2087,18 @@
                               ],
                               "additionalProperties": false
                             },
+                            "extensions": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 128,
+                                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                              },
+                              "additionalProperties": {
+                                "$ref": "#/$defs/exchange/$defs/__schema0"
+                              }
+                            },
                             "invocation": {
                               "type": "string",
                               "enum": [
@@ -2101,18 +2113,6 @@
                                 "process_local",
                                 "durable"
                               ]
-                            },
-                            "extensions": {
-                              "type": "object",
-                              "propertyNames": {
-                                "type": "string",
-                                "minLength": 3,
-                                "maxLength": 128,
-                                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                              },
-                              "additionalProperties": {
-                                "$ref": "#/$defs/exchange/$defs/__schema0"
-                              }
                             }
                           },
                           "required": [
@@ -3654,6 +3654,18 @@
                   ],
                   "additionalProperties": false
                 },
+                "extensions": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128,
+                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/request/$defs/__schema0"
+                  }
+                },
                 "invocation": {
                   "type": "string",
                   "enum": [
@@ -3668,18 +3680,6 @@
                     "process_local",
                     "durable"
                   ]
-                },
-                "extensions": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 128,
-                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                  },
-                  "additionalProperties": {
-                    "$ref": "#/$defs/request/$defs/__schema0"
-                  }
                 }
               },
               "required": [
@@ -3977,6 +3977,18 @@
                   ],
                   "additionalProperties": false
                 },
+                "extensions": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 128,
+                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/request/$defs/__schema0"
+                  }
+                },
                 "invocation": {
                   "type": "string",
                   "enum": [
@@ -3991,18 +4003,6 @@
                     "process_local",
                     "durable"
                   ]
-                },
-                "extensions": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 128,
-                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                  },
-                  "additionalProperties": {
-                    "$ref": "#/$defs/request/$defs/__schema0"
-                  }
                 }
               },
               "required": [
@@ -5250,6 +5250,18 @@
                           ],
                           "additionalProperties": false
                         },
+                        "extensions": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128,
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                          },
+                          "additionalProperties": {
+                            "$ref": "#/$defs/response/$defs/__schema0"
+                          }
+                        },
                         "invocation": {
                           "type": "string",
                           "enum": [
@@ -5264,18 +5276,6 @@
                             "process_local",
                             "durable"
                           ]
-                        },
-                        "extensions": {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string",
-                            "minLength": 3,
-                            "maxLength": 128,
-                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                          },
-                          "additionalProperties": {
-                            "$ref": "#/$defs/response/$defs/__schema0"
-                          }
                         }
                       },
                       "required": [
@@ -5512,6 +5512,18 @@
                           ],
                           "additionalProperties": false
                         },
+                        "extensions": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 128,
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
+                          },
+                          "additionalProperties": {
+                            "$ref": "#/$defs/response/$defs/__schema0"
+                          }
+                        },
                         "invocation": {
                           "type": "string",
                           "enum": [
@@ -5526,18 +5538,6 @@
                             "process_local",
                             "durable"
                           ]
-                        },
-                        "extensions": {
-                          "type": "object",
-                          "propertyNames": {
-                            "type": "string",
-                            "minLength": 3,
-                            "maxLength": 128,
-                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+:[A-Za-z0-9][A-Za-z0-9._-]*$"
-                          },
-                          "additionalProperties": {
-                            "$ref": "#/$defs/response/$defs/__schema0"
-                          }
                         }
                       },
                       "required": [

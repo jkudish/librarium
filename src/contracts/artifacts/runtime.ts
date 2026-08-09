@@ -20,7 +20,7 @@ import {
   InterchangeResponseSchema,
   InterchangeResultSchema,
   LifecycleEventSchema,
-} from '../interchange/index.js';
+} from '../interchange/internal.js';
 import { ARTIFACT_VERSIONS } from './versions.js';
 
 const artifactHeader = {

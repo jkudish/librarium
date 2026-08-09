@@ -3,7 +3,11 @@
 `contracts/v1/` is the TypeScript Librarium repository's canonical, offline
 contract snapshot. It contains four deliberately separate schema bundles:
 domain leaves, TypeScript artifacts, the trusted custom-provider protocol, and
-the narrow TypeScript/PHP interchange.
+the narrow TypeScript/PHP interchange. `ResearchResponse` and `ResearchResult`
+form its shared terminal envelope, including their approved nested domain leaves
+such as citations, normalized sources, usage, errors, and provenance. Every
+response carries its actual producer receipt (`generator` and
+`generator_version`) and has only `succeeded`, `partial`, or `failed` status.
 
 The snapshot is generated from the Zod 4 schemas under `src/contracts/` with:
 
@@ -35,8 +39,10 @@ compiled TypeScript runtime, not the cross-language contract corpus.
 Each implementation maps idiomatic runtime types losslessly to the wire
 contract. Laravel DTOs, enums, events, exceptions, queues, and persistence stay
 inside the PHP implementation. TypeScript runtime APIs and provider-native
-payloads stay inside TypeScript and its adapters. Neither language recursively
-case-converts `extensions`.
+payloads stay inside TypeScript and its adapters. Requests, slots, attempts,
+durable handles, replacement chains, lifecycle events, and coordinator state
+are TypeScript execution-only validation, never PHP parity payloads. Neither
+language recursively case-converts `extensions`.
 
 ## Strictness and extensions
 
@@ -45,6 +51,8 @@ Semantic objects reject unknown fields. Wire fields and enum values use
 strings. Provider-specific data is allowed only in bounded, namespaced,
 JSON-safe `extensions`. Credentials, task secrets, headers, stack traces, binary
 payloads, and unrestricted raw provider responses are forbidden.
+Extension-key filtering catches obvious sensitive names, but producers remain
+responsible for never placing secrets or raw payloads behind benign names.
 
 HTTP(S) locators use an intentionally strict, language-neutral wire subset.
 The scheme is literally lowercase `http://` or `https://`; the hostname is one
@@ -53,6 +61,14 @@ an optional canonical decimal port is between 1 and 65535 with no leading zero.
 An optional path, query, or fragment contains printable ASCII only and never a
 backslash. Unicode hostnames use their ASCII form, and non-ASCII path data must
 be percent-encoded before it crosses the contract boundary.
+Validated citation and source URLs are untrusted identifiers only; validation
+never authorizes fetching them.
+
+Producer receipts are descriptive, self-reported package facts, not
+cryptographic authentication. Trust-sensitive consumers compare them with
+authenticated or out-of-band expectations. An `effective_target` reports
+provider runtime resolution or routing; its kind matches the declared target
+kind, but its ID need not equal a configured alias or target ID.
 
 Surface context is descriptive and non-blocking by default. When a request adds
 a `surface_context_constraint`, the profile must declare context and every
@@ -110,22 +126,25 @@ consumer requires a major version. A backward-compatible addition may use a
 minor version. Documentation, fixture coverage, or generator corrections that
 preserve payload compatibility and meaning may use a patch version.
 
-## Schema-derived TypeScript types
+## Shared terminal boundary and TypeScript-internal types
 
-Every runtime-crossing type under `src/contracts/` is inferred from its Zod
-schema. The approved compatibility map is:
+`ResearchResponse` and `ResearchResult`, including their approved nested domain
+leaves, are the shared runtime boundary. The table below is explicitly
+TypeScript-internal migration guidance for adapter and execution schemas; it is
+not a PHP parity map.
 
-| Existing public name | Proposed schema-derived destination |
+| Existing TypeScript name | TypeScript-internal schema destination |
 | --- | --- |
 | `Citation` | `Citation` |
 | `ProviderUsage`, `ProviderMetering` | explicit mappers to `Usage`, `CostRecord` |
 | `AsyncTaskHandle` | `DurableHandle` |
 | `ProgressEvent` | `LifecycleEvent` |
-| `ProviderResult` | `InterchangeResult` through an adapter mapper |
-| `ProviderDispatchResult` | `Attempt` + `SlotOutcome` + `InterchangeResult` |
+| `ProviderResult` | `InterchangeResult` through an internal adapter mapper |
+| `ProviderDispatchResult` | `Attempt` + `SlotOutcome` + `InterchangeResult` internally |
 | `RunManifest`, `ProviderReport`, `DeduplicatedSource` | independently versioned artifact types |
 | `ProviderTier` | no direct alias; replace with orthogonal `ExecutionProfile` facts |
 
 Existing v1 adapter types and parsers remain authoritative until their explicit
 migration. The contract foundation does not recursively transform
-provider-native payloads or expose them across the shared boundary.
+provider-native payloads or expose execution records across the shared
+boundary.

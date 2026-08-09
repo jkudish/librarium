@@ -42,6 +42,69 @@ function createAjv(): Ajv2020 {
 }
 
 describe('published Draft 2020-12 contracts', () => {
+  it('keeps shared and execution definitions in their intended bundles', () => {
+    const schemas = schemaDocuments();
+    const domain = schemas.find(
+      (schema) => schema.$id === 'https://librarium.dev/contracts/v1/domain',
+    );
+    const interchange = schemas.find(
+      (schema) =>
+        schema.$id === 'https://librarium.dev/contracts/v1/interchange',
+    );
+    const artifacts = schemas.find(
+      (schema) => schema.$id === 'https://librarium.dev/contracts/v1/artifacts',
+    );
+    const customProvider = schemas.find(
+      (schema) =>
+        schema.$id === 'https://librarium.dev/contracts/v1/custom-provider',
+    );
+
+    expect(Object.keys(domain?.$defs ?? {}).sort()).toEqual([
+      'citation',
+      'collection_provenance',
+      'normalized_source',
+      'profile_target',
+      'profile_target_slot',
+      'provider_identity',
+      'research_profile',
+      'runtime_effective_target',
+      'semantic_facts',
+      'structured_error',
+      'surface_context',
+      'surface_context_constraint',
+      'usage',
+    ]);
+    expect(Object.keys(interchange?.$defs ?? {}).sort()).toEqual([
+      'research_error',
+      'research_response',
+      'research_result',
+      'research_result_provenance',
+    ]);
+    expect(Object.keys(artifacts?.$defs ?? {}).sort()).toEqual([
+      'artifact',
+      'artifact_producer',
+      'durable_handle',
+      'execution_attempt',
+      'execution_profile',
+      'execution_request',
+      'execution_response',
+      'execution_result',
+      'fixture_index',
+      'historical_reader',
+      'jsonl_record',
+      'lifecycle_trace',
+      'provider_metadata',
+      'run_manifest',
+      'snapshot_manifest',
+      'sources',
+    ]);
+    expect(Object.keys(customProvider?.$defs ?? {}).sort()).toEqual([
+      'exchange',
+      'request',
+      'response',
+    ]);
+  });
+
   it('independently compiles every manifest-exposed definition and resolves every ref', () => {
     const ajv = createAjv();
 

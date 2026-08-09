@@ -26,6 +26,7 @@ import {
   DOMAIN_VERSION,
   DurableHandleSchema,
   ExecutionProfileSchema,
+  ResearchProfileSchema,
   NormalizedSourceSchema,
   ProfileTargetSchema,
   ProfileTargetSlotSchema,
@@ -47,14 +48,21 @@ import {
   representativeRequest,
   representativeRunManifest,
   representativeSearchRequest,
+  surfaceObservationPrimaryProfile,
   representativeSurfaceContextRequest,
   representativeUnsuccessfulResponse,
   SNAPSHOT_GENERATED_AT,
 } from '../src/contracts/examples.js';
 import {
+  ResearchErrorSchema,
+  RESEARCH_RESPONSE_CONTRACT_VERSION,
+  ResearchResponseSchema,
+  ResearchResultSchema,
+  ResearchResultProvenanceSchema,
+} from '../src/contracts/interchange/index.js';
+import {
   AttemptSchema,
   EvidenceRequirementsSchema,
-  INTERCHANGE_VERSION,
   InterchangeMessageSchema,
   InterchangeRequestSchema,
   InterchangeResponseSchema,
@@ -63,12 +71,15 @@ import {
   LifecycleTraceSchema,
   RequestSlotSchema,
   SlotOutcomeSchema,
-} from '../src/contracts/interchange/index.js';
+} from '../src/contracts/interchange/internal.js';
 import { resolveSnapshotWritePath } from './contract-snapshot-path.js';
 
 const root =
   process.env.LIBRARIUM_CONTRACTS_OUTPUT ??
   join(process.cwd(), 'contracts', 'v1');
+const typescriptPackage = JSON.parse(
+  readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
+) as { version: string };
 
 function canonicalJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -163,13 +174,12 @@ const schemaFiles = [
       {
         citation: CitationSchema,
         collection_provenance: CollectionProvenanceSchema,
-        durable_handle: DurableHandleSchema,
-        execution_profile: ExecutionProfileSchema,
         normalized_source: NormalizedSourceSchema,
         profile_target: ProfileTargetSchema,
         profile_target_slot: ProfileTargetSlotSchema,
         provider_identity: ProviderIdentitySchema,
         runtime_effective_target: RuntimeEffectiveTargetSchema,
+        research_profile: ResearchProfileSchema,
         semantic_facts: SemanticFactsSchema,
         structured_error: StructuredErrorSchema,
         surface_context: SurfaceContextSchema,
@@ -193,6 +203,13 @@ const schemaFiles = [
         provider_metadata: ProviderMetadataArtifactSchema,
         run_manifest: RunManifestArtifactSchema,
         sources: SourcesArtifactSchema,
+        execution_attempt: AttemptSchema,
+        durable_handle: DurableHandleSchema,
+        execution_profile: ExecutionProfileSchema,
+        execution_request: InterchangeRequestSchema,
+        execution_response: InterchangeResponseSchema,
+        execution_result: InterchangeResultSchema,
+        lifecycle_trace: LifecycleTraceSchema,
       },
     ),
   ),
@@ -214,16 +231,10 @@ const schemaFiles = [
       'https://librarium.dev/contracts/v1/interchange',
       'Librarium language-neutral interchange',
       {
-        attempt: AttemptSchema,
-        evidence_requirements: EvidenceRequirementsSchema,
-        lifecycle_event: LifecycleEventSchema,
-        lifecycle_trace: LifecycleTraceSchema,
-        message: InterchangeMessageSchema,
-        request: InterchangeRequestSchema,
-        request_slot: RequestSlotSchema,
-        response: InterchangeResponseSchema,
-        result: InterchangeResultSchema,
-        slot_outcome: SlotOutcomeSchema,
+        research_error: ResearchErrorSchema,
+        research_response: ResearchResponseSchema,
+        research_result: ResearchResultSchema,
+        research_result_provenance: ResearchResultProvenanceSchema,
       },
     ),
   ),
@@ -562,7 +573,8 @@ invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider =
   clone(
     invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider,
   );
-invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider.target.primary.target_id =
+invalidCitationProviderTarget.results[0]!
+  .citations[0]!.provenance.provider.target.primary.target_id =
   'mismatched-citation-target';
 
 const invalidSelectedAttempt = clone(representativePartialResponse);
@@ -581,14 +593,16 @@ const invalidEffectiveProfileTarget = clone(representativePartialResponse);
 invalidEffectiveProfileTarget.results[0]!.provenance.effective_profile = clone(
   invalidEffectiveProfileTarget.results[0]!.provenance.effective_profile,
 );
-invalidEffectiveProfileTarget.results[0]!.provenance.effective_profile.identity.target.primary.target_id =
+invalidEffectiveProfileTarget
+  .results[0]!.provenance.effective_profile.identity.target.primary.target_id =
   'mismatched-target';
 
 const invalidRequestedProfileTarget = clone(representativePartialResponse);
 invalidRequestedProfileTarget.results[0]!.provenance.requested_profile = clone(
   invalidRequestedProfileTarget.results[0]!.provenance.requested_profile,
 );
-invalidRequestedProfileTarget.results[0]!.provenance.requested_profile.identity.target.primary.target_id =
+invalidRequestedProfileTarget
+  .results[0]!.provenance.requested_profile.identity.target.primary.target_id =
   'mismatched-requested-target';
 
 const invalidCollectionProvider = clone(representativePartialResponse);
@@ -603,7 +617,8 @@ invalidCollectionProviderTarget.results[0]!.provenance.collection.provider =
   clone(
     invalidCollectionProviderTarget.results[0]!.provenance.collection.provider,
   );
-invalidCollectionProviderTarget.results[0]!.provenance.collection.provider.target.primary.target_id =
+invalidCollectionProviderTarget
+  .results[0]!.provenance.collection.provider.target.primary.target_id =
   'mismatched-target';
 
 const invalidReplacementProvenance = clone(
@@ -675,12 +690,13 @@ invalidCustomProviderResultIdentifiers.response.result.provenance.slot_id =
 const invalidCustomProviderCitationTarget = clone(
   representativeCustomProviderExchange,
 );
-invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance.provider =
-  clone(
-    invalidCustomProviderCitationTarget.response.result.citations[0]!
-      .provenance.provider,
-  );
-invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance.provider.target.primary.target_id =
+invalidCustomProviderCitationTarget.response.result
+  .citations[0]!.provenance.provider = clone(
+  invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance
+    .provider,
+);
+invalidCustomProviderCitationTarget.response.result
+  .citations[0]!.provenance.provider.target.primary.target_id =
   'mismatched-custom-citation-target';
 
 const invalidRunManifestSlotOrder = clone(representativeRunManifest);
@@ -821,8 +837,8 @@ const invalidAttemptHandleTarget = clone(representativePartialResponse);
 invalidAttemptHandleTarget.attempts[2]!.durable_handle!.provider = clone(
   invalidAttemptHandleTarget.attempts[2]!.durable_handle!.provider,
 );
-invalidAttemptHandleTarget.attempts[2]!.durable_handle!.provider.target.primary.target_id =
-  'different-target';
+invalidAttemptHandleTarget.attempts[2]!
+  .durable_handle!.provider.target.primary.target_id = 'different-target';
 
 const invalidRetrieveRunningHandle = {
   request: {
@@ -858,18 +874,18 @@ invalidResultRequiredGrounding.results[0]!.semantic_facts.grounding_outcome =
 
 const invalidResultNoneGrounding = clone(representativePartialResponse);
 invalidResultNoneGrounding.attempts[1]!.profile.grounding_policy = 'none';
-invalidResultNoneGrounding.results[0]!.provenance.effective_profile
-  .grounding_policy = 'none';
+invalidResultNoneGrounding
+  .results[0]!.provenance.effective_profile.grounding_policy = 'none';
 
 const representativeReportedEffectiveTargetResponse = clone(
   representativePartialResponse,
 );
-representativeReportedEffectiveTargetResponse.results[0]!.provenance.effective_target =
-  {
-    source: 'provider_reported',
-    kind: 'model',
-    target_id: 'brave-reported-model',
-  };
+representativeReportedEffectiveTargetResponse
+  .results[0]!.provenance.effective_target = {
+  source: 'provider_reported',
+  kind: 'model',
+  target_id: 'brave-reported-model',
+};
 
 const representativeNestedPrimaryTargetResponse = clone(
   representativePartialResponse,
@@ -891,28 +907,30 @@ nestedTargetProfile.identity.target = {
 };
 representativeNestedPrimaryTargetResponse.attempts[1]!.profile =
   clone(nestedTargetProfile);
-representativeNestedPrimaryTargetResponse.results[0]!.provenance.effective_profile =
-  clone(nestedTargetProfile);
-representativeNestedPrimaryTargetResponse.results[0]!.provenance.collection.provider =
-  clone(nestedTargetProfile.identity);
-representativeNestedPrimaryTargetResponse.results[0]!.citations[0]!.provenance.provider =
-  clone(nestedTargetProfile.identity);
-representativeNestedPrimaryTargetResponse.results[0]!.provenance.effective_target =
-  {
-    source: 'provider_reported',
-    kind: 'preset',
-    target_id: 'answers',
-  };
+representativeNestedPrimaryTargetResponse
+  .results[0]!.provenance.effective_profile = clone(nestedTargetProfile);
+representativeNestedPrimaryTargetResponse
+  .results[0]!.provenance.collection.provider = clone(
+  nestedTargetProfile.identity,
+);
+representativeNestedPrimaryTargetResponse.results[0]!
+  .citations[0]!.provenance.provider = clone(nestedTargetProfile.identity);
+representativeNestedPrimaryTargetResponse
+  .results[0]!.provenance.effective_target = {
+  source: 'provider_reported',
+  kind: 'preset',
+  target_id: 'answers',
+};
 
 const representativeNestedUnderlyingTargetResponse = clone(
   representativeNestedPrimaryTargetResponse,
 );
-representativeNestedUnderlyingTargetResponse.results[0]!.provenance.effective_target =
-  {
-    source: 'provider_reported',
-    kind: 'model',
-    target_id: 'brave',
-  };
+representativeNestedUnderlyingTargetResponse
+  .results[0]!.provenance.effective_target = {
+  source: 'provider_reported',
+  kind: 'model',
+  target_id: 'brave',
+};
 
 const invalidEffectiveTargetSource = clone(
   representativeReportedEffectiveTargetResponse,
@@ -932,7 +950,9 @@ const invalidNotApplicableEffectiveTarget = clone(
 const notApplicableTargetProfile = clone(
   invalidNotApplicableEffectiveTarget.attempts[1]!.profile,
 );
-notApplicableTargetProfile.identity.target = clone(notApplicableIdentity.target);
+notApplicableTargetProfile.identity.target = clone(
+  notApplicableIdentity.target,
+);
 invalidNotApplicableEffectiveTarget.attempts[1]!.profile = clone(
   notApplicableTargetProfile,
 );
@@ -940,8 +960,10 @@ invalidNotApplicableEffectiveTarget.results[0]!.provenance.effective_profile =
   clone(notApplicableTargetProfile);
 invalidNotApplicableEffectiveTarget.results[0]!.provenance.collection.provider =
   clone(notApplicableTargetProfile.identity);
-invalidNotApplicableEffectiveTarget.results[0]!.citations[0]!.provenance.provider =
-  clone(notApplicableTargetProfile.identity);
+invalidNotApplicableEffectiveTarget.results[0]!
+  .citations[0]!.provenance.provider = clone(
+  notApplicableTargetProfile.identity,
+);
 
 const invalidSurfaceProfileMissingIdentity = clone(
   representativeSurfaceContextRequest,
@@ -954,9 +976,7 @@ const invalidSurfaceSnapshotRetrieval = clone(
 invalidSurfaceSnapshotRetrieval.slots[0]!.primary.retrieval_method =
   'model_only';
 
-const invalidSurfaceSnapshotAccess = clone(
-  representativeSurfaceContextRequest,
-);
+const invalidSurfaceSnapshotAccess = clone(representativeSurfaceContextRequest);
 invalidSurfaceSnapshotAccess.slots[0]!.primary.access_mode = 'direct';
 
 const representativeApiProxySurfaceRequest = clone(
@@ -1075,6 +1095,303 @@ const invalidSourceCategoryTooLong = clone(representativeSpecializedResponse);
 invalidSourceCategoryTooLong.results[0]!.citations[0]!.source_category =
   `a${'b'.repeat(128)}`;
 
+const toResearchProfile = (
+  profile: (typeof representativePartialResponse.results)[number]['provenance']['effective_profile'],
+) => {
+  const {
+    invocation: _invocation,
+    resumability: _resumability,
+    ...researchProfile
+  } = profile;
+  return researchProfile;
+};
+
+const toSharedResult = (
+  result: (typeof representativePartialResponse.results)[number],
+) => {
+  const {
+    slot_id: _slotId,
+    attempt_id: _attemptId,
+    provenance,
+    ...shared
+  } = result;
+  const {
+    request_id: _requestId,
+    slot_id: _provenanceSlotId,
+    attempt_id: _provenanceAttemptId,
+    replaced_attempt_id: _replacedAttemptId,
+    ...sharedProvenance
+  } = provenance;
+  return {
+    ...shared,
+    provenance: {
+      ...sharedProvenance,
+      requested_profile: toResearchProfile(sharedProvenance.requested_profile),
+      effective_profile: toResearchProfile(sharedProvenance.effective_profile),
+    },
+  };
+};
+
+const representativeSharedPartialResponse = {
+  generator: 'jkudish/librarium',
+  generator_version: typescriptPackage.version,
+  request_id: representativePartialResponse.request_id,
+  status: 'partial' as const,
+  completed_at: representativePartialResponse.emitted_at,
+  results: representativePartialResponse.results.map(toSharedResult),
+  errors: [
+    {
+      provider: durableResearchProfile.identity,
+      error: representativePartialResponse.errors[0]!,
+      usage: representativePartialResponse.attempts[2]!.usage,
+    },
+  ],
+  sources: [
+    {
+      source_id: 'source-001',
+      canonical_url:
+        representativePartialResponse.results[0]!.citations[0]!.url,
+      source_kind:
+        representativePartialResponse.results[0]!.citations[0]!.source_kind,
+      citation_ids: [
+        representativePartialResponse.results[0]!.citations[0]!.citation_id,
+      ],
+    },
+  ],
+};
+
+const representativeSharedSucceededResponse = {
+  ...clone(representativeSharedPartialResponse),
+  status: 'succeeded' as const,
+  errors: [],
+};
+
+const representativeSharedFailedResponse = {
+  ...clone(representativeSharedPartialResponse),
+  status: 'failed' as const,
+  results: [],
+  sources: [],
+};
+
+const representativeSharedEffectiveTargetResponse = clone(
+  representativeSharedSucceededResponse,
+);
+representativeSharedEffectiveTargetResponse
+  .results[0]!.provenance.effective_target = {
+  source: 'provider_reported',
+  kind: 'model',
+  target_id: 'brave-reported-model',
+};
+
+const representativeSharedSurfaceObservationResponse = clone(
+  representativeSharedSucceededResponse,
+);
+const sharedSurfaceResult =
+  representativeSharedSurfaceObservationResponse.results[0]!;
+sharedSurfaceResult.provenance.requested_profile = clone(
+  toResearchProfile(surfaceObservationPrimaryProfile),
+);
+sharedSurfaceResult.provenance.effective_profile = clone(
+  toResearchProfile(surfaceObservationPrimaryProfile),
+);
+sharedSurfaceResult.provenance.collection = {
+  provider: clone(surfaceObservationPrimaryProfile.identity),
+  access_mode: 'collected',
+  operator_id: 'google',
+  collector_id: 'searchapi',
+  surface_id: 'google_ai_mode',
+  surface_context: clone(surfaceObservationPrimaryProfile.surface_context!),
+  origin_key: 'origin-searchapi-google-ai-mode',
+};
+sharedSurfaceResult.semantic_facts = {
+  result_kinds: ['surface_observation'],
+  grounding_outcome: 'not_used',
+  observation_mode: 'surface_snapshot',
+  corpora: ['web'],
+  retrieval_methods: ['surface_collector'],
+  measured_surface_id: 'google_ai_mode',
+  observed_at: '2026-08-08T00:00:05Z',
+};
+sharedSurfaceResult.citations[0]!.provenance = {
+  provider: clone(surfaceObservationPrimaryProfile.identity),
+  access_mode: 'collected',
+  operator_id: 'google',
+  collector_id: 'searchapi',
+  surface_id: 'google_ai_mode',
+  surface_context: clone(surfaceObservationPrimaryProfile.surface_context!),
+  origin_key: 'origin-searchapi-google-ai-mode',
+};
+
+const representativeSharedSpecializedDataRecordResponse = clone(
+  representativeSharedSucceededResponse,
+);
+representativeSharedSpecializedDataRecordResponse.results = [
+  toSharedResult(representativeSpecializedResponse.results[0]!),
+];
+representativeSharedSpecializedDataRecordResponse
+  .results[0]!.provenance.requested_profile = clone(
+  representativeSharedSpecializedDataRecordResponse.results[0]!.provenance
+    .effective_profile,
+);
+representativeSharedSpecializedDataRecordResponse.sources = [
+  {
+    source_id: 'source-specialized-record-001',
+    provider_reference: 'record-public-001',
+    source_kind: 'data_record',
+    source_category: 'patent_record',
+    dataset_id: 'dataset-public-001',
+    citation_ids: [
+      representativeSharedSpecializedDataRecordResponse.results[0]!
+        .citations[0]!.citation_id,
+    ],
+  },
+];
+
+const invalidSharedGenericVersion = {
+  ...clone(representativeSharedSucceededResponse),
+  version: '1.0.0',
+};
+const invalidSharedInterchangeVersion = {
+  ...clone(representativeSharedSucceededResponse),
+  interchange_version: '1.0.0',
+};
+const invalidSharedExecutionField = {
+  ...clone(representativeSharedSucceededResponse),
+  attempts: [],
+};
+const invalidSharedSlotField = {
+  ...clone(representativeSharedSucceededResponse),
+  slots: [],
+};
+const invalidSharedHandleField = {
+  ...clone(representativeSharedSucceededResponse),
+  durable_handle: {},
+};
+const invalidSharedLifecycleField = {
+  ...clone(representativeSharedSucceededResponse),
+  lifecycle: [],
+};
+const invalidSharedPendingStatus = {
+  ...clone(representativeSharedSucceededResponse),
+  status: 'pending',
+};
+const invalidSharedCancelledStatus = {
+  ...clone(representativeSharedFailedResponse),
+  status: 'cancelled',
+};
+const invalidSharedUnsuccessfulStatus = {
+  ...clone(representativeSharedFailedResponse),
+  status: 'unsuccessful',
+};
+const invalidSharedSubmittedStatus = {
+  ...clone(representativeSharedSucceededResponse),
+  status: 'submitted',
+};
+const invalidSharedRunningStatus = {
+  ...clone(representativeSharedSucceededResponse),
+  status: 'running',
+};
+const invalidSharedMissingReceipt = clone(
+  representativeSharedSucceededResponse,
+) as Record<string, unknown>;
+delete invalidSharedMissingReceipt.generator;
+const invalidSharedMalformedReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator_version: '1.4',
+};
+const invalidSharedBlankReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: ' ',
+};
+const invalidSharedBareScopeReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: '@scope',
+};
+const invalidSharedOversizedReceipt = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: 'a'.repeat(256),
+};
+const representativeSharedPhpSucceededResponse = {
+  ...clone(representativeSharedSucceededResponse),
+  generator: 'jkudish/laravel-ai-librarium',
+  generator_version: '1.0.0-rc.1+build.7',
+};
+const invalidSharedResultExecutionField = clone(
+  representativeSharedSucceededResponse,
+) as Record<string, any>;
+invalidSharedResultExecutionField.results[0].attempt_id = 'attempt-internal';
+const invalidSharedCollectionProvider = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedCollectionProvider.results[0]!.provenance.collection.provider = {
+  ...invalidSharedCollectionProvider.results[0]!.provenance.collection.provider,
+  provider_id: 'other-provider',
+};
+const invalidSharedDuplicateCitationSource = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedDuplicateCitationSource.sources.push({
+  ...clone(invalidSharedDuplicateCitationSource.sources[0]!),
+  source_id: 'source-002',
+});
+const invalidSharedDanglingCitationSource = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedDanglingCitationSource.sources[0]!.citation_ids = [
+  'citation-does-not-exist',
+];
+const invalidSharedUnownedCitation = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedUnownedCitation.sources = [];
+const invalidSharedTerminalShape = {
+  ...clone(representativeSharedSucceededResponse),
+  errors: [{ error: representativePartialResponse.errors[0]! }],
+};
+const invalidSharedSemanticProfile = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedSemanticProfile.results[0]!.semantic_facts.result_kinds = [
+  'model_answer',
+];
+const invalidSharedEffectiveTarget = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedEffectiveTarget.results[0]!.provenance.effective_target = {
+  source: 'provider_reported',
+  kind: 'agent',
+  target_id: 'wrong-kind',
+};
+const invalidSharedCitationProvider = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedCitationProvider.results[0]!.citations[0]!.provenance.provider = {
+  ...invalidSharedCitationProvider.results[0]!.citations[0]!.provenance
+    .provider,
+  provider_id: 'other-provider',
+};
+const invalidSharedProfileExecutionField = clone(
+  representativeSharedSucceededResponse,
+) as Record<string, any>;
+invalidSharedProfileExecutionField.results[0].provenance.effective_profile.invocation =
+  'inline';
+const invalidSharedRequestedResultKind = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedRequestedResultKind.results[0]!.provenance.requested_profile.result_kind =
+  'model_answer';
+const invalidSharedCitationCollectionBinding = clone(
+  representativeSharedSucceededResponse,
+);
+invalidSharedCitationCollectionBinding.results[0]!
+  .citations[0]!.provenance.operator_id = 'other-operator';
+const invalidSharedSourceKind = clone(representativeSharedSucceededResponse);
+invalidSharedSourceKind.sources[0]!.source_kind = 'web_page';
+const invalidSharedChronology = clone(representativeSharedSucceededResponse);
+invalidSharedChronology.results[0]!.completed_at =
+  '2026-08-08T00:00:05.0002Z';
+invalidSharedChronology.completed_at = '2026-08-08T00:00:05.0001Z';
+
 const fixtureDefinitions = [
   {
     id: 'valid.target_configurable_model',
@@ -1097,8 +1414,7 @@ const fixtureDefinitions = [
     area: 'domain',
     schema: 'provider_identity',
     valid: true,
-    path:
-      'fixtures/valid/target-fixed-preset-underlying-configurable-model.json',
+    path: 'fixtures/valid/target-fixed-preset-underlying-configurable-model.json',
     payload: fixedPresetUnderlyingModelIdentity,
   },
   {
@@ -1993,21 +2309,315 @@ const fixtureDefinitions = [
   },
 ] as const;
 
+const sharedFixtureDefinitions = [
+  {
+    id: 'valid.research_response_succeeded',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-succeeded.json',
+    payload: representativeSharedSucceededResponse,
+  },
+  {
+    id: 'valid.research_response_php_succeeded',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-php-succeeded.json',
+    payload: representativeSharedPhpSucceededResponse,
+  },
+  {
+    id: 'valid.research_response_partial',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-partial.json',
+    payload: representativeSharedPartialResponse,
+  },
+  {
+    id: 'valid.research_response_failed',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-failed.json',
+    payload: representativeSharedFailedResponse,
+  },
+  {
+    id: 'valid.research_response_provider_reported_effective_target',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-provider-reported-effective-target.json',
+    payload: representativeSharedEffectiveTargetResponse,
+  },
+  {
+    id: 'valid.research_response_surface_observation',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-surface-observation.json',
+    payload: representativeSharedSurfaceObservationResponse,
+  },
+  {
+    id: 'valid.research_response_specialized_data_record',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: true,
+    path: 'fixtures/valid/research-response-specialized-data-record.json',
+    payload: representativeSharedSpecializedDataRecordResponse,
+  },
+  {
+    id: 'invalid.research_response_missing_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-missing-receipt.json',
+    payload: invalidSharedMissingReceipt,
+  },
+  {
+    id: 'invalid.research_response_blank_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-blank-receipt.json',
+    payload: invalidSharedBlankReceipt,
+  },
+  {
+    id: 'invalid.research_response_bare_scope_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-bare-scope-receipt.json',
+    payload: invalidSharedBareScopeReceipt,
+  },
+  {
+    id: 'invalid.research_response_oversized_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator',
+    path: 'fixtures/invalid/research-response-oversized-receipt.json',
+    payload: invalidSharedOversizedReceipt,
+  },
+  {
+    id: 'invalid.research_response_malformed_receipt',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/generator_version',
+    path: 'fixtures/invalid/research-response-malformed-receipt.json',
+    payload: invalidSharedMalformedReceipt,
+  },
+  {
+    id: 'invalid.research_response_generic_version',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/research-response-generic-version.json',
+    payload: invalidSharedGenericVersion,
+  },
+  {
+    id: 'invalid.research_response_interchange_version',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/research-response-interchange-version.json',
+    payload: invalidSharedInterchangeVersion,
+  },
+  {
+    id: 'invalid.research_response_execution_field',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '',
+    path: 'fixtures/invalid/research-response-execution-field.json',
+    payload: invalidSharedExecutionField,
+  },
+  {
+    id: 'invalid.research_response_result_execution_field',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0',
+    path: 'fixtures/invalid/research-response-result-execution-field.json',
+    payload: invalidSharedResultExecutionField,
+  },
+  ...(
+    [
+      ['slot_field', invalidSharedSlotField],
+      ['handle_field', invalidSharedHandleField],
+      ['lifecycle_field', invalidSharedLifecycleField],
+    ] as const
+  ).map(([name, payload]) => ({
+    id: `invalid.research_response_${name}`,
+    area: 'interchange' as const,
+    schema: 'research_response' as const,
+    valid: false as const,
+    expected_issue_path: '',
+    path: `fixtures/invalid/research-response-${name.replaceAll('_', '-')}.json`,
+    payload,
+  })),
+  {
+    id: 'invalid.research_response_collection_provider',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/collection/provider',
+    path: 'fixtures/invalid/research-response-collection-provider.json',
+    payload: invalidSharedCollectionProvider,
+  },
+  {
+    id: 'invalid.research_response_duplicate_citation_source',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/sources/1/citation_ids/0',
+    path: 'fixtures/invalid/research-response-duplicate-citation-source.json',
+    payload: invalidSharedDuplicateCitationSource,
+  },
+  {
+    id: 'invalid.research_response_dangling_citation_source',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/sources/0/citation_ids/0',
+    path: 'fixtures/invalid/research-response-dangling-citation-source.json',
+    payload: invalidSharedDanglingCitationSource,
+  },
+  {
+    id: 'invalid.research_response_unowned_citation',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/citation_id',
+    path: 'fixtures/invalid/research-response-unowned-citation.json',
+    payload: invalidSharedUnownedCitation,
+  },
+  {
+    id: 'invalid.research_response_terminal_shape',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/errors',
+    path: 'fixtures/invalid/research-response-terminal-shape.json',
+    payload: invalidSharedTerminalShape,
+  },
+  {
+    id: 'invalid.research_response_semantic_profile',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/semantic_facts/result_kinds',
+    path: 'fixtures/invalid/research-response-semantic-profile.json',
+    payload: invalidSharedSemanticProfile,
+  },
+  {
+    id: 'invalid.research_response_effective_target',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_target/kind',
+    path: 'fixtures/invalid/research-response-effective-target.json',
+    payload: invalidSharedEffectiveTarget,
+  },
+  {
+    id: 'invalid.research_response_citation_provider',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/provenance/provider',
+    path: 'fixtures/invalid/research-response-citation-provider.json',
+    payload: invalidSharedCitationProvider,
+  },
+  {
+    id: 'invalid.research_response_profile_execution_field',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/provenance/effective_profile',
+    path: 'fixtures/invalid/research-response-profile-execution-field.json',
+    payload: invalidSharedProfileExecutionField,
+  },
+  {
+    id: 'invalid.research_response_requested_result_kind',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path:
+      '/results/0/provenance/effective_profile/result_kind',
+    path: 'fixtures/invalid/research-response-requested-result-kind.json',
+    payload: invalidSharedRequestedResultKind,
+  },
+  {
+    id: 'invalid.research_response_citation_collection_binding',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/provenance/operator_id',
+    path: 'fixtures/invalid/research-response-citation-collection-binding.json',
+    payload: invalidSharedCitationCollectionBinding,
+  },
+  {
+    id: 'invalid.research_response_source_kind',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/sources/0/source_kind',
+    path: 'fixtures/invalid/research-response-source-kind.json',
+    payload: invalidSharedSourceKind,
+  },
+  {
+    id: 'invalid.research_response_chronology',
+    area: 'interchange',
+    schema: 'research_response',
+    valid: false,
+    expected_issue_path: '/results/0/completed_at',
+    path: 'fixtures/invalid/research-response-chronology.json',
+    payload: invalidSharedChronology,
+  },
+  ...(
+    [
+      ['pending', invalidSharedPendingStatus],
+      ['cancelled', invalidSharedCancelledStatus],
+      ['unsuccessful', invalidSharedUnsuccessfulStatus],
+      ['submitted', invalidSharedSubmittedStatus],
+      ['running', invalidSharedRunningStatus],
+    ] as const
+  ).map(([status, payload]) => ({
+    id: `invalid.research_response_${status}_status`,
+    area: 'interchange' as const,
+    schema: 'research_response' as const,
+    valid: false as const,
+    expected_issue_path: '/status',
+    path: `fixtures/invalid/research-response-${status}-status.json`,
+    payload,
+  })),
+] as const;
+
 const schemaTargets = {
   provider_identity: {
     schema_path: 'schema/domain.schema.json',
     schema_ref: '#/$defs/provider_identity',
   },
   interchange_request: {
-    schema_path: 'schema/interchange.schema.json',
-    schema_ref: '#/$defs/request',
+    schema_path: 'schema/artifacts.schema.json',
+    schema_ref: '#/$defs/execution_request',
   },
   interchange_response: {
+    schema_path: 'schema/artifacts.schema.json',
+    schema_ref: '#/$defs/execution_response',
+  },
+  research_response: {
     schema_path: 'schema/interchange.schema.json',
-    schema_ref: '#/$defs/response',
+    schema_ref: '#/$defs/research_response',
   },
   lifecycle_trace: {
-    schema_path: 'schema/interchange.schema.json',
+    schema_path: 'schema/artifacts.schema.json',
     schema_ref: '#/$defs/lifecycle_trace',
   },
   run_manifest: {
@@ -2029,8 +2639,7 @@ const schemaTargets = {
 } as const;
 
 const semanticFixtureRules: Record<string, string> = {
-  'invalid.target_configurable_missing_kind':
-    'target.selection_coherence',
+  'invalid.target_configurable_missing_kind': 'target.selection_coherence',
   'invalid.target_configurable_missing_id': 'target.selection_coherence',
   'invalid.target_fixed_missing_kind': 'target.selection_coherence',
   'invalid.target_fixed_missing_id': 'target.selection_coherence',
@@ -2038,8 +2647,7 @@ const semanticFixtureRules: Record<string, string> = {
   'invalid.target_not_applicable_kind': 'target.selection_coherence',
   'invalid.target_not_applicable_id': 'target.selection_coherence',
   'invalid.target_underlying_primary_model': 'target.underlying_coherence',
-  'invalid.target_underlying_provider_managed':
-    'target.underlying_coherence',
+  'invalid.target_underlying_provider_managed': 'target.underlying_coherence',
   'invalid.target_underlying_nested_agent': 'target.underlying_coherence',
   'invalid.async_non_durable_profile': 'request.preflight_plan_compatibility',
   'invalid.incompatible_fallback': 'request.preflight_plan_compatibility',
@@ -2087,8 +2695,7 @@ const semanticFixtureRules: Record<string, string> = {
     'response.effective_target_coherence',
   'invalid.response_not_applicable_effective_target':
     'response.effective_target_coherence',
-  'invalid.response_fallback_candidate_reuse':
-    'response.fallback_consumption',
+  'invalid.response_fallback_candidate_reuse': 'response.fallback_consumption',
   'invalid.response_mixed_unsuccessful_status': 'response.status_coherence',
   'invalid.custom_provider_result_identifiers':
     'custom_provider.result_binding',
@@ -2109,20 +2716,51 @@ const semanticFixtureRules: Record<string, string> = {
     'surface_observation.profile_invariants',
   'invalid.surface_snapshot_retrieval':
     'surface_observation.profile_invariants',
-  'invalid.surface_snapshot_access':
-    'surface_observation.profile_invariants',
+  'invalid.surface_snapshot_access': 'surface_observation.profile_invariants',
   'invalid.sources_dangling_citation': 'artifacts.sources_reference_integrity',
   'invalid.sources_duplicate_identity': 'artifacts.sources_reference_integrity',
   'invalid.sources_duplicate_citation_identity':
     'artifacts.sources_reference_integrity',
   'invalid.sources_duplicate_reference':
     'artifacts.sources_reference_integrity',
+  'invalid.research_response_collection_provider':
+    'research_response.result_provenance',
+  'invalid.research_response_duplicate_citation_source':
+    'research_response.source_integrity',
+  'invalid.research_response_dangling_citation_source':
+    'research_response.source_integrity',
+  'invalid.research_response_unowned_citation':
+    'research_response.source_integrity',
+  'invalid.research_response_terminal_shape':
+    'research_response.terminal_shape',
+  'invalid.research_response_semantic_profile':
+    'research_response.semantic_profile_coherence',
+  'invalid.research_response_effective_target':
+    'research_response.effective_target_coherence',
+  'invalid.research_response_citation_provider':
+    'citation.provider_identity_binding',
+  'invalid.research_response_requested_result_kind':
+    'research_response.profile_compatibility',
+  'invalid.research_response_citation_collection_binding':
+    'research_response.collection_profile_binding',
+  'invalid.research_response_source_kind': 'research_response.source_integrity',
+  'invalid.research_response_chronology':
+    'research_response.terminal_chronology',
 };
 
-const fixtureFiles = fixtureDefinitions.map((fixture) =>
+const internalFixtureDefinitions = fixtureDefinitions.map((fixture) =>
+  fixture.area === 'interchange'
+    ? { ...fixture, area: 'artifacts' as const }
+    : fixture,
+);
+const allFixtureDefinitions = [
+  ...internalFixtureDefinitions,
+  ...sharedFixtureDefinitions,
+];
+const fixtureFiles = allFixtureDefinitions.map((fixture) =>
   write(fixture.path, fixture.payload),
 );
-const fixtureIndex = fixtureDefinitions.map((fixture) => {
+const fixtureIndex = allFixtureDefinitions.map((fixture) => {
   const target = schemaTargets[fixture.schema];
   const base = {
     id: fixture.id,
@@ -2167,7 +2805,7 @@ const manifest = {
     domain: DOMAIN_VERSION,
     artifacts: ARTIFACTS_VERSION,
     custom_provider: CUSTOM_PROVIDER_PROTOCOL_VERSION,
-    interchange: INTERCHANGE_VERSION,
+    interchange: RESEARCH_RESPONSE_CONTRACT_VERSION,
   },
   semantic_rules: [
     {
@@ -2186,7 +2824,7 @@ const manifest = {
       rule_id: 'extensions.bounded_namespaced_json',
       version: '1.0.0',
       description:
-        'Extensions are namespaced, JSON-safe, size/depth bounded, and secret-free.',
+        'Extensions are namespaced, JSON-safe, size/depth bounded, and reject obvious sensitive key names; producers remain responsible for content redaction.',
     },
     {
       rule_id: 'request.preflight_plan_compatibility',
@@ -2326,6 +2964,60 @@ const manifest = {
       description:
         'Evidence facts cross the boundary without a universal verified boolean or threshold.',
     },
+    {
+      rule_id: 'research_response.terminal_shape',
+      version: '1.0.0',
+      description:
+        'Shared responses contain only terminal succeeded, partial, or failed outcomes with coherent results and errors.',
+    },
+    {
+      rule_id: 'research_response.producer_receipt',
+      version: '1.0.0',
+      description:
+        'Every shared response identifies its actual producing package and independent SemVer 2 package release.',
+    },
+    {
+      rule_id: 'research_response.result_provenance',
+      version: '1.0.0',
+      description:
+        'A terminal result collection identifies the effective producing profile without exposing execution attempts.',
+    },
+    {
+      rule_id: 'research_response.semantic_profile_coherence',
+      version: '1.0.0',
+      description:
+        'Terminal result facts remain within and identify the effective profile.',
+    },
+    {
+      rule_id: 'research_response.effective_target_coherence',
+      version: '1.0.0',
+      description:
+        'Provider-reported effective targets match a declared effective profile target kind.',
+    },
+    {
+      rule_id: 'research_response.source_integrity',
+      version: '1.0.0',
+      description:
+        'Every terminal response citation belongs to exactly one normalized source, and every source reference resolves.',
+    },
+    {
+      rule_id: 'research_response.profile_compatibility',
+      version: '1.0.0',
+      description:
+        'Effective terminal profiles preserve requested result kind, observation lane, and measured surface without inferring hidden request requirements from provider capability profiles.',
+    },
+    {
+      rule_id: 'research_response.collection_profile_binding',
+      version: '1.0.0',
+      description:
+        'Terminal collection and citation provenance bind provider, access, operator, collector, surface, and context facts to the effective profile.',
+    },
+    {
+      rule_id: 'research_response.terminal_chronology',
+      version: '1.0.0',
+      description:
+        'A terminal response cannot complete before any result in its envelope completes.',
+    },
   ],
   files: [
     ...schemaFiles.map((path) => ({
@@ -2337,14 +3029,14 @@ const manifest = {
       path: fixtureIndexPath,
       role: 'fixture_index',
       areas: Array.from(
-        new Set(fixtureDefinitions.map((fixture) => fixture.area)),
+        new Set(allFixtureDefinitions.map((fixture) => fixture.area)),
       ).sort(),
     },
     ...fixtureFiles.map((path) => ({
       path,
       role: 'fixture',
       areas: [
-        fixtureDefinitions.find((fixture) => fixture.path === path)!.area,
+        allFixtureDefinitions.find((fixture) => fixture.path === path)!.area,
       ],
     })),
   ],
