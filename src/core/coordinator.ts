@@ -182,6 +182,7 @@ export interface AttemptLaunch {
   readonly slot_id: string;
   readonly profile: ExecutionProfile;
   readonly binding: AdapterBindingIdentity;
+  readonly catalog_digest: string;
   readonly query: string;
   readonly deadline_at: string;
   readonly delivery_lease_id: string;
@@ -736,6 +737,7 @@ function claimDispatchPendingAttempts(
       slot_id: attempt.slot_id,
       profile: attempt.profile,
       binding: profilePlanFor(state, attempt.profile).binding,
+      catalog_digest: state.catalog_digest,
       query: attempt.query,
       deadline_at: attempt.deadline_at,
       delivery_lease_id: deliveryLeaseId,
@@ -892,11 +894,6 @@ export function recordSubmissionAccepted(
     );
   }
   validateHandleProvider(attempt, handle);
-  if (handle.status !== 'pending' && handle.status !== 'running') {
-    throw new Error(
-      'A newly accepted durable handle must be pending or running.',
-    );
-  }
   attempt.status = 'submitted';
   attempt.durable_handle = handle;
   attempt.adapter_state_ref = adapterStateRef ?? attempt.adapter_state_ref;

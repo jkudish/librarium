@@ -129,29 +129,48 @@ export async function runPreparedExecution(
     launch: AttemptLaunch,
   ): Promise<boolean> => {
     let dispatched = false;
-    await transition(effectiveDependencies, requestId, (state) => {
-      // updateCoordinationState may invoke this callback more than once after
-      // a CAS conflict. Reset the decision on every observation so a stale
-      // delivery never inherits permission from a failed CAS attempt.
-      dispatched = false;
-      const attempt = state.attempts.find(
-        (candidate) => candidate.attempt_id === launch.attempt_id,
-      );
-      if (
-        attempt?.status !== 'dispatch_pending' ||
-        attempt?.delivery_lease_id !== launch.delivery_lease_id
-      ) {
-        return undefined;
-      }
-      dispatched = true;
-      return recordLaunchDispatched(
-        state,
-        launch.attempt_id,
-        launch.delivery_lease_id,
-        effectiveDependencies.coordinator,
-      );
-    });
-    return dispatched;
+    const persisted = await transition(
+      effectiveDependencies,
+      requestId,
+      (state) => {
+        // updateCoordinationState may invoke this callback more than once after
+        // a CAS conflict. Reset the decision on every observation so a stale
+        // delivery never inherits permission from a failed CAS attempt.
+        dispatched = false;
+        const attempt = state.attempts.find(
+          (candidate) => candidate.attempt_id === launch.attempt_id,
+        );
+        if (
+          attempt?.status !== 'dispatch_pending' ||
+          attempt?.delivery_lease_id !== launch.delivery_lease_id
+        ) {
+          return undefined;
+        }
+        const now = effectiveDependencies.coordinator.clock.now();
+        if (
+          now >= Date.parse(state.request_deadline_at) ||
+          !attempt.delivery_lease_expires_at ||
+          now >= Date.parse(attempt.delivery_lease_expires_at)
+        ) {
+          return undefined;
+        }
+        dispatched = true;
+        return recordLaunchDispatched(
+          state,
+          launch.attempt_id,
+          launch.delivery_lease_id,
+          effectiveDependencies.coordinator,
+        );
+      },
+    );
+    const attempt = persisted.state.attempts.find(
+      (candidate) => candidate.attempt_id === launch.attempt_id,
+    );
+    return (
+      dispatched &&
+      (attempt?.status === 'running' || attempt?.status === 'submitting') &&
+      attempt.started_at !== undefined
+    );
   };
 
   const executeLaunch = async (launch: AttemptLaunch): Promise<void> => {
@@ -272,6 +291,31 @@ export async function runPreparedExecution(
         }
       }
     } catch (error) {
+      const current = await effectiveDependencies.store.load(requestId);
+      const attempt = current?.state.attempts.find(
+        (candidate) => candidate.attempt_id === launch.attempt_id,
+      );
+      if (
+        attempt?.durable_handle &&
+        (attempt.status === 'submitted' || attempt.status === 'running')
+      ) {
+        await transition(effectiveDependencies, requestId, (state) =>
+          recordTransientPollFailure(
+            state,
+            launch.attempt_id,
+            {
+              code: 'attempt_execution_interrupted',
+              message:
+                'Local execution was interrupted after durable acceptance.',
+              category: 'internal',
+              retryable: true,
+              fallback_allowed: false,
+            },
+            effectiveDependencies.coordinator,
+          ),
+        );
+        return;
+      }
       await transition(effectiveDependencies, requestId, (state) =>
         recordAttemptFinished(
           state,

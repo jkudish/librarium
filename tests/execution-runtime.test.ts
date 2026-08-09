@@ -157,12 +157,22 @@ function successfulResult(provider: string): ProviderResult {
   };
 }
 
-function resolvedBinding(providerId: string, provider: Provider) {
+function resolvedBinding(
+  providerId: string,
+  provider: Provider,
+  resolvedProfile: ExecutionProfile = profile(
+    providerId,
+    provider.execution === 'background' ? 'background' : 'inline',
+  ),
+  catalogDigest = 'runtime-digest',
+) {
   return {
     binding: {
       adapter_id: `adapter-${providerId}`,
       binding_id: `binding-${providerId}`,
     },
+    profile: resolvedProfile,
+    catalog_digest: catalogDigest,
     provider,
   };
 }
@@ -207,6 +217,46 @@ class LoseDispatchLeaseStore implements CoordinationStateStore {
   }
 }
 
+class AdvanceClockAfterLeaseStore implements CoordinationStateStore {
+  readonly inner = new InMemoryCoordinationStateStore();
+  advanced = false;
+
+  constructor(private readonly advance: () => void) {}
+
+  load(requestId: string): Promise<VersionedCoordinationState | undefined> {
+    return this.inner.load(requestId);
+  }
+
+  create(state: CoordinatorState): Promise<VersionedCoordinationState> {
+    return this.inner.create(state);
+  }
+
+  async compareAndSwap(
+    requestId: string,
+    expectedVersion: number,
+    state: CoordinatorState,
+  ): Promise<CoordinationCompareAndSwapResult> {
+    const result = await this.inner.compareAndSwap(
+      requestId,
+      expectedVersion,
+      state,
+    );
+    if (
+      result.ok &&
+      !this.advanced &&
+      state.attempts.some(
+        (attempt) =>
+          attempt.status === 'dispatch_pending' &&
+          attempt.delivery_lease_id !== undefined,
+      )
+    ) {
+      this.advanced = true;
+      this.advance();
+    }
+    return result;
+  }
+}
+
 describe('private prepared execution runtime', () => {
   it('executes only the frozen adapter binding and never performs provider selection', async () => {
     const exact: Provider = {
@@ -239,7 +289,7 @@ describe('private prepared execution runtime', () => {
     });
     expect(exact.execute).toHaveBeenCalledExactlyOnceWith(
       'runtime query',
-      expect.objectContaining({ timeout: 10_000, signal: expect.anything() }),
+      expect.objectContaining({ timeout: 10, signal: expect.anything() }),
     );
     expect(result.state.status).toBe('succeeded');
     expect(result.outputs_by_attempt).toEqual(
@@ -292,7 +342,7 @@ describe('private prepared execution runtime', () => {
 
     expect(durable.submit).toHaveBeenCalledWith(
       'runtime query',
-      expect.objectContaining({ timeout: 20_000, signal: expect.anything() }),
+      expect.objectContaining({ timeout: 20, signal: expect.anything() }),
     );
     expect(durable.poll).toHaveBeenCalledOnce();
     expect(durable.retrieve).toHaveBeenCalledOnce();
@@ -497,6 +547,8 @@ describe('private prepared execution runtime', () => {
             adapter_id: 'adapter-primary',
             binding_id: 'different-binding',
           },
+          profile: profile('primary'),
+          catalog_digest: 'runtime-digest',
           provider,
         }),
         now: () => start,
@@ -512,6 +564,59 @@ describe('private prepared execution runtime', () => {
       },
     });
   });
+
+  it.each([
+    {
+      name: 'execution profile',
+      resolvedProfile: profile('different-profile'),
+      catalogDigest: 'runtime-digest',
+    },
+    {
+      name: 'catalog digest',
+      resolvedProfile: profile('primary'),
+      catalogDigest: 'different-digest',
+    },
+  ])(
+    'rejects a resolver result with a mismatched frozen $name',
+    async ({ resolvedProfile, catalogDigest }) => {
+      const execute = vi.fn(async () => successfulResult('adapter-primary'));
+      const provider: Provider = {
+        id: 'adapter-primary',
+        displayName: 'Primary',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute,
+      };
+
+      const result = await runPreparedExecution(
+        prepared([profile('primary')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: coordinatorDependencies(),
+          attempts: createNodeAttemptBridge({
+            resolveExactBinding: () =>
+              resolvedBinding(
+                'primary',
+                provider,
+                resolvedProfile,
+                catalogDigest,
+              ),
+            now: () => start,
+          }),
+        },
+      );
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'failed',
+        error: {
+          code: 'frozen_adapter_binding_unavailable',
+          fallback_allowed: false,
+        },
+      });
+    },
+  );
 
   it('keeps polling through transient errors and repeated running states before fallback', async () => {
     const pollSteps: Array<Error | { status: 'running' | 'failed' }> = [
@@ -625,17 +730,171 @@ describe('private prepared execution runtime', () => {
     expect(durable.retrieve).not.toHaveBeenCalled();
   });
 
+  it('retrieves an already-completed durable submission in async mode', async () => {
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-durable',
+        taskId: 'already-completed',
+        query: 'runtime query',
+        submittedAt: start,
+        status: 'completed' as const,
+      })),
+      poll: vi.fn(),
+      retrieve: vi.fn(async () => successfulResult('adapter-durable')),
+    };
+
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [], 'async'),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createNodeAttemptBridge({
+          resolveExactBinding: () => resolvedBinding('durable', durable),
+          now: () => start,
+        }),
+      },
+    );
+
+    expect(result.state.status).toBe('succeeded');
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'succeeded',
+      durable_handle: {
+        provider_task_id: 'already-completed',
+        status: 'succeeded',
+      },
+    });
+    expect(durable.poll).not.toHaveBeenCalled();
+    expect(durable.retrieve).toHaveBeenCalledOnce();
+    expect(result.outputs_by_attempt).toEqual(
+      expect.objectContaining({
+        'attempt-2': expect.objectContaining({ content: 'done' }),
+      }),
+    );
+  });
+
+  it.each([
+    {
+      taskStatus: 'failed' as const,
+      attemptStatus: 'failed',
+      errorCode: 'provider_task_failed',
+    },
+    {
+      taskStatus: 'cancelled' as const,
+      attemptStatus: 'cancelled',
+      errorCode: 'provider_task_cancelled',
+    },
+  ])(
+    'terminalizes an already-$taskStatus durable submission without polling',
+    async ({ taskStatus, attemptStatus, errorCode }) => {
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-durable',
+          taskId: `already-${taskStatus}`,
+          query: 'runtime query',
+          submittedAt: start,
+          status: taskStatus,
+        })),
+        poll: vi.fn(),
+        retrieve: vi.fn(),
+      };
+
+      const result = await runPreparedExecution(
+        prepared([profile('durable', 'background')], [], 'async'),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: coordinatorDependencies(),
+          attempts: createNodeAttemptBridge({
+            resolveExactBinding: () => resolvedBinding('durable', durable),
+            now: () => start,
+          }),
+        },
+      );
+
+      expect(result.state.attempts[0]).toMatchObject({
+        status: attemptStatus,
+        durable_handle: { status: taskStatus },
+        error: { code: errorCode },
+      });
+      expect(durable.poll).not.toHaveBeenCalled();
+      expect(durable.retrieve).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps accepted durable work resumable after a local execution exception', async () => {
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [], 'async'),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: {
+          execute: async (launch, context) => {
+            await context.submissionAccepted({
+              handle_id: launch.attempt_id,
+              provider_task_id: 'accepted-before-local-error',
+              provider: launch.profile.identity,
+              submitted_at: new Date(start).toISOString(),
+              status: 'pending',
+            });
+            throw new Error('Authorization: secret-after-acceptance');
+          },
+        },
+      },
+    );
+
+    expect(result.state.status).toBe('running');
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'submitted',
+      durable_handle: {
+        provider_task_id: 'accepted-before-local-error',
+        status: 'pending',
+      },
+      transient_poll_error: {
+        code: 'attempt_execution_interrupted',
+        fallback_allowed: false,
+        retryable: true,
+      },
+    });
+    expect(JSON.stringify(result.state)).not.toContain(
+      'secret-after-acceptance',
+    );
+  });
+
   it('times out a hung inline call and executes an eligible fallback', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(start);
     try {
+      let aborted = false;
       const primary: Provider = {
         id: 'adapter-primary',
         displayName: 'Primary',
         tier: 'raw-search',
         envVar: '',
         execution: 'inline',
-        execute: vi.fn(() => new Promise<ProviderResult>(() => {})),
+        execute: vi.fn(
+          (_query, options) =>
+            new Promise<ProviderResult>((_resolve, reject) => {
+              options.signal?.addEventListener(
+                'abort',
+                () => {
+                  aborted = true;
+                  reject(new Error('aborted by deadline'));
+                },
+                { once: true },
+              );
+            }),
+        ),
       };
       const reserveExecute = vi.fn(async () =>
         successfulResult('adapter-reserve'),
@@ -672,6 +931,7 @@ describe('private prepared execution runtime', () => {
         error: { code: 'attempt_deadline_exceeded', fallback_allowed: true },
       });
       expect(reserveExecute).toHaveBeenCalledOnce();
+      expect(aborted).toBe(true);
       expect(result.state.status).toBe('succeeded');
     } finally {
       vi.useRealTimers();
@@ -924,6 +1184,52 @@ describe('private prepared execution runtime', () => {
     expect(store.lostDispatch).toBe(true);
     expect(attempts.execute).not.toHaveBeenCalled();
     expect(result.state.attempts[0]?.status).toBe('running');
+  });
+
+  it('does not dispatch after the request deadline wins the launch race', async () => {
+    const dependencies = mutableCoordinatorDependencies();
+    const store = new AdvanceClockAfterLeaseStore(() => {
+      dependencies.setNow(start + 60_000);
+    });
+    const attempts: AttemptExecutionPort = { execute: vi.fn() };
+
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store,
+      coordinator: dependencies,
+      attempts,
+    });
+
+    expect(store.advanced).toBe(true);
+    expect(attempts.execute).not.toHaveBeenCalled();
+    expect(result.state.status).toBe('unsuccessful');
+    expect(result.state.attempts[0]).toMatchObject({
+      status: 'timed_out',
+      error: { code: 'request_deadline_exceeded' },
+    });
+  });
+
+  it('reclaims an expired launch lease before dispatching exactly once', async () => {
+    const dependencies = mutableCoordinatorDependencies();
+    const store = new AdvanceClockAfterLeaseStore(() => {
+      dependencies.setNow(start + 1_001);
+    });
+    const execute = vi.fn(async (launch) => ({
+      kind: 'finished' as const,
+      finished: {
+        outcome: 'succeeded' as const,
+        result_id: `result-${launch.attempt_id}`,
+      },
+    }));
+
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store,
+      coordinator: dependencies,
+      attempts: { execute },
+    });
+
+    expect(store.advanced).toBe(true);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(result.state.status).toBe('succeeded');
   });
 
   it('derives enough CAS retries for the maximum concurrent completion wave', async () => {

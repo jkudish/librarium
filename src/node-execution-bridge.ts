@@ -1,7 +1,9 @@
 import type {
   DurableHandle,
+  ExecutionProfile,
   StructuredError,
 } from './contracts/domain/index.js';
+import { ExecutionProfileSchema } from './contracts/domain/index.js';
 import type { AttemptLaunch } from './core/coordinator.js';
 import type { AdapterBindingIdentity } from './core/execution-plan.js';
 import type {
@@ -11,12 +13,17 @@ import type {
 } from './core/execution-runtime.js';
 import type { AsyncTaskHandle, Provider, ProviderResult } from './types.js';
 
+type BackgroundProvider = Extract<Provider, { execution: 'background' }>;
+
 export interface NodeExecutionBridgeDependencies {
   /** Exact binding lookup only: aliases and selector policy are absent. */
-  resolveExactBinding(
-    binding: AdapterBindingIdentity,
-  ):
-    | { readonly binding: AdapterBindingIdentity; readonly provider: Provider }
+  resolveExactBinding(binding: AdapterBindingIdentity):
+    | {
+        readonly binding: AdapterBindingIdentity;
+        readonly profile: ExecutionProfile;
+        readonly catalog_digest: string;
+        readonly provider: Provider;
+      }
     | undefined;
   now?: () => number;
   wait?: (milliseconds: number) => Promise<void>;
@@ -74,6 +81,23 @@ function timeoutFor(launch: AttemptLaunch, now: () => number): number {
   return Math.max(1, Date.parse(launch.deadline_at) - now());
 }
 
+function providerTimeoutSeconds(remainingMs: number): number {
+  return Math.max(1, Math.ceil(remainingMs / 1_000));
+}
+
+function profilesMatch(
+  expected: ExecutionProfile,
+  actual: ExecutionProfile,
+): boolean {
+  const parsedExpected = ExecutionProfileSchema.safeParse(expected);
+  const parsedActual = ExecutionProfileSchema.safeParse(actual);
+  return (
+    parsedExpected.success &&
+    parsedActual.success &&
+    JSON.stringify(parsedExpected.data) === JSON.stringify(parsedActual.data)
+  );
+}
+
 function resultOutcome(
   launch: AttemptLaunch,
   result: ProviderResult,
@@ -89,6 +113,7 @@ function resultOutcome(
           'The provider returned an error.',
           result.preventFallback !== true,
         ),
+        ...(completedHandle && { durable_handle: completedHandle }),
       },
       output: result,
     };
@@ -109,12 +134,18 @@ function durableHandle(
   task: AsyncTaskHandle,
   now: () => number,
 ): DurableHandle {
+  const status: DurableHandle['status'] =
+    task.status === 'completed'
+      ? 'succeeded'
+      : task.status === 'failed' || task.status === 'cancelled'
+        ? task.status
+        : task.status;
   return {
     handle_id: launch.attempt_id,
     provider_task_id: task.taskId,
     provider: launch.profile.identity,
     submitted_at: new Date(task.submittedAt || now()).toISOString(),
-    status: task.status === 'running' ? 'running' : 'pending',
+    status,
   };
 }
 
@@ -132,6 +163,52 @@ function observedHandle(
 
 function defaultWait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function retrieveCompletedTask(
+  provider: BackgroundProvider,
+  task: AsyncTaskHandle,
+  launch: AttemptLaunch,
+  handle: DurableHandle,
+  now: () => number,
+): Promise<AttemptExecutionResult> {
+  const completedHandle = observedHandle(handle, 'succeeded', now);
+  const retrieved = await beforeDeadline(
+    () => provider.retrieve(task),
+    launch,
+    now,
+  );
+  if (retrieved.kind === 'deadline') {
+    return {
+      kind: 'finished',
+      finished: {
+        outcome: 'timed_out',
+        error: providerFailure(
+          'attempt_deadline_exceeded',
+          'The provider result retrieval exceeded the attempt deadline.',
+          false,
+          true,
+          'timeout',
+        ),
+        durable_handle: completedHandle,
+      },
+    };
+  }
+  if (retrieved.kind === 'error') {
+    return {
+      kind: 'finished',
+      finished: {
+        outcome: 'failed',
+        error: providerFailure(
+          'adapter_retrieve_failed',
+          'The provider result retrieval failed.',
+          true,
+        ),
+        durable_handle: completedHandle,
+      },
+    };
+  }
+  return resultOutcome(launch, retrieved.value, completedHandle);
 }
 
 /**
@@ -155,6 +232,8 @@ export function createNodeAttemptBridge(
         !resolved ||
         resolved.binding.adapter_id !== launch.binding.adapter_id ||
         resolved.binding.binding_id !== launch.binding.binding_id ||
+        resolved.catalog_digest !== launch.catalog_digest ||
+        !profilesMatch(launch.profile, resolved.profile) ||
         !provider ||
         provider.id !== launch.binding.adapter_id
       ) {
@@ -188,7 +267,7 @@ export function createNodeAttemptBridge(
         const executed = await beforeDeadline(
           (signal, remainingMs) =>
             provider.execute(launch.query, {
-              timeout: remainingMs,
+              timeout: providerTimeoutSeconds(remainingMs),
               signal,
             }),
           launch,
@@ -244,7 +323,10 @@ export function createNodeAttemptBridge(
 
       const submitted = await beforeDeadline(
         (signal, remainingMs) =>
-          provider.submit(launch.query, { timeout: remainingMs, signal }),
+          provider.submit(launch.query, {
+            timeout: providerTimeoutSeconds(remainingMs),
+            signal,
+          }),
         launch,
         now,
       );
@@ -274,6 +356,40 @@ export function createNodeAttemptBridge(
         // fallback so the coordinator retains the safe terminal marker.
         await context.submissionAcceptanceUnknown();
         return { kind: 'acceptance_unknown' };
+      }
+
+      if (task.status === 'failed') {
+        return {
+          kind: 'finished',
+          finished: {
+            outcome: 'failed',
+            error: providerFailure(
+              'provider_task_failed',
+              'The durable provider task failed.',
+              true,
+            ),
+            durable_handle: handle,
+          },
+        };
+      }
+      if (task.status === 'cancelled') {
+        return {
+          kind: 'finished',
+          finished: {
+            outcome: 'cancelled',
+            error: providerFailure(
+              'provider_task_cancelled',
+              'The durable provider task was cancelled.',
+              false,
+              false,
+              'cancelled',
+            ),
+            durable_handle: handle,
+          },
+        };
+      }
+      if (task.status === 'completed') {
+        return retrieveCompletedTask(provider, task, launch, handle, now);
       }
       if (context.mode === 'async') return { kind: 'accepted' };
 
@@ -335,47 +451,13 @@ export function createNodeAttemptBridge(
           await context.running();
         }
         if (poll.status === 'completed') {
-          const completedHandle = observedHandle(
-            latestHandle,
-            'succeeded',
-            now,
-          );
-          const retrieved = await beforeDeadline(
-            () => provider.retrieve(task),
+          return retrieveCompletedTask(
+            provider,
+            task,
             launch,
+            latestHandle,
             now,
           );
-          if (retrieved.kind === 'deadline') {
-            return {
-              kind: 'finished',
-              finished: {
-                outcome: 'timed_out',
-                error: providerFailure(
-                  'attempt_deadline_exceeded',
-                  'The provider result retrieval exceeded the attempt deadline.',
-                  false,
-                  true,
-                  'timeout',
-                ),
-                durable_handle: completedHandle,
-              },
-            };
-          }
-          if (retrieved.kind === 'error') {
-            return {
-              kind: 'finished',
-              finished: {
-                outcome: 'failed',
-                error: providerFailure(
-                  'adapter_retrieve_failed',
-                  'The provider result retrieval failed.',
-                  true,
-                ),
-                durable_handle: completedHandle,
-              },
-            };
-          }
-          return resultOutcome(launch, retrieved.value, completedHandle);
         }
         if (poll.status === 'failed') {
           return {

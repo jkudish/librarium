@@ -7,6 +7,7 @@ import {
   type FrozenPlanningCatalog,
   type PlanningProfile,
   prepareResearchExecution,
+  profileIdentityKey,
 } from '../src/core/execution-plan.js';
 import {
   CanonicalResearchRequestSchema,
@@ -417,6 +418,35 @@ describe('research execution preparation', () => {
         '/catalog/profiles/1/binding/adapter_id',
       ],
     ]);
+  });
+
+  it('rejects one adapter binding pair assigned to multiple catalog profiles', () => {
+    const sharedBinding = {
+      adapter_id: 'adapter-shared',
+      binding_id: 'binding-shared',
+    };
+    const result = prepareResearchExecution(
+      targetRequest(),
+      new FixtureCatalog([
+        planningProfile(groundedProfile('alpha'), {
+          binding: sharedBinding,
+        }),
+        planningProfile(groundedProfile('beta'), {
+          binding: sharedBinding,
+        }),
+      ]),
+      dependencies(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'catalog_binding_duplicate',
+        path: '/catalog/profiles/1/binding',
+        profile_key: profileIdentityKey(groundedProfile('beta').identity),
+      }),
+    );
   });
 
   it('rejects unbounded catalog identity metadata without reflecting it', () => {

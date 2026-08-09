@@ -442,7 +442,12 @@ async function callScriptOperation<T>({
     sourceOptions: source.options ?? {},
   };
 
-  const raw = await runScriptOperation(source, envelope, timeoutSeconds);
+  const raw = await runScriptOperation(
+    source,
+    envelope,
+    timeoutSeconds,
+    options?.signal,
+  );
   const response = SCRIPT_RESPONSE_SCHEMA.parse(raw);
 
   if (!response.ok) {
@@ -468,8 +473,13 @@ function runScriptOperation(
   source: ScriptProviderSource,
   envelope: ScriptRequestEnvelope,
   timeoutSeconds: number,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Script provider operation was aborted.'));
+      return;
+    }
     const child = spawn(source.command, source.args ?? [], {
       cwd: source.cwd ? resolvePath(process.cwd(), source.cwd) : process.cwd(),
       env: { ...process.env, ...(source.env ?? {}) },
@@ -479,11 +489,18 @@ function runScriptOperation(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const onAbort = (): void => {
+      child.kill('SIGKILL');
+      finish(new Error('Script provider operation was aborted.'));
+    };
 
     const finish = (error?: Error, value?: unknown): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
       if (error) {
         reject(error);
       } else {
@@ -538,7 +555,7 @@ function runScriptOperation(
       }
     });
 
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
       child.kill('SIGKILL');
       finish(
         new Error(
@@ -546,6 +563,11 @@ function runScriptOperation(
         ),
       );
     }, Math.max(1, timeoutSeconds) * 1000);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
 
     child.stdin.write(JSON.stringify(envelope));
     child.stdin.end();
