@@ -1,7 +1,11 @@
-import type {
-  DurableHandle,
-  ExecutionProfile,
-  StructuredError,
+import { z } from 'zod/v4';
+import { OpaqueIdSchema } from '../contracts/common.js';
+import {
+  type DurableHandle,
+  DurableHandleSchema,
+  type ExecutionProfile,
+  type StructuredError,
+  StructuredErrorSchema,
 } from '../contracts/domain/index.js';
 import type { LifecycleEvent } from '../contracts/interchange/lifecycle.js';
 import { INTERCHANGE_VERSION } from '../contracts/interchange/request.js';
@@ -15,7 +19,10 @@ import {
   type PreparedResearchExecution,
   profileIdentityKey,
 } from './execution-plan.js';
-import { RESEARCH_REQUEST_LIMITS } from './research-request.js';
+import {
+  ExactMicrousdSchema,
+  RESEARCH_REQUEST_LIMITS,
+} from './research-request.js';
 
 export type CoordinatorTerminalOutcome =
   | 'succeeded'
@@ -27,6 +34,7 @@ export type CoordinatorTerminalOutcome =
 export type CoordinatorStatus = 'running' | CoordinatorTerminalOutcome;
 
 export type CoordinatorAttemptStatus =
+  | 'dispatch_pending'
   | 'submitting'
   | 'acceptance_unknown'
   | 'submitted'
@@ -69,8 +77,11 @@ export interface CoordinatorAttemptState {
   profile: ExecutionProfile;
   status: CoordinatorAttemptStatus;
   query: string;
-  started_at: string;
+  queued_at: string;
+  started_at?: string;
   deadline_at: string;
+  delivery_lease_id?: string;
+  delivery_lease_expires_at?: string;
   finished_at?: string;
   replaces_attempt_id?: string;
   candidate_id?: string;
@@ -118,6 +129,14 @@ export interface UnresolvedAcceptance {
   adapter_state_ref?: string;
 }
 
+const UnresolvedAcceptanceReasonSchema = z.enum([
+  'submission_response_uncertain',
+  'submission_deadline_exceeded',
+  'request_deadline_exceeded',
+  'cancelled_while_acceptance_unknown',
+  'infrastructure_failure_while_acceptance_unknown',
+]);
+
 export interface CoordinatorState {
   request_id: string;
   mode: 'sync' | 'async';
@@ -135,7 +154,6 @@ export interface CoordinatorState {
   attempts: CoordinatorAttemptState[];
   reserve: CoordinatorReserveCandidate[];
   pending_fallbacks: PendingFallbackLaunch[];
-  claimed_candidate_ids: string[];
   used_profile_keys: string[];
   unresolved_acceptances: UnresolvedAcceptance[];
   profile_plans_by_identity: PreparedResearchExecution['profile_plans_by_identity'];
@@ -151,7 +169,7 @@ export interface CoordinatorClock {
 }
 
 export interface CoordinatorIdGenerator {
-  next(scope: 'attempt' | 'event'): string;
+  next(scope: 'attempt' | 'event' | 'delivery_lease'): string;
 }
 
 export interface CoordinatorDependencies {
@@ -166,6 +184,8 @@ export interface AttemptLaunch {
   readonly binding: AdapterBindingIdentity;
   readonly query: string;
   readonly deadline_at: string;
+  readonly delivery_lease_id: string;
+  readonly idempotency_key: string;
 }
 
 export interface CoordinatorAdvanceResult {
@@ -173,27 +193,31 @@ export interface CoordinatorAdvanceResult {
   readonly launches: readonly AttemptLaunch[];
 }
 
-export type AttemptFinishedInput =
-  | {
-      readonly outcome: 'succeeded';
-      readonly result_id: string;
-      readonly durable_handle?: DurableHandle;
-      readonly actual_cost_microusd?: string;
-    }
-  | {
-      readonly outcome: 'failed' | 'timed_out';
-      readonly error: StructuredError;
-      readonly durable_handle?: DurableHandle;
-      readonly actual_cost_microusd?: string;
-    }
-  | {
-      readonly outcome: 'cancelled';
-      readonly error?: StructuredError;
-      readonly durable_handle?: DurableHandle;
-      readonly actual_cost_microusd?: string;
-    };
+const AttemptFinishedInputSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({
+    outcome: z.literal('succeeded'),
+    result_id: OpaqueIdSchema,
+    durable_handle: DurableHandleSchema.optional(),
+    actual_cost_microusd: ExactMicrousdSchema.optional(),
+  }),
+  z.strictObject({
+    outcome: z.enum(['failed', 'timed_out']),
+    error: StructuredErrorSchema,
+    durable_handle: DurableHandleSchema.optional(),
+    actual_cost_microusd: ExactMicrousdSchema.optional(),
+  }),
+  z.strictObject({
+    outcome: z.literal('cancelled'),
+    error: StructuredErrorSchema.optional(),
+    durable_handle: DurableHandleSchema.optional(),
+    actual_cost_microusd: ExactMicrousdSchema.optional(),
+  }),
+]);
+
+export type AttemptFinishedInput = z.infer<typeof AttemptFinishedInputSchema>;
 
 const ACTIVE_ATTEMPT_STATUSES = new Set<CoordinatorAttemptStatus>([
+  'dispatch_pending',
   'submitting',
   'submitted',
   'running',
@@ -254,6 +278,9 @@ function appendAttemptStarted(
   attempt: CoordinatorAttemptState,
   dependencies: CoordinatorDependencies,
 ): void {
+  if (!attempt.started_at) {
+    throw new Error('A dispatched attempt requires a started_at timestamp.');
+  }
   appendLifecycle(state, {
     ...eventBase(state, dependencies, attempt.started_at),
     slot_id: attempt.slot_id,
@@ -411,21 +438,43 @@ function reservationFor(
 function budgetPermitsLaunch(
   state: CoordinatorState,
   reservation: string,
+  additionalReservation = '0',
 ): boolean {
   const estimatedLimit = state.budget.max_estimated_cost_microusd;
   if (
     estimatedLimit !== undefined &&
     exactGreaterThan(
-      exactAdd(state.budget.reserved_estimated_cost_microusd, reservation),
+      exactAdd(
+        exactAdd(
+          state.budget.reserved_estimated_cost_microusd,
+          additionalReservation,
+        ),
+        reservation,
+      ),
       estimatedLimit,
     )
   ) {
     return false;
   }
   const actualLimit = state.budget.max_actual_cost_microusd;
+  const projectedCommittedActual = state.attempts.reduce(
+    (total, attempt) =>
+      exactAdd(
+        total,
+        attempt.actual_cost_microusd ??
+          attempt.reserved_estimated_cost_microusd,
+      ),
+    '0',
+  );
   return !(
     actualLimit !== undefined &&
-    exactGreaterThan(state.budget.actual_cost_microusd, actualLimit)
+    exactGreaterThan(
+      exactAdd(
+        exactAdd(projectedCommittedActual, additionalReservation),
+        reservation,
+      ),
+      actualLimit,
+    )
   );
 }
 
@@ -532,7 +581,6 @@ export function createCoordinatorState(
       eligible_slot_ids: [...candidate.eligible_slot_ids],
     })),
     pending_fallbacks: [],
-    claimed_candidate_ids: [],
     used_profile_keys: [],
     unresolved_acceptances: [],
     profile_plans_by_identity: structuredClone(
@@ -596,34 +644,28 @@ function startAttempt(
     CoordinatorAttemptState,
     | 'status'
     | 'query'
+    | 'queued_at'
     | 'started_at'
     | 'deadline_at'
+    | 'delivery_lease_id'
+    | 'delivery_lease_expires_at'
     | 'reserved_estimated_cost_microusd'
   >,
   dependencies: CoordinatorDependencies,
-): AttemptLaunch | undefined {
+): boolean {
   const reservation = reservationFor(state, attempt.profile);
   if (!budgetPermitsLaunch(state, reservation)) {
     suppressSlotForBudget(state, slot);
-    return undefined;
+    return false;
   }
 
-  const startedAtMs = dependencies.clock.now();
-  const requestDeadlineMs = Date.parse(state.request_deadline_at);
-  const attemptDeadlineMs =
-    attempt.profile.invocation === 'inline'
-      ? state.inline_attempt_deadline_ms
-      : state.background_attempt_deadline_ms;
+  const queuedAtMs = dependencies.clock.now();
   const started: CoordinatorAttemptState = {
     ...attempt,
-    status: canHaveRemoteAcceptanceUncertainty(attempt.profile)
-      ? 'submitting'
-      : 'running',
+    status: 'dispatch_pending',
     query: slot.refined_query ?? state.original_query,
-    started_at: iso(startedAtMs),
-    deadline_at: iso(
-      Math.min(startedAtMs + attemptDeadlineMs, requestDeadlineMs),
-    ),
+    queued_at: iso(queuedAtMs),
+    deadline_at: state.request_deadline_at,
     reserved_estimated_cost_microusd: reservation,
   };
   state.attempts.push(started);
@@ -637,15 +679,59 @@ function startAttempt(
     state.budget.reserved_estimated_cost_microusd,
     reservation,
   );
-  appendAttemptStarted(state, started, dependencies);
-  return {
-    attempt_id: started.attempt_id,
-    slot_id: started.slot_id,
-    profile: started.profile,
-    binding: profilePlanFor(state, started.profile).binding,
-    query: started.query,
-    deadline_at: started.deadline_at,
-  };
+  return true;
+}
+
+function claimDispatchPendingAttempts(
+  state: CoordinatorState,
+  dependencies: CoordinatorDependencies,
+): AttemptLaunch[] {
+  const nowMs = dependencies.clock.now();
+  const requestDeadlineMs = Date.parse(state.request_deadline_at);
+  const launches: AttemptLaunch[] = [];
+  const queued = state.attempts
+    .filter((attempt) => attempt.status === 'dispatch_pending')
+    .sort(
+      (left, right) =>
+        slotFor(state, left.slot_id).position -
+        slotFor(state, right.slot_id).position,
+    );
+  for (const attempt of queued) {
+    if (
+      attempt.delivery_lease_expires_at &&
+      nowMs < Date.parse(attempt.delivery_lease_expires_at)
+    ) {
+      continue;
+    }
+    const deliveryLeaseId = dependencies.ids.next('delivery_lease');
+    const attemptDeadlineMs =
+      attempt.profile.invocation === 'inline'
+        ? state.inline_attempt_deadline_ms
+        : state.background_attempt_deadline_ms;
+    attempt.deadline_at = iso(
+      Math.min(nowMs + attemptDeadlineMs, requestDeadlineMs),
+    );
+    const leaseExpiresAt = iso(
+      Math.min(
+        nowMs + state.poll_interval_ms,
+        requestDeadlineMs,
+        Date.parse(attempt.deadline_at),
+      ),
+    );
+    attempt.delivery_lease_id = deliveryLeaseId;
+    attempt.delivery_lease_expires_at = leaseExpiresAt;
+    launches.push({
+      attempt_id: attempt.attempt_id,
+      slot_id: attempt.slot_id,
+      profile: attempt.profile,
+      binding: profilePlanFor(state, attempt.profile).binding,
+      query: attempt.query,
+      deadline_at: attempt.deadline_at,
+      delivery_lease_id: deliveryLeaseId,
+      idempotency_key: attempt.attempt_id,
+    });
+  }
+  return launches;
 }
 
 export function startLaunchableAttempts(
@@ -663,8 +749,16 @@ export function startLaunchableAttempts(
   const next = cloneState(state);
   let changed = false;
   let capacity = availableConcurrency(next);
-  if (capacity === 0) return { state, launches: [] };
-  const launches: AttemptLaunch[] = [];
+  const claimedBeforeScheduling = claimDispatchPendingAttempts(
+    next,
+    dependencies,
+  );
+  if (capacity === 0) {
+    return {
+      state: claimedBeforeScheduling.length > 0 ? next : state,
+      launches: claimedBeforeScheduling,
+    };
+  }
 
   const pending = [...next.pending_fallbacks].sort(
     (left, right) =>
@@ -684,7 +778,7 @@ export function startLaunchableAttempts(
       (entry) => entry.attempt_id !== fallback.attempt_id,
     );
     changed = true;
-    const launch = startAttempt(
+    const started = startAttempt(
       next,
       slot,
       {
@@ -698,14 +792,19 @@ export function startLaunchableAttempts(
       },
       dependencies,
     );
-    if (launch) {
-      launches.push(launch);
+    if (started) {
       capacity -= 1;
     }
   }
 
   if (next.pending_fallbacks.length > 0 || capacity === 0) {
-    return { state: next, launches };
+    return {
+      state: next,
+      launches: [
+        ...claimedBeforeScheduling,
+        ...claimDispatchPendingAttempts(next, dependencies),
+      ],
+    };
   }
 
   for (const slot of [...next.slots].sort(
@@ -714,7 +813,7 @@ export function startLaunchableAttempts(
     if (capacity === 0) break;
     if (slot.status !== 'unstarted') continue;
     changed = true;
-    const launch = startAttempt(
+    const started = startAttempt(
       next,
       slot,
       {
@@ -726,23 +825,50 @@ export function startLaunchableAttempts(
       },
       dependencies,
     );
-    if (launch) {
-      launches.push(launch);
+    if (started) {
       capacity -= 1;
     }
   }
-  return { state: changed ? next : state, launches };
+  const launches = [
+    ...claimedBeforeScheduling,
+    ...claimDispatchPendingAttempts(next, dependencies),
+  ];
+  return { state: changed || launches.length > 0 ? next : state, launches };
 }
 
 export function recordSubmissionAccepted(
   state: CoordinatorState,
   attemptId: string,
-  handle: DurableHandle,
+  handleInput: unknown,
   dependencies: CoordinatorDependencies,
-  adapterStateRef?: string,
+  adapterStateRefInput?: unknown,
 ): CoordinatorState {
-  const next = cloneState(state);
+  const priorAttempt = attemptFor(state, attemptId);
+  const priorStatus = priorAttempt.status;
+  if (!canHaveRemoteAcceptanceUncertainty(priorAttempt.profile)) {
+    throw new Error('Only durable background profiles can be submitted.');
+  }
+  if (priorStatus !== 'submitting' && priorStatus !== 'acceptance_unknown') {
+    throw new Error(
+      'Only a submitting or acceptance-unknown attempt can be accepted.',
+    );
+  }
+  const deadlineState = advanceDeadlines(state, dependencies);
+  if (deadlineState.status !== 'running') return deadlineState;
+  const next = cloneState(deadlineState);
   const attempt = attemptFor(next, attemptId);
+  if (TERMINAL_ATTEMPT_STATUSES.has(attempt.status)) return next;
+  if (
+    priorStatus !== 'acceptance_unknown' &&
+    attempt.status === 'acceptance_unknown'
+  ) {
+    return next;
+  }
+  const handle = DurableHandleSchema.parse(handleInput);
+  const adapterStateRef =
+    adapterStateRefInput === undefined
+      ? undefined
+      : OpaqueIdSchema.parse(adapterStateRefInput);
   if (!canHaveRemoteAcceptanceUncertainty(attempt.profile)) {
     throw new Error('Only durable background profiles can be submitted.');
   }
@@ -778,11 +904,59 @@ export function recordSubmissionAccepted(
   return next;
 }
 
+export function recordLaunchDispatched(
+  state: CoordinatorState,
+  attemptId: string,
+  deliveryLeaseIdInput: unknown,
+  dependencies: CoordinatorDependencies,
+): CoordinatorState {
+  const deadlineState = advanceDeadlines(state, dependencies);
+  if (deadlineState.status !== 'running') return deadlineState;
+  const next = cloneState(deadlineState);
+  const attempt = attemptFor(next, attemptId);
+  const deliveryLeaseId = OpaqueIdSchema.parse(deliveryLeaseIdInput);
+  if (attempt.status !== 'dispatch_pending') {
+    throw new Error('Only a dispatch-pending attempt can begin delivery.');
+  }
+  if (attempt.delivery_lease_id !== deliveryLeaseId) {
+    throw new Error('The dispatch delivery lease does not match the attempt.');
+  }
+  const startedAtMs = dependencies.clock.now();
+  if (
+    !attempt.delivery_lease_expires_at ||
+    startedAtMs >= Date.parse(attempt.delivery_lease_expires_at)
+  ) {
+    throw new Error('The dispatch delivery lease has expired.');
+  }
+  attempt.status = canHaveRemoteAcceptanceUncertainty(attempt.profile)
+    ? 'submitting'
+    : 'running';
+  attempt.started_at = iso(startedAtMs);
+  attempt.delivery_lease_id = undefined;
+  attempt.delivery_lease_expires_at = undefined;
+  slotFor(next, attempt.slot_id).status = attempt.status;
+  appendAttemptStarted(next, attempt, dependencies);
+  return next;
+}
+
 export function recordAttemptRunning(
   state: CoordinatorState,
   attemptId: string,
+  dependencies: CoordinatorDependencies,
 ): CoordinatorState {
-  const next = cloneState(state);
+  const priorAttempt = attemptFor(state, attemptId);
+  if (!canHaveRemoteAcceptanceUncertainty(priorAttempt.profile)) {
+    throw new Error(
+      'Only durable background submissions can transition from submitted to running.',
+    );
+  }
+  if (priorAttempt.status !== 'submitted') {
+    throw new Error('Only a submitted attempt can transition to running.');
+  }
+  const deadlineState = advanceDeadlines(state, dependencies);
+  const deadlineAttempt = attemptFor(deadlineState, attemptId);
+  if (deadlineAttempt.status !== 'submitted') return deadlineState;
+  const next = cloneState(deadlineState);
   const attempt = attemptFor(next, attemptId);
   if (!canHaveRemoteAcceptanceUncertainty(attempt.profile)) {
     throw new Error(
@@ -798,15 +972,20 @@ export function recordAttemptRunning(
   return next;
 }
 
-export function recordAcceptanceUnknown(
+function markAcceptanceUnknownUnchecked(
   state: CoordinatorState,
   attemptId: string,
   dependencies: CoordinatorDependencies,
-  adapterStateRef?: string,
-  reason: UnresolvedAcceptance['reason'] = 'submission_response_uncertain',
+  adapterStateRefInput?: unknown,
+  reasonInput: unknown = 'submission_response_uncertain',
 ): CoordinatorState {
   const next = cloneState(state);
   const attempt = attemptFor(next, attemptId);
+  const adapterStateRef =
+    adapterStateRefInput === undefined
+      ? undefined
+      : OpaqueIdSchema.parse(adapterStateRefInput);
+  const reason = UnresolvedAcceptanceReasonSchema.parse(reasonInput);
   if (!canHaveRemoteAcceptanceUncertainty(attempt.profile)) {
     throw new Error(
       'Only durable background profiles can have unknown acceptance.',
@@ -827,12 +1006,68 @@ export function recordAcceptanceUnknown(
   return next;
 }
 
+export function recordAcceptanceUnknown(
+  state: CoordinatorState,
+  attemptId: string,
+  dependencies: CoordinatorDependencies,
+  adapterStateRefInput?: unknown,
+  reasonInput: unknown = 'submission_response_uncertain',
+): CoordinatorState {
+  const priorAttempt = attemptFor(state, attemptId);
+  if (!canHaveRemoteAcceptanceUncertainty(priorAttempt.profile)) {
+    throw new Error(
+      'Only durable background profiles can have unknown acceptance.',
+    );
+  }
+  if (priorAttempt.status !== 'submitting') {
+    throw new Error('Only a submitting attempt can become acceptance-unknown.');
+  }
+  const deadlineState = advanceDeadlines(state, dependencies);
+  const deadlineAttempt = attemptFor(deadlineState, attemptId);
+  if (!canHaveRemoteAcceptanceUncertainty(deadlineAttempt.profile)) {
+    throw new Error(
+      'Only durable background profiles can have unknown acceptance.',
+    );
+  }
+  if (deadlineAttempt.status !== 'submitting') return deadlineState;
+  return markAcceptanceUnknownUnchecked(
+    deadlineState,
+    attemptId,
+    dependencies,
+    adapterStateRefInput,
+    reasonInput,
+  );
+}
+
 export function recordTransientPollFailure(
   state: CoordinatorState,
   attemptId: string,
-  error: StructuredError,
+  errorInput: unknown,
+  dependencies: CoordinatorDependencies,
 ): CoordinatorState {
-  const next = cloneState(state);
+  const priorAttempt = attemptFor(state, attemptId);
+  if (!canHaveRemoteAcceptanceUncertainty(priorAttempt.profile)) {
+    throw new Error('Transient poll failures require durable background work.');
+  }
+  if (
+    priorAttempt.status !== 'submitted' &&
+    priorAttempt.status !== 'running'
+  ) {
+    throw new Error('Transient poll failures require an accepted attempt.');
+  }
+  const error = StructuredErrorSchema.parse(errorInput);
+  if (!error.retryable) {
+    throw new Error('Transient poll failures must carry a retryable error.');
+  }
+  const deadlineState = advanceDeadlines(state, dependencies);
+  const deadlineAttempt = attemptFor(deadlineState, attemptId);
+  if (
+    deadlineAttempt.status !== 'submitted' &&
+    deadlineAttempt.status !== 'running'
+  ) {
+    return deadlineState;
+  }
+  const next = cloneState(deadlineState);
   const attempt = attemptFor(next, attemptId);
   if (!canHaveRemoteAcceptanceUncertainty(attempt.profile)) {
     throw new Error('Transient poll failures require durable background work.');
@@ -847,7 +1082,7 @@ export function recordTransientPollFailure(
   return next;
 }
 
-export function recordAttemptFinished(
+function finishAttemptUnchecked(
   state: CoordinatorState,
   attemptId: string,
   input: AttemptFinishedInput,
@@ -857,7 +1092,7 @@ export function recordAttemptFinished(
   const attempt = attemptFor(next, attemptId);
   if (
     TERMINAL_ATTEMPT_STATUSES.has(attempt.status) ||
-    attempt.status === 'acceptance_unknown'
+    attempt.status === 'dispatch_pending'
   ) {
     throw new Error('The attempt cannot transition to a terminal outcome.');
   }
@@ -886,11 +1121,6 @@ export function recordAttemptFinished(
   attempt.transient_poll_error = undefined;
   attempt.actual_cost_microusd = input.actual_cost_microusd;
   if (input.actual_cost_microusd !== undefined) {
-    if (!/^(?:0|[1-9]\d*)$/.test(input.actual_cost_microusd)) {
-      throw new Error(
-        'Actual cost must be an exact non-negative integer string.',
-      );
-    }
     next.budget.actual_cost_microusd = exactAdd(
       next.budget.actual_cost_microusd,
       input.actual_cost_microusd,
@@ -910,6 +1140,61 @@ export function recordAttemptFinished(
   }
   appendAttemptFinished(next, attempt, dependencies);
   return next;
+}
+
+export function recordAttemptFinished(
+  state: CoordinatorState,
+  attemptId: string,
+  input: unknown,
+  dependencies: CoordinatorDependencies,
+): CoordinatorState {
+  const deadlineState = advanceDeadlines(state, dependencies);
+  if (deadlineState.status !== 'running') return deadlineState;
+  const attempt = attemptFor(deadlineState, attemptId);
+  if (
+    TERMINAL_ATTEMPT_STATUSES.has(attempt.status) ||
+    attempt.status === 'acceptance_unknown'
+  ) {
+    return deadlineState;
+  }
+  return finishAttemptUnchecked(
+    deadlineState,
+    attemptId,
+    AttemptFinishedInputSchema.parse(input),
+    dependencies,
+  );
+}
+
+export function recordAcceptanceRejected(
+  state: CoordinatorState,
+  attemptId: string,
+  errorInput: unknown,
+  dependencies: CoordinatorDependencies,
+): CoordinatorState {
+  const priorAttempt = attemptFor(state, attemptId);
+  if (priorAttempt.status !== 'acceptance_unknown') {
+    throw new Error(
+      'Only an acceptance-unknown attempt can be definitively rejected.',
+    );
+  }
+  const deadlineState = advanceDeadlines(state, dependencies);
+  if (deadlineState.status !== 'running') return deadlineState;
+  const attempt = attemptFor(deadlineState, attemptId);
+  if (attempt.status !== 'acceptance_unknown') {
+    throw new Error(
+      'Only an acceptance-unknown attempt can be definitively rejected.',
+    );
+  }
+  const next = cloneState(deadlineState);
+  next.unresolved_acceptances = next.unresolved_acceptances.filter(
+    (entry) => entry.attempt_id !== attemptId,
+  );
+  return finishAttemptUnchecked(
+    next,
+    attemptId,
+    { outcome: 'failed', error: StructuredErrorSchema.parse(errorInput) },
+    dependencies,
+  );
 }
 
 export interface FallbackRoundResult {
@@ -952,6 +1237,7 @@ export function claimFallbackRound(
     .sort((left, right) => left.position - right.position);
   if (failedSlots.length === 0) return { state, claims: [] };
   const claims: PendingFallbackLaunch[] = [];
+  let roundReservations = '0';
 
   for (const slot of failedSlots) {
     const replaced = latestAttempt(next, slot);
@@ -964,6 +1250,11 @@ export function claimFallbackRound(
           entry.eligible_slot_ids.includes(slot.slot_id) &&
           !next.used_profile_keys.includes(
             profileIdentityKey(entry.profile.identity),
+          ) &&
+          budgetPermitsLaunch(
+            next,
+            reservationFor(next, entry.profile),
+            roundReservations,
           ),
       );
     if (!candidate) {
@@ -980,7 +1271,10 @@ export function claimFallbackRound(
       replaces_attempt_id: replaced.attempt_id,
     };
     candidate.claimed_by_slot_id = slot.slot_id;
-    next.claimed_candidate_ids.push(candidate.candidate_id);
+    roundReservations = exactAdd(
+      roundReservations,
+      reservationFor(next, candidate.profile),
+    );
     next.used_profile_keys.push(profileIdentityKey(candidate.profile.identity));
     next.pending_fallbacks.push(pending);
     slot.status = 'fallback_pending';
@@ -1003,15 +1297,17 @@ export function claimFallbackRound(
 export function cancelCoordination(
   state: CoordinatorState,
   dependencies: CoordinatorDependencies,
-  error: StructuredError = cancellationError(),
+  errorInput: unknown = cancellationError(),
 ): CoordinatorState {
   if (state.status !== 'running') return state;
+  const error = StructuredErrorSchema.parse(errorInput);
   const next = cloneState(state);
   const cancelledAt = iso(dependencies.clock.now());
   next.cancellation = { requested_at: cancelledAt, error };
 
   for (const attempt of next.attempts) {
     if (TERMINAL_ATTEMPT_STATUSES.has(attempt.status)) continue;
+    const wasDispatchPending = attempt.status === 'dispatch_pending';
     if (
       canHaveRemoteAcceptanceUncertainty(attempt.profile) &&
       (attempt.status === 'submitting' ||
@@ -1027,10 +1323,12 @@ export function cancelCoordination(
     attempt.status = 'cancelled';
     attempt.finished_at = cancelledAt;
     attempt.error = error;
-    appendAttemptFinished(next, attempt, dependencies);
+    if (!wasDispatchPending) {
+      appendAttemptFinished(next, attempt, dependencies);
+    }
   }
   for (const slot of next.slots) {
-    if (slot.status === 'succeeded') continue;
+    if (TERMINAL_SLOT_STATUSES.has(slot.status)) continue;
     slot.status = 'cancelled';
     slot.error = error;
     slot.fallback_exhausted = true;
@@ -1047,10 +1345,11 @@ export function cancelCoordination(
 
 export function failCoordination(
   state: CoordinatorState,
-  error: StructuredError,
+  errorInput: unknown,
   dependencies: CoordinatorDependencies,
 ): CoordinatorState {
   if (state.status !== 'running') return state;
+  const error = StructuredErrorSchema.parse(errorInput);
   const next = cloneState(state);
   const failedAt = iso(dependencies.clock.now());
   next.infrastructure_error = error;
@@ -1068,13 +1367,14 @@ export function failCoordination(
         'infrastructure_failure_while_acceptance_unknown',
       );
     }
+    const wasDispatchPending = attempt.status === 'dispatch_pending';
     attempt.status = 'failed';
     attempt.finished_at = failedAt;
     attempt.error = error;
-    appendAttemptFinished(next, attempt, dependencies);
+    if (!wasDispatchPending) appendAttemptFinished(next, attempt, dependencies);
   }
   for (const slot of next.slots) {
-    if (slot.status === 'succeeded') continue;
+    if (TERMINAL_SLOT_STATUSES.has(slot.status)) continue;
     slot.status = 'failed';
     slot.error = error;
     slot.fallback_exhausted = true;
@@ -1124,6 +1424,7 @@ export function advanceDeadlines(
     const error = requestDeadlineError();
     for (const attempt of next.attempts) {
       if (TERMINAL_ATTEMPT_STATUSES.has(attempt.status)) continue;
+      const wasDispatchPending = attempt.status === 'dispatch_pending';
       if (
         canHaveRemoteAcceptanceUncertainty(attempt.profile) &&
         (attempt.status === 'submitting' ||
@@ -1144,12 +1445,19 @@ export function advanceDeadlines(
       slot.status = 'timed_out';
       slot.error = error;
       slot.fallback_exhausted = true;
-      appendAttemptFinished(next, attempt, dependencies);
+      if (!wasDispatchPending)
+        appendAttemptFinished(next, attempt, dependencies);
     }
     for (const slot of next.slots) {
-      if (slot.status === 'succeeded') continue;
-      if (!slot.latest_attempt_id) slot.status = 'cancelled';
-      slot.error = error;
+      if (TERMINAL_SLOT_STATUSES.has(slot.status)) continue;
+      const latest = latestAttempt(next, slot);
+      if (latest && TERMINAL_ATTEMPT_STATUSES.has(latest.status)) {
+        slot.status = latest.status;
+        slot.error = latest.error;
+      } else {
+        slot.status = latest ? 'timed_out' : 'cancelled';
+        slot.error = error;
+      }
       slot.fallback_exhausted = true;
     }
     next.pending_fallbacks = [];
@@ -1176,12 +1484,13 @@ export function advanceDeadlines(
     if (
       nowMs < Date.parse(current.deadline_at) ||
       TERMINAL_ATTEMPT_STATUSES.has(current.status) ||
+      current.status === 'dispatch_pending' ||
       current.status === 'acceptance_unknown'
     ) {
       continue;
     }
     if (current.status === 'submitting') {
-      next = recordAcceptanceUnknown(
+      next = markAcceptanceUnknownUnchecked(
         next,
         current.attempt_id,
         dependencies,
@@ -1189,7 +1498,7 @@ export function advanceDeadlines(
         'submission_deadline_exceeded',
       );
     } else {
-      next = recordAttemptFinished(
+      next = finishAttemptUnchecked(
         next,
         current.attempt_id,
         { outcome: 'timed_out', error: attemptDeadlineError() },

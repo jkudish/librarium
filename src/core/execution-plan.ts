@@ -661,6 +661,35 @@ function validatePlanningMetadata(
   }
 }
 
+function validateCatalogIdentity(
+  catalog: FrozenPlanningCatalog,
+  issues: PreparationIssue[],
+): { readonly revision: string; readonly digest: string } | undefined {
+  const revision = OpaqueIdSchema.safeParse(catalog.revision);
+  if (!revision.success) {
+    issues.push({
+      code: 'invalid_catalog_revision',
+      phase: 'validation',
+      path: '/catalog/revision',
+      message:
+        'Catalog revision must be a bounded, trimmed, control-free opaque identifier.',
+    });
+  }
+  const digest = OpaqueIdSchema.safeParse(catalog.digest);
+  if (!digest.success) {
+    issues.push({
+      code: 'invalid_catalog_digest',
+      phase: 'validation',
+      path: '/catalog/digest',
+      message:
+        'Catalog digest must be a bounded, trimmed, control-free opaque identifier.',
+    });
+  }
+  return revision.success && digest.success
+    ? { revision: revision.data, digest: digest.data }
+    : undefined;
+}
+
 function resolveReserve(
   request: CanonicalResearchRequest,
   catalog: FrozenPlanningCatalog,
@@ -777,6 +806,46 @@ function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
   };
 }
 
+function validatePrimaryBudgetAdmission(
+  request: CanonicalResearchRequest,
+  primaries: readonly SelectedProfile[],
+  reserve: readonly SelectedProfile[],
+  issues: PreparationIssue[],
+): void {
+  if (!request.budgets) return;
+  let total = 0n;
+  for (const selection of [...primaries, ...reserve]) {
+    const estimate = selection.entry.estimate?.estimated_cost_microusd;
+    if (estimate === undefined) {
+      issues.push({
+        code: 'budget_estimate_required',
+        phase: 'validation',
+        path: selection.path,
+        message:
+          'A hard request budget requires a bounded network-free estimate for every planned profile.',
+        profile_key: profileIdentityKey(selection.entry.profile.identity),
+      });
+      continue;
+    }
+    if (primaries.includes(selection)) total += BigInt(estimate);
+  }
+  if (issues.some((issue) => issue.code === 'budget_estimate_required')) {
+    return;
+  }
+  const totalText = total.toString();
+  for (const [field, limit] of Object.entries(request.budgets)) {
+    if (limit !== undefined && BigInt(totalText) > BigInt(limit)) {
+      issues.push({
+        code: 'primary_plan_budget_exceeded',
+        phase: 'validation',
+        path: `/budgets/${field}`,
+        message:
+          'The complete primary plan exceeds this hard budget before execution.',
+      });
+    }
+  }
+}
+
 export function prepareResearchExecution(
   input: unknown,
   catalog: FrozenPlanningCatalog,
@@ -811,6 +880,7 @@ export function prepareResearchExecution(
       notices: sortDiagnostics(notices),
     };
   }
+  const catalogIdentity = validateCatalogIdentity(catalog, issues);
   validatePlanningMetadata(catalog.profiles, issues);
   if (issues.length > 0) {
     return {
@@ -818,6 +888,9 @@ export function prepareResearchExecution(
       issues: sortDiagnostics(issues),
       notices: sortDiagnostics(notices),
     };
+  }
+  if (!catalogIdentity) {
+    throw new Error('Catalog identity validation did not produce metadata.');
   }
   const byKey = new Map(
     catalog.profiles.map((entry) => [
@@ -844,6 +917,8 @@ export function prepareResearchExecution(
     issues,
     notices,
   );
+
+  validatePrimaryBudgetAdmission(request, primaries, reserve, issues);
 
   if (issues.length > 0) {
     return {
@@ -907,7 +982,7 @@ export function prepareResearchExecution(
       refinement: request.refinement,
     },
     profile_plans_by_identity: profilePlans,
-    catalog: { revision: catalog.revision, digest: catalog.digest },
+    catalog: catalogIdentity,
     notices: sortedNotices,
   };
   return { ok: true, prepared, notices: sortedNotices };

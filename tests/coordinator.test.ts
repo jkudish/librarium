@@ -15,8 +15,10 @@ import {
   failCoordination,
   finalizeCoordination,
   mapCoordinatorOutcome,
+  recordAcceptanceRejected,
   recordAcceptanceUnknown,
   recordAttemptFinished,
+  recordLaunchDispatched,
   recordSubmissionAccepted,
   recordTransientPollFailure,
   resumeCoordination,
@@ -73,6 +75,7 @@ interface PreparedOptions {
   inlineAttemptDeadlineMs?: number;
   backgroundAttemptDeadlineMs?: number;
   requestDeadlineMs?: number;
+  pollIntervalMs?: number;
   estimates?: Readonly<Record<string, string | undefined>>;
   budgets?: {
     max_estimated_cost_microusd?: string;
@@ -156,7 +159,7 @@ function preparedExecution(
         inline_attempt_deadline_ms: options.inlineAttemptDeadlineMs ?? 30_000,
         background_attempt_deadline_ms:
           options.backgroundAttemptDeadlineMs ?? 30_000,
-        poll_interval_ms: 1_000,
+        poll_interval_ms: options.pollIntervalMs ?? 1_000,
       },
       budgets: options.budgets,
       fallback,
@@ -175,7 +178,7 @@ function dependencies(start = Date.parse('2026-08-08T12:00:00Z')) {
   return {
     clock: { now: () => now },
     ids: {
-      next: (scope: 'attempt' | 'event') => {
+      next: (scope: 'attempt' | 'event' | 'delivery_lease') => {
         const count = (counts.get(scope) ?? 0) + 1;
         counts.set(scope, count);
         return `${scope}-${count}`;
@@ -228,8 +231,28 @@ function startAll(
   prepared: PreparedResearchExecution,
   deps: ReturnType<typeof dependencies>,
 ): CoordinatorState {
-  return startLaunchableAttempts(createCoordinatorState(prepared, deps), deps)
-    .state;
+  const started = startLaunchableAttempts(
+    createCoordinatorState(prepared, deps),
+    deps,
+  );
+  return dispatchLaunches(started.state, started.launches, deps);
+}
+
+function dispatchLaunches(
+  state: CoordinatorState,
+  launches: ReturnType<typeof startLaunchableAttempts>['launches'],
+  deps: ReturnType<typeof dependencies>,
+): CoordinatorState {
+  return launches.reduce(
+    (state, launch) =>
+      recordLaunchDispatched(
+        state,
+        launch.attempt_id,
+        launch.delivery_lease_id,
+        deps,
+      ),
+    state,
+  );
 }
 
 describe('deterministic coordinator rounds', () => {
@@ -260,16 +283,17 @@ describe('deterministic coordinator rounds', () => {
       ['slot-0', 'candidate-1'],
       ['slot-1', 'candidate-0'],
     ]);
-    expect(round.state.claimed_candidate_ids).toEqual([
-      'candidate-1',
-      'candidate-0',
-    ]);
+    expect(
+      round.state.reserve
+        .filter((candidate) => candidate.claimed_by_slot_id)
+        .map((candidate) => candidate.candidate_id),
+    ).toEqual(['candidate-0', 'candidate-1']);
 
     const replacement = startLaunchableAttempts(round.state, deps);
     expect(
       replacement.launches.map((launch) => launch.profile.identity.provider_id),
     ).toEqual(['reserve-shared', 'reserve-b-first']);
-    state = replacement.state;
+    state = dispatchLaunches(replacement.state, replacement.launches, deps);
     for (const attempt of state.attempts.filter(
       (candidate) => candidate.round === 1,
     )) {
@@ -314,6 +338,44 @@ describe('deterministic coordinator rounds', () => {
     expect(() => LifecycleTraceSchema.parse(state.lifecycle)).not.toThrow();
   });
 
+  it('accounts for earlier same-round fallback reservations when choosing later candidates', () => {
+    const deps = dependencies();
+    const prepared = preparedExecution({
+      primaries: [inlineProfile('primary-a'), inlineProfile('primary-b')],
+      reserve: [
+        { profile: inlineProfile('reserve-six-a'), eligibleSlots: [0] },
+        { profile: inlineProfile('reserve-six-b'), eligibleSlots: [1] },
+        { profile: inlineProfile('reserve-four-b'), eligibleSlots: [1] },
+      ],
+      estimates: {
+        'primary-a': '0',
+        'primary-b': '0',
+        'reserve-six-a': '6',
+        'reserve-six-b': '6',
+        'reserve-four-b': '4',
+      },
+      budgets: { max_estimated_cost_microusd: '10' },
+    });
+    let state = startAll(prepared, deps);
+    for (const attempt of [...state.attempts]) {
+      state = recordAttemptFinished(
+        state,
+        attempt.attempt_id,
+        { outcome: 'failed', error: providerFailure(true) },
+        deps,
+      );
+    }
+    const round = claimFallbackRound(state, deps);
+    expect(round.claims.map((claim) => claim.candidate_id)).toEqual([
+      'candidate-0',
+      'candidate-2',
+    ]);
+    const started = startLaunchableAttempts(round.state, deps);
+    expect(
+      started.launches.map((launch) => launch.profile.identity.provider_id),
+    ).toEqual(['reserve-six-a', 'reserve-four-b']);
+  });
+
   it('allows only the concurrent CAS winner to receive launches', async () => {
     const deps = dependencies();
     const prepared = preparedExecution({
@@ -345,8 +407,15 @@ describe('deterministic coordinator rounds', () => {
 
     const persisted = await store.load(state.request_id);
     expect(persisted?.version).toBe(2);
-    expect(persisted?.state.claimed_candidate_ids).toHaveLength(2);
-    expect(new Set(persisted?.state.claimed_candidate_ids).size).toBe(2);
+    const claimedCandidates =
+      persisted?.state.reserve.filter(
+        (candidate) => candidate.claimed_by_slot_id,
+      ) ?? [];
+    expect(claimedCandidates).toHaveLength(2);
+    expect(
+      new Set(claimedCandidates.map((candidate) => candidate.candidate_id))
+        .size,
+    ).toBe(2);
     const replacementAttempts =
       persisted?.state.attempts.filter((attempt) => attempt.round === 1) ?? [];
     expect(replacementAttempts).toHaveLength(2);
@@ -357,6 +426,94 @@ describe('deterministic coordinator rounds', () => {
         ),
       ).size,
     ).toBe(2);
+  });
+
+  it('replays an undispatched launch only after its delivery lease expires', async () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const deps = dependencies(start);
+    const state = createCoordinatorState(
+      preparedExecution({ primaries: [inlineProfile('primary')] }),
+      deps,
+    );
+    const store = new InMemoryCoordinationStateStore();
+    await store.create(state);
+
+    const first = await resumeCoordination(store, state.request_id, deps);
+    expect(first.launches).toHaveLength(1);
+    expect(first.state.attempts[0]?.status).toBe('dispatch_pending');
+
+    deps.setNow(start + 500);
+    const leased = await resumeCoordination(store, state.request_id, deps);
+    expect(leased.launches).toEqual([]);
+
+    deps.setNow(start + 1_000);
+    const replayed = await resumeCoordination(store, state.request_id, deps);
+    expect(replayed.launches).toHaveLength(1);
+    expect(replayed.launches[0]?.attempt_id).toBe(
+      first.launches[0]?.attempt_id,
+    );
+    expect(replayed.launches[0]?.idempotency_key).toBe(
+      first.launches[0]?.attempt_id,
+    );
+    expect(replayed.launches[0]?.delivery_lease_id).not.toBe(
+      first.launches[0]?.delivery_lease_id,
+    );
+    expect({
+      profile: replayed.launches[0]?.profile,
+      binding: replayed.launches[0]?.binding,
+      query: replayed.launches[0]?.query,
+      idempotency_key: replayed.launches[0]?.idempotency_key,
+    }).toEqual({
+      profile: first.launches[0]?.profile,
+      binding: first.launches[0]?.binding,
+      query: first.launches[0]?.query,
+      idempotency_key: first.launches[0]?.idempotency_key,
+    });
+
+    const dispatched = recordLaunchDispatched(
+      replayed.state,
+      replayed.launches[0]?.attempt_id ?? '',
+      replayed.launches[0]?.delivery_lease_id ?? '',
+      deps,
+    );
+    expect(dispatched.attempts[0]?.status).toBe('running');
+    expect(dispatched.lifecycle.map((event) => event.event_kind)).toEqual([
+      'request_started',
+      'attempt_started',
+    ]);
+  });
+
+  it('never permits a delivery lease to outlive the pending attempt deadline', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const deps = dependencies(start);
+    const started = startLaunchableAttempts(
+      createCoordinatorState(
+        preparedExecution({
+          primaries: [inlineProfile('inline')],
+          inlineAttemptDeadlineMs: 1_000,
+          backgroundAttemptDeadlineMs: 10_000,
+          requestDeadlineMs: 10_000,
+          pollIntervalMs: 5_000,
+        }),
+        deps,
+      ),
+      deps,
+    );
+    expect(started.state.attempts[0]?.delivery_lease_expires_at).toBe(
+      new Date(start + 1_000).toISOString(),
+    );
+    deps.setNow(start + 1_000);
+    expect(() =>
+      recordLaunchDispatched(
+        started.state,
+        started.launches[0]?.attempt_id ?? '',
+        started.launches[0]?.delivery_lease_id ?? '',
+        deps,
+      ),
+    ).toThrow('delivery lease has expired');
+    expect(started.state.lifecycle.map((event) => event.event_kind)).toEqual([
+      'request_started',
+    ]);
   });
 
   it('keeps refined queries private and inherits them across replacements', () => {
@@ -370,7 +527,7 @@ describe('deterministic coordinator rounds', () => {
     let advanced = startLaunchableAttempts(state, deps);
     expect(advanced.launches[0]?.query).toBe('refined private query');
     state = recordAttemptFinished(
-      advanced.state,
+      dispatchLaunches(advanced.state, advanced.launches, deps),
       advanced.launches[0]?.attempt_id ?? '',
       { outcome: 'failed', error: providerFailure(true) },
       deps,
@@ -427,11 +584,133 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
       }),
     ]);
     expect(state.slots[1]?.status).toBe('unstarted');
-    expect(state.claimed_candidate_ids).toEqual([]);
+    expect(
+      state.reserve.every((candidate) => !candidate.claimed_by_slot_id),
+    ).toBe(true);
     expect(claimFallbackRound(state, deps).claims).toEqual([]);
     expect(state.used_profile_keys).toContain(
       profileIdentityKey(durableProfile('durable').identity),
     );
+  });
+
+  it('applies attempt deadlines before late completion or acceptance callbacks', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const inlineDeps = dependencies(start);
+    let inline = startAll(
+      preparedExecution({
+        primaries: [inlineProfile('inline')],
+        inlineAttemptDeadlineMs: 10_000,
+      }),
+      inlineDeps,
+    );
+    inlineDeps.setNow(start + 10_000);
+    inline = recordAttemptFinished(
+      inline,
+      inline.attempts[0]?.attempt_id ?? '',
+      { outcome: 'succeeded', result_id: 'late-result' },
+      inlineDeps,
+    );
+    expect(inline.attempts[0]?.status).toBe('timed_out');
+    expect(inline.slots[0]?.result_id).toBeUndefined();
+
+    const durableDeps = dependencies(start);
+    let durable = startAll(
+      preparedExecution({
+        primaries: [durableProfile('durable')],
+        backgroundAttemptDeadlineMs: 10_000,
+      }),
+      durableDeps,
+    );
+    durableDeps.setNow(start + 10_000);
+    durable = recordSubmissionAccepted(
+      durable,
+      durable.attempts[0]?.attempt_id ?? '',
+      handle(durableProfile('durable'), 'pending'),
+      durableDeps,
+    );
+    expect(durable.attempts[0]?.status).toBe('acceptance_unknown');
+    expect(durable.attempts[0]?.durable_handle).toBeUndefined();
+  });
+
+  it('retains a timely target callback while advancing an overdue sibling', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const deps = dependencies(start);
+    const durable = durableProfile('durable');
+    let state = startAll(
+      preparedExecution({
+        primaries: [inlineProfile('inline'), durable],
+        inlineAttemptDeadlineMs: 10_000,
+        backgroundAttemptDeadlineMs: 20_000,
+      }),
+      deps,
+    );
+    const durableAttempt = state.attempts.find(
+      (attempt) => attempt.profile.identity.provider_id === 'durable',
+    );
+    deps.setNow(start + 10_000);
+    state = recordSubmissionAccepted(
+      state,
+      durableAttempt?.attempt_id ?? '',
+      handle(durable, 'pending'),
+      deps,
+    );
+    expect(state.attempts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          profile: expect.objectContaining({
+            identity: expect.objectContaining({ provider_id: 'inline' }),
+          }),
+          status: 'timed_out',
+        }),
+        expect.objectContaining({
+          profile: expect.objectContaining({
+            identity: expect.objectContaining({ provider_id: 'durable' }),
+          }),
+          status: 'submitted',
+        }),
+      ]),
+    );
+  });
+
+  it('terminalizes fallback-pending slots at the request deadline without overwriting settled failures', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const deps = dependencies(start);
+    let state = startAll(
+      preparedExecution({
+        primaries: [inlineProfile('failed'), inlineProfile('active')],
+        reserve: [{ profile: inlineProfile('reserve'), eligibleSlots: [1] }],
+        requestDeadlineMs: 10_000,
+      }),
+      deps,
+    );
+    const failure = providerFailure(false, 'settled_failure');
+    state = recordAttemptFinished(
+      state,
+      state.attempts[0]?.attempt_id ?? '',
+      { outcome: 'failed', error: failure },
+      deps,
+    );
+    state = recordAttemptFinished(
+      state,
+      state.attempts[1]?.attempt_id ?? '',
+      { outcome: 'failed', error: providerFailure(true) },
+      deps,
+    );
+    state = claimFallbackRound(state, deps).state;
+    expect(state.slots[1]?.status).toBe('fallback_pending');
+
+    deps.setNow(start + 10_000);
+    state = advanceCoordination(state, deps).state;
+    expect(state.status).toBe('unsuccessful');
+    expect(state.slots[0]).toMatchObject({
+      status: 'failed',
+      error: { code: 'settled_failure' },
+    });
+    expect(state.slots[1]).toMatchObject({
+      status: 'failed',
+      error: { code: 'provider_failed' },
+    });
+    expect(mapCoordinatorOutcome(state)).toBe('unsuccessful');
   });
 
   it('times out inline work and launches an eligible fallback without acceptance uncertainty', () => {
@@ -460,6 +739,30 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     expect(advanced.launches).toHaveLength(1);
     expect(advanced.launches[0]?.profile.identity.provider_id).toBe(
       'inline-reserve',
+    );
+  });
+
+  it('clamps a late fallback launch to the remaining request deadline', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const deps = dependencies(start);
+    let state = startAll(
+      preparedExecution({
+        primaries: [inlineProfile('primary')],
+        reserve: [{ profile: inlineProfile('reserve'), eligibleSlots: [0] }],
+        inlineAttemptDeadlineMs: 10_000,
+        requestDeadlineMs: 15_000,
+      }),
+      deps,
+    );
+    deps.setNow(start + 10_000);
+    const advanced = advanceCoordination(state, deps);
+    expect(advanced.launches).toHaveLength(1);
+    expect(advanced.launches[0]?.deadline_at).toBe(
+      new Date(start + 15_000).toISOString(),
+    );
+    state = dispatchLaunches(advanced.state, advanced.launches, deps);
+    expect(state.attempts.at(-1)?.deadline_at).toBe(
+      new Date(start + 15_000).toISOString(),
     );
   });
 
@@ -515,7 +818,9 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
       status: 'cancelled',
       adapter_state_ref: 'adapter-state-ref-1',
     });
-    expect(cancelled.claimed_candidate_ids).toEqual([]);
+    expect(
+      cancelled.reserve.every((candidate) => !candidate.claimed_by_slot_id),
+    ).toBe(true);
   });
 
   it('keeps transient poll failures private and nonterminal', () => {
@@ -540,6 +845,7 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
       state,
       state.attempts[0]?.attempt_id ?? '',
       pollError,
+      deps,
     );
 
     expect(state.attempts[0]).toMatchObject({
@@ -574,6 +880,45 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
       },
     });
     expect(started.state.budget.reserved_estimated_cost_microusd).toBe('0');
+  });
+
+  it('treats the actual-cost ceiling as a projected hard launch budget', () => {
+    const deps = dependencies();
+    const started = startLaunchableAttempts(
+      createCoordinatorState(
+        preparedExecution({
+          primaries: [inlineProfile('free'), inlineProfile('paid')],
+          estimates: { free: '0', paid: '1' },
+          budgets: { max_actual_cost_microusd: '0' },
+        }),
+        deps,
+      ),
+      deps,
+    );
+    expect(
+      started.launches.map((launch) => launch.profile.identity.provider_id),
+    ).toEqual(['free']);
+    expect(started.state.slots[1]?.error?.code).toBe(
+      'budget_reservation_exceeded',
+    );
+
+    const concurrent = startLaunchableAttempts(
+      createCoordinatorState(
+        preparedExecution({
+          primaries: [inlineProfile('first'), inlineProfile('second')],
+          estimates: { first: '6', second: '6' },
+          budgets: { max_actual_cost_microusd: '10' },
+        }),
+        deps,
+      ),
+      deps,
+    );
+    expect(
+      concurrent.launches.map((launch) => launch.profile.identity.provider_id),
+    ).toEqual(['first']);
+    expect(concurrent.state.slots[1]?.error?.code).toBe(
+      'budget_reservation_exceeded',
+    );
   });
 });
 
@@ -794,14 +1139,66 @@ describe('durable handles and terminal mapping', () => {
       deps,
     );
     expect(() =>
-      recordTransientPollFailure(state, state.attempts[0]?.attempt_id ?? '', {
-        code: 'poll_permanently_broken',
-        message: 'The provider status endpoint rejected the handle.',
-        category: 'provider',
-        retryable: false,
-        fallback_allowed: false,
-      }),
+      recordTransientPollFailure(
+        state,
+        state.attempts[0]?.attempt_id ?? '',
+        {
+          code: 'poll_permanently_broken',
+          message: 'The provider status endpoint rejected the handle.',
+          category: 'provider',
+          retryable: false,
+          fallback_allowed: false,
+        },
+        deps,
+      ),
     ).toThrow('retryable');
+  });
+
+  it('validates adapter payloads before persistence and resolves definitive rejection', () => {
+    const deps = dependencies();
+    const profile = durableProfile('durable');
+    let state = startAll(
+      preparedExecution({
+        primaries: [profile],
+        reserve: [{ profile: durableProfile('reserve'), eligibleSlots: [0] }],
+      }),
+      deps,
+    );
+    const attemptId = state.attempts[0]?.attempt_id ?? '';
+    expect(() =>
+      recordSubmissionAccepted(
+        state,
+        attemptId,
+        { ...handle(profile, 'pending'), apiKey: 'must-not-persist' },
+        deps,
+      ),
+    ).toThrow();
+    expect(() =>
+      recordAttemptFinished(
+        state,
+        attemptId,
+        {
+          outcome: 'failed',
+          error: providerFailure(true),
+          actual_cost_microusd: '9'.repeat(65),
+        },
+        deps,
+      ),
+    ).toThrow();
+
+    state = recordAcceptanceUnknown(state, attemptId, deps, 'state-ref');
+    state = recordAcceptanceRejected(
+      state,
+      attemptId,
+      providerFailure(true, 'definitively_rejected'),
+      deps,
+    );
+    expect(state.unresolved_acceptances).toEqual([]);
+    expect(state.attempts[0]).toMatchObject({
+      status: 'failed',
+      error: { code: 'definitively_rejected' },
+    });
+    expect(advanceCoordination(state, deps).launches).toHaveLength(1);
   });
 
   it('applies the canonical 100k character bound to refined slot queries', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ExecutionProfile } from '../../src/contracts/domain/index.js';
 import {
   createCoordinatorState,
+  recordLaunchDispatched,
   startLaunchableAttempts,
 } from '../../src/core/coordinator.js';
 import { InMemoryCoordinationStateStore } from '../../src/core/coordinator-store.js';
@@ -74,7 +75,7 @@ describe('private execution architecture in workerd', () => {
     const dependencies = {
       clock: { now: () => Date.parse('2026-08-08T12:00:00Z') },
       ids: {
-        next: (scope: 'attempt' | 'event') => {
+        next: (scope: 'attempt' | 'event' | 'delivery_lease') => {
           id += 1;
           return `worker-${scope}-${id}`;
         },
@@ -86,13 +87,20 @@ describe('private execution architecture in workerd', () => {
     );
     expect(started.launches).toHaveLength(1);
     expect(started.launches[0]?.query).toBe('worker-safe query');
+    const dispatched = recordLaunchDispatched(
+      started.state,
+      started.launches[0]?.attempt_id ?? '',
+      started.launches[0]?.delivery_lease_id ?? '',
+      dependencies,
+    );
+    expect(dispatched.attempts[0]?.status).toBe('running');
 
     const store = new InMemoryCoordinationStateStore();
-    const created = await store.create(started.state);
+    const created = await store.create(dispatched);
     expect(created.version).toBe(1);
-    await expect(store.load(started.state.request_id)).resolves.toMatchObject({
+    await expect(store.load(dispatched.request_id)).resolves.toMatchObject({
       version: 1,
-      state: { request_id: started.state.request_id },
+      state: { request_id: dispatched.request_id },
     });
   });
 });

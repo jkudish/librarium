@@ -77,19 +77,18 @@ function planningProfile(
 }
 
 class FixtureCatalog implements FrozenPlanningCatalog {
-  readonly revision = 'fixture-r1';
-  readonly digest = 'fixture-digest';
   readonly profiles: readonly PlanningProfile[];
   readonly groupCalls = vi.fn();
   readonly defaultCalls = vi.fn();
   readonly reserveCalls = vi.fn();
-  readonly executor = vi.fn();
 
   constructor(
     profiles: readonly PlanningProfile[],
     readonly groups: Readonly<Record<string, readonly ProviderIdentity[]>> = {},
     readonly defaults: readonly ProviderIdentity[] = [],
     readonly configuredReserve: readonly ProviderIdentity[] = [],
+    readonly revision = 'fixture-r1',
+    readonly digest = 'fixture-digest',
   ) {
     this.profiles = Object.freeze([...profiles]);
   }
@@ -407,6 +406,71 @@ describe('research execution preparation', () => {
     ]);
   });
 
+  it('rejects unbounded catalog identity metadata without reflecting it', () => {
+    const result = prepareResearchExecution(
+      targetRequest(),
+      new FixtureCatalog(
+        [planningProfile(groundedProfile('alpha'))],
+        {},
+        [],
+        [],
+        ' padded ',
+        'x'.repeat(256),
+      ),
+      dependencies(),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues.map(({ code, path }) => [code, path])).toEqual([
+      ['invalid_catalog_digest', '/catalog/digest'],
+      ['invalid_catalog_revision', '/catalog/revision'],
+    ]);
+    expect(JSON.stringify(result.issues)).not.toContain('x'.repeat(256));
+  });
+
+  it('rejects over-budget or unestimated primary plans before execution', () => {
+    const alpha = planningProfile(groundedProfile('alpha'), {
+      estimate: { estimated_cost_microusd: '10' },
+    });
+    const beta = planningProfile(groundedProfile('beta'), {
+      estimate: { estimated_cost_microusd: '10' },
+    });
+    const selector = {
+      kind: 'targets' as const,
+      targets: [alpha.profile.identity, beta.profile.identity],
+    };
+    const exceeded = prepareResearchExecution(
+      {
+        ...targetRequest(),
+        selector,
+        budgets: { max_actual_cost_microusd: '15' },
+      },
+      new FixtureCatalog([alpha, beta]),
+      dependencies(),
+    );
+    expect(exceeded.ok).toBe(false);
+    if (exceeded.ok) return;
+    expect(exceeded.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'primary_plan_budget_exceeded',
+        path: '/budgets/max_actual_cost_microusd',
+      }),
+    );
+
+    const unestimated = prepareResearchExecution(
+      { ...targetRequest(), budgets: { max_estimated_cost_microusd: '10' } },
+      new FixtureCatalog([
+        planningProfile(groundedProfile('alpha'), { estimate: undefined }),
+      ]),
+      dependencies(),
+    );
+    expect(unestimated.ok).toBe(false);
+    if (unestimated.ok) return;
+    expect(unestimated.issues).toContainEqual(
+      expect.objectContaining({ code: 'budget_estimate_required' }),
+    );
+  });
+
   it('bounds billable unit arrays and addresses duplicate catalog profiles by index', () => {
     const alpha = planningProfile(groundedProfile('alpha'));
     const duplicated = prepareResearchExecution(
@@ -538,7 +602,7 @@ describe('research execution preparation', () => {
     );
   });
 
-  it('rejects every explicit non-durable async profile before executor calls', () => {
+  it('rejects every explicit non-durable async profile during preparation', () => {
     const catalog = new FixtureCatalog([
       planningProfile(groundedProfile('alpha')),
       planningProfile(groundedProfile('beta', 'process_local')),
@@ -571,7 +635,6 @@ describe('research execution preparation', () => {
         path: '/selector/targets/1',
       }),
     ]);
-    expect(catalog.executor).not.toHaveBeenCalled();
   });
 
   it('enforces profile uniqueness across primaries and the global reserve', () => {

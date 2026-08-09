@@ -15,7 +15,7 @@ export const RESEARCH_REQUEST_LIMITS = {
   maxPollIntervalMs: 5 * 60 * 1_000,
 } as const;
 
-const ExactIntegerStringSchema = z
+export const ExactMicrousdSchema = z
   .string()
   .max(RESEARCH_REQUEST_LIMITS.exactIntegerLength)
   .regex(/^(?:0|[1-9]\d*)$/, 'Expected an exact non-negative integer string');
@@ -119,8 +119,8 @@ export const ExactBudgetLimitsSchema = z
   .strictObject({
     // Zero is intentional: it is a fail-closed ceiling that permits only work
     // whose network-free reservation is exactly zero.
-    max_estimated_cost_microusd: ExactIntegerStringSchema.optional(),
-    max_actual_cost_microusd: ExactIntegerStringSchema.optional(),
+    max_estimated_cost_microusd: ExactMicrousdSchema.optional(),
+    max_actual_cost_microusd: ExactMicrousdSchema.optional(),
   })
   .superRefine((budgets, ctx) => {
     if (
