@@ -8,6 +8,7 @@ import {
   CitationSchema,
   CollectionProvenanceSchema,
   ExecutionProfileSchema,
+  RuntimeEffectiveTargetSchema,
   SemanticFactsSchema,
   UsageSchema,
 } from '../domain/index.js';
@@ -18,6 +19,7 @@ export const ResultProvenanceSchema = z.strictObject({
   attempt_id: OpaqueIdSchema,
   requested_profile: ExecutionProfileSchema,
   effective_profile: ExecutionProfileSchema,
+  effective_target: RuntimeEffectiveTargetSchema.optional(),
   collection: CollectionProvenanceSchema,
   replaced_attempt_id: OpaqueIdSchema.optional(),
   extensions: ExtensionsSchema.optional(),
@@ -40,6 +42,38 @@ export const InterchangeResultSchema = z
   .superRefine((result, ctx) => {
     const facts = result.semantic_facts;
     const profile = result.provenance.effective_profile;
+    const effectiveTarget = result.provenance.effective_target;
+    const configuredTargetKinds = new Set(
+      [
+        profile.identity.target.primary.kind,
+        profile.identity.target.underlying?.kind,
+      ].filter(
+        (kind): kind is 'model' | 'agent' | 'preset' => kind !== undefined,
+      ),
+    );
+
+    if (
+      effectiveTarget !== undefined &&
+      profile.identity.target.primary.model_selection === 'not_applicable'
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'Runtime effective targets are inapplicable when the profile target is not_applicable',
+        path: ['provenance', 'effective_target'],
+      });
+    } else if (
+      effectiveTarget !== undefined &&
+      configuredTargetKinds.size > 0 &&
+      !configuredTargetKinds.has(effectiveTarget.kind)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'Runtime effective target kind must match a declared profile target',
+        path: ['provenance', 'effective_target', 'kind'],
+      });
+    }
 
     if (!facts.result_kinds.includes(profile.result_kind)) {
       ctx.addIssue({

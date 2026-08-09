@@ -117,7 +117,8 @@ export const InterchangeRequestSchema = z
       if (profilePaths.has(key)) {
         ctx.addIssue({
           code: 'custom',
-          message: 'Each provider profile may execute at most once per request',
+          message:
+            'Each exact provider profile target may execute at most once per request',
           path: ['slots', index, 'primary', 'identity'],
         });
       }
@@ -155,7 +156,7 @@ export const InterchangeRequestSchema = z
         ctx.addIssue({
           code: 'custom',
           message:
-            'Each provider profile may appear only once in the primary and reserve plan',
+            'Each exact provider profile target may appear only once in the primary and reserve plan',
           path: ['fallback_reserve', index, 'profile', 'identity'],
         });
       }

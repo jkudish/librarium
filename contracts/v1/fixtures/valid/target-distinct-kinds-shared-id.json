@@ -1,0 +1,16 @@
+{
+  "provider_id": "example-agent",
+  "profile_id": "shared-target-name",
+  "target": {
+    "primary": {
+      "model_selection": "fixed",
+      "kind": "agent",
+      "target_id": "shared-target-name"
+    },
+    "underlying": {
+      "model_selection": "fixed",
+      "kind": "model",
+      "target_id": "shared-target-name"
+    }
+  }
+}

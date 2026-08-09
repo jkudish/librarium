@@ -1,8 +1,8 @@
-import type { ExecutionProfile } from '../domain/index.js';
+import { type ExecutionProfile, providerIdentityKey } from '../domain/index.js';
 import type { EvidenceRequirements, RequestSlot } from './request.js';
 
 export function profileKey(profile: ExecutionProfile): string {
-  return `${profile.identity.provider_id}\u0000${profile.identity.profile_id}`;
+  return providerIdentityKey(profile.identity);
 }
 
 export function compatibilityIssues(

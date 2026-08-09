@@ -21,6 +21,13 @@ function groundedProfile(
     identity: {
       provider_id: providerId,
       profile_id: 'grounded-web',
+      target: {
+        primary: {
+          model_selection: 'fixed',
+          kind: 'model',
+          target_id: `${providerId}-fixture-model`,
+        },
+      },
     },
     result_kind: 'grounded_answer',
     grounding_policy: 'required',
@@ -43,6 +50,12 @@ function surfaceProfile(
     identity: {
       provider_id: providerId,
       profile_id: 'google-ai-mode',
+      target: {
+        primary: {
+          model_selection: 'provider_managed',
+          kind: 'model',
+        },
+      },
     },
     result_kind: 'surface_observation',
     grounding_policy: 'optional',
@@ -437,7 +450,10 @@ describe('research execution preparation', () => {
     });
     const selector = {
       kind: 'targets' as const,
-      targets: [alpha.profile.identity, beta.profile.identity],
+      targets: [alpha, beta].map(({ profile }) => ({
+        provider_id: profile.identity.provider_id,
+        profile_id: profile.identity.profile_id,
+      })),
     };
     const exceeded = prepareResearchExecution(
       {

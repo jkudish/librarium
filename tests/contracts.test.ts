@@ -32,6 +32,8 @@ import {
   ErrorCategorySchema,
   ExecutionProfileSchema,
   NormalizedSourceSchema,
+  ProviderIdentitySchema,
+  RuntimeEffectiveTargetSchema,
   SemanticFactsSchema,
   StructuredErrorSchema,
   UsageSchema,
@@ -46,6 +48,7 @@ import {
 const snapshotRoot = join(process.cwd(), 'contracts', 'v1');
 
 const fixtureSchemas = {
+  'schema/domain.schema.json#/$defs/provider_identity': ProviderIdentitySchema,
   'schema/artifacts.schema.json#/$defs/historical_reader':
     HistoricalArtifactReaderSchema,
   'schema/artifacts.schema.json#/$defs/run_manifest': RunManifestArtifactSchema,
@@ -279,6 +282,75 @@ describe('canonical v2 contracts', () => {
       ).toContain(fixture.expected_issue_path);
     },
   );
+
+  it('models configured target intent separately from provider-reported runtime fact', () => {
+    const configurableModel = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-configurable-model.json',
+        ),
+      ),
+    );
+    const presetWithUnderlying = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-fixed-preset-underlying-configurable-model.json',
+        ),
+      ),
+    );
+
+    expect(configurableModel.target.primary).toEqual({
+      model_selection: 'configurable',
+      kind: 'model',
+      target_id: 'example-model-v1',
+    });
+    expect(presetWithUnderlying.target).toMatchObject({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: {
+        model_selection: 'configurable',
+        kind: 'model',
+        target_id: 'example-model-v2',
+      },
+    });
+    expect(
+      RuntimeEffectiveTargetSchema.safeParse({
+        source: 'configured',
+        kind: 'model',
+        target_id: 'example-model-v1',
+      }).success,
+    ).toBe(false);
+    expect(configurableModel).not.toHaveProperty('model_id');
+  });
+
+  it('distinguishes target variants while rejecting an exact execution identity twice', () => {
+    const request = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'interchange-request.json'),
+    );
+    const firstSlot = structuredClone(request.slots[0]);
+    const secondSlot = structuredClone(firstSlot);
+    secondSlot.slot_id = 'slot-grounded-second-target';
+    secondSlot.position = 1;
+    secondSlot.primary.identity.target.primary.target_id = 'sonar-pro-second';
+    request.slots = [firstSlot, secondSlot];
+    request.fallback_reserve = [];
+
+    expect(InterchangeRequestSchema.safeParse(request).success).toBe(true);
+
+    const duplicate = structuredClone(request);
+    duplicate.slots[1].primary.identity.target.primary.target_id =
+      duplicate.slots[0].primary.identity.target.primary.target_id;
+    expect(InterchangeRequestSchema.safeParse(duplicate).success).toBe(false);
+  });
 
   it('locks the structured error vocabulary and required fallback policy', () => {
     expect(ErrorCategorySchema.options).toEqual([
@@ -1006,6 +1078,12 @@ describe('canonical v2 contracts', () => {
       identity: {
         provider_id: 'google-gemini-api',
         profile_id: 'google-ai-mode-api-proxy',
+        target: {
+          primary: {
+            model_selection: 'provider_managed',
+            kind: 'model',
+          },
+        },
       },
       result_kind: 'surface_observation',
       grounding_policy: 'optional',
@@ -1465,6 +1543,11 @@ describe('canonical v2 contracts', () => {
     result.provenance.attempt_id = 'attempt-research-primary';
     result.provenance.requested_profile = profile;
     result.provenance.effective_profile = profile;
+    result.provenance.effective_target = {
+      source: 'provider_reported',
+      kind: 'model',
+      target_id: 'o4-deep-research',
+    };
     result.provenance.collection.provider = profile.identity;
     result.provenance.collection.operator_id = profile.operator_id;
     delete result.provenance.replaced_attempt_id;

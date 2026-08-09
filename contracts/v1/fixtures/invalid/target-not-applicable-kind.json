@@ -1,0 +1,10 @@
+{
+  "provider_id": "example-search",
+  "profile_id": "search",
+  "target": {
+    "primary": {
+      "model_selection": "not_applicable",
+      "kind": "model"
+    }
+  }
+}

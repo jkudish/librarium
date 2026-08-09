@@ -27,7 +27,13 @@
       "primary": {
         "identity": {
           "provider_id": "searchapi-google-ai-mode",
-          "profile_id": "google-ai-mode-en-ca"
+          "profile_id": "google-ai-mode-en-ca",
+          "target": {
+            "primary": {
+              "model_selection": "provider_managed",
+              "kind": "model"
+            }
+          }
         },
         "result_kind": "surface_observation",
         "grounding_policy": "optional",
@@ -57,7 +63,13 @@
       "profile": {
         "identity": {
           "provider_id": "serpapi-google-ai-mode",
-          "profile_id": "google-ai-mode-en-ca"
+          "profile_id": "google-ai-mode-en-ca",
+          "target": {
+            "primary": {
+              "model_selection": "provider_managed",
+              "kind": "model"
+            }
+          }
         },
         "result_kind": "surface_observation",
         "grounding_policy": "optional",

@@ -11,6 +11,7 @@ import {
   executionProfilesEqual,
   NormalizedSourceSchema,
   ProviderIdentitySchema,
+  providerIdentityKey,
   StructuredErrorSchema,
 } from '../domain/index.js';
 import {
@@ -26,10 +27,6 @@ const artifactHeader = {
   generated_at: Rfc3339UtcSchema,
   extensions: ExtensionsSchema.optional(),
 };
-
-function profileKey(profile: z.infer<typeof ExecutionProfileSchema>): string {
-  return `${profile.identity.provider_id}\u0000${profile.identity.profile_id}`;
-}
 
 export const ArtifactProducerSchema = z.strictObject({
   id: OpaqueIdSchema,
@@ -84,12 +81,14 @@ export const RunManifestArtifactSchema = z
       slotAttempts.forEach((attempt, attemptIndex) => {
         const responseAttemptIndex =
           manifest.response.attempts.indexOf(attempt);
-        const executedProfileKey = profileKey(attempt.profile);
+        const executedProfileKey = providerIdentityKey(
+          attempt.profile.identity,
+        );
         if (executedProfileKeys.has(executedProfileKey)) {
           ctx.addIssue({
             code: 'custom',
             message:
-              'Each provider profile may execute at most once across the run manifest',
+              'Each exact provider profile target may execute at most once across the run manifest',
             path: [
               'response',
               'attempts',

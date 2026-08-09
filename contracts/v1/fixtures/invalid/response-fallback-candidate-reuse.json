@@ -27,7 +27,13 @@
         "identity": {
           "provider_id": "perplexity-sonar-pro",
           "profile_id": "grounded-web",
-          "model_id": "sonar-pro"
+          "target": {
+            "primary": {
+              "model_selection": "fixed",
+              "kind": "model",
+              "target_id": "sonar-pro"
+            }
+          }
         },
         "result_kind": "grounded_answer",
         "grounding_policy": "required",
@@ -60,7 +66,14 @@
       "profile": {
         "identity": {
           "provider_id": "brave-answers",
-          "profile_id": "grounded-web"
+          "profile_id": "grounded-web",
+          "target": {
+            "primary": {
+              "model_selection": "fixed",
+              "kind": "model",
+              "target_id": "brave"
+            }
+          }
         },
         "result_kind": "grounded_answer",
         "grounding_policy": "required",
@@ -89,7 +102,13 @@
         "identity": {
           "provider_id": "perplexity-sonar-pro-secondary",
           "profile_id": "grounded-web",
-          "model_id": "sonar-pro"
+          "target": {
+            "primary": {
+              "model_selection": "fixed",
+              "kind": "model",
+              "target_id": "sonar-pro"
+            }
+          }
         },
         "result_kind": "grounded_answer",
         "grounding_policy": "required",
@@ -121,7 +140,14 @@
       "profile": {
         "identity": {
           "provider_id": "brave-answers",
-          "profile_id": "grounded-web"
+          "profile_id": "grounded-web",
+          "target": {
+            "primary": {
+              "model_selection": "fixed",
+              "kind": "model",
+              "target_id": "brave"
+            }
+          }
         },
         "result_kind": "grounded_answer",
         "grounding_policy": "required",
@@ -175,7 +201,14 @@
           "provenance": {
             "provider": {
               "provider_id": "brave-answers",
-              "profile_id": "grounded-web"
+              "profile_id": "grounded-web",
+              "target": {
+                "primary": {
+                  "model_selection": "fixed",
+                  "kind": "model",
+                  "target_id": "brave"
+                }
+              }
             },
             "access_mode": "direct",
             "operator_id": "brave",
@@ -194,7 +227,13 @@
           "identity": {
             "provider_id": "perplexity-sonar-pro",
             "profile_id": "grounded-web",
-            "model_id": "sonar-pro"
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "sonar-pro"
+              }
+            }
           },
           "result_kind": "grounded_answer",
           "grounding_policy": "required",
@@ -211,7 +250,14 @@
         "effective_profile": {
           "identity": {
             "provider_id": "brave-answers",
-            "profile_id": "grounded-web"
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
           },
           "result_kind": "grounded_answer",
           "grounding_policy": "required",
@@ -228,7 +274,14 @@
         "collection": {
           "provider": {
             "provider_id": "brave-answers",
-            "profile_id": "grounded-web"
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
           },
           "access_mode": "direct",
           "operator_id": "brave",
@@ -300,7 +353,14 @@
           "provenance": {
             "provider": {
               "provider_id": "brave-answers",
-              "profile_id": "grounded-web"
+              "profile_id": "grounded-web",
+              "target": {
+                "primary": {
+                  "model_selection": "fixed",
+                  "kind": "model",
+                  "target_id": "brave"
+                }
+              }
             },
             "access_mode": "direct",
             "operator_id": "brave",
@@ -319,7 +379,13 @@
           "identity": {
             "provider_id": "perplexity-sonar-pro-secondary",
             "profile_id": "grounded-web",
-            "model_id": "sonar-pro"
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "sonar-pro"
+              }
+            }
           },
           "result_kind": "grounded_answer",
           "grounding_policy": "required",
@@ -336,7 +402,14 @@
         "effective_profile": {
           "identity": {
             "provider_id": "brave-answers",
-            "profile_id": "grounded-web"
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
           },
           "result_kind": "grounded_answer",
           "grounding_policy": "required",
@@ -353,7 +426,14 @@
         "collection": {
           "provider": {
             "provider_id": "brave-answers",
-            "profile_id": "grounded-web"
+            "profile_id": "grounded-web",
+            "target": {
+              "primary": {
+                "model_selection": "fixed",
+                "kind": "model",
+                "target_id": "brave"
+              }
+            }
           },
           "access_mode": "direct",
           "operator_id": "brave",

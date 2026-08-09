@@ -25,7 +25,14 @@
       "provenance": {
         "provider": {
           "provider_id": "brave-answers",
-          "profile_id": "grounded-web"
+          "profile_id": "grounded-web",
+          "target": {
+            "primary": {
+              "model_selection": "fixed",
+              "kind": "model",
+              "target_id": "brave"
+            }
+          }
         },
         "access_mode": "direct",
         "operator_id": "brave",

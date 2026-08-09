@@ -11,7 +11,13 @@
       "provider": {
         "provider_id": "openai-research",
         "profile_id": "deep-web-news",
-        "model_id": "o4-deep-research"
+        "target": {
+          "primary": {
+            "model_selection": "configurable",
+            "kind": "model",
+            "target_id": "o4-deep-research"
+          }
+        }
       },
       "submitted_at": "2026-08-08T00:00:06Z",
       "last_observed_at": "2026-08-08T00:00:07Z",
@@ -30,7 +36,13 @@
       "provider": {
         "provider_id": "openai-research",
         "profile_id": "deep-web-news",
-        "model_id": "o4-deep-research"
+        "target": {
+          "primary": {
+            "model_selection": "configurable",
+            "kind": "model",
+            "target_id": "o4-deep-research"
+          }
+        }
       },
       "submitted_at": "2026-08-08T00:00:06Z",
       "last_observed_at": "2026-08-08T00:00:10Z",

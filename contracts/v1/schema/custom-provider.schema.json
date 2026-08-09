@@ -57,15 +57,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -313,15 +380,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -579,15 +713,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -715,15 +916,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -1102,15 +1370,82 @@
                                     "minLength": 1,
                                     "maxLength": 255
                                   },
-                                  "model_id": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 255
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "primary": {
+                                        "type": "object",
+                                        "properties": {
+                                          "model_selection": {
+                                            "type": "string",
+                                            "enum": [
+                                              "configurable",
+                                              "fixed",
+                                              "provider_managed",
+                                              "not_applicable"
+                                            ]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "model",
+                                              "agent",
+                                              "preset"
+                                            ]
+                                          },
+                                          "target_id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 255
+                                          }
+                                        },
+                                        "required": [
+                                          "model_selection"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "underlying": {
+                                        "type": "object",
+                                        "properties": {
+                                          "model_selection": {
+                                            "type": "string",
+                                            "enum": [
+                                              "configurable",
+                                              "fixed",
+                                              "provider_managed",
+                                              "not_applicable"
+                                            ]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "model",
+                                              "agent",
+                                              "preset"
+                                            ]
+                                          },
+                                          "target_id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 255
+                                          }
+                                        },
+                                        "required": [
+                                          "model_selection"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "required": [
+                                      "primary"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
                                   "provider_id",
-                                  "profile_id"
+                                  "profile_id",
+                                  "target"
                                 ],
                                 "additionalProperties": false
                               },
@@ -1285,15 +1620,82 @@
                                   "minLength": 1,
                                   "maxLength": 255
                                 },
-                                "model_id": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 255
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "primary": {
+                                      "type": "object",
+                                      "properties": {
+                                        "model_selection": {
+                                          "type": "string",
+                                          "enum": [
+                                            "configurable",
+                                            "fixed",
+                                            "provider_managed",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "model",
+                                            "agent",
+                                            "preset"
+                                          ]
+                                        },
+                                        "target_id": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        }
+                                      },
+                                      "required": [
+                                        "model_selection"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "underlying": {
+                                      "type": "object",
+                                      "properties": {
+                                        "model_selection": {
+                                          "type": "string",
+                                          "enum": [
+                                            "configurable",
+                                            "fixed",
+                                            "provider_managed",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "model",
+                                            "agent",
+                                            "preset"
+                                          ]
+                                        },
+                                        "target_id": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        }
+                                      },
+                                      "required": [
+                                        "model_selection"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "primary"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
                                 "provider_id",
-                                "profile_id"
+                                "profile_id",
+                                "target"
                               ],
                               "additionalProperties": false
                             },
@@ -1480,15 +1882,82 @@
                                   "minLength": 1,
                                   "maxLength": 255
                                 },
-                                "model_id": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 255
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "primary": {
+                                      "type": "object",
+                                      "properties": {
+                                        "model_selection": {
+                                          "type": "string",
+                                          "enum": [
+                                            "configurable",
+                                            "fixed",
+                                            "provider_managed",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "model",
+                                            "agent",
+                                            "preset"
+                                          ]
+                                        },
+                                        "target_id": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        }
+                                      },
+                                      "required": [
+                                        "model_selection"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "underlying": {
+                                      "type": "object",
+                                      "properties": {
+                                        "model_selection": {
+                                          "type": "string",
+                                          "enum": [
+                                            "configurable",
+                                            "fixed",
+                                            "provider_managed",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "model",
+                                            "agent",
+                                            "preset"
+                                          ]
+                                        },
+                                        "target_id": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        }
+                                      },
+                                      "required": [
+                                        "model_selection"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "primary"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
                                 "provider_id",
-                                "profile_id"
+                                "profile_id",
+                                "target"
                               ],
                               "additionalProperties": false
                             },
@@ -1659,6 +2128,34 @@
                           ],
                           "additionalProperties": false
                         },
+                        "effective_target": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string",
+                              "const": "provider_reported"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "source",
+                            "kind",
+                            "target_id"
+                          ],
+                          "additionalProperties": false
+                        },
                         "collection": {
                           "type": "object",
                           "properties": {
@@ -1675,15 +2172,82 @@
                                   "minLength": 1,
                                   "maxLength": 255
                                 },
-                                "model_id": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 255
+                                "target": {
+                                  "type": "object",
+                                  "properties": {
+                                    "primary": {
+                                      "type": "object",
+                                      "properties": {
+                                        "model_selection": {
+                                          "type": "string",
+                                          "enum": [
+                                            "configurable",
+                                            "fixed",
+                                            "provider_managed",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "model",
+                                            "agent",
+                                            "preset"
+                                          ]
+                                        },
+                                        "target_id": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        }
+                                      },
+                                      "required": [
+                                        "model_selection"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "underlying": {
+                                      "type": "object",
+                                      "properties": {
+                                        "model_selection": {
+                                          "type": "string",
+                                          "enum": [
+                                            "configurable",
+                                            "fixed",
+                                            "provider_managed",
+                                            "not_applicable"
+                                          ]
+                                        },
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "model",
+                                            "agent",
+                                            "preset"
+                                          ]
+                                        },
+                                        "target_id": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        }
+                                      },
+                                      "required": [
+                                        "model_selection"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "primary"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
                                 "provider_id",
-                                "profile_id"
+                                "profile_id",
+                                "target"
                               ],
                               "additionalProperties": false
                             },
@@ -2106,15 +2670,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -2239,15 +2870,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -2382,15 +3080,82 @@
                           "minLength": 1,
                           "maxLength": 255
                         },
-                        "model_id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 255
+                        "target": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "underlying": {
+                              "type": "object",
+                              "properties": {
+                                "model_selection": {
+                                  "type": "string",
+                                  "enum": [
+                                    "configurable",
+                                    "fixed",
+                                    "provider_managed",
+                                    "not_applicable"
+                                  ]
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "model",
+                                    "agent",
+                                    "preset"
+                                  ]
+                                },
+                                "target_id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                }
+                              },
+                              "required": [
+                                "model_selection"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "primary"
+                          ],
+                          "additionalProperties": false
                         }
                       },
                       "required": [
                         "provider_id",
-                        "profile_id"
+                        "profile_id",
+                        "target"
                       ],
                       "additionalProperties": false
                     },
@@ -2684,15 +3449,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },
@@ -2940,15 +3772,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },
@@ -3206,15 +4105,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },
@@ -3342,15 +4308,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },
@@ -3762,15 +4795,82 @@
                                 "minLength": 1,
                                 "maxLength": 255
                               },
-                              "model_id": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 255
+                              "target": {
+                                "type": "object",
+                                "properties": {
+                                  "primary": {
+                                    "type": "object",
+                                    "properties": {
+                                      "model_selection": {
+                                        "type": "string",
+                                        "enum": [
+                                          "configurable",
+                                          "fixed",
+                                          "provider_managed",
+                                          "not_applicable"
+                                        ]
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "model",
+                                          "agent",
+                                          "preset"
+                                        ]
+                                      },
+                                      "target_id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "required": [
+                                      "model_selection"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "underlying": {
+                                    "type": "object",
+                                    "properties": {
+                                      "model_selection": {
+                                        "type": "string",
+                                        "enum": [
+                                          "configurable",
+                                          "fixed",
+                                          "provider_managed",
+                                          "not_applicable"
+                                        ]
+                                      },
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "model",
+                                          "agent",
+                                          "preset"
+                                        ]
+                                      },
+                                      "target_id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "required": [
+                                      "model_selection"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "primary"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": [
                               "provider_id",
-                              "profile_id"
+                              "profile_id",
+                              "target"
                             ],
                             "additionalProperties": false
                           },
@@ -3945,15 +5045,82 @@
                               "minLength": 1,
                               "maxLength": 255
                             },
-                            "model_id": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 255
+                            "target": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model_selection": {
+                                      "type": "string",
+                                      "enum": [
+                                        "configurable",
+                                        "fixed",
+                                        "provider_managed",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "model",
+                                        "agent",
+                                        "preset"
+                                      ]
+                                    },
+                                    "target_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    }
+                                  },
+                                  "required": [
+                                    "model_selection"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "underlying": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model_selection": {
+                                      "type": "string",
+                                      "enum": [
+                                        "configurable",
+                                        "fixed",
+                                        "provider_managed",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "model",
+                                        "agent",
+                                        "preset"
+                                      ]
+                                    },
+                                    "target_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    }
+                                  },
+                                  "required": [
+                                    "model_selection"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "primary"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
                             "provider_id",
-                            "profile_id"
+                            "profile_id",
+                            "target"
                           ],
                           "additionalProperties": false
                         },
@@ -4140,15 +5307,82 @@
                               "minLength": 1,
                               "maxLength": 255
                             },
-                            "model_id": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 255
+                            "target": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model_selection": {
+                                      "type": "string",
+                                      "enum": [
+                                        "configurable",
+                                        "fixed",
+                                        "provider_managed",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "model",
+                                        "agent",
+                                        "preset"
+                                      ]
+                                    },
+                                    "target_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    }
+                                  },
+                                  "required": [
+                                    "model_selection"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "underlying": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model_selection": {
+                                      "type": "string",
+                                      "enum": [
+                                        "configurable",
+                                        "fixed",
+                                        "provider_managed",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "model",
+                                        "agent",
+                                        "preset"
+                                      ]
+                                    },
+                                    "target_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    }
+                                  },
+                                  "required": [
+                                    "model_selection"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "primary"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
                             "provider_id",
-                            "profile_id"
+                            "profile_id",
+                            "target"
                           ],
                           "additionalProperties": false
                         },
@@ -4319,6 +5553,34 @@
                       ],
                       "additionalProperties": false
                     },
+                    "effective_target": {
+                      "type": "object",
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "const": "provider_reported"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "model",
+                            "agent",
+                            "preset"
+                          ]
+                        },
+                        "target_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        }
+                      },
+                      "required": [
+                        "source",
+                        "kind",
+                        "target_id"
+                      ],
+                      "additionalProperties": false
+                    },
                     "collection": {
                       "type": "object",
                       "properties": {
@@ -4335,15 +5597,82 @@
                               "minLength": 1,
                               "maxLength": 255
                             },
-                            "model_id": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 255
+                            "target": {
+                              "type": "object",
+                              "properties": {
+                                "primary": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model_selection": {
+                                      "type": "string",
+                                      "enum": [
+                                        "configurable",
+                                        "fixed",
+                                        "provider_managed",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "model",
+                                        "agent",
+                                        "preset"
+                                      ]
+                                    },
+                                    "target_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    }
+                                  },
+                                  "required": [
+                                    "model_selection"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "underlying": {
+                                  "type": "object",
+                                  "properties": {
+                                    "model_selection": {
+                                      "type": "string",
+                                      "enum": [
+                                        "configurable",
+                                        "fixed",
+                                        "provider_managed",
+                                        "not_applicable"
+                                      ]
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "model",
+                                        "agent",
+                                        "preset"
+                                      ]
+                                    },
+                                    "target_id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    }
+                                  },
+                                  "required": [
+                                    "model_selection"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "primary"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
                             "provider_id",
-                            "profile_id"
+                            "profile_id",
+                            "target"
                           ],
                           "additionalProperties": false
                         },
@@ -4766,15 +6095,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },
@@ -4899,15 +6295,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },
@@ -5042,15 +6505,82 @@
                       "minLength": 1,
                       "maxLength": 255
                     },
-                    "model_id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 255
+                    "target": {
+                      "type": "object",
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "underlying": {
+                          "type": "object",
+                          "properties": {
+                            "model_selection": {
+                              "type": "string",
+                              "enum": [
+                                "configurable",
+                                "fixed",
+                                "provider_managed",
+                                "not_applicable"
+                              ]
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "model",
+                                "agent",
+                                "preset"
+                              ]
+                            },
+                            "target_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            }
+                          },
+                          "required": [
+                            "model_selection"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "primary"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "provider_id",
-                    "profile_id"
+                    "profile_id",
+                    "target"
                   ],
                   "additionalProperties": false
                 },

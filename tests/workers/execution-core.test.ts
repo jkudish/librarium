@@ -13,7 +13,17 @@ import {
 import { CanonicalResearchRequestSchema } from '../../src/core/research-request.js';
 
 const profile: ExecutionProfile = {
-  identity: { provider_id: 'worker-fixture', profile_id: 'grounded-web' },
+  identity: {
+    provider_id: 'worker-fixture',
+    profile_id: 'grounded-web',
+    target: {
+      primary: {
+        model_selection: 'fixed',
+        kind: 'model',
+        target_id: 'worker-fixture-model',
+      },
+    },
+  },
   result_kind: 'grounded_answer',
   grounding_policy: 'required',
   observation_mode: 'api_output',

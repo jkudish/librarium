@@ -14,6 +14,16 @@
   },
   "semantic_rules": [
     {
+      "rule_id": "target.selection_coherence",
+      "version": "1.0.0",
+      "description": "Configurable and fixed target slots identify a kind and target_id, provider-managed slots omit target_id until runtime, and not-applicable slots omit both."
+    },
+    {
+      "rule_id": "target.underlying_coherence",
+      "version": "1.0.0",
+      "description": "Underlying targets exist only beneath primary agents or presets and identify a configurable or fixed model without creating nested target identities."
+    },
+    {
       "rule_id": "extensions.bounded_namespaced_json",
       "version": "1.0.0",
       "description": "Extensions are namespaced, JSON-safe, size/depth bounded, and secret-free."
@@ -66,12 +76,17 @@
     {
       "rule_id": "response.fallback_consumption",
       "version": "1.0.0",
-      "description": "Each fallback candidate and provider profile executes at most once across a response."
+      "description": "Each fallback candidate and exact provider profile target executes at most once across a response."
     },
     {
       "rule_id": "response.semantic_profile_coherence",
       "version": "1.0.0",
       "description": "Result semantic facts remain within and identify the effective execution profile."
+    },
+    {
+      "rule_id": "response.effective_target_coherence",
+      "version": "1.0.0",
+      "description": "Optional runtime effective targets are provider-reported facts whose kind matches a declared primary or underlying profile target."
     },
     {
       "rule_id": "response.status_coherence",
@@ -159,7 +174,57 @@
       "areas": [
         "artifacts",
         "custom_provider",
+        "domain",
         "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-configurable-model.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-configurable-agent.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-fixed-preset-underlying-configurable-model.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-provider-managed-known-kind.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-provider-managed-unknown-kind.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-distinct-kinds-shared-id.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-not-applicable.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
       ]
     },
     {
@@ -192,6 +257,27 @@
     },
     {
       "path": "fixtures/valid/partial-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/provider-reported-effective-target-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/nested-primary-effective-target-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/valid/nested-underlying-effective-target-response.json",
       "role": "fixture",
       "areas": [
         "interchange"
@@ -244,6 +330,83 @@
       "role": "fixture",
       "areas": [
         "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-configurable-missing-kind.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-configurable-missing-id.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-fixed-missing-kind.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-fixed-missing-id.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-provider-managed-id.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-not-applicable-kind.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-not-applicable-id.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-underlying-primary-model.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-underlying-provider-managed.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-underlying-nested-agent.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/target-legacy-model-id.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
       ]
     },
     {
@@ -450,7 +613,28 @@
       ]
     },
     {
+      "path": "fixtures/invalid/response-effective-profile-target.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-requested-profile-target.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
       "path": "fixtures/invalid/response-collection-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-collection-provider-target.json",
       "role": "fixture",
       "areas": [
         "interchange"
@@ -472,6 +656,13 @@
     },
     {
       "path": "fixtures/invalid/response-attempt-handle-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-attempt-handle-target.json",
       "role": "fixture",
       "areas": [
         "interchange"
@@ -507,6 +698,27 @@
     },
     {
       "path": "fixtures/invalid/response-none-grounding.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-effective-target-source.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-effective-target-kind.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/response-not-applicable-effective-target.json",
       "role": "fixture",
       "areas": [
         "interchange"

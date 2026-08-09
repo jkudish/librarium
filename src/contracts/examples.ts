@@ -19,7 +19,13 @@ export const groundedPrimaryProfile: ExecutionProfile = {
   identity: {
     provider_id: 'perplexity-sonar-pro',
     profile_id: 'grounded-web',
-    model_id: 'sonar-pro',
+    target: {
+      primary: {
+        model_selection: 'fixed',
+        kind: 'model',
+        target_id: 'sonar-pro',
+      },
+    },
   },
   result_kind: 'grounded_answer',
   grounding_policy: 'required',
@@ -36,6 +42,13 @@ export const groundedFallbackProfile: ExecutionProfile = {
   identity: {
     provider_id: 'brave-answers',
     profile_id: 'grounded-web',
+    target: {
+      primary: {
+        model_selection: 'fixed',
+        kind: 'model',
+        target_id: 'brave',
+      },
+    },
   },
   result_kind: 'grounded_answer',
   grounding_policy: 'required',
@@ -52,7 +65,13 @@ export const durableResearchProfile: ExecutionProfile = {
   identity: {
     provider_id: 'openai-research',
     profile_id: 'deep-web-news',
-    model_id: 'o4-deep-research',
+    target: {
+      primary: {
+        model_selection: 'configurable',
+        kind: 'model',
+        target_id: 'o4-deep-research',
+      },
+    },
   },
   result_kind: 'research_report',
   grounding_policy: 'required',
@@ -69,6 +88,11 @@ export const searchResultsProfile: ExecutionProfile = {
   identity: {
     provider_id: 'brave-search',
     profile_id: 'web-results',
+    target: {
+      primary: {
+        model_selection: 'not_applicable',
+      },
+    },
   },
   result_kind: 'search_results',
   observation_mode: 'api_output',
@@ -84,6 +108,12 @@ export const surfaceObservationPrimaryProfile: ExecutionProfile = {
   identity: {
     provider_id: 'searchapi-google-ai-mode',
     profile_id: 'google-ai-mode-en-ca',
+    target: {
+      primary: {
+        model_selection: 'provider_managed',
+        kind: 'model',
+      },
+    },
   },
   result_kind: 'surface_observation',
   grounding_policy: 'optional',
@@ -108,6 +138,12 @@ export const surfaceObservationFallbackProfile: ExecutionProfile = {
   identity: {
     provider_id: 'serpapi-google-ai-mode',
     profile_id: 'google-ai-mode-en-ca',
+    target: {
+      primary: {
+        model_selection: 'provider_managed',
+        kind: 'model',
+      },
+    },
   },
   result_kind: 'surface_observation',
   grounding_policy: 'optional',

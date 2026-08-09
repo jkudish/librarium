@@ -27,7 +27,13 @@
       "primary": {
         "identity": {
           "provider_id": "google-gemini-api",
-          "profile_id": "google-ai-mode-api-proxy"
+          "profile_id": "google-ai-mode-api-proxy",
+          "target": {
+            "primary": {
+              "model_selection": "provider_managed",
+              "kind": "model"
+            }
+          }
         },
         "result_kind": "surface_observation",
         "grounding_policy": "optional",
@@ -57,7 +63,13 @@
       "profile": {
         "identity": {
           "provider_id": "openai-api",
-          "profile_id": "google-ai-mode-api-proxy-comparison"
+          "profile_id": "google-ai-mode-api-proxy-comparison",
+          "target": {
+            "primary": {
+              "model_selection": "provider_managed",
+              "kind": "model"
+            }
+          }
         },
         "result_kind": "surface_observation",
         "grounding_policy": "optional",
