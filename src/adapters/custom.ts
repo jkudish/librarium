@@ -490,10 +490,15 @@ function runScriptOperation(
     let stderr = '';
     let settled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let terminationError: Error | undefined;
+
+    const terminate = (error: Error): void => {
+      terminationError = error;
+      if (!child.kill('SIGKILL')) finish(error);
+    };
 
     const onAbort = (): void => {
-      child.kill('SIGKILL');
-      finish(new Error('Script provider operation was aborted.'));
+      terminate(new Error('Script provider operation was aborted.'));
     };
 
     const finish = (error?: Error, value?: unknown): void => {
@@ -523,6 +528,10 @@ function runScriptOperation(
     });
 
     child.on('close', (code, terminationSignal) => {
+      if (terminationError) {
+        finish(terminationError);
+        return;
+      }
       const trimmed = stdout.trim();
       if (!trimmed) {
         const detail = [
@@ -556,8 +565,7 @@ function runScriptOperation(
     });
 
     timeout = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(
+      terminate(
         new Error(
           `Script provider operation "${envelope.operation}" timed out after ${timeoutSeconds}s`,
         ),
