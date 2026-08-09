@@ -344,6 +344,21 @@ function resolveTargets(
       });
       continue;
     }
+    if (matches.length > 1) {
+      // An explicit target must name one exact executable strategy. A bare
+      // provider id that spans several profiles is rejected rather than
+      // silently fanned out.
+      issues.push({
+        code: 'ambiguous_profile_target',
+        phase: 'selection',
+        path,
+        message: `Provider ${target.provider_id} exposes ${matches.length} profiles (${matches
+          .map(({ profile }) => profile.identity.profile_id)
+          .sort()
+          .join(', ')}). Qualify the target with a profile_id.`,
+      });
+      continue;
+    }
     selected.push(...matches.map((entry) => ({ entry, path })));
   }
   return selected;
@@ -722,14 +737,22 @@ function resolveReserve(
     const key = profileKey(selection.entry.profile);
     const diagnosticKey = profileIdentityKey(selection.entry.profile.identity);
     if (used.has(key)) {
-      issues.push({
-        code: 'profile_reused_in_fallback',
-        phase: 'validation',
+      // A profile may appear only once across the primary and reserve plan.
+      // Asking for it twice explicitly is an error; a configured reserve that
+      // happens to overlap is omitted with a notice, like every other
+      // configured-reserve omission.
+      const diagnostic = {
+        code: explicit
+          ? 'profile_reused_in_fallback'
+          : 'configured_fallback_duplicate',
+        phase: 'validation' as const,
         path: selection.path,
         message:
           'A provider profile may appear only once in the primary and reserve plan.',
         profile_key: diagnosticKey,
-      });
+      };
+      if (explicit) issues.push(diagnostic);
+      else notices.push(diagnostic);
       continue;
     }
     used.add(key);
