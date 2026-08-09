@@ -74,7 +74,10 @@ export const ResearchResponseSchema = z
     }
 
     const resultIds = new Set<string>();
-    const citationIds = new Set<string>();
+    const citationsById = new Map<
+      string,
+      z.infer<typeof ResearchResultSchema>['citations'][number]
+    >();
     response.results.forEach((result, resultIndex) => {
       if (Date.parse(result.completed_at) > Date.parse(response.completed_at)) {
         ctx.addIssue({
@@ -92,7 +95,7 @@ export const ResearchResponseSchema = z
       }
       resultIds.add(result.result_id);
       result.citations.forEach((citation, citationIndex) => {
-        if (citationIds.has(citation.citation_id)) {
+        if (citationsById.has(citation.citation_id)) {
           ctx.addIssue({
             code: 'custom',
             message: 'citation_id values must be unique across a response',
@@ -105,7 +108,7 @@ export const ResearchResponseSchema = z
             ],
           });
         }
-        citationIds.add(citation.citation_id);
+        citationsById.set(citation.citation_id, citation);
       });
     });
 
@@ -138,16 +141,14 @@ export const ResearchResponseSchema = z
           });
         }
         referencedCitationIds.add(citationId);
-        if (!citationIds.has(citationId)) {
+        if (!citationsById.has(citationId)) {
           ctx.addIssue({
             code: 'custom',
             message: 'Source citation_ids must reference a response citation',
             path: ['sources', sourceIndex, 'citation_ids', citationIndex],
           });
         }
-        const citation = response.results
-          .flatMap((result) => result.citations)
-          .find((entry) => entry.citation_id === citationId);
+        const citation = citationsById.get(citationId);
         if (citation) {
           if (source.source_kind !== citation.source_kind)
             ctx.addIssue({

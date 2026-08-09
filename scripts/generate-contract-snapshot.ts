@@ -2821,7 +2821,7 @@ const manifest = {
       rule_id: 'extensions.bounded_namespaced_json',
       version: '1.0.0',
       description:
-        'Extensions are namespaced, JSON-safe, size/depth bounded, and secret-free.',
+        'Extensions are namespaced, JSON-safe, size/depth bounded, and reject obvious sensitive key names; producers remain responsible for content redaction.',
     },
     {
       rule_id: 'request.preflight_plan_compatibility',

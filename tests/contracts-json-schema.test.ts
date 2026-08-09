@@ -42,6 +42,35 @@ function createAjv(): Ajv2020 {
 }
 
 describe('published Draft 2020-12 contracts', () => {
+  it('keeps shared and execution definitions in their intended bundles', () => {
+    const schemas = schemaDocuments();
+    const interchange = schemas.find(
+      (schema) =>
+        schema.$id === 'https://librarium.dev/contracts/v1/interchange',
+    );
+    const artifacts = schemas.find(
+      (schema) => schema.$id === 'https://librarium.dev/contracts/v1/artifacts',
+    );
+
+    expect(Object.keys(interchange?.$defs ?? {}).sort()).toEqual([
+      'research_error',
+      'research_response',
+      'research_result',
+      'research_result_provenance',
+    ]);
+    expect(Object.keys(artifacts?.$defs ?? {})).toEqual(
+      expect.arrayContaining([
+        'durable_handle',
+        'execution_attempt',
+        'execution_profile',
+        'execution_request',
+        'execution_response',
+        'execution_result',
+        'lifecycle_trace',
+      ]),
+    );
+  });
+
   it('independently compiles every manifest-exposed definition and resolves every ref', () => {
     const ajv = createAjv();
 

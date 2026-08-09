@@ -723,6 +723,38 @@ describe('canonical v2 contracts', () => {
   });
 
   it('publishes shared terminal fixtures for effective targets, surface observations, and specialized records', () => {
+    const typescript = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-succeeded.json',
+        ),
+      ),
+    );
+    expect(typescript).toMatchObject({
+      generator: 'jkudish/librarium',
+      generator_version: readJson<{ version: string }>(
+        join(process.cwd(), 'package.json'),
+      ).version,
+    });
+
+    const php = ResearchResponseSchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'research-response-php-succeeded.json',
+        ),
+      ),
+    );
+    expect(php).toMatchObject({
+      generator: 'jkudish/laravel-ai-librarium',
+      generator_version: '1.0.0-rc.1+build.7',
+    });
+
     const effectiveTarget = ResearchResponseSchema.parse(
       readJson(
         join(
