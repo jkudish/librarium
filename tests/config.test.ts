@@ -548,6 +548,66 @@ describe('mergeConfigs', () => {
     expect(merged.trustedProviderIds).toEqual(['my-custom', 'my-custom-2']);
   });
 
+  it('drops inherited trust when a project overrides a custom provider', () => {
+    const merged = mergeConfigs(
+      {
+        ...baseGlobal,
+        customProviders: {
+          overridden: { type: 'npm', module: 'global-provider' },
+        },
+        trustedProviderIds: ['overridden'],
+      },
+      {
+        customProviders: {
+          overridden: { type: 'npm', module: 'project-provider' },
+        },
+      },
+    );
+
+    expect(merged.trustedProviderIds).toEqual([]);
+  });
+
+  it('keeps a project override trusted when the project explicitly trusts it', () => {
+    const merged = mergeConfigs(
+      {
+        ...baseGlobal,
+        customProviders: {
+          overridden: { type: 'npm', module: 'global-provider' },
+        },
+        trustedProviderIds: ['overridden'],
+      },
+      {
+        customProviders: {
+          overridden: { type: 'npm', module: 'project-provider' },
+        },
+        trustedProviderIds: ['overridden'],
+      },
+    );
+
+    expect(merged.trustedProviderIds).toEqual(['overridden']);
+  });
+
+  it('retains trust for unrelated global custom providers', () => {
+    const merged = mergeConfigs(
+      {
+        ...baseGlobal,
+        customProviders: {
+          overridden: { type: 'npm', module: 'global-provider' },
+          retained: { type: 'npm', module: 'retained-provider' },
+        },
+        trustedProviderIds: ['overridden', 'retained'],
+      },
+      {
+        customProviders: {
+          overridden: { type: 'npm', module: 'project-provider' },
+          'project-only': { type: 'npm', module: 'project-only-provider' },
+        },
+      },
+    );
+
+    expect(merged.trustedProviderIds).toEqual(['retained']);
+  });
+
   it('applies CLI flags', () => {
     const merged = mergeConfigs(baseGlobal, null, {
       timeout: 120,

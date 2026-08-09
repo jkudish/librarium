@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,6 @@ describe('librarium/node entry', () => {
   let executeResearchRun: typeof import('../src/node-entry.js').executeResearchRun;
   let getProvider: typeof import('../src/adapters/index.js').getProvider;
   let getAllProviders: typeof import('../src/adapters/index.js').getAllProviders;
-  let registerProvider: typeof import('../src/adapters/index.js').registerProvider;
   let initializeProviders: typeof import('../src/adapters/index.js').initializeProviders;
 
   beforeEach(async () => {
@@ -32,7 +31,6 @@ describe('librarium/node entry', () => {
     const registry = await import('../src/adapters/index.js');
     getProvider = registry.getProvider;
     getAllProviders = registry.getAllProviders;
-    registerProvider = registry.registerProvider;
     initializeProviders = registry.initializeProviders;
   });
 
@@ -48,7 +46,7 @@ describe('librarium/node entry', () => {
     expect(typeof executeResearchRun).toBe('function');
   });
 
-  function writeNpmProvider(id: string): void {
+  function writeNpmProvider(id: string, topLevelEffectPath?: string): void {
     const pkgDir = join(tmpDir, 'node_modules', id);
     mkdirSync(pkgDir, { recursive: true });
     writeFileSync(
@@ -68,6 +66,12 @@ describe('librarium/node entry', () => {
     writeFileSync(
       join(pkgDir, 'index.mjs'),
       [
+        ...(topLevelEffectPath
+          ? [
+              "import { writeFileSync } from 'node:fs';",
+              `writeFileSync(${JSON.stringify(topLevelEffectPath)}, 'loaded');`,
+            ]
+          : []),
         'export default {',
         `  id: '${id}',`,
         "  displayName: 'Lib Provider',",
@@ -133,21 +137,57 @@ describe('librarium/node entry', () => {
     expect(executed.content).toBe('lib:hi');
   });
 
-  it('protects reserved provider IDs by default after initializeProviders', async () => {
-    writeNpmProvider('exa');
-    await initializeProviders();
+  it('rejects canonical built-in IDs before importing npm code', async () => {
+    const markerPath = join(tmpDir, 'npm-provider-loaded');
+    writeNpmProvider('exa', markerPath);
 
-    const result = await registerCustomProviders({
-      providers: { exa: { enabled: true } },
-      customProviders: { exa: { type: 'npm', module: 'exa' } },
-      trustedProviderIds: ['exa'],
-    });
+    const result = await loadCustomProviders(
+      {
+        providers: { exa: { enabled: true } },
+        customProviders: { exa: { type: 'npm', module: 'exa' } },
+        trustedProviderIds: ['exa'],
+      },
+      {
+        reservedProviderIds: [],
+      },
+    );
 
     expect(result.loadedIds).not.toContain('exa');
     expect(result.skippedIds).toContain('exa');
     expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
-    // The built-in exa provider is still the registered one.
-    expect(getProvider('exa')?.source).toBe('builtin');
-    expect(registerProvider).toBeDefined();
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('rejects built-in aliases before spawning script describe code', async () => {
+    const markerPath = join(tmpDir, 'script-provider-described');
+    const scriptPath = join(tmpDir, 'reserved-provider-script.mjs');
+    writeFileSync(
+      scriptPath,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(markerPath)}, 'described');`,
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = await loadCustomProviders(
+      {
+        providers: { 'openai-deep': { enabled: true } },
+        customProviders: {
+          'openai-deep': {
+            type: 'script',
+            command: process.execPath,
+            args: [scriptPath],
+          },
+        },
+        trustedProviderIds: ['openai-deep'],
+      },
+      { reservedProviderIds: [] },
+    );
+
+    expect(result.loadedIds).not.toContain('openai-deep');
+    expect(result.skippedIds).toContain('openai-deep');
+    expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
+    expect(existsSync(markerPath)).toBe(false);
   });
 });

@@ -177,6 +177,13 @@ export function mergeConfigs(
   }
 
   if (project?.customProviders) {
+    // A project definition replaces the global code associated with the same
+    // ID, so it must receive its own explicit trust decision. Keep trust for
+    // global providers the project did not replace.
+    const overriddenProviderIds = new Set(Object.keys(project.customProviders));
+    merged.trustedProviderIds = merged.trustedProviderIds.filter(
+      (providerId) => !overriddenProviderIds.has(providerId),
+    );
     merged.customProviders = {
       ...merged.customProviders,
       ...project.customProviders,
