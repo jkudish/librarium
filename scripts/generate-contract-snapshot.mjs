@@ -15,4 +15,9 @@ if (!source)
   throw new Error('Contract snapshot generator did not produce output');
 
 const url = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-await import(url);
+try {
+  await import(url);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}

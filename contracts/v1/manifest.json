@@ -99,6 +99,11 @@
       "description": "Citations and normalized sources identify their source with an HTTP(S) URL or an opaque provider reference."
     },
     {
+      "rule_id": "citation.provider_identity_binding",
+      "version": "1.0.0",
+      "description": "Every citation identifies the same exact provider profile target as the producing effective execution profile."
+    },
+    {
       "rule_id": "custom_provider.result_binding",
       "version": "1.0.0",
       "description": "Custom-provider result identifiers, profile, collection provider, and response envelope agree."
@@ -208,6 +213,13 @@
     },
     {
       "path": "fixtures/valid/target-provider-managed-unknown-kind.json",
+      "role": "fixture",
+      "areas": [
+        "domain"
+      ]
+    },
+    {
+      "path": "fixtures/valid/target-provider-managed-agent-underlying-model.json",
       "role": "fixture",
       "areas": [
         "domain"
@@ -599,6 +611,13 @@
       ]
     },
     {
+      "path": "fixtures/invalid/citation-provider-target.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
       "path": "fixtures/invalid/response-selected-attempt-status.json",
       "role": "fixture",
       "areas": [
@@ -775,6 +794,13 @@
     },
     {
       "path": "fixtures/invalid/custom-provider-result-identifiers.json",
+      "role": "fixture",
+      "areas": [
+        "custom_provider"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/custom-provider-citation-target.json",
       "role": "fixture",
       "areas": [
         "custom_provider"

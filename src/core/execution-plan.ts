@@ -7,6 +7,7 @@ import {
   type ExecutionProfile,
   ExecutionProfileSchema,
   type ProviderIdentity,
+  providerIdentityKey,
 } from '../contracts/domain/index.js';
 import {
   compatibilityIssues,
@@ -219,7 +220,7 @@ function sortDiagnostics<T extends PreparationIssue | PreparationNotice>(
 }
 
 function profileIdentityKey(identity: ProviderIdentity): string {
-  return JSON.stringify([identity.provider_id, identity.profile_id]);
+  return providerIdentityKey(identity);
 }
 
 function targetKey(target: ProfileTarget): string {

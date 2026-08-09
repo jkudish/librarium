@@ -8,6 +8,7 @@ import {
   CitationSchema,
   CollectionProvenanceSchema,
   ExecutionProfileSchema,
+  providerIdentitiesEqual,
   RuntimeEffectiveTargetSchema,
   SemanticFactsSchema,
   UsageSchema,
@@ -74,6 +75,19 @@ export const InterchangeResultSchema = z
         path: ['provenance', 'effective_target', 'kind'],
       });
     }
+
+    result.citations.forEach((citation, index) => {
+      if (
+        !providerIdentitiesEqual(citation.provenance.provider, profile.identity)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Citation provider must match the producing effective profile identity',
+          path: ['citations', index, 'provenance', 'provider'],
+        });
+      }
+    });
 
     if (!facts.result_kinds.includes(profile.result_kind)) {
       ctx.addIssue({

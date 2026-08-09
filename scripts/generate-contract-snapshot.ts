@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { z } from 'zod/v4';
 import {
@@ -80,6 +80,29 @@ function write(relativePath: string, value: unknown): string {
   const content = typeof value === 'string' ? value : canonicalJson(value);
   writeFileSync(resolveSnapshotWritePath(root, relativePath), content);
   return relativePath;
+}
+
+function listSnapshotFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? listSnapshotFiles(path) : [path];
+  });
+}
+
+function assertExactSnapshotInventory(expectedPaths: readonly string[]): void {
+  const actualPaths = listSnapshotFiles(root)
+    .map((path) => relative(root, path).replaceAll('\\', '/'))
+    .sort();
+  const expected = [...expectedPaths].sort();
+  if (JSON.stringify(actualPaths) === JSON.stringify(expected)) return;
+
+  const expectedSet = new Set(expected);
+  const actualSet = new Set(actualPaths);
+  const unexpected = actualPaths.filter((path) => !expectedSet.has(path));
+  const missing = expected.filter((path) => !actualSet.has(path));
+  throw new Error(
+    `Contract snapshot inventory mismatch; unexpected=[${unexpected.join(', ')}], missing=[${missing.join(', ')}]`,
+  );
 }
 
 function areaSchema(
@@ -278,6 +301,22 @@ const providerManagedUnknownKindIdentity = {
   target: {
     primary: {
       model_selection: 'provider_managed',
+    },
+  },
+} satisfies z.input<typeof ProviderIdentitySchema>;
+
+const providerManagedAgentUnderlyingIdentity = {
+  provider_id: 'example-provider-managed-agent',
+  profile_id: 'research',
+  target: {
+    primary: {
+      model_selection: 'provider_managed',
+      kind: 'agent',
+    },
+    underlying: {
+      model_selection: 'configurable',
+      kind: 'model',
+      target_id: 'example-model-v3',
     },
   },
 } satisfies z.input<typeof ProviderIdentitySchema>;
@@ -518,6 +557,14 @@ const invalidCitationLocator = clone(representativePartialResponse) as Record<
 delete invalidCitationLocator.results[0].citations[0].url;
 delete invalidCitationLocator.results[0].citations[0].provider_reference;
 
+const invalidCitationProviderTarget = clone(representativePartialResponse);
+invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider =
+  clone(
+    invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider,
+  );
+invalidCitationProviderTarget.results[0]!.citations[0]!.provenance.provider.target.primary.target_id =
+  'mismatched-citation-target';
+
 const invalidSelectedAttempt = clone(representativePartialResponse);
 invalidSelectedAttempt.slots[0]!.selected_attempt_id =
   'attempt-grounded-primary';
@@ -624,6 +671,17 @@ const invalidCustomProviderResultIdentifiers = clone(
 );
 invalidCustomProviderResultIdentifiers.response.result.provenance.slot_id =
   'slot-does-not-match';
+
+const invalidCustomProviderCitationTarget = clone(
+  representativeCustomProviderExchange,
+);
+invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance.provider =
+  clone(
+    invalidCustomProviderCitationTarget.response.result.citations[0]!
+      .provenance.provider,
+  );
+invalidCustomProviderCitationTarget.response.result.citations[0]!.provenance.provider.target.primary.target_id =
+  'mismatched-custom-citation-target';
 
 const invalidRunManifestSlotOrder = clone(representativeRunManifest);
 invalidRunManifestSlotOrder.response.slots.reverse();
@@ -1058,6 +1116,14 @@ const fixtureDefinitions = [
     valid: true,
     path: 'fixtures/valid/target-provider-managed-unknown-kind.json',
     payload: providerManagedUnknownKindIdentity,
+  },
+  {
+    id: 'valid.target_provider_managed_agent_underlying_model',
+    area: 'domain',
+    schema: 'provider_identity',
+    valid: true,
+    path: 'fixtures/valid/target-provider-managed-agent-underlying-model.json',
+    payload: providerManagedAgentUnderlyingIdentity,
   },
   {
     id: 'valid.target_distinct_kinds_shared_id',
@@ -1539,6 +1605,15 @@ const fixtureDefinitions = [
     payload: invalidCitationLocator,
   },
   {
+    id: 'invalid.citation_provider_target',
+    area: 'interchange',
+    schema: 'interchange_response',
+    valid: false,
+    expected_issue_path: '/results/0/citations/0/provenance/provider',
+    path: 'fixtures/invalid/citation-provider-target.json',
+    payload: invalidCitationProviderTarget,
+  },
+  {
     id: 'invalid.response_selected_attempt_status',
     area: 'interchange',
     schema: 'interchange_response',
@@ -1773,6 +1848,15 @@ const fixtureDefinitions = [
     payload: invalidCustomProviderResultIdentifiers,
   },
   {
+    id: 'invalid.custom_provider_citation_target',
+    area: 'custom_provider',
+    schema: 'custom_provider_exchange',
+    valid: false,
+    expected_issue_path: '/response/result/citations/0/provenance/provider',
+    path: 'fixtures/invalid/custom-provider-citation-target.json',
+    payload: invalidCustomProviderCitationTarget,
+  },
+  {
     id: 'invalid.custom_provider_retrieve_running_handle',
     area: 'custom_provider',
     schema: 'custom_provider_exchange',
@@ -1980,6 +2064,7 @@ const semanticFixtureRules: Record<string, string> = {
   'invalid.answer_missing_grounding_policy':
     'grounding.search_results_inapplicable',
   'invalid.citation_missing_locator': 'source.locator_required',
+  'invalid.citation_provider_target': 'citation.provider_identity_binding',
   'invalid.response_selected_attempt_status': 'response.lossless_references',
   'invalid.response_effective_profile': 'response.lossless_references',
   'invalid.response_effective_profile_target': 'response.lossless_references',
@@ -2007,6 +2092,8 @@ const semanticFixtureRules: Record<string, string> = {
   'invalid.response_mixed_unsuccessful_status': 'response.status_coherence',
   'invalid.custom_provider_result_identifiers':
     'custom_provider.result_binding',
+  'invalid.custom_provider_citation_target':
+    'citation.provider_identity_binding',
   'invalid.custom_provider_status_handle_binding':
     'custom_provider.task_binding',
   'invalid.run_manifest_slot_order': 'artifacts.run_manifest_execution_plan',
@@ -2186,6 +2273,12 @@ const manifest = {
         'Citations and normalized sources identify their source with an HTTP(S) URL or an opaque provider reference.',
     },
     {
+      rule_id: 'citation.provider_identity_binding',
+      version: '1.0.0',
+      description:
+        'Every citation identifies the same exact provider profile target as the producing effective execution profile.',
+    },
+    {
       rule_id: 'custom_provider.result_binding',
       version: '1.0.0',
       description:
@@ -2273,6 +2366,7 @@ const checksums = filesToChecksum
   })
   .join('\n');
 write('checksums.sha256', `${checksums}\n`);
+assertExactSnapshotInventory([...filesToChecksum, 'checksums.sha256']);
 
 function schemaArea(
   path: string,

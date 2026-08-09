@@ -967,6 +967,21 @@ describe('durable handles and terminal mapping', () => {
         deps,
       ),
     ).toThrow('provider must match');
+    const wrongTargetProfile = structuredClone(profile);
+    wrongTargetProfile.identity.target.primary.target_id =
+      'different-durable-target';
+    expect(() =>
+      recordAttemptFinished(
+        state,
+        attemptId,
+        {
+          outcome: 'failed',
+          error: providerFailure(false),
+          durable_handle: handle(wrongTargetProfile, 'failed'),
+        },
+        deps,
+      ),
+    ).toThrow('provider must match');
 
     const succeededHandle = handle(profile, 'succeeded');
     state = recordAttemptFinished(

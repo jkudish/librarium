@@ -33,6 +33,7 @@ import {
   ExecutionProfileSchema,
   NormalizedSourceSchema,
   ProviderIdentitySchema,
+  providerIdentityKey,
   RuntimeEffectiveTargetSchema,
   SemanticFactsSchema,
   StructuredErrorSchema,
@@ -350,6 +351,85 @@ describe('canonical v2 contracts', () => {
     duplicate.slots[1].primary.identity.target.primary.target_id =
       duplicate.slots[0].primary.identity.target.primary.target_id;
     expect(InterchangeRequestSchema.safeParse(duplicate).success).toBe(false);
+  });
+
+  it('includes every target dimension in the canonical provider identity key', () => {
+    const configurableModel = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-configurable-model.json',
+        ),
+      ),
+    );
+    const presetWithUnderlying = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-fixed-preset-underlying-configurable-model.json',
+        ),
+      ),
+    );
+    const providerManagedAgent = ProviderIdentitySchema.parse(
+      readJson(
+        join(
+          snapshotRoot,
+          'fixtures',
+          'valid',
+          'target-provider-managed-agent-underlying-model.json',
+        ),
+      ),
+    );
+
+    const variants = [
+      {
+        base: configurableModel,
+        mutate(identity: Record<string, any>) {
+          identity.target.primary.model_selection = 'fixed';
+        },
+      },
+      {
+        base: configurableModel,
+        mutate(identity: Record<string, any>) {
+          identity.target.primary.kind = 'agent';
+        },
+      },
+      {
+        base: configurableModel,
+        mutate(identity: Record<string, any>) {
+          identity.target.primary.target_id = 'example-model-v2';
+        },
+      },
+      {
+        base: presetWithUnderlying,
+        mutate(identity: Record<string, any>) {
+          identity.target.underlying.model_selection = 'fixed';
+        },
+      },
+      {
+        base: presetWithUnderlying,
+        mutate(identity: Record<string, any>) {
+          identity.target.underlying.target_id = 'example-model-v3';
+        },
+      },
+      {
+        base: providerManagedAgent,
+        mutate(identity: Record<string, any>) {
+          delete identity.target.underlying;
+        },
+      },
+    ];
+
+    for (const { base, mutate } of variants) {
+      const changed = structuredClone(base);
+      mutate(changed);
+      const parsed = ProviderIdentitySchema.parse(changed);
+      expect(providerIdentityKey(parsed)).not.toBe(providerIdentityKey(base));
+    }
   });
 
   it('locks the structured error vocabulary and required fallback policy', () => {
@@ -1285,6 +1365,94 @@ describe('canonical v2 contracts', () => {
       expect(paths).toContain('/attempts/3/candidate_id');
       expect(paths).toContain('/attempts/3/profile/identity');
     }
+  });
+
+  it('treats target identity as part of response profile uniqueness', () => {
+    const response = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'partial-response.json'),
+    );
+    const additionalSlot = structuredClone(response.slots[1]);
+    additionalSlot.slot_id = 'slot-research-secondary-target';
+    additionalSlot.selected_attempt_id = 'attempt-research-secondary-target';
+    const additionalAttempt = structuredClone(response.attempts[2]);
+    additionalAttempt.attempt_id = 'attempt-research-secondary-target';
+    additionalAttempt.slot_id = additionalSlot.slot_id;
+    additionalAttempt.profile.identity.target.primary.target_id =
+      'o3-deep-research';
+    additionalAttempt.durable_handle.provider.target.primary.target_id =
+      'o3-deep-research';
+
+    const targetDistinct = structuredClone(response);
+    targetDistinct.slots.push(additionalSlot);
+    targetDistinct.attempts.push(additionalAttempt);
+    const targetDistinctResult =
+      InterchangeResponseSchema.safeParse(targetDistinct);
+    expect(
+      targetDistinctResult.success,
+      targetDistinctResult.success
+        ? undefined
+        : JSON.stringify(targetDistinctResult.error.issues),
+    ).toBe(true);
+
+    const exactDuplicate = structuredClone(targetDistinct);
+    exactDuplicate.attempts.at(-1).profile.identity.target.primary.target_id =
+      response.attempts[2].profile.identity.target.primary.target_id;
+    exactDuplicate.attempts.at(
+      -1,
+    ).durable_handle.provider.target.primary.target_id =
+      response.attempts[2].durable_handle.provider.target.primary.target_id;
+    expect(InterchangeResponseSchema.safeParse(exactDuplicate).success).toBe(
+      false,
+    );
+  });
+
+  it('treats target identity as part of run-manifest profile uniqueness', () => {
+    const manifest = readJson<Record<string, any>>(
+      join(snapshotRoot, 'fixtures', 'valid', 'run-manifest.json'),
+    );
+    const additionalRequestSlot = structuredClone(manifest.request.slots[1]);
+    additionalRequestSlot.slot_id = 'slot-research-secondary-target';
+    additionalRequestSlot.position = manifest.request.slots.length;
+    additionalRequestSlot.primary.identity.target.primary.target_id =
+      'o3-deep-research';
+
+    const additionalResponseSlot = structuredClone(manifest.response.slots[1]);
+    additionalResponseSlot.slot_id = additionalRequestSlot.slot_id;
+    additionalResponseSlot.selected_attempt_id =
+      'attempt-research-secondary-target';
+
+    const additionalAttempt = structuredClone(manifest.response.attempts[2]);
+    additionalAttempt.attempt_id = additionalResponseSlot.selected_attempt_id;
+    additionalAttempt.slot_id = additionalRequestSlot.slot_id;
+    additionalAttempt.profile.identity.target.primary.target_id =
+      'o3-deep-research';
+    additionalAttempt.durable_handle.provider.target.primary.target_id =
+      'o3-deep-research';
+
+    const targetDistinct = structuredClone(manifest);
+    targetDistinct.request.slots.push(additionalRequestSlot);
+    targetDistinct.response.slots.push(additionalResponseSlot);
+    targetDistinct.response.attempts.push(additionalAttempt);
+    expect(RunManifestArtifactSchema.safeParse(targetDistinct).success).toBe(
+      true,
+    );
+
+    const exactDuplicate = structuredClone(targetDistinct);
+    exactDuplicate.request.slots.at(
+      -1,
+    ).primary.identity.target.primary.target_id =
+      manifest.request.slots[1].primary.identity.target.primary.target_id;
+    exactDuplicate.response.attempts.at(
+      -1,
+    ).profile.identity.target.primary.target_id =
+      manifest.response.attempts[2].profile.identity.target.primary.target_id;
+    exactDuplicate.response.attempts.at(
+      -1,
+    ).durable_handle.provider.target.primary.target_id =
+      manifest.response.attempts[2].durable_handle.provider.target.primary.target_id;
+    expect(RunManifestArtifactSchema.safeParse(exactDuplicate).success).toBe(
+      false,
+    );
   });
 
   it('validates every independently versioned artifact family', () => {

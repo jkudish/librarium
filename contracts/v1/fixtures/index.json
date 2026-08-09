@@ -42,6 +42,14 @@
       "schema_ref": "#/$defs/provider_identity"
     },
     {
+      "id": "valid.target_provider_managed_agent_underlying_model",
+      "area": "domain",
+      "valid": true,
+      "path": "fixtures/valid/target-provider-managed-agent-underlying-model.json",
+      "schema_path": "schema/domain.schema.json",
+      "schema_ref": "#/$defs/provider_identity"
+    },
+    {
       "id": "valid.target_distinct_kinds_shared_id",
       "area": "domain",
       "valid": true,
@@ -585,6 +593,17 @@
       "expected_issue_path": "/results/0/citations/0/url"
     },
     {
+      "id": "invalid.citation_provider_target",
+      "area": "interchange",
+      "valid": false,
+      "path": "fixtures/invalid/citation-provider-target.json",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "citation.provider_identity_binding",
+      "expected_issue_path": "/results/0/citations/0/provenance/provider"
+    },
+    {
       "id": "invalid.response_selected_attempt_status",
       "area": "interchange",
       "valid": false,
@@ -864,6 +883,17 @@
       "enforcement": "semantic_rule",
       "semantic_rule_id": "custom_provider.result_binding",
       "expected_issue_path": "/response/result/provenance"
+    },
+    {
+      "id": "invalid.custom_provider_citation_target",
+      "area": "custom_provider",
+      "valid": false,
+      "path": "fixtures/invalid/custom-provider-citation-target.json",
+      "schema_path": "schema/custom-provider.schema.json",
+      "schema_ref": "#/$defs/exchange",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "citation.provider_identity_binding",
+      "expected_issue_path": "/response/result/citations/0/provenance/provider"
     },
     {
       "id": "invalid.custom_provider_retrieve_running_handle",
