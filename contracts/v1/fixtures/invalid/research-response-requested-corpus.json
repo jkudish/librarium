@@ -98,7 +98,7 @@
           "grounding_policy": "required",
           "observation_mode": "api_output",
           "corpora": [
-            "web"
+            "news"
           ],
           "retrieval_method": "model_search_tool",
           "access_mode": "direct",

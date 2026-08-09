@@ -76,6 +76,13 @@ export const ResearchResponseSchema = z
     const resultIds = new Set<string>();
     const citationIds = new Set<string>();
     response.results.forEach((result, resultIndex) => {
+      if (Date.parse(result.completed_at) > Date.parse(response.completed_at)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Response completed_at cannot precede a result completed_at',
+          path: ['results', resultIndex, 'completed_at'],
+        });
+      }
       if (resultIds.has(result.result_id)) {
         ctx.addIssue({
           code: 'custom',
@@ -137,6 +144,33 @@ export const ResearchResponseSchema = z
             message: 'Source citation_ids must reference a response citation',
             path: ['sources', sourceIndex, 'citation_ids', citationIndex],
           });
+        }
+        const citation = response.results
+          .flatMap((result) => result.citations)
+          .find((entry) => entry.citation_id === citationId);
+        if (citation) {
+          if (source.source_kind !== citation.source_kind)
+            ctx.addIssue({
+              code: 'custom',
+              message: 'Source source_kind must match its citation',
+              path: ['sources', sourceIndex, 'source_kind'],
+            });
+          for (const field of [
+            'source_category',
+            'dataset_id',
+            'provider_reference',
+          ] as const) {
+            if (
+              source[field] !== undefined &&
+              citation[field] !== undefined &&
+              source[field] !== citation[field]
+            )
+              ctx.addIssue({
+                code: 'custom',
+                message: `Source ${field} must match its citation when both are present`,
+                path: ['sources', sourceIndex, field],
+              });
+          }
         }
       });
     });

@@ -51,6 +51,8 @@ Semantic objects reject unknown fields. Wire fields and enum values use
 strings. Provider-specific data is allowed only in bounded, namespaced,
 JSON-safe `extensions`. Credentials, task secrets, headers, stack traces, binary
 payloads, and unrestricted raw provider responses are forbidden.
+Extension-key filtering catches obvious sensitive names, but producers remain
+responsible for never placing secrets or raw payloads behind benign names.
 
 HTTP(S) locators use an intentionally strict, language-neutral wire subset.
 The scheme is literally lowercase `http://` or `https://`; the hostname is one
@@ -59,6 +61,14 @@ an optional canonical decimal port is between 1 and 65535 with no leading zero.
 An optional path, query, or fragment contains printable ASCII only and never a
 backslash. Unicode hostnames use their ASCII form, and non-ASCII path data must
 be percent-encoded before it crosses the contract boundary.
+Validated citation and source URLs are untrusted identifiers only; validation
+never authorizes fetching them.
+
+Producer receipts are descriptive, self-reported package facts, not
+cryptographic authentication. Trust-sensitive consumers compare them with
+authenticated or out-of-band expectations. An `effective_target` reports
+provider runtime resolution or routing; its kind matches the declared target
+kind, but its ID need not equal a configured alias or target ID.
 
 Surface context is descriptive and non-blocking by default. When a request adds
 a `surface_context_constraint`, the profile must declare context and every

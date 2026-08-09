@@ -102,9 +102,7 @@
           ],
           "retrieval_method": "model_search_tool",
           "access_mode": "direct",
-          "operator_id": "perplexity",
-          "invocation": "inline",
-          "resumability": "none"
+          "operator_id": "perplexity"
         },
         "effective_profile": {
           "identity": {
@@ -126,9 +124,7 @@
           ],
           "retrieval_method": "search_endpoint",
           "access_mode": "direct",
-          "operator_id": "brave",
-          "invocation": "inline",
-          "resumability": "none"
+          "operator_id": "brave"
         },
         "collection": {
           "provider": {

@@ -124,7 +124,8 @@
           ],
           "retrieval_method": "search_endpoint",
           "access_mode": "direct",
-          "operator_id": "brave"
+          "operator_id": "brave",
+          "invocation": "inline"
         },
         "collection": {
           "provider": {

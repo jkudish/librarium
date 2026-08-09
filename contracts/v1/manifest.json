@@ -172,6 +172,21 @@
       "rule_id": "research_response.source_integrity",
       "version": "1.0.0",
       "description": "Every terminal response citation belongs to exactly one normalized source, and every source reference resolves."
+    },
+    {
+      "rule_id": "research_response.profile_compatibility",
+      "version": "1.0.0",
+      "description": "Effective terminal profiles preserve requested result, observation, grounding, corpus, and surface guarantees without exposing execution state."
+    },
+    {
+      "rule_id": "research_response.collection_profile_binding",
+      "version": "1.0.0",
+      "description": "Terminal collection and citation provenance bind provider, access, operator, collector, surface, and context facts to the effective profile."
+    },
+    {
+      "rule_id": "research_response.terminal_chronology",
+      "version": "1.0.0",
+      "description": "A terminal response cannot complete before any result in its envelope completes."
     }
   ],
   "files": [
@@ -1125,6 +1140,41 @@
     },
     {
       "path": "fixtures/invalid/research-response-citation-provider.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-profile-execution-field.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-requested-corpus.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-citation-collection-binding.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-source-kind.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/research-response-chronology.json",
       "role": "fixture",
       "areas": [
         "interchange"

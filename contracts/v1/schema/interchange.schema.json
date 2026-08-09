@@ -1160,21 +1160,6 @@
                         ],
                         "additionalProperties": false
                       },
-                      "invocation": {
-                        "type": "string",
-                        "enum": [
-                          "inline",
-                          "background"
-                        ]
-                      },
-                      "resumability": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "process_local",
-                          "durable"
-                        ]
-                      },
                       "extensions": {
                         "type": "object",
                         "propertyNames": {
@@ -1195,9 +1180,7 @@
                       "corpora",
                       "retrieval_method",
                       "access_mode",
-                      "operator_id",
-                      "invocation",
-                      "resumability"
+                      "operator_id"
                     ],
                     "additionalProperties": false
                   },
@@ -1422,21 +1405,6 @@
                         ],
                         "additionalProperties": false
                       },
-                      "invocation": {
-                        "type": "string",
-                        "enum": [
-                          "inline",
-                          "background"
-                        ]
-                      },
-                      "resumability": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "process_local",
-                          "durable"
-                        ]
-                      },
                       "extensions": {
                         "type": "object",
                         "propertyNames": {
@@ -1457,9 +1425,7 @@
                       "corpora",
                       "retrieval_method",
                       "access_mode",
-                      "operator_id",
-                      "invocation",
-                      "resumability"
+                      "operator_id"
                     ],
                     "additionalProperties": false
                   },
@@ -3341,21 +3307,6 @@
                   ],
                   "additionalProperties": false
                 },
-                "invocation": {
-                  "type": "string",
-                  "enum": [
-                    "inline",
-                    "background"
-                  ]
-                },
-                "resumability": {
-                  "type": "string",
-                  "enum": [
-                    "none",
-                    "process_local",
-                    "durable"
-                  ]
-                },
                 "extensions": {
                   "type": "object",
                   "propertyNames": {
@@ -3376,9 +3327,7 @@
                 "corpora",
                 "retrieval_method",
                 "access_mode",
-                "operator_id",
-                "invocation",
-                "resumability"
+                "operator_id"
               ],
               "additionalProperties": false
             },
@@ -3603,21 +3552,6 @@
                   ],
                   "additionalProperties": false
                 },
-                "invocation": {
-                  "type": "string",
-                  "enum": [
-                    "inline",
-                    "background"
-                  ]
-                },
-                "resumability": {
-                  "type": "string",
-                  "enum": [
-                    "none",
-                    "process_local",
-                    "durable"
-                  ]
-                },
                 "extensions": {
                   "type": "object",
                   "propertyNames": {
@@ -3638,9 +3572,7 @@
                 "corpora",
                 "retrieval_method",
                 "access_mode",
-                "operator_id",
-                "invocation",
-                "resumability"
+                "operator_id"
               ],
               "additionalProperties": false
             },
@@ -4363,21 +4295,6 @@
               ],
               "additionalProperties": false
             },
-            "invocation": {
-              "type": "string",
-              "enum": [
-                "inline",
-                "background"
-              ]
-            },
-            "resumability": {
-              "type": "string",
-              "enum": [
-                "none",
-                "process_local",
-                "durable"
-              ]
-            },
             "extensions": {
               "type": "object",
               "propertyNames": {
@@ -4398,9 +4315,7 @@
             "corpora",
             "retrieval_method",
             "access_mode",
-            "operator_id",
-            "invocation",
-            "resumability"
+            "operator_id"
           ],
           "additionalProperties": false
         },
@@ -4625,21 +4540,6 @@
               ],
               "additionalProperties": false
             },
-            "invocation": {
-              "type": "string",
-              "enum": [
-                "inline",
-                "background"
-              ]
-            },
-            "resumability": {
-              "type": "string",
-              "enum": [
-                "none",
-                "process_local",
-                "durable"
-              ]
-            },
             "extensions": {
               "type": "object",
               "propertyNames": {
@@ -4660,9 +4560,7 @@
             "corpora",
             "retrieval_method",
             "access_mode",
-            "operator_id",
-            "invocation",
-            "resumability"
+            "operator_id"
           ],
           "additionalProperties": false
         },

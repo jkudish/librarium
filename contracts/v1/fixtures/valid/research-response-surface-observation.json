@@ -114,9 +114,7 @@
             "locale": "en-CA",
             "country": "CA",
             "personalization": "unknown"
-          },
-          "invocation": "inline",
-          "resumability": "none"
+          }
         },
         "effective_profile": {
           "identity": {
@@ -145,9 +143,7 @@
             "locale": "en-CA",
             "country": "CA",
             "personalization": "unknown"
-          },
-          "invocation": "inline",
-          "resumability": "none"
+          }
         },
         "collection": {
           "provider": {

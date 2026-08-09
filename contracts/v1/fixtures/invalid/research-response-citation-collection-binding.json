@@ -44,7 +44,7 @@
               }
             },
             "access_mode": "direct",
-            "operator_id": "brave",
+            "operator_id": "other-operator",
             "origin_key": "origin-example-newsroom",
             "correlation_keys": {
               "com.example:publisherGroup": "example-newsroom"
