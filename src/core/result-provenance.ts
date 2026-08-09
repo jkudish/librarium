@@ -37,6 +37,20 @@ export interface CollectionProvenanceInput {
   readonly correlation_keys?: CorrelationKeys;
 }
 
+/** Own and freeze plain provenance data so later caller mutation cannot alter it. */
+function ownFrozen<T>(value: T): T {
+  const owned = structuredClone(value);
+  const freeze = (item: unknown): void => {
+    if (item === null || typeof item !== 'object' || Object.isFrozen(item)) {
+      return;
+    }
+    Object.freeze(item);
+    for (const child of Object.values(item)) freeze(child);
+  };
+  freeze(owned);
+  return owned;
+}
+
 /**
  * Build collection provenance from the profile that actually executed.
  *
@@ -49,7 +63,7 @@ export function collectionProvenanceFor(
   input: CollectionProvenanceInput,
 ): CollectionProvenance {
   const { profile } = input;
-  return {
+  return ownFrozen({
     provider: profile.identity,
     access_mode: profile.access_mode,
     operator_id: profile.operator_id,
@@ -66,7 +80,7 @@ export function collectionProvenanceFor(
     ...(input.correlation_keys !== undefined && {
       correlation_keys: input.correlation_keys,
     }),
-  };
+  });
 }
 
 /**

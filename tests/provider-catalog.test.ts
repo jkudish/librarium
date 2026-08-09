@@ -1351,6 +1351,26 @@ const CONFIGURABLE_TARGET_MATRIX = [
 ] as const;
 
 describe('provider catalog -- configured target fidelity', () => {
+  it('exposes exactly the seven adapter-backed configurable targets', () => {
+    const configurable = catalog()
+      .resolved.filter(
+        (item) =>
+          item.profile.identity.target.primary.model_selection ===
+          'configurable',
+      )
+      .map(
+        (item) =>
+          `${item.profile.identity.provider_id}/${item.declaration.profile_id}`,
+      );
+
+    expect(configurable).toEqual(
+      CONFIGURABLE_TARGET_MATRIX.map(
+        ([providerId, profileId]) => `${providerId}/${profileId}`,
+      ),
+    );
+    expect(configurable).toHaveLength(7);
+  });
+
   it('resolves every configurable target to the configured identifier', () => {
     for (const [
       providerId,

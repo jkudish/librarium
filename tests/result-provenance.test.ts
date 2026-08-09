@@ -84,6 +84,38 @@ describe('result provenance -- effective profile fidelity', () => {
     expect(api.surface_id).toBeUndefined();
     expect(api.surface_context).toBeUndefined();
   });
+
+  it('owns and freezes profile and correlation data after construction', () => {
+    const profile = structuredClone(profileOf('searchapi-chatgpt', 'surface'));
+    const correlationKeys = {
+      ...collectorCorrelation('searchapi', 'run-1'),
+    };
+    const provenance = collectionProvenanceFor({
+      profile,
+      correlation_keys: correlationKeys,
+    });
+
+    (profile.identity as { provider_id: string }).provider_id =
+      'mutated-provider';
+    if (profile.surface_context) {
+      (
+        profile.surface_context as {
+          account_context: string;
+        }
+      ).account_context = 'authenticated';
+    }
+    correlationKeys[CORRELATION_KEYS.collectorRun] = 'mutated-run';
+
+    expect(provenance.provider.provider_id).toBe('searchapi-chatgpt');
+    expect(provenance.surface_context?.account_context).toBe('unknown');
+    expect(provenance.correlation_keys?.[CORRELATION_KEYS.collectorRun]).toBe(
+      'run-1',
+    );
+    expect(Object.isFrozen(provenance)).toBe(true);
+    expect(Object.isFrozen(provenance.provider)).toBe(true);
+    expect(Object.isFrozen(provenance.surface_context)).toBe(true);
+    expect(Object.isFrozen(provenance.correlation_keys)).toBe(true);
+  });
 });
 
 describe('result provenance -- SearchAPI collector correlation', () => {
