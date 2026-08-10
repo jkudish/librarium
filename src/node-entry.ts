@@ -1,74 +1,233 @@
 /**
- * librarium/node -- the Node-only bridge for the library.
+ * Deliberate Node-only services layered on the Worker-safe core API.
  *
- * `librarium/core` is edge-safe (no Node APIs) and exposes the built-in
- * provider adapters plus `registerProvider()` for hand-written providers.
- * Custom providers configured as npm modules or external scripts, however,
- * require Node (module resolution + child processes). This entry point is the
- * single, documented place those are loaded from -- it shares the exact
- * loading/trust logic the CLI uses (one implementation, two callers).
- *
- * Edge/Workers users should keep importing from `librarium/core`.
+ * Filesystem configuration, durable artifacts, and writable migration
+ * services remain private until their v2 service shapes land.
  */
-
 import {
   type CustomProviderLoadResult,
   loadCustomProviders as loadCustomProvidersInternal,
 } from './adapters/custom.js';
-import { getAllProviders, registerProvider } from './adapters/index.js';
+import type { ExecutionProfile } from './contracts/domain/index.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './core/reserved-provider-ids.js';
-import type { Config } from './types.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
-export * from './core/research-run.js';
-export * from './node-credentials.js';
+export type {
+  ActualCostSource,
+  AdapterBindingIdentity,
+  AdmittedSelectedProfile,
+  AsyncPollResult,
+  AsyncTaskHandle,
+  AsyncTaskStatus,
+  AttemptExecutionContext,
+  AttemptExecutionPort,
+  AttemptExecutionResult,
+  AttemptFinishedInput,
+  AttemptLaunch,
+  AvailabilityReason,
+  BackgroundProvider,
+  BaseProviderOptions,
+  BuiltinWorkflowId,
+  CanonicalResearchAdmissionResult,
+  CatalogProfileBinding,
+  CatalogProfileRef,
+  CatalogProfileTarget,
+  CatalogProviderConfig,
+  Citation,
+  CoordinationCompareAndSwapResult,
+  CoordinationStateStore,
+  CoordinatorAttemptState,
+  CoordinatorAttemptStatus,
+  CoordinatorBudgetState,
+  CoordinatorCancellation,
+  CoordinatorClock,
+  CoordinatorDependencies,
+  CoordinatorIdGenerator,
+  CoordinatorReserveCandidate,
+  CoordinatorSlotState,
+  CoordinatorSlotStatus,
+  CoordinatorState,
+  CoordinatorStatus,
+  CoordinatorTerminalOutcome,
+  CostConfidence,
+  CredentialContext,
+  CustomCatalogProfile,
+  DeclarableWorkflowId,
+  DurableHandle,
+  EvidenceRequirements,
+  ExecutableProfileDeclaration,
+  ExecutionProfile,
+  ExecutionRuntimeDependencies,
+  ExecutionRuntimeResult,
+  FrozenPlanningCatalog,
+  HttpClient,
+  HttpRequestOptions,
+  HttpResponse,
+  HttpRetryPolicy,
+  HttpStreamClient,
+  HttpStreamRequestOptions,
+  HttpStreamResponse,
+  InlineProvider,
+  InterchangeRequest,
+  LegacyProviderTier,
+  LifecycleEvent,
+  MeteringActual,
+  MeteringEstimate,
+  MeteringKind,
+  NetworkFreeEstimate,
+  PendingFallbackLaunch,
+  PlanningProfile,
+  PreparationClock,
+  PreparationDependencies,
+  PreparationDiagnostic,
+  PreparationIdGenerator,
+  PreparationIssue,
+  PreparationNotice,
+  PreparationPhase,
+  PreparationResult,
+  PreparedProfilePlan,
+  PreparedResearchExecution,
+  PrivateExecutionPolicy,
+  ProfileFeatures,
+  ProfileTarget,
+  Provider,
+  ProviderAttemptBridgeDependencies,
+  ProviderCatalog,
+  ProviderCatalogEntry,
+  ProviderCatalogOptions,
+  ProviderCitation,
+  ProviderCommon,
+  ProviderIdentity,
+  ProviderMetering,
+  ProviderOptions,
+  ProviderResult,
+  ProviderSource,
+  ProviderUsage,
+  RequestSlot,
+  ResearchAdmissionResult,
+  ResearchError,
+  ResearchExecutionAdmission,
+  ResearchRequest,
+  ResearchResponse,
+  ResearchResult,
+  ResolvedCatalogProfile,
+  ResultProvenance,
+  Source,
+  StructuredError,
+  UnresolvedAcceptance,
+  Usage,
+  VersionedCoordinationState,
+  WorkflowOmission,
+  WorkflowResolutionResult,
+} from './core-entry.js';
+export {
+  admitResearchExecution,
+  BUILTIN_PROVIDER_CATALOG,
+  buildPrompt,
+  buildProviderCatalog,
+  CitationSchema,
+  createProviderAttemptBridge,
+  generateSlug,
+  HttpRequestAbortedError,
+  HttpRequestTimeoutError,
+  HttpResponseTooLargeError,
+  httpRequest,
+  httpStreamRequest,
+  InMemoryCoordinationStateStore,
+  materializeResearchExecution,
+  ProviderCatalogError,
+  prepareResearchExecution,
+  ResearchErrorSchema,
+  ResearchRequestSchema,
+  ResearchResponseSchema,
+  ResearchResultSchema,
+  ResultProvenanceSchema,
+  resolveOutputDir,
+  runPreparedExecution,
+  SourceSchema,
+  UsageSchema,
+  updateCoordinationState,
+  VERSION,
+} from './core-entry.js';
+export { createNodeCredentialContext } from './node-credentials.js';
 
 export interface LoadCustomProvidersOptions {
-  /**
-   * Additional provider IDs that may not be claimed by a custom provider.
-   * Built-in canonical IDs and aliases are always reserved.
-   */
+  /** Additional IDs which custom providers may not claim. */
   reservedProviderIds?: Iterable<string>;
 }
 
+export interface CustomProviderExecutionProfileConfig {
+  bindingId: string;
+  profile: ExecutionProfile;
+  credential?: { envVar: string };
+}
+
+export interface NpmCustomProviderSource {
+  type: 'npm';
+  module: string;
+  export?: string;
+  options?: Record<string, unknown>;
+  executionProfile?: CustomProviderExecutionProfileConfig;
+}
+
+export interface ScriptCustomProviderSource {
+  type: 'script';
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  options?: Record<string, unknown>;
+  executionProfile?: CustomProviderExecutionProfileConfig;
+}
+
+export type CustomProviderSource =
+  | NpmCustomProviderSource
+  | ScriptCustomProviderSource;
+
+export interface CustomProviderRuntimeConfig {
+  apiKey?: string;
+  enabled?: boolean;
+  model?: string;
+  options?: Record<string, unknown>;
+  fallback?: string;
+}
+
+/** Minimal trusted-provider input; deliberately independent of v1 Config. */
+export interface CustomProviderLoadConfig {
+  readonly customProviders?: Readonly<Record<string, CustomProviderSource>>;
+  readonly trustedProviderIds?: readonly string[];
+  readonly providers?: Readonly<Record<string, CustomProviderRuntimeConfig>>;
+}
+
 /**
- * Load custom providers (npm modules + scripts) declared in a librarium
- * `Config`, applying the same trust gating (`trustedProviderIds`) and
- * reserved-ID protection the CLI uses. Returns the loaded providers plus
- * diagnostics; it does NOT register them. Use `registerCustomProviders` for
- * the load-and-register convenience.
+ * Load trusted custom providers without mutating a global registry.
+ *
+ * The caller owns the returned provider instances and decides how to bind
+ * them into its client-scoped execution runtime.
+ *
+ * SECURITY: trusted npm modules and script declarations execute arbitrary
+ * code with this process's permissions and inherited environment. Load only
+ * code you explicitly trust; `trustedProviderIds` is an execution allowlist,
+ * not a sandbox.
  */
 export async function loadCustomProviders(
-  config: Pick<Config, 'customProviders' | 'trustedProviderIds' | 'providers'>,
+  config: CustomProviderLoadConfig,
   options: LoadCustomProvidersOptions = {},
 ): Promise<CustomProviderLoadResult> {
   const reservedProviderIds = new Set([
     ...RESERVED_BUILTIN_PROVIDER_IDS,
-    ...getAllProviders().map((provider) => provider.id),
     ...(options.reservedProviderIds ?? []),
   ]);
 
   return loadCustomProvidersInternal({
-    customProviders: config.customProviders ?? {},
-    trustedProviderIds: config.trustedProviderIds ?? [],
-    providerConfigs: config.providers ?? {},
+    customProviders: { ...(config.customProviders ?? {}) },
+    trustedProviderIds: [...(config.trustedProviderIds ?? [])],
+    providerConfigs: Object.fromEntries(
+      Object.entries(config.providers ?? {}).map(([id, provider]) => [
+        id,
+        { ...provider, enabled: provider.enabled ?? true },
+      ]),
+    ),
     reservedProviderIds,
   });
-}
-
-/**
- * Load custom providers from a `Config` and register the successfully loaded
- * ones into the core registry (so `getProvider`/`dispatch` see them). Returns
- * the same diagnostics as `loadCustomProviders`. Call after
- * `initializeProviders()` so reserved-ID detection sees the built-ins.
- */
-export async function registerCustomProviders(
-  config: Pick<Config, 'customProviders' | 'trustedProviderIds' | 'providers'>,
-  options: LoadCustomProvidersOptions = {},
-): Promise<CustomProviderLoadResult> {
-  const result = await loadCustomProviders(config, options);
-  for (const provider of result.providers) {
-    registerProvider(provider);
-  }
-  return result;
 }

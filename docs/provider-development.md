@@ -39,12 +39,30 @@ Load rules:
 - Built-in IDs are reserved and cannot be overridden
 - Project and global configs merge; project `customProviders` override same IDs from global
 
-## Core vs CLI Boundary (v0.2.0+)
+## Package and CLI Boundary
 
-Librarium is consumable as a library via the `librarium/core` package export (see README "Library Usage"). The boundary matters for provider development:
+Librarium exposes three deliberate package entries (see README "Library
+Usage"). The boundary matters for provider development:
 
-- **Built-in adapters** live in core: they must stay runtime-portable -- fetch-based HTTP only, no `node:*` imports, no direct `process.env` access. API keys resolve through the injected `CredentialContext` (`BaseProvider.getApiKey(apiKeyRef, credentials)`); a workerd CI suite enforces this.
-- **Custom npm and script providers** are CLI-only: they depend on Node module resolution and child processes and are loaded by the CLI's `node-registry`, never by core. Library consumers who need a custom provider implement the `Provider` interface directly and call `registerProvider()` at runtime.
+- **Built-in adapters** are internal runtime modules. They must remain portable:
+  fetch-based HTTP only, no `node:*` imports, and no direct `process.env`
+  access. API keys resolve through the injected `CredentialContext`; a workerd
+  CI suite imports these modules directly even though their constructors are
+  not public package exports.
+- **`librarium`** exposes canonical request/terminal-result schemas and the
+  static provider capability catalog. It never initializes adapters.
+- **`librarium/core`** exposes Worker-safe provider interfaces and injected
+  catalog/planning/transport/execution ports. It has no concrete adapter
+  classes, dispatcher convenience, or global provider registry.
+- **`librarium/node`** exposes `loadCustomProviders()` for explicitly trusted
+  npm modules and scripts. It returns provider instances without registering
+  them. Complete configured runs still go through the `librarium` CLI while
+  the v2 high-level library runner is finalized.
+
+> **Security:** an allowed npm module or script executes arbitrary code with
+> the Librarium process's permissions and inherited environment.
+> `trustedProviderIds` is an execution allowlist, not a sandbox. Load only code
+> you explicitly trust.
 
 ## Provider Interface Contract
 
@@ -96,9 +114,11 @@ You can export either:
 Factory function receives:
 
 ```ts
+import type { CustomProviderRuntimeConfig } from 'librarium/node';
+
 {
   id: string;
-  config?: ProviderConfig;
+  config?: CustomProviderRuntimeConfig;
   sourceOptions: Record<string, unknown>;
 }
 ```
@@ -229,20 +249,27 @@ A built-in adapter declares its pricing model in its provider descriptor. The me
 
 ## Adding a Built-in Adapter
 
-Built-in adapters live in core and must stay runtime-portable (fetch-only HTTP, no `node:*`, no direct `process.env`; a workerd CI suite enforces this). Each built-in has one typed runtime descriptor composed from:
+Built-in adapters live in the internal Worker-safe adapter layer and must stay runtime-portable (fetch-only HTTP, no `node:*`, no direct `process.env`; a workerd CI suite enforces this). Each built-in has one typed runtime descriptor composed from:
 
 - `src/core/provider-descriptor.ts`: portable metadata, aliases, credential name, tier, display/catalog copy, default model, metering, option schema, and discriminated execution capabilities
 - `src/adapters/provider-descriptors.ts`: the adapter factory for each metadata definition
 
-Runtime registration, constants, aliases, onboarding catalog, and metering are derived from these descriptors. Default groups remain explicit product policy in `src/constants.ts`, but startup validation rejects unknown IDs, duplicates, tier mistakes, or a stale `all`/`llm` roster.
+Runtime registration, constants, aliases, onboarding catalog, and metering are derived from these descriptors. Legacy CLI grouping remains internal until the configuration and runtime cutover work lands. The v2 workflow source of truth is provider profiles plus curated `quick`/`visibility` policy and capability-derived `deep`/`all` membership.
 
 To add one:
 
 1. **Adapter** -- `src/adapters/<id>.ts`, extending `BaseProvider` for inline execution or `BackgroundBaseProvider` for a complete remote-task lifecycle. Implement `execute` in both cases; background adapters also implement `submit`/`poll`/`retrieve`. Return `usage` when the API reports cost/tokens.
 2. **Descriptor definition** -- add the portable metadata entry in `src/core/provider-descriptor.ts`, including its metering declaration and an appropriate Zod schema for the supported `options`.
-3. **Factory** -- add the constructor mapping in `src/adapters/provider-descriptors.ts`. `initializeProviders()` validates configured options, constructs adapters from this descriptor list, and checks the runtime adapter matches its declared ID, tier, execution mode, display name, and credential. Invalid options warn but do not unregister the adapter: Librarium blocks new `execute`, `submit`, and `test` work before HTTP while retaining `poll`/`retrieve` for existing background tasks and preserving reserved built-in IDs.
-4. **Group policy** -- place the canonical ID in the intended explicit groups in `src/constants.ts`. Every non-LLM built-in must appear in `all`; every LLM built-in must appear in `llm`.
-5. **Core export** -- `export * from './adapters/<id>.js'` in `src/core-entry.ts`.
+3. **Factory** -- add the constructor mapping in `src/adapters/provider-descriptors.ts`. The internal Node registry validates configured options, constructs adapters from this descriptor list, and checks that runtime adapters match their declared ID, tier, execution mode, display name, and credential. Invalid options warn but do not remove the adapter: Librarium blocks new `execute`, `submit`, and `test` work before HTTP while retaining `poll`/`retrieve` for existing background tasks and preserving reserved built-in IDs.
+4. **Workflow policy** -- declare eligible curated workflow membership on the
+   profile in `src/core/provider-profiles.ts` and update
+   `src/core/builtin-workflows.ts` only when the profile belongs in the curated
+   `quick` or `visibility` roster. `deep` and `all` are derived from profile
+   capabilities and must not be manually enumerated.
+5. **Capability catalog** -- add or update the corresponding audited profile in
+   `src/core/provider-profiles.ts` and its binding in
+   `src/core/profile-bindings.ts`. Do not add the concrete adapter constructor
+   to a public package entry.
 6. **README** -- bump the "N built-in provider adapters" count; the README-drift test (`tests/readme-drift.test.ts`) tripwires on the provider count, tiers, and group names.
 
 Run `npm run test` (it includes the metering lockstep and README-drift guards) and `npm run test:workers` (the runtime-portability suite) before opening a PR.

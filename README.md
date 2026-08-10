@@ -17,7 +17,7 @@
   <a href="https://librarium.agentsy.build"><strong>Website</strong></a> &nbsp;·&nbsp;
   <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
   <a href="#commands">Commands</a> &nbsp;·&nbsp;
-  <a href="#library-usage-librariumcore">Library</a> &nbsp;·&nbsp;
+  <a href="#library-usage">Library</a> &nbsp;·&nbsp;
   <a href="#using-with-ai-agents">Agents</a>
 </p>
 
@@ -31,7 +31,13 @@ Ask once. Librarium fans your query out to search engines, AI-grounded answers, 
 
 Inspired by Aaron Francis' [counselors](https://github.com/aarondfrancis/counselors), librarium applies the same fan-out pattern to search. Where counselors fans out prompts to multiple LLM CLIs, librarium fans out research queries to search engines, AI-grounded search, and deep-research APIs -- collecting, normalizing, and deduplicating results into structured output.
 
-Librarium is both a **CLI** and an **embeddable library**: `import { dispatch } from 'librarium/core'` gives you the same provider adapters and fan-out dispatcher with in-memory structured results, no filesystem or Node-only dependencies -- it runs in Cloudflare Workers and other edge runtimes. See [Library Usage](#library-usage-librariumcore).
+Librarium is both a **CLI** and a set of **embeddable foundations**. The
+side-effect-free `librarium` root validates canonical requests and terminal
+results; `librarium/core` adds Worker-safe catalog, planning, transport, and
+execution ports; `librarium/node` adds deliberate Node-only services. The v2
+package boundary does not yet expose a high-level library runner -- use the
+`librarium` executable for complete research runs. See
+[Library Usage](#library-usage).
 
 The full docs live at **[librarium.agentsy.build](https://librarium.agentsy.build)**.
 
@@ -63,7 +69,7 @@ On first run, `librarium` opens a guided onboarding wizard: pick providers, choo
 - **Reports for humans and machines** -- a tabbed [HTML report](#html) for reading, [`results.jsonl`](#jsonl) with full content for pipelines, and a [browsable run directory](#browse) for everything else.
 - **Tier-tuned queries** -- [`--refine`](#refine) rewrites your query three ways with one LLM call: a brief for deep research, a question for AI answers, keywords for raw search.
 - **Async deep research** -- submit long-running jobs and walk away. [`status --wait --retrieve`](#status) collects the reports when they land.
-- **Built for agents** -- an [agent skill](#option-1-claude-code-skill-recommended), an [MCP server](#option-2-mcp-server), and an [embeddable edge-safe core](#library-usage-librariumcore). Your agents fan out, browse, and cite without screen-scraping a terminal.
+- **Built for agents** -- an [agent skill](#option-1-claude-code-skill-recommended), an [MCP server](#option-2-mcp-server), and [embeddable edge-safe foundations](#library-usage). Your agents fan out, browse, and cite without screen-scraping a terminal.
 
 Plus provider groups, automatic fallbacks, and custom providers from npm or local scripts.
 
@@ -297,21 +303,26 @@ adapter factory with its tier, display/catalog metadata, credential environment
 variable, metering declaration, option schema, aliases, default model, and a
 discriminated inline/background capability contract. Registry initialization,
 the onboarding catalog, provider names, credential lookup, aliases, and
-metering are derived from that inventory. Default groups remain explicit
-policy, with automatic validation against the inventory so a new provider
-cannot silently drift out of `all` or `llm`.
+metering are derived from that inventory. The v2 provider-profile catalog owns
+workflow facts: `quick` and `visibility` use curated profile rosters, while
+`deep` and `all` are derived from profile capabilities. Automatic validation
+rejects missing bindings, invalid workflow declarations, and stale curated
+memberships.
 
-Library consumers can inspect the same inventory:
+Library consumers can inspect the public capability catalog without importing
+adapter constructors or initializing a global registry:
 
 ```ts
-import { BUILTIN_PROVIDER_DESCRIPTORS } from 'librarium/core';
+import { BUILTIN_PROVIDER_CATALOG } from 'librarium';
 
-for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
+for (const provider of BUILTIN_PROVIDER_CATALOG) {
   console.log({
-    id: descriptor.id,
-    model: descriptor.defaultModel,
-    execution: descriptor.capabilities.execution,
-    options: descriptor.optionsSchema,
+    id: provider.provider_id,
+    profiles: provider.profiles.map(({ profile_id, invocation, target }) => ({
+      profile_id,
+      invocation,
+      target,
+    })),
   });
 }
 ```
@@ -1412,213 +1423,171 @@ The `usage` and `metering` fields are optional. `usage` is reported-only: its `i
 | `1` | Partial success (some providers failed) |
 | `2` | Total failure (all providers failed, or configuration error) |
 
-## Library Usage (`librarium/core`)
+## Library Usage
 
-Everything the CLI does with providers is importable. The `librarium/core` entry exposes the adapters, registry, dispatcher, normalizer, and types, and returns results **in memory**. The core entry has zero Node-only dependencies: no `node:fs`, no `process.env` access, fetch-based HTTP only. It is tested in workerd (Cloudflare's runtime) on every CI run. Node applications that want Librarium's complete durable file-writing lifecycle can use `executeResearchRun()` from `librarium/node`.
+Install the package when you need Librarium's schemas, catalog, or execution
+ports in application code:
 
 ```bash
 npm install librarium
 ```
 
-```ts
-import { dispatch, initializeProviders, type Config } from 'librarium/core';
+The v2 package boundary is deliberately lower-level than the CLI. There is no
+public `createLibrarium().research()`, global provider registry, adapter
+constructor inventory, or headless file-writing runner yet. Use the
+`librarium` executable for complete configured research runs while the
+canonical runner is integrated.
 
-// Credentials are injected -- core never reads process.env itself.
-// Pass an env map (Workers: pass your `env` binding) or a resolveCredential fn.
-const credentials = { env: { GEMINI_API_KEY: '...', OPENROUTER_API_KEY: '...' } };
+### Root API (`librarium`)
 
-await initializeProviders({ credentials });
-
-const config: Config = {
-  version: 1,
-  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync', llmWebSearch: true },
-  providers: {
-    'gemini-grounded': { enabled: true },
-    'openrouter-online': { enabled: true },
-  },
-  customProviders: {},
-  trustedProviderIds: [],
-  groups: {},
-};
-
-const { results, asyncTasks } = await dispatch({
-  config,
-  providerIds: ['gemini-grounded', 'openrouter-online'],
-  query: 'What is the best wholesale produce supplier in London?',
-  mode: 'sync',
-  credentials,
-});
-
-for (const r of results) {
-  // { provider, tier, status, text, sourceUrls, citations, durationMs,
-  //   model, tokenUsage, error, fallbackFor }
-  console.log(r.provider, r.status, r.sourceUrls);
-}
-```
-
-Notes:
-
-- **Credential injection.** `CredentialContext` is `{ env?: Record<string, string | undefined>, resolveCredential?: (value: string) => string | undefined }`. `$ENV_VAR` references in provider config resolve against the injected `env`; literal keys pass through. In the CLI, this is backed by `process.env` -- in a Worker, pass your env binding.
-- **Custom providers from the library.** Hand-written providers work anywhere via `registerProvider()` (edge included). npm- and script-based custom providers need Node (module resolution, child processes), so they load through the dedicated `librarium/node` entry -- the same loader the CLI uses. See [Custom providers](#custom-providers-librariumnode).
-- **Async deep-research from the library.** `dispatch` with `mode: 'async'`/`'mixed'` returns `asyncTasks` handles; polling/retrieval is the caller's responsibility. See [Async deep-research](#async-deep-research-from-the-library).
-- **Bring your own persistence.** Core returns data; where it goes (D1, R2, files, nowhere) is up to you.
-
-### Headless durable runs (`librarium/node`)
-
-`executeResearchRun(request, overrides?)` is the shared application service behind the CLI and MCP server. It has no spinner, prompt, stdout, or stderr behavior. The caller supplies an initialized config, selected provider IDs, and an output directory; the service creates and reconciles `run.json`, dispatches providers, writes provider results, deduplicates citations, and writes `prompt.md`, `sources.json`, and `summary.md`.
-
-```ts
-import { initializeProviders } from 'librarium/core';
-import { executeResearchRun } from 'librarium/node';
-
-const credentials = { env: process.env };
-await initializeProviders({ ...config, credentials });
-
-const run = await executeResearchRun({
-  query: 'Compare current deep-research APIs',
-  config,
-  providerIds: ['openai-research'],
-  outputDir: '/absolute/path/to/run',
-  slug: 'compare-current-deep-research-apis',
-  credentials,
-  onEvent(event) {
-    if (event.type === 'dispatch-progress') {
-      renderProgress(event.progress);
-    }
-  },
-});
-
-console.log(run.manifest.status, run.sources.length);
-```
-
-Production defaults are used when `overrides` is omitted. Embedders and tests may independently replace `providerRegistry`, `taskStore`, `httpClient`, or `dispatch`. The HTTP override creates run-local copies of built-in and other `ProviderBase` adapters; a registry containing plain-object providers can implement `withHttpClient()` to supply its own run-local projection. `onEvent` receives a typed event union and is observational: an event handler failure cannot interrupt dispatch or corrupt persistence. A `postDispatch` callback can add `answer` or `verification` metadata before the manifest reaches its final lifecycle state; callback failures are reported as `post-dispatch-warning` events and do not discard the run.
-
-### Custom providers (`librarium/node`)
-
-Three flavors of custom provider:
-
-1. **Hand-written** -- implement the `Provider` interface (fetch-based) and call `registerProvider(provider)` from `librarium/core`. This is edge-safe and works in Workers.
-2. **npm modules** -- a published/local package exporting a provider (or a factory). Requires Node module resolution.
-3. **scripts** -- an external executable that speaks librarium's JSON-over-stdio protocol. Requires child processes.
-
-The last two are Node-only, so they live behind the `librarium/node` entry point (one implementation, shared with the CLI). It exposes:
-
-- `loadCustomProviders(config, options?) -> { providers, loadedIds, skippedIds, warnings }` -- loads (but does not register) the npm/script providers declared in `config.customProviders`, applying the same `trustedProviderIds` gating and reserved-ID protection the CLI uses.
-- `registerCustomProviders(config, options?)` -- convenience that loads and registers them into the core registry. Built-in IDs are reserved directly from the descriptor inventory, even before initialization or when a built-in has invalid options. Same return shape.
-
-```ts
-import { dispatch, initializeProviders, getProvider } from 'librarium/core';
-import { registerCustomProviders } from 'librarium/node';
-
-const credentials = { env: process.env };
-await initializeProviders({ credentials });
-
-const config = {
-  version: 1 as const,
-  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'sync' as const, llmWebSearch: true },
-  providers: { 'my-search': { enabled: true } },
-  // npm: { type: 'npm', module: 'my-search-provider', export: 'default' }
-  // script: { type: 'script', command: './providers/my-search.mjs' }
-  customProviders: { 'my-search': { type: 'npm' as const, module: 'my-search-provider' } },
-  trustedProviderIds: ['my-search'], // untrusted IDs are skipped with a warning
-  groups: {},
-};
-
-const { warnings, loadedIds } = await registerCustomProviders(config);
-if (warnings.length) console.warn(warnings.join('\n'));
-
-// Now registered alongside the built-ins -- dispatch sees it.
-console.log(getProvider('my-search')?.source); // 'npm'
-const { results } = await dispatch({
-  config,
-  providerIds: loadedIds,
-  query: 'best wholesale produce supplier in London',
-  mode: 'sync',
-  credentials,
-});
-```
-
-`librarium/core` stays Node-free: edge users never import `librarium/node` and keep using fetch-based `registerProvider()` providers.
-
-### Async deep-research from the library
-
-Deep-research providers can run asynchronously. In `mode: 'mixed'` (or `'async'`), `dispatch` submits each deep-research task and returns an `AsyncTaskHandle` in `asyncTasks` instead of blocking; sync-tier providers still return their results inline. The caller persists the handles, then later polls and retrieves through the registry -- there is no background worker in core.
+The package root is side-effect-free and Worker-safe. It exposes the canonical
+request and terminal-response schemas/types, the built-in provider capability
+catalog, and `VERSION`.
 
 ```ts
 import {
-  dispatch,
-  initializeProviders,
-  getProvider,
-  type AsyncTaskHandle,
-  type Config,
-} from 'librarium/core';
+  BUILTIN_PROVIDER_CATALOG,
+  ResearchRequestSchema,
+  ResearchResponseSchema,
+  type ResearchRequest,
+} from 'librarium';
 
-const credentials = { env: process.env };
-await initializeProviders({ credentials });
-
-const config: Config = {
-  version: 1,
-  defaults: { outputDir: '', maxParallel: 4, timeout: 60, asyncTimeout: 600, asyncPollInterval: 5, mode: 'mixed', llmWebSearch: true },
-  providers: {
-    'openai-research': { enabled: true },    // deep-research -> async
-    'gemini-grounded': { enabled: true },    // ai-grounded -> sync, inline
+const request: ResearchRequest = ResearchRequestSchema.parse({
+  query: 'Compare current deep-research APIs',
+  mode: 'sync',
+  selector: { kind: 'group', group_id: 'deep' },
+  fallback: { kind: 'configured' },
+  limits: {
+    max_concurrency: 4,
+    request_deadline_ms: 600_000,
+    inline_attempt_deadline_ms: 60_000,
+    background_attempt_deadline_ms: 600_000,
+    poll_interval_ms: 5_000,
   },
-  customProviders: {},
-  trustedProviderIds: [],
-  groups: {},
-};
-
-// 1. Dispatch. Sync results are inline; deep-research tasks come back as handles.
-const { results, asyncTasks } = await dispatch({
-  config,
-  providerIds: ['openai-research', 'gemini-grounded'],
-  query: 'State of solid-state battery commercialization in 2026',
-  mode: 'mixed',
-  credentials,
 });
 
-for (const r of results) {
-  // r.status is one of: 'success' | 'error' | 'timeout' | 'skipped' | 'async-pending'
-  // Deep-research providers submitted async show up here as 'async-pending'
-  // (empty text); their real payload arrives via retrieve() below.
-  if (r.status === 'success') console.log(r.provider, r.sourceUrls);
-}
+console.log(BUILTIN_PROVIDER_CATALOG.length, request.query);
 
-// 2. Persist the handles wherever you want (DB, KV, file, queue). They're plain
-//    JSON: { provider, taskId, query, submittedAt, status, ... }.
-await saveHandles(asyncTasks); // your storage
+// Validate a terminal payload produced by Librarium or another conforming
+// implementation. This does not execute the request.
+const response = ResearchResponseSchema.parse(receivedPayload);
+console.log(response.status, response.results.length);
+```
 
-// ...later, in a separate invocation, reload the handles and resolve them:
-const handles: AsyncTaskHandle[] = await loadHandles();
+Importing the root does not parse CLI arguments, write files, initialize
+providers, install signal handlers, or read credentials.
 
-for (const handle of handles) {
-  const provider = getProvider(handle.provider);
-  if (provider?.execution !== 'background') continue;
+### Advanced Worker-safe API (`librarium/core`)
 
-  // 3. Poll for status. AsyncPollResult.status is the AsyncTaskStatus enum:
-  //    'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
-  const poll = await provider.poll(handle);
-  if (poll.status === 'pending' || poll.status === 'running') {
-    continue; // still cooking -- check again next time
-  }
-  if (poll.status !== 'completed') {
-    console.warn(`${handle.provider} ${poll.status}: ${poll.message ?? ''}`);
-    continue;
-  }
+`librarium/core` re-exports the root and adds explicit catalog, planning,
+HTTP/stream transport, coordination-store, and attempt-execution ports. These
+APIs are dependency-injected and contain no concrete provider adapters or
+global registry.
 
-  // 4. Retrieve the finished result. retrieve() returns a ProviderResult:
-  //    { provider, tier, content, citations, durationMs, model?, tokenUsage?, usage?, error? }
-  const result = await provider.retrieve(handle);
-  if (result.error) {
-    console.warn(`${handle.provider} retrieve error: ${result.error}`);
-    continue;
-  }
-  console.log(result.provider, result.content);
-  for (const c of result.citations) console.log(' -', c.title ?? c.url, c.url);
+```ts
+import { ResearchRequestSchema } from 'librarium';
+import {
+  buildProviderCatalog,
+  prepareResearchExecution,
+  type PreparationDependencies,
+} from 'librarium/core';
+
+const catalog = buildProviderCatalog({
+  providerConfigs: {
+    'brave-search': { enabled: true },
+  },
+  credentials: {
+    env: { BRAVE_API_KEY: workerEnv.BRAVE_API_KEY },
+  },
+});
+
+const dependencies: PreparationDependencies = {
+  clock: { now: () => Date.now() },
+  ids: {
+    next(scope) {
+      return crypto.randomUUID() + '-' + scope;
+    },
+  },
+};
+
+const prepared = prepareResearchExecution(
+  ResearchRequestSchema.parse({
+    query: 'Independent web evidence',
+    mode: 'sync',
+    selector: {
+      kind: 'targets',
+      targets: [{ provider_id: 'brave-search', profile_id: 'search' }],
+    },
+    fallback: { kind: 'disabled' },
+    limits: {
+      max_concurrency: 1,
+      request_deadline_ms: 30_000,
+      inline_attempt_deadline_ms: 30_000,
+      background_attempt_deadline_ms: 30_000,
+      poll_interval_ms: 1_000,
+    },
+  }),
+  catalog,
+  dependencies,
+);
+
+if (!prepared.ok) {
+  console.error(prepared.issues);
 }
 ```
 
-> **Workers note.** A single request can't block for minutes, so split the lifecycle: dispatch on the first request and persist `asyncTasks` (KV, D1, R2, or a Durable Object), then resolve them on a later request, a Cron Trigger, or a Durable Object alarm. `getProvider(handle.provider).poll/retrieve` is pure fetch, so it runs in the same Worker -- just reload the handle from storage between invocations.
+Preparation is network-free. `runPreparedExecution` is an advanced
+coordination primitive that requires an injected `AttemptExecutionPort` and
+`CoordinationStateStore`; it is not a preconfigured research client.
+
+### Node-only API (`librarium/node`)
+
+`librarium/node` re-exports the Worker-safe API and adds two deliberate
+Node services:
+
+- `createNodeCredentialContext()` resolves environment and supported OS
+  keychain references without exposing raw keychain CRUD.
+- `loadCustomProviders(config, options?)` trust-checks and loads npm/script
+  providers, returning provider instances and diagnostics without registering
+  global state.
+
+```ts
+import {
+  loadCustomProviders,
+  type CustomProviderLoadConfig,
+} from 'librarium/node';
+
+const config: CustomProviderLoadConfig = {
+  providers: {
+    'my-search': { enabled: true },
+  },
+  customProviders: {
+    'my-search': {
+      type: 'npm',
+      module: 'librarium-provider-myteam',
+      export: 'createProvider',
+    },
+  },
+  trustedProviderIds: ['my-search'],
+};
+
+const { providers, loadedIds, skippedIds, warnings } =
+  await loadCustomProviders(config);
+
+console.log({ loadedIds, skippedIds, warnings });
+const result = await providers[0]?.execute('Research question', {
+  timeout: 30,
+});
+```
+
+> **Security:** trusted npm modules and script declarations execute arbitrary
+> code with the current process's permissions and inherited environment.
+> `trustedProviderIds` is an execution allowlist, not a sandbox. Load only
+> code you explicitly trust.
+
+The Node entry does not expose `executeResearchRun`, writable configuration
+migration, run-manifest mutation, or a registration convenience. Those service
+shapes remain private until their v2 contracts are finalized.
 
 ## Using with AI Agents
 

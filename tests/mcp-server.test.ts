@@ -13,7 +13,6 @@ import {
   vi,
 } from 'vitest';
 import { initializeProviders } from '../src/adapters/node-registry.js';
-import { createRunDir } from '../src/core/prompt-builder.js';
 import {
   ResearchInputError,
   resolveProviderSelection,
@@ -33,6 +32,7 @@ import {
   truncateProviderContent,
   UNTRUSTED_CONTENT_WARNING,
 } from '../src/mcp/shaping.js';
+import { createRunDir } from '../src/node-run-directory.js';
 import type {
   Config,
   DeduplicatedSource,

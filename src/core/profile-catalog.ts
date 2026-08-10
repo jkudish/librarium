@@ -3,7 +3,6 @@ import type {
   ExecutionProfile,
   ProviderIdentity,
 } from '../contracts/domain/index.js';
-import type { ProviderConfig } from '../types.js';
 import {
   BUILTIN_WORKFLOW_IDS,
   type BuiltinWorkflowId,
@@ -90,10 +89,18 @@ export interface CatalogProfileTarget {
   readonly profile_id: string;
 }
 
+/** Minimal v1-compatible inputs needed to resolve an executable profile. */
+export interface CatalogProviderConfig {
+  readonly apiKey?: string;
+  readonly enabled?: boolean;
+  readonly model?: string;
+  readonly options?: Readonly<Record<string, unknown>>;
+}
+
 export interface ProviderCatalogOptions {
   readonly catalog?: readonly ProviderCatalogEntry[];
   /** v1 provider configuration, keyed by adapter id. */
-  readonly providerConfigs?: Readonly<Record<string, ProviderConfig>>;
+  readonly providerConfigs?: Readonly<Record<string, CatalogProviderConfig>>;
   readonly credentials?: CredentialContext;
   /** User-defined groups; reserved names are migrated to `custom:<name>`. */
   readonly groups?: Readonly<Record<string, readonly string[]>>;
@@ -165,7 +172,7 @@ function profileKeyOf(profile: ResolvedCatalogProfile): string {
 function bindingConfig(
   options: ProviderCatalogOptions,
   adapterId: string,
-): ProviderConfig | undefined {
+): CatalogProviderConfig | undefined {
   return options.providerConfigs?.[adapterId];
 }
 

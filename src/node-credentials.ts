@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { platform } from 'node:os';
 import {
   type CredentialContext,
+  type EnvRecord,
   keychainCredentialName,
 } from './core/credentials.js';
 
@@ -67,7 +68,7 @@ export function deleteKeychainCredential(name: string): void {
 }
 
 export function createNodeCredentialContext(
-  env: NodeJS.ProcessEnv = process.env,
+  env: EnvRecord = process.env,
 ): CredentialContext {
   return {
     env,
