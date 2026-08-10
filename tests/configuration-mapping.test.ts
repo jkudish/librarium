@@ -175,7 +175,7 @@ describe('configuration mapping', () => {
       groups: { team: ['acme-adapter'] },
     });
     const mapped = map(source, {
-      requestDeadlineMs: 300_000,
+      requestDeadlineMs: 2_000_000,
       credentials: credentials(),
     });
     expect(mapped.preflight.issues).toEqual([]);
@@ -200,7 +200,7 @@ describe('configuration mapping', () => {
         providers: { 'acme-adapter': { enabled: false } },
       }),
     ]) {
-      const result = map(filtered, { requestDeadlineMs: 300_000 });
+      const result = map(filtered, { requestDeadlineMs: 2_000_000 });
       expect(result.custom_profile_bindings).toEqual([]);
       expect(result.catalog.get('acme-provider', 'search')).toBeUndefined();
     }
@@ -214,7 +214,7 @@ describe('configuration mapping', () => {
         'custom-identity',
         'search',
       );
-      const mapped = map(source, { requestDeadlineMs: 300_000 });
+      const mapped = map(source, { requestDeadlineMs: 2_000_000 });
       expect(mapped.custom_profile_bindings).toEqual([]);
       expect(mapped.preflight.issues).not.toContainEqual(
         expect.objectContaining({ code: 'custom_provider_profile_missing' }),
@@ -226,7 +226,7 @@ describe('configuration mapping', () => {
     'rejects custom metadata claiming reserved provider identity %s',
     (providerId) => {
       const mapped = map(customIdentityConfig('acme-adapter', providerId), {
-        requestDeadlineMs: 300_000,
+        requestDeadlineMs: 2_000_000,
       });
       expect(mapped.custom_profile_bindings).toEqual([]);
       expect(mapped.preflight.issues).toContainEqual(
@@ -266,8 +266,8 @@ describe('configuration mapping', () => {
   ])(
     'returns a stable $code issue instead of throwing',
     ({ source, code, path }) => {
-      expect(() => map(source, { requestDeadlineMs: 300_000 })).not.toThrow();
-      const mapped = map(source, { requestDeadlineMs: 300_000 });
+      expect(() => map(source, { requestDeadlineMs: 2_000_000 })).not.toThrow();
+      const mapped = map(source, { requestDeadlineMs: 2_000_000 });
       expect(mapped.custom_profile_bindings).toEqual([]);
       expect(mapped.preflight.issues).toContainEqual(
         expect.objectContaining({ code, path }),
@@ -279,7 +279,7 @@ describe('configuration mapping', () => {
     'rejects invalid eligible adapter record key %j without throwing',
     (adapterId) => {
       const mapped = map(customIdentityConfig(adapterId, 'acme-provider'), {
-        requestDeadlineMs: 300_000,
+        requestDeadlineMs: 2_000_000,
       });
       expect(mapped.custom_profile_bindings).toEqual([]);
       expect(mapped.preflight.issues).toContainEqual(
@@ -296,7 +296,7 @@ describe('configuration mapping', () => {
       },
     });
     const mapped = map(source, {
-      requestDeadlineMs: 300_000,
+      requestDeadlineMs: 2_000_000,
       credentials: credentials(),
     });
     expect(mapped.preflight.issues).toEqual([]);
@@ -311,7 +311,7 @@ describe('configuration mapping', () => {
 
   it('owns and freezes custom profile bindings independently of caller config', () => {
     const source = customProviderConfig();
-    const mapped = map(source, { requestDeadlineMs: 300_000 });
+    const mapped = map(source, { requestDeadlineMs: 2_000_000 });
     const digest = mapped.catalog.digest;
     expect(Object.isFrozen(mapped.custom_profile_bindings)).toBe(true);
     expect(Object.isFrozen(mapped.custom_profile_bindings[0]?.profile)).toBe(
@@ -501,7 +501,7 @@ describe('configuration mapping', () => {
   it('does not map injected v1 default groups as custom groups, but migrates explicit reserved groups', () => {
     const global = loadConfig('/definitely/missing/librarium-config.json');
     const direct = map(global, {
-      requestDeadlineMs: 300_000,
+      requestDeadlineMs: 2_000_000,
       credentials: credentials(),
       authoredGroups: configGroupProvenance(global),
     });
@@ -510,7 +510,7 @@ describe('configuration mapping', () => {
       groups: { quick: ['exa/search'] },
     });
     const mapped = map(merged, {
-      requestDeadlineMs: 300_000,
+      requestDeadlineMs: 2_000_000,
       credentials: credentials(),
       authoredGroups: configGroupProvenance(merged),
     });
@@ -645,7 +645,7 @@ describe('configuration mapping', () => {
         defaults: { llmWebSearch: false },
         providers: { 'openrouter-chat': { enabled: true } },
       }),
-      { requestDeadlineMs: 300_000, credentials: credentials() },
+      { requestDeadlineMs: 2_000_000, credentials: credentials() },
     );
     expect(
       defaultsOff.catalog.get('openrouter', 'chat')?.profile.result_kind,
@@ -658,7 +658,7 @@ describe('configuration mapping', () => {
           'openrouter-chat': { enabled: true, options: { webSearch: true } },
         },
       }),
-      { requestDeadlineMs: 300_000, credentials: credentials() },
+      { requestDeadlineMs: 2_000_000, credentials: credentials() },
     );
     expect(
       providerOverride.catalog.get('openrouter', 'chat')?.profile.result_kind,
@@ -675,7 +675,7 @@ describe('configuration mapping', () => {
           serpapi: { enabled: true, fallback: 'tavily' },
         },
       }),
-      { requestDeadlineMs: 300_000, credentials: credentials() },
+      { requestDeadlineMs: 2_000_000, credentials: credentials() },
     );
 
     expect(keys(mapped.reserve)).toEqual([
@@ -920,14 +920,41 @@ describe('configuration mapping', () => {
     });
     const missingDeadline = map(source);
     expect(missingDeadline.transport_defaults).toBeUndefined();
-    expect(missingDeadline.preflight.issues).toContainEqual(
-      expect.objectContaining({
-        code: 'configuration_request_deadline_required',
-        path: '/defaults/requestDeadlineMs',
-      }),
-    );
+    expect(missingDeadline.deadline_migration).toEqual({
+      kind: 'v1_request_deadline_migration',
+      max_parallel: 3,
+      inline_attempt_deadline_ms: 12_000,
+      raw_background_attempt_deadline_ms: 90_000,
+      poll_interval_ms: 7_000,
+      legacy_mode: 'sync',
+    });
+    expect(Object.isFrozen(missingDeadline.deadline_migration)).toBe(true);
+    expect(missingDeadline.preflight.issues).toEqual([]);
+    expect(missingDeadline.unresolved_transport_defaults).toEqual({
+      mode: 'sync',
+      limits: {
+        max_concurrency: 3,
+        inline_attempt_deadline_ms: 12_000,
+        poll_interval_ms: 7_000,
+      },
+      fallback: { kind: 'configured' },
+      refinement: { kind: 'disabled' },
+      budgets: {
+        max_estimated_cost_microusd: '100000',
+        max_actual_cost_microusd: '250000',
+      },
+    });
 
     const mapped = map(source, { requestDeadlineMs: 300_000 });
+    expect(mapped.deadline_migration).toEqual({
+      kind: 'v1_request_deadline_migration',
+      max_parallel: 3,
+      inline_attempt_deadline_ms: 12_000,
+      raw_background_attempt_deadline_ms: 90_000,
+      poll_interval_ms: 7_000,
+      legacy_mode: 'sync',
+      explicit_request_deadline_ms: 300_000,
+    });
     const normalized = normalizeConfigurationRequest(
       { query: 'v1 defaults', providers: ['exa'], ...mapped.transport_input },
       mapped.transport_defaults!,
@@ -957,11 +984,177 @@ describe('configuration mapping', () => {
     }
   });
 
+  it.each([
+    ['fractional maxParallel', { maxParallel: 1.5 }, '/defaults/maxParallel'],
+    ['negative timeout', { timeout: -1 }, '/defaults/timeout'],
+    ['fractional timeout', { timeout: 1.5 }, '/defaults/timeout'],
+    [
+      'unsafe asyncTimeout',
+      { asyncTimeout: Number.MAX_SAFE_INTEGER + 1 },
+      '/defaults/asyncTimeout',
+    ],
+  ])(
+    'withholds deadline migration context for %s',
+    (_label, defaults, path) => {
+      const mapped = map(config({ defaults }));
+      expect(mapped.deadline_migration).toBeUndefined();
+      expect(mapped.transport_defaults).toBeUndefined();
+      expect(mapped.preflight.issues).toContainEqual(
+        expect.objectContaining({ path }),
+      );
+    },
+  );
+
+  it.each([1.5, -1, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid explicit request deadline %s at the config boundary',
+    (requestDeadlineMs) => {
+      const mapped = map(config(), { requestDeadlineMs });
+      expect(mapped.deadline_migration).toBeUndefined();
+      expect(mapped.transport_defaults).toBeUndefined();
+      expect(mapped.preflight.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'configuration_deadline_invalid_integer',
+          path: '/defaults/requestDeadlineMs',
+        }),
+      );
+    },
+  );
+
+  it.each([
+    {
+      name: 'below inline attempt',
+      defaults: { timeout: 12, asyncTimeout: 10, asyncPollInterval: 5 },
+      requestDeadlineMs: 11_999,
+    },
+    {
+      name: 'below background attempt',
+      defaults: { timeout: 10, asyncTimeout: 12, asyncPollInterval: 5 },
+      requestDeadlineMs: 11_999,
+    },
+  ])('rejects an explicit deadline $name', (fixture) => {
+    const mapped = map(config({ defaults: fixture.defaults }), {
+      requestDeadlineMs: fixture.requestDeadlineMs,
+    });
+    expect(
+      mapped.preflight.issues.map(({ code, path }) => ({ code, path })),
+    ).toContainEqual({
+      code: 'configuration_request_deadline_less_than_attempt_deadline',
+      path: '/defaults/requestDeadlineMs',
+    });
+    expect(mapped.deadline_migration).toBeUndefined();
+    expect(mapped.transport_defaults).toBeUndefined();
+  });
+
+  it('accepts an explicit deadline equal to the larger attempt deadline', () => {
+    const mapped = map(
+      config({
+        defaults: { timeout: 10, asyncTimeout: 12, asyncPollInterval: 5 },
+      }),
+      { requestDeadlineMs: 12_000 },
+    );
+    expect(mapped.preflight.issues).toEqual([]);
+    expect(mapped.transport_defaults?.limits).toEqual({
+      max_concurrency: 6,
+      request_deadline_ms: 12_000,
+      inline_attempt_deadline_ms: 10_000,
+      background_attempt_deadline_ms: 12_000,
+      poll_interval_ms: 5_000,
+    });
+  });
+
+  it.each([
+    {
+      name: 'asyncTimeout above the 7-day contract maximum',
+      defaults: { asyncTimeout: 604_801 },
+      code: 'configuration_deadline_contract_maximum_exceeded',
+      path: '/defaults/asyncTimeout',
+    },
+    {
+      name: 'timeout seconds-to-milliseconds safe-integer overflow',
+      defaults: { timeout: Number.MAX_SAFE_INTEGER },
+      code: 'configuration_deadline_arithmetic_overflow',
+      path: '/defaults/timeout',
+    },
+    {
+      name: 'poll seconds-to-milliseconds safe-integer overflow',
+      defaults: { asyncPollInterval: Number.MAX_SAFE_INTEGER },
+      code: 'configuration_poll_interval_arithmetic_overflow',
+      path: '/defaults/asyncPollInterval',
+    },
+  ])('rejects $name with its exact diagnostic', (fixture) => {
+    const mapped = map(config({ defaults: fixture.defaults }));
+    expect(
+      mapped.preflight.issues.map(({ code, path }) => ({ code, path })),
+    ).toContainEqual({ code: fixture.code, path: fixture.path });
+    expect(mapped.deadline_migration).toBeUndefined();
+  });
+
+  it('rejects requestDeadlineMs one millisecond above seven days', () => {
+    const mapped = map(config(), { requestDeadlineMs: 604_800_001 });
+    expect(
+      mapped.preflight.issues.map(({ code, path }) => ({ code, path })),
+    ).toContainEqual({
+      code: 'configuration_deadline_contract_maximum_exceeded',
+      path: '/defaults/requestDeadlineMs',
+    });
+    expect(mapped.transport_defaults).toBeUndefined();
+  });
+
+  it.each([
+    ['fractional', 1.5, 'configuration_poll_interval_invalid_integer'],
+    ['negative', -1, 'configuration_poll_interval_invalid_integer'],
+    [
+      'unsafe',
+      Number.MAX_SAFE_INTEGER + 1,
+      'configuration_poll_interval_invalid_integer',
+    ],
+    ['out-of-range', 301, 'configuration_poll_interval_out_of_bounds'],
+  ])(
+    'rejects %s asyncPollInterval before canonical defaults',
+    (_label, asyncPollInterval, code) => {
+      const mapped = map(config({ defaults: { asyncPollInterval } }), {
+        requestDeadlineMs: 2_000_000,
+      });
+      expect(mapped.deadline_migration).toBeUndefined();
+      expect(mapped.transport_defaults).toBeUndefined();
+      expect(mapped.preflight.issues).toContainEqual(
+        expect.objectContaining({
+          code,
+          path: '/defaults/asyncPollInterval',
+        }),
+      );
+    },
+  );
+
+  it('rejects asyncPollInterval above the background attempt timeout', () => {
+    const mapped = map(
+      config({ defaults: { asyncTimeout: 2, asyncPollInterval: 3 } }),
+      { requestDeadlineMs: 2_000_000 },
+    );
+    expect(mapped.deadline_migration).toBeUndefined();
+    expect(mapped.transport_defaults).toBeUndefined();
+    expect(mapped.preflight.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'configuration_poll_interval_exceeds_background_attempt',
+        path: '/defaults/asyncPollInterval',
+      }),
+    );
+  });
+
+  it('accepts asyncPollInterval at the 300-second contract maximum', () => {
+    const mapped = map(
+      config({ defaults: { asyncTimeout: 300, asyncPollInterval: 300 } }),
+      { requestDeadlineMs: 300_000 },
+    );
+    expect(mapped.preflight.issues).toEqual([]);
+    expect(mapped.deadline_migration?.poll_interval_ms).toBe(300_000);
+  });
+
   it('withholds transport defaults when any configured budget is inexact', () => {
     const source = config({
       defaults: { maxCostUsd: 0.25, maxEstimatedCostUsd: 0.0000001 },
     });
-    const mapped = map(source, { requestDeadlineMs: 300_000 });
+    const mapped = map(source, { requestDeadlineMs: 2_000_000 });
     expect(mapped.transport_defaults).toBeUndefined();
     expect(mapped.preflight.issues).toContainEqual(
       expect.objectContaining({
@@ -1039,7 +1232,7 @@ describe('configuration mapping', () => {
         groups: { broken: ['nope/search'] },
         providers: { exa: { enabled: true, fallback: 'missing-adapter' } },
       }),
-      { requestDeadlineMs: 300_000 },
+      { requestDeadlineMs: 2_000_000 },
     );
     expect(
       mapped.preflight.issues.map(({ code, path }) => [code, path]),

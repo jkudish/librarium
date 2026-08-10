@@ -26,7 +26,6 @@ describe('private shadow compiler in workerd', () => {
       config,
       authoredGroups: { global: {}, project: {} },
       credentials: { env: { EXA_API_KEY: 'worker-test-key' } },
-      requestDeadlineMs: 300_000,
       transport: {
         kind: 'silent_mcp',
         input: { query: 'worker-safe shadow plan', providers: ['Exa Search'] },
@@ -43,12 +42,19 @@ describe('private shadow compiler in workerd', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
     if (!result.ok) return;
     expect(result.prepared.request.slots).toHaveLength(1);
     expect(result.prepared.request.slots[0]?.primary.identity).toMatchObject({
       provider_id: 'exa',
       profile_id: 'search',
+    });
+    expect(result.prepared.policy.limits).toEqual({
+      max_concurrency: 2,
+      request_deadline_ms: 120_000,
+      inline_attempt_deadline_ms: 30_000,
+      background_attempt_deadline_ms: 120_000,
+      poll_interval_ms: 5_000,
     });
   });
 
@@ -88,7 +94,6 @@ describe('private shadow compiler in workerd', () => {
       config: custom,
       authoredGroups: { global: {}, project: {} },
       credentials: {},
-      requestDeadlineMs: 300_000,
       transport: {
         kind: 'silent_mcp',
         input: { query: 'worker custom plan', providers: ['edge-custom'] },
@@ -104,5 +109,201 @@ describe('private shadow compiler in workerd', () => {
       provider_id: 'edge-provider',
       profile_id: 'search',
     });
+  });
+
+  it('injects the reachable maximum selected background attempt allowance', () => {
+    const background: Config = {
+      ...config,
+      providers: {
+        'openai-research': { enabled: true },
+        'gemini-deep': { enabled: true },
+      },
+    };
+    const ids = new Map<string, number>();
+    const result = compileShadowRequest({
+      config: background,
+      authoredGroups: { global: {}, project: {} },
+      credentials: {
+        env: {
+          OPENAI_API_KEY: 'worker-test-key',
+          GEMINI_API_KEY: 'worker-test-key',
+        },
+      },
+      transport: {
+        kind: 'silent_mcp',
+        input: {
+          query: 'effective background attempt',
+          providers: ['openai-research', 'gemini-deep'],
+        },
+      },
+      preparation: {
+        clock: { now: () => Date.parse('2026-08-09T12:00:00Z') },
+        ids: {
+          next: (scope) => {
+            const next = (ids.get(scope) ?? 0) + 1;
+            ids.set(scope, next);
+            return `background-${scope}-${next}`;
+          },
+        },
+      },
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) return;
+    expect(result.prepared.policy.limits).toMatchObject({
+      request_deadline_ms: 525_000,
+      background_attempt_deadline_ms: 525_000,
+    });
+  });
+
+  it('keeps an explicit total authoritative and propagates truncation notice', () => {
+    const ids = new Map<string, number>();
+    const result = compileShadowRequest({
+      config: {
+        ...config,
+        defaults: { ...config.defaults, maxParallel: 1 },
+        providers: {
+          'openai-research': { enabled: true },
+          'gemini-deep': { enabled: true },
+        },
+      },
+      authoredGroups: { global: {}, project: {} },
+      credentials: {
+        env: {
+          OPENAI_API_KEY: 'worker-test-key',
+          GEMINI_API_KEY: 'worker-test-key',
+        },
+      },
+      requestDeadlineMs: 600_000,
+      transport: {
+        kind: 'silent_mcp',
+        input: {
+          query: 'explicit truncation warning',
+          providers: ['openai-research', 'gemini-deep'],
+        },
+      },
+      preparation: {
+        clock: { now: () => Date.parse('2026-08-09T12:00:00Z') },
+        ids: {
+          next: (scope) => {
+            const next = (ids.get(scope) ?? 0) + 1;
+            ids.set(scope, next);
+            return `explicit-${scope}-${next}`;
+          },
+        },
+      },
+    });
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) return;
+    expect(result.prepared.policy.limits).toMatchObject({
+      request_deadline_ms: 600_000,
+      background_attempt_deadline_ms: 525_000,
+    });
+    expect(result.notices).toContainEqual(
+      expect.objectContaining({
+        code: 'explicit_request_deadline_may_truncate_plan',
+        path: '/deadline_migration/explicit_request_deadline_ms',
+      }),
+    );
+  });
+
+  it.each([
+    {
+      name: 'explicit total below the effective attempt cap',
+      config: {
+        ...config,
+        providers: { 'openai-research': { enabled: true } },
+      } satisfies Config,
+      credentials: { env: { OPENAI_API_KEY: 'worker-test-key' } },
+      providers: ['openai-research'],
+      requestDeadlineMs: 199_999,
+      code: 'request_deadline_less_than_attempt_deadline',
+    },
+    {
+      name: 'derived total above seven days',
+      config: {
+        ...config,
+        defaults: {
+          ...config.defaults,
+          maxParallel: 1,
+          timeout: 400_000,
+        },
+        providers: {
+          exa: { enabled: true },
+          'brave-search': { enabled: true },
+        },
+      } satisfies Config,
+      credentials: {
+        env: {
+          EXA_API_KEY: 'worker-test-key',
+          BRAVE_API_KEY: 'worker-test-key',
+        },
+      },
+      providers: ['exa', 'brave-search'],
+      requestDeadlineMs: undefined,
+      code: 'request_deadline_contract_maximum_exceeded',
+    },
+    {
+      name: 'unknown selected provider',
+      config,
+      credentials: { env: {} },
+      providers: ['not-a-provider'],
+      requestDeadlineMs: undefined,
+      code: 'shadow_provider_token_unknown',
+    },
+    {
+      name: 'async mode with an inline profile',
+      config: {
+        ...config,
+        defaults: { ...config.defaults, mode: 'async' },
+      } satisfies Config,
+      credentials: { env: { EXA_API_KEY: 'worker-test-key' } },
+      providers: ['exa'],
+      requestDeadlineMs: undefined,
+      code: 'async_requires_durable_profile',
+    },
+    {
+      name: 'hard budget without a network-free estimate',
+      config: {
+        ...config,
+        defaults: { ...config.defaults, maxEstimatedCostUsd: 1 },
+      } satisfies Config,
+      credentials: { env: { EXA_API_KEY: 'worker-test-key' } },
+      providers: ['exa'],
+      requestDeadlineMs: undefined,
+      code: 'budget_estimate_required',
+    },
+  ])('keeps clock and IDs untouched when $name is rejected', (fixture) => {
+    const counts = { clock: 0, ids: 0 };
+    const result = compileShadowRequest({
+      config: fixture.config,
+      authoredGroups: { global: {}, project: {} },
+      credentials: fixture.credentials,
+      ...(fixture.requestDeadlineMs !== undefined && {
+        requestDeadlineMs: fixture.requestDeadlineMs,
+      }),
+      transport: {
+        kind: 'silent_mcp',
+        input: { query: fixture.name, providers: fixture.providers },
+      },
+      preparation: {
+        clock: {
+          now: () => {
+            counts.clock += 1;
+            return Date.parse('2026-08-09T12:00:00Z');
+          },
+        },
+        ids: {
+          next: (scope) => {
+            counts.ids += 1;
+            return `rejected-${scope}`;
+          },
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ code: fixture.code })],
+    });
+    expect(counts).toEqual({ clock: 0, ids: 0 });
   });
 });
