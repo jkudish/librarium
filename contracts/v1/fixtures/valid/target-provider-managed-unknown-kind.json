@@ -1,9 +1,0 @@
-{
-  "provider_id": "example-provider-managed",
-  "profile_id": "unknown-target-kind",
-  "target": {
-    "primary": {
-      "model_selection": "provider_managed"
-    }
-  }
-}
