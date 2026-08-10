@@ -17,6 +17,48 @@ import { safeWriteFile } from './fs-utils.js';
 export const CONFIG_DIR = resolve(homedir(), '.config', 'librarium');
 export const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json');
 
+/**
+ * Only authored groups are meaningful to the v2 catalog. `loadConfig` still
+ * injects DEFAULT_GROUPS for the unchanged v1 dispatcher, so retain the two
+ * authored layers out-of-band instead of making injected defaults look like
+ * custom user workflows.
+ */
+export interface ConfigGroupProvenance {
+  readonly global: Readonly<Record<string, readonly string[]>>;
+  readonly project: Readonly<Record<string, readonly string[]>>;
+}
+
+const groupProvenanceByConfig = new WeakMap<Config, ConfigGroupProvenance>();
+
+function cloneGroups(
+  groups: Readonly<Record<string, readonly string[]>>,
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(groups).map(([name, members]) => [name, [...members]]),
+  );
+}
+
+function setConfigGroupProvenance(
+  config: Config,
+  provenance: ConfigGroupProvenance,
+): Config {
+  groupProvenanceByConfig.set(config, {
+    global: cloneGroups(provenance.global),
+    project: cloneGroups(provenance.project),
+  });
+  return config;
+}
+
+/**
+ * Returns authored global/project group layers for a config loaded or merged
+ * by this module. Hand-built Config values are treated as authored global
+ * config, which keeps this helper useful in library callers and tests.
+ */
+export function configGroupProvenance(config: Config): ConfigGroupProvenance {
+  const known = groupProvenanceByConfig.get(config);
+  return known ?? { global: config.groups, project: {} };
+}
+
 const DEFAULT_CONFIG: Config = {
   version: 1,
   defaults: {
@@ -87,13 +129,16 @@ export function validateFallbacks(config: Config): string[] {
 export function loadConfig(globalPath?: string): Config {
   const path = globalPath ?? CONFIG_FILE;
   if (!existsSync(path))
-    return {
-      ...DEFAULT_CONFIG,
-      providers: {},
-      customProviders: {},
-      trustedProviderIds: [],
-      groups: { ...DEFAULT_GROUPS },
-    };
+    return setConfigGroupProvenance(
+      {
+        ...DEFAULT_CONFIG,
+        providers: {},
+        customProviders: {},
+        trustedProviderIds: [],
+        groups: { ...DEFAULT_GROUPS },
+      },
+      { global: {}, project: {} },
+    );
 
   let raw: unknown;
   try {
@@ -104,11 +149,24 @@ export function loadConfig(globalPath?: string): Config {
     );
   }
   const config = ConfigSchema.parse(raw);
+  // Keep the authored spelling for the pure v2 mapper. v1 still mutates
+  // config.groups below, but doing that here would erase alias provenance
+  // before the mapper can issue its structured migration diagnostic.
+  const explicitGlobalGroups = cloneGroups(config.groups);
   const storedDefaultGroupRosters = captureStoredDefaultGroupRosters(
     config.groups,
   );
   const migrationWarnings = migrateLegacyProviderIds(config);
-  migratePriorCanonicalDefaultGroups(config, storedDefaultGroupRosters);
+  const migratedDefaultGroups = migratePriorCanonicalDefaultGroups(
+    config,
+    storedDefaultGroupRosters,
+  );
+  // The two exact historical shipped rosters are a narrow exception: preserve
+  // their approved replacement rather than making the retired roster a custom
+  // group in v2. No other authored member is rewritten in provenance.
+  for (const name of migratedDefaultGroups) {
+    explicitGlobalGroups[name] = [...(config.groups[name] ?? [])];
+  }
   // Merge defaults only after inspecting explicitly stored global groups.
   // User groups, including customized comprehensive/all rosters, win.
   config.groups = { ...DEFAULT_GROUPS, ...config.groups };
@@ -122,7 +180,10 @@ export function loadConfig(globalPath?: string): Config {
     console.error(`[librarium] warning: ${warning}`);
   }
 
-  return config;
+  return setConfigGroupProvenance(config, {
+    global: explicitGlobalGroups,
+    project: {},
+  });
 }
 
 /**
@@ -213,6 +274,13 @@ export function mergeConfigs(
   }
 
   migrateLegacyProviderIds(merged);
+
+  const globalGroups = configGroupProvenance(global).global;
+  const projectGroups = project?.groups ?? {};
+  setConfigGroupProvenance(merged, {
+    global: globalGroups,
+    project: projectGroups,
+  });
 
   return merged;
 }
@@ -450,7 +518,8 @@ function captureStoredDefaultGroupRosters(
 function migratePriorCanonicalDefaultGroups(
   config: Config,
   storedRosters: StoredDefaultGroupRosters,
-): void {
+): Array<'comprehensive' | 'all'> {
+  const migrated: Array<'comprehensive' | 'all'> = [];
   for (const groupName of ['comprehensive', 'all'] as const) {
     const storedMembers = storedRosters[groupName];
     if (!storedMembers) continue;
@@ -459,8 +528,10 @@ function migratePriorCanonicalDefaultGroups(
     ].some((snapshot) => orderedExactMatch(storedMembers, snapshot));
     if (matchesPriorSnapshot) {
       config.groups[groupName] = [...DEFAULT_GROUPS[groupName]];
+      migrated.push(groupName);
     }
   }
+  return migrated;
 }
 
 function orderedExactMatch(

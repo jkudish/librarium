@@ -277,8 +277,8 @@ describe('selector conflicts', () => {
     expect(library.ok).toBe(false);
     if (library.ok) return;
     expect(library.issues.map(({ code, path }) => [code, path])).toEqual([
-      ['transport_selector_conflict', '/group'],
       ['transport_selector_conflict', '/capabilities'],
+      ['transport_selector_conflict', '/group'],
     ]);
   });
 

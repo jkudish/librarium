@@ -52,6 +52,7 @@ export interface ResolvedCatalogProfile {
   readonly estimate?: NetworkFreeEstimate;
   readonly availability: {
     readonly enabled: boolean;
+    readonly reserve_only: boolean;
     readonly credential_valid: boolean;
     readonly configuration_valid: boolean;
     readonly selectable: boolean;
@@ -76,6 +77,8 @@ export interface ProviderCatalogOptions {
   readonly defaults?: readonly CatalogProfileTarget[];
   /** The ordered global reserve for `fallback: configured`. */
   readonly reserve?: readonly CatalogProfileTarget[];
+  /** Adapter ids which are disabled for primary selection but valid reserve. */
+  readonly reserveOnlyAdapterIds?: readonly string[];
 }
 
 export interface WorkflowOmission {
@@ -158,6 +161,7 @@ function resolveDeclaration(
       profile: ownFrozen(declared),
       availability: ownFrozen({
         enabled: false,
+        reserve_only: false,
         credential_valid: false,
         configuration_valid: true,
         selectable: false,
@@ -168,6 +172,9 @@ function resolveDeclaration(
 
   const providerConfig = bindingConfig(options, binding.adapter_id);
   const enabled = providerConfig?.enabled === true;
+  const reserveOnly =
+    !enabled &&
+    options.reserveOnlyAdapterIds?.includes(binding.adapter_id) === true;
   const credentialReference =
     providerConfig?.apiKey ??
     (entry.credential.env_var ? `$${entry.credential.env_var}` : undefined);
@@ -206,6 +213,7 @@ function resolveDeclaration(
     ...(estimate && { estimate: ownFrozen(estimate) }),
     availability: ownFrozen({
       enabled,
+      reserve_only: reserveOnly,
       credential_valid: credentialValid,
       configuration_valid: configurationValid,
       selectable: enabled && credentialValid && configurationValid,
@@ -528,6 +536,7 @@ export function buildProviderCatalog(
       },
       ...(item.estimate && { estimate: item.estimate }),
       enabled: item.availability.enabled,
+      reserve_only: item.availability.reserve_only,
       credentialed: item.availability.credential_valid,
       configuration_valid: item.availability.configuration_valid,
     }));
