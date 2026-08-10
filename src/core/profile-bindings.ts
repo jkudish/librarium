@@ -239,10 +239,13 @@ function firecrawlSourcesProjection(
   return corpora.length > 0 ? { ...profile, corpora } : profile;
 }
 
-interface BindingSpec {
+export interface AdapterProfileBinding {
+  readonly adapter_id: string;
   readonly provider_id: string;
   readonly profile_id: string;
-  readonly adapter_id: string;
+}
+
+interface BindingSpec extends AdapterProfileBinding {
   readonly project?: BindingInput['project'];
 }
 
@@ -392,6 +395,57 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     project: chatWebSearchProjection,
   },
 ];
+
+/**
+ * Resolve one v1 adapter id to its exact catalog identity.
+ *
+ * Provider configuration is keyed by adapter id, while the v2 catalog is
+ * keyed by provider/profile. Keeping this small validated bridge here avoids
+ * callers accidentally treating an alias as a provider id (notably the two
+ * distinct OpenRouter strategies).
+ */
+export function adapterProfileBinding(
+  adapterId: string,
+  specs: readonly AdapterProfileBinding[] = BUILTIN_PROFILE_BINDING_SPECS,
+): AdapterProfileBinding | undefined {
+  const matches = specs.filter((spec) => spec.adapter_id === adapterId);
+  if (matches.length > 1) {
+    throw new ProfileBindingError(
+      `Adapter id has more than one exact profile binding: ${adapterId}`,
+    );
+  }
+  const match = matches[0];
+  return match
+    ? Object.freeze({
+        adapter_id: match.adapter_id,
+        provider_id: match.provider_id,
+        profile_id: match.profile_id,
+      })
+    : undefined;
+}
+
+/** Validate and materialize the complete adapter-id binding matrix. */
+export function adapterProfileBindings(
+  specs: readonly AdapterProfileBinding[] = BUILTIN_PROFILE_BINDING_SPECS,
+): ReadonlyMap<string, AdapterProfileBinding> {
+  const bindings = new Map<string, AdapterProfileBinding>();
+  for (const spec of specs) {
+    if (bindings.has(spec.adapter_id)) {
+      throw new ProfileBindingError(
+        `Adapter id has more than one exact profile binding: ${spec.adapter_id}`,
+      );
+    }
+    bindings.set(
+      spec.adapter_id,
+      Object.freeze({
+        adapter_id: spec.adapter_id,
+        provider_id: spec.provider_id,
+        profile_id: spec.profile_id,
+      }),
+    );
+  }
+  return bindings;
+}
 
 export function buildProfileBindings(
   declarationsByKey: ReadonlyMap<string, ExecutableProfileDeclaration>,

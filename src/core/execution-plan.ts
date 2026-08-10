@@ -30,6 +30,7 @@ import {
 import {
   type CanonicalResearchRequest,
   CanonicalResearchRequestSchema,
+  comparePreparationDiagnostics,
   migrateLegacyResearchRequest,
   type PreparationIssue,
   type PreparationNotice,
@@ -57,6 +58,8 @@ export interface PlanningProfile {
   readonly enabled: boolean;
   readonly credentialed: boolean;
   readonly configuration_valid: boolean;
+  /** Disabled in v1 but deliberately retained for fallback reserve only. */
+  readonly reserve_only?: boolean;
 }
 
 /**
@@ -137,15 +140,6 @@ interface SelectedProfile {
   readonly requirements?: EvidenceRequirements;
 }
 
-const PHASE_ORDER = {
-  transport: 0,
-  migration: 1,
-  canonicalization: 2,
-  selection: 3,
-  validation: 4,
-  compilation: 5,
-} as const;
-
 function escapeJsonPointerToken(token: string): string {
   return token.replaceAll('~', '~0').replaceAll('/', '~1');
 }
@@ -208,15 +202,7 @@ function canonicalIssueCode(path: string, message: string): string {
 function sortDiagnostics<T extends PreparationIssue | PreparationNotice>(
   diagnostics: readonly T[],
 ): T[] {
-  const compareText = (left: string, right: string): number =>
-    left < right ? -1 : left > right ? 1 : 0;
-  return [...diagnostics].sort(
-    (left, right) =>
-      PHASE_ORDER[left.phase] - PHASE_ORDER[right.phase] ||
-      compareText(left.path, right.path) ||
-      compareText(left.code, right.code) ||
-      compareText(left.profile_key ?? '', right.profile_key ?? ''),
-  );
+  return [...diagnostics].sort(comparePreparationDiagnostics);
 }
 
 function profileIdentityKey(identity: ProviderIdentity): string {
@@ -391,11 +377,20 @@ function resolveIdentities(
 function profileAvailabilityIssues(
   selection: SelectedProfile,
   mode: CanonicalResearchRequest['mode'],
+  allowReserveOnly = false,
 ): PreparationIssue[] {
   const { entry, path } = selection;
   const key = profileIdentityKey(entry.profile.identity);
   const issues: PreparationIssue[] = [];
-  if (!entry.enabled) {
+  if (entry.reserve_only && !allowReserveOnly) {
+    issues.push({
+      code: 'profile_reserve_only',
+      phase: 'validation',
+      path,
+      message: 'The selected profile is available only as a fallback reserve.',
+      profile_key: key,
+    });
+  } else if (!entry.enabled && !(allowReserveOnly && entry.reserve_only)) {
     issues.push({
       code: 'profile_disabled',
       phase: 'validation',
@@ -441,6 +436,7 @@ function isUsableCapabilityMatch(
 ): boolean {
   return (
     entry.enabled &&
+    !entry.reserve_only &&
     entry.credentialed &&
     entry.configuration_valid &&
     (request.mode !== 'async' || entry.profile.resumability === 'durable') &&
@@ -790,7 +786,11 @@ function resolveReserve(
       continue;
     }
 
-    const availability = profileAvailabilityIssues(selection, request.mode);
+    const availability = profileAvailabilityIssues(
+      selection,
+      request.mode,
+      true,
+    );
     if (availability.length > 0) {
       if (explicit) {
         issues.push(...availability);

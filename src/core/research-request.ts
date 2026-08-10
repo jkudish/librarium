@@ -187,6 +187,39 @@ export interface PreparationDiagnostic {
 export type PreparationIssue = PreparationDiagnostic;
 export type PreparationNotice = PreparationDiagnostic;
 
+const PREPARATION_PHASE_ORDER: Readonly<Record<PreparationPhase, number>> = {
+  transport: 0,
+  migration: 1,
+  canonicalization: 2,
+  selection: 3,
+  validation: 4,
+  compilation: 5,
+};
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Stable ordering for every preflight, normalization, and planner diagnostic. */
+export function comparePreparationDiagnostics(
+  left: PreparationIssue | PreparationNotice,
+  right: PreparationIssue | PreparationNotice,
+): number {
+  return (
+    PREPARATION_PHASE_ORDER[left.phase] -
+      PREPARATION_PHASE_ORDER[right.phase] ||
+    compareText(left.path, right.path) ||
+    compareText(left.code, right.code) ||
+    compareText(left.profile_key ?? '', right.profile_key ?? '')
+  );
+}
+
+export function sortPreparationDiagnostics<
+  T extends PreparationIssue | PreparationNotice,
+>(diagnostics: readonly T[]): T[] {
+  return [...diagnostics].sort(comparePreparationDiagnostics);
+}
+
 export interface LegacyMigrationResult {
   readonly input: unknown;
   readonly notices: readonly PreparationNotice[];

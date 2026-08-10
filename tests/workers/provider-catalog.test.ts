@@ -3,11 +3,13 @@ import {
   catalogFingerprint,
   isCatalogFingerprint,
 } from '../../src/core/catalog-fingerprint.js';
+import { mapConfiguration } from '../../src/core/configuration-mapping.js';
 import { prepareResearchExecution } from '../../src/core/execution-plan.js';
 import { BUILTIN_PROFILE_BINDING_SPECS } from '../../src/core/profile-bindings.js';
 import { buildProviderCatalog } from '../../src/core/profile-catalog.js';
 import { BUILTIN_PROVIDER_CATALOG } from '../../src/core/provider-profiles.js';
 import { collectionProvenanceFor } from '../../src/core/result-provenance.js';
+import type { Config } from '../../src/types.js';
 
 function workerCatalog() {
   return buildProviderCatalog({
@@ -38,6 +40,34 @@ describe('provider catalog in workerd', () => {
     expect(catalog.workflow('quick').members).toHaveLength(5);
     expect(catalog.workflow('visibility').members).toHaveLength(9);
     expect(catalog.workflow('deep').members).toHaveLength(5);
+  });
+
+  it('maps configuration without importing Node config loading', () => {
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: './agents/librarium',
+        maxParallel: 2,
+        timeout: 30,
+        asyncTimeout: 60,
+        asyncPollInterval: 5,
+        mode: 'sync',
+        llmWebSearch: true,
+      },
+      providers: { exa: { enabled: true } },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: { team: ['exa'] },
+    };
+    const mapped = mapConfiguration(config, {
+      authoredGroups: { global: config.groups, project: {} },
+      requestDeadlineMs: 60_000,
+      credentials: {
+        env: { EXA_API_KEY: 'worker-synthetic-credential' },
+      },
+    });
+    expect(mapped.groups).toEqual({ team: ['exa/search'] });
+    expect(mapped.catalog.resolveDefault()).toHaveLength(1);
   });
 
   it('fingerprints deterministically without crypto', () => {

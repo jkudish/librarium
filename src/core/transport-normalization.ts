@@ -14,6 +14,7 @@ import type {
   RefinementIntent,
   ResearchExecutionLimits,
 } from './research-request.js';
+import { sortPreparationDiagnostics } from './research-request.js';
 
 /**
  * Shadow-only transport normalization for the v2 request pipeline
@@ -48,10 +49,12 @@ export type TransportSource =
 
 /** Injected per-caller context; this module ships no default policy values. */
 export interface CanonicalTransportDefaults {
-  readonly mode: 'sync' | 'async';
+  /** `mixed` reaches the existing legacy migration boundary unchanged. */
+  readonly mode: 'sync' | 'async' | 'mixed';
   readonly limits: ResearchExecutionLimits;
   readonly fallback: FallbackIntent;
   readonly refinement: RefinementIntent;
+  readonly budgets?: ExactBudgetLimits;
 }
 
 export type TransportNormalizationResult =
@@ -210,7 +213,11 @@ function normalizeTransportRequest(
   }
 
   if (issues.length > 0) {
-    return { ok: false, issues, notices };
+    return {
+      ok: false,
+      issues: sortPreparationDiagnostics(issues),
+      notices: sortPreparationDiagnostics(notices),
+    };
   }
 
   const request: Record<string, unknown> = {
@@ -222,8 +229,9 @@ function normalizeTransportRequest(
     exclusions: fields.exclusions ?? [],
     refinement: fields.refinement ?? defaults.refinement,
   };
-  if (fields.budgets !== undefined) request.budgets = fields.budgets;
-  return { ok: true, request, notices };
+  const budgets = fields.budgets ?? defaults.budgets;
+  if (budgets !== undefined) request.budgets = budgets;
+  return { ok: true, request, notices: sortPreparationDiagnostics(notices) };
 }
 
 /**
@@ -262,7 +270,10 @@ export function compileNormalizedTransportRequest(
     catalog,
     dependencies,
   );
-  const notices = [...normalized.notices, ...result.notices];
+  const notices = sortPreparationDiagnostics([
+    ...normalized.notices,
+    ...result.notices,
+  ]);
   return result.ok
     ? { ok: true, prepared: result.prepared, notices }
     : { ok: false, issues: result.issues, notices };
@@ -326,12 +337,15 @@ function targetsFromProviderIds(
   return { value: targets, raw_path: path };
 }
 
-function usdBudgets(
+export function exactUsdBudgets(
   maxCostUsd: number | undefined,
   maxEstimatedCostUsd: number | undefined,
   pathPrefix: string,
-  issues: PreparationIssue[],
-): ExactBudgetLimits | undefined {
+): {
+  readonly budgets?: ExactBudgetLimits;
+  readonly issues: readonly PreparationIssue[];
+} {
+  const issues: PreparationIssue[] = [];
   const budgets: {
     max_estimated_cost_microusd?: string;
     max_actual_cost_microusd?: string;
@@ -352,10 +366,24 @@ function usdBudgets(
     if ('issue' in converted) issues.push(converted.issue);
     else budgets.max_actual_cost_microusd = converted.value;
   }
-  return budgets.max_estimated_cost_microusd !== undefined ||
+  return {
+    ...(budgets.max_estimated_cost_microusd !== undefined ||
     budgets.max_actual_cost_microusd !== undefined
-    ? budgets
-    : undefined;
+      ? { budgets }
+      : {}),
+    issues,
+  };
+}
+
+function usdBudgets(
+  maxCostUsd: number | undefined,
+  maxEstimatedCostUsd: number | undefined,
+  pathPrefix: string,
+  issues: PreparationIssue[],
+): ExactBudgetLimits | undefined {
+  const result = exactUsdBudgets(maxCostUsd, maxEstimatedCostUsd, pathPrefix);
+  issues.push(...result.issues);
+  return result.budgets;
 }
 
 function toggleIntent<TIntent>(
@@ -547,9 +575,21 @@ export interface ConfigurationTransportInput {
   readonly defaults?: {
     readonly mode?: string;
     readonly maxParallel?: number;
+    /** v1 inline per-attempt deadline, in seconds. */
+    readonly timeout?: number;
+    /** v1 background per-attempt deadline, in seconds. */
+    readonly asyncTimeout?: number;
+    /** v1 background poll interval, in seconds. */
+    readonly asyncPollInterval?: number;
+    /** Explicit caller-provided canonical request deadline, in milliseconds. */
+    readonly requestDeadlineMs?: number;
+    /** @deprecated shadow compatibility spelling; prefer timeout. */
     readonly timeoutSeconds?: number;
+    /** @deprecated shadow compatibility spelling; prefer asyncTimeout. */
     readonly backgroundTimeoutSeconds?: number;
+    /** @deprecated shadow compatibility spelling; prefer requestDeadlineMs. */
     readonly requestTimeoutSeconds?: number;
+    /** @deprecated shadow compatibility spelling; prefer asyncPollInterval. */
     readonly pollIntervalSeconds?: number;
     readonly maxCostUsd?: number;
     readonly maxEstimatedCostUsd?: number;
@@ -566,18 +606,24 @@ export function normalizeConfigurationRequest(
   if (configured.maxParallel !== undefined) {
     limits.max_concurrency = configured.maxParallel;
   }
-  if (configured.timeoutSeconds !== undefined) {
-    limits.inline_attempt_deadline_ms = configured.timeoutSeconds * 1_000;
+  const timeout = configured.timeout ?? configured.timeoutSeconds;
+  if (timeout !== undefined) {
+    limits.inline_attempt_deadline_ms = timeout * 1_000;
   }
-  if (configured.backgroundTimeoutSeconds !== undefined) {
-    limits.background_attempt_deadline_ms =
-      configured.backgroundTimeoutSeconds * 1_000;
+  const backgroundTimeout =
+    configured.asyncTimeout ?? configured.backgroundTimeoutSeconds;
+  if (backgroundTimeout !== undefined) {
+    limits.background_attempt_deadline_ms = backgroundTimeout * 1_000;
   }
-  if (configured.requestTimeoutSeconds !== undefined) {
+  if (configured.requestDeadlineMs !== undefined) {
+    limits.request_deadline_ms = configured.requestDeadlineMs;
+  } else if (configured.requestTimeoutSeconds !== undefined) {
     limits.request_deadline_ms = configured.requestTimeoutSeconds * 1_000;
   }
-  if (configured.pollIntervalSeconds !== undefined) {
-    limits.poll_interval_ms = configured.pollIntervalSeconds * 1_000;
+  const pollInterval =
+    configured.asyncPollInterval ?? configured.pollIntervalSeconds;
+  if (pollInterval !== undefined) {
+    limits.poll_interval_ms = pollInterval * 1_000;
   }
   return normalizeTransportRequest(
     'configuration',
