@@ -38,6 +38,33 @@ export type {
   DeclarableWorkflowId,
 } from './core/builtin-workflows.js';
 export type {
+  ConfigMigrationInput,
+  ConfigMigrationResult,
+  ConfigProviderV2,
+  ConfigSourceVersion,
+  ConfigValidationResult,
+  CustomProviderSourceV2,
+  ExecutionDefaultsV2,
+  JsonValue,
+  LibrariumConfigV2,
+  LibrariumProjectConfigV2,
+  RuntimeConfigV2,
+} from './core/config-v2.js';
+export {
+  ConfigProviderV2Schema,
+  CustomProviderExecutionProfileV2Schema,
+  CustomProviderSourceV2Schema,
+  ExecutionDefaultsV2Schema,
+  JsonValueSchema,
+  LibrariumConfigV2Schema,
+  LibrariumProjectConfigV2Schema,
+  migrateConfig,
+  NpmCustomProviderSourceV2Schema,
+  RuntimeConfigV2Schema,
+  ScriptCustomProviderSourceV2Schema,
+  validateConfigV2,
+} from './core/config-v2.js';
+export type {
   CatalogProfileRef,
   ExecutableProfileDeclaration,
   ProfileFeatures,

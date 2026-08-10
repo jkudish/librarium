@@ -4,15 +4,15 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { builtinModules } from 'node:module';
 import { build as esbuild } from 'esbuild';
 
 const expectEngineRejection = process.argv.includes(
@@ -33,14 +33,26 @@ const NODE_BUILTINS = new Set(
 const ROOT_EXPORTS = [
   'BUILTIN_PROVIDER_CATALOG',
   'CitationSchema',
+  'ConfigProviderV2Schema',
+  'CustomProviderExecutionProfileV2Schema',
+  'CustomProviderSourceV2Schema',
+  'ExecutionDefaultsV2Schema',
+  'JsonValueSchema',
+  'LibrariumConfigV2Schema',
+  'LibrariumProjectConfigV2Schema',
+  'NpmCustomProviderSourceV2Schema',
   'ResearchErrorSchema',
   'ResearchRequestSchema',
   'ResearchResponseSchema',
   'ResearchResultSchema',
   'ResultProvenanceSchema',
+  'RuntimeConfigV2Schema',
+  'ScriptCustomProviderSourceV2Schema',
   'SourceSchema',
   'UsageSchema',
   'VERSION',
+  'migrateConfig',
+  'validateConfigV2',
 ].sort();
 
 const CORE_EXPORTS = [
@@ -66,8 +78,12 @@ const CORE_EXPORTS = [
 
 const NODE_EXPORTS = [
   ...CORE_EXPORTS,
+  'ConfigV2FileError',
   'createNodeCredentialContext',
   'loadCustomProviders',
+  'loadConfigV2',
+  'projectConfigV2Path',
+  'saveConfigV2',
 ].sort();
 
 function npmCommand() {
@@ -149,7 +165,11 @@ function verifyTarballInventory(packResult) {
     'dist/cli.d.ts.map',
     'contracts/v1',
   ]) {
-    if (actual.some((path) => path === forbidden || path.startsWith(`${forbidden}/`))) {
+    if (
+      actual.some(
+        (path) => path === forbidden || path.startsWith(`${forbidden}/`),
+      )
+    ) {
       throw new Error(`Forbidden packed artifact: ${forbidden}`);
     }
   }
@@ -238,10 +258,14 @@ function verifyDeclarations() {
         type BuiltinWorkflowId,
         type DeclarableWorkflowId,
         type ExecutionProfile,
+        type LibrariumConfigV2,
+        LibrariumConfigV2Schema,
+        migrateConfig,
         type ProfileTarget,
         type ProviderIdentity,
         ResearchRequestSchema,
         type ResearchRequest,
+        validateConfigV2,
       } from 'librarium';
       import {
         type AsyncPollResult,
@@ -292,6 +316,23 @@ function verifyDeclarations() {
           poll_interval_ms: 100,
         },
       });
+      const config: LibrariumConfigV2 = LibrariumConfigV2Schema.parse({
+        version: 2,
+        execution_defaults: {
+          mode: 'sync',
+          max_concurrency: 1,
+          inline_attempt_deadline_ms: 1000,
+          background_attempt_deadline_ms: 1000,
+          poll_interval_ms: 100,
+        },
+        providers: {},
+        custom_providers: {},
+        trusted_provider_ids: [],
+        groups: {},
+        runtime: { output_dir: './runs', llm_web_search: true },
+      });
+      const validatedConfig = validateConfigV2(config);
+      const migratedConfig = migrateConfig({ global: config });
       const client: HttpClient = async <T>() => ({
         status: 200,
         statusText: 'OK',
@@ -318,6 +359,8 @@ function verifyDeclarations() {
         BUILTIN_PROVIDER_CATALOG,
         buildProviderCatalog,
         request,
+        validatedConfig,
+        migratedConfig,
         client,
         port,
         launch,
@@ -355,12 +398,12 @@ function verifyDeclarations() {
   );
   execFileSync(
     process.execPath,
-    [
-      resolve(root, 'node_modules/typescript/bin/tsc'),
-      '-p',
-      workerConfigPath,
-    ],
-    { cwd: consumerDirectory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    [resolve(root, 'node_modules/typescript/bin/tsc'), '-p', workerConfigPath],
+    {
+      cwd: consumerDirectory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   );
 
   const nodeSourcePath = join(consumerDirectory, 'node-consumer.ts');
@@ -378,7 +421,11 @@ function verifyDeclarations() {
         type NpmCustomProviderSource,
         type ScriptCustomProviderSource,
         createNodeCredentialContext,
+        type LibrariumConfigV2,
+        loadConfigV2,
         loadCustomProviders,
+        projectConfigV2Path,
+        saveConfigV2,
       } from 'librarium/node';
       declare const profile: ExecutionProfile;
       const credentials = createNodeCredentialContext({ TEST_KEY: 'value' });
@@ -406,8 +453,14 @@ function verifyDeclarations() {
         config,
         options,
       );
+      declare const v2Config: LibrariumConfigV2;
+      const migrated = loadConfigV2({ global_path: './config.json' });
+      saveConfigV2(v2Config, { path: './saved-config.json' });
+      const projectPath: string = projectConfigV2Path('.');
       void credentials;
       void loaded;
+      void migrated;
+      void projectPath;
     `,
   );
   writeFileSync(
@@ -430,7 +483,11 @@ function verifyDeclarations() {
   execFileSync(
     process.execPath,
     [resolve(root, 'node_modules/typescript/bin/tsc'), '-p', nodeConfigPath],
-    { cwd: consumerDirectory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: consumerDirectory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   );
 
   const nodeDeclaration = readFileSync(join(root, 'dist/node.d.ts'), 'utf8')
@@ -443,10 +500,7 @@ function verifyDeclarations() {
 
 async function verifyWorkerSafeGraph() {
   const scan = await esbuild({
-    entryPoints: [
-      join(root, 'src/index.ts'),
-      join(root, 'src/core-entry.ts'),
-    ],
+    entryPoints: [join(root, 'src/index.ts'), join(root, 'src/core-entry.ts')],
     outdir: join(workspace, 'worker-scan'),
     bundle: true,
     splitting: true,
