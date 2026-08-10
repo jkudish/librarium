@@ -1,0 +1,192 @@
+{
+  "generator": "jkudish/librarium",
+  "generator_version": "1.4.1",
+  "request_id": "request-terminal-1",
+  "status": "succeeded",
+  "completed_at": "2026-08-09T12:00:02Z",
+  "results": [
+    {
+      "id": "result-search-results",
+      "content_format": "markdown",
+      "content": "# Result",
+      "requested_profile": "deep-research",
+      "provider": "example-provider",
+      "profile": "deep-research-v2",
+      "provenance": {
+        "result_kind": "search_results",
+        "retrieval_methods": [
+          "search_endpoint",
+          "model_search_tool",
+          "research_agent",
+          "model_only"
+        ],
+        "corpora": [
+          "web",
+          "news",
+          "x",
+          "files",
+          "places"
+        ],
+        "observed_at": "2026-08-09T12:00:00Z"
+      },
+      "citations": [
+        {
+          "id": "citation-web-page",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "web_page",
+            "url": "source:web-page"
+          }
+        },
+        {
+          "id": "citation-news-article",
+          "derivation": "collector_extracted",
+          "source": {
+            "kind": "news_article",
+            "url": "source:news-article"
+          }
+        },
+        {
+          "id": "citation-x-post",
+          "derivation": "librarium_inferred",
+          "source": {
+            "kind": "x_post",
+            "url": "source:x-post"
+          }
+        },
+        {
+          "id": "citation-file",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "file",
+            "provider_reference": "file-1"
+          }
+        },
+        {
+          "id": "citation-place",
+          "derivation": "collector_extracted",
+          "source": {
+            "kind": "place",
+            "url": "source:place"
+          }
+        },
+        {
+          "id": "citation-video",
+          "derivation": "librarium_inferred",
+          "source": {
+            "kind": "video",
+            "url": "source:video"
+          }
+        },
+        {
+          "id": "citation-forum-post",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "forum_post",
+            "url": "source:forum-post"
+          }
+        },
+        {
+          "id": "citation-unknown",
+          "derivation": "collector_extracted",
+          "source": {
+            "kind": "unknown",
+            "url": "source:unknown"
+          }
+        }
+      ],
+      "completed_at": "2026-08-09T12:00:01Z"
+    },
+    {
+      "id": "result-grounded-answer",
+      "content_format": "markdown",
+      "content": "# Result",
+      "requested_profile": "deep-research",
+      "provider": "example-provider",
+      "profile": "deep-research-v2",
+      "provenance": {
+        "result_kind": "grounded_answer",
+        "retrieval_methods": [
+          "research_agent"
+        ],
+        "corpora": [
+          "web"
+        ],
+        "observed_at": "2026-08-09T12:00:00Z"
+      },
+      "citations": [
+        {
+          "id": "citation-1",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "web_page",
+            "url": "https://example.com/research",
+            "title": "Research"
+          }
+        }
+      ],
+      "completed_at": "2026-08-09T12:00:01Z"
+    },
+    {
+      "id": "result-research-report",
+      "content_format": "markdown",
+      "content": "# Result",
+      "requested_profile": "deep-research",
+      "provider": "example-provider",
+      "profile": "deep-research-v2",
+      "provenance": {
+        "result_kind": "research_report",
+        "retrieval_methods": [
+          "research_agent"
+        ],
+        "corpora": [
+          "web"
+        ],
+        "observed_at": "2026-08-09T12:00:00Z"
+      },
+      "citations": [
+        {
+          "id": "citation-1",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "web_page",
+            "url": "https://example.com/research",
+            "title": "Research"
+          }
+        }
+      ],
+      "completed_at": "2026-08-09T12:00:01Z"
+    },
+    {
+      "id": "result-model-answer",
+      "content_format": "markdown",
+      "content": "# Result",
+      "requested_profile": "deep-research",
+      "provider": "example-provider",
+      "profile": "deep-research-v2",
+      "provenance": {
+        "result_kind": "model_answer",
+        "retrieval_methods": [
+          "research_agent"
+        ],
+        "corpora": [
+          "web"
+        ],
+        "observed_at": "2026-08-09T12:00:00Z"
+      },
+      "citations": [
+        {
+          "id": "citation-1",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "web_page",
+            "url": "https://example.com/research",
+            "title": "Research"
+          }
+        }
+      ],
+      "completed_at": "2026-08-09T12:00:01Z"
+    }
+  ],
+  "errors": []
+}

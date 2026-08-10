@@ -1,5 +1,2 @@
-export * from './artifacts/index.js';
-export * from './common.js';
-export * from './custom-provider/index.js';
-export * from './domain/index.js';
+/** Shared seven-value terminal contract only. Internal schemas have direct imports. */
 export * from './interchange/index.js';

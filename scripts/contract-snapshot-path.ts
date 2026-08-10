@@ -1,5 +1,5 @@
 import { lstatSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 
 function assertNoExistingSymlink(path: string, description: string): boolean {
   try {
@@ -20,6 +20,32 @@ function assertNoExistingSymlink(path: string, description: string): boolean {
   }
 }
 
+function assertContained(
+  boundary: string,
+  candidate: string,
+  description: string,
+): void {
+  const pathFromBoundary = relative(boundary, candidate);
+  if (
+    pathFromBoundary === '..' ||
+    pathFromBoundary.startsWith(`..${sep}`) ||
+    isAbsolute(pathFromBoundary)
+  ) {
+    throw new Error(`Refusing snapshot ${description} outside safe boundary`);
+  }
+}
+
+function nearestExistingAncestor(path: string): string {
+  let currentPath = path;
+  while (!assertNoExistingSymlink(currentPath, 'root ancestor')) {
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath)
+      throw new Error(`Unable to establish safe snapshot boundary: ${path}`);
+    currentPath = parentPath;
+  }
+  return currentPath;
+}
+
 export function resolveSnapshotWritePath(
   root: string,
   relativePath: string,
@@ -34,6 +60,8 @@ export function resolveSnapshotWritePath(
   }
 
   const resolvedRoot = resolve(root);
+  const safeBoundary = nearestExistingAncestor(resolvedRoot);
+  assertContained(safeBoundary, resolvedRoot, 'root');
   const outputPath = resolve(resolvedRoot, relativePath);
   const pathFromRoot = relative(resolvedRoot, outputPath);
   if (
@@ -45,9 +73,9 @@ export function resolveSnapshotWritePath(
     throw new Error(`Refusing to write outside snapshot root: ${relativePath}`);
   }
 
-  if (!assertNoExistingSymlink(resolvedRoot, 'root')) {
-    return outputPath;
-  }
+  assertContained(resolvedRoot, outputPath, 'target');
+
+  if (!assertNoExistingSymlink(resolvedRoot, 'root')) return outputPath;
 
   let currentPath = resolvedRoot;
   const pathSegments = pathFromRoot.split(sep);

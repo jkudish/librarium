@@ -178,7 +178,7 @@ const isForbiddenNormalizedExtensionKey = (key: string): boolean => {
   );
 };
 
-const isForbiddenExtensionKey = (key: string): boolean => {
+export const isForbiddenExtensionKey = (key: string): boolean => {
   const normalized = normalizeExtensionKey(key);
   const candidates = [normalized, normalized.replace(/_?\d+$/, '')];
   const namespaceSeparator = key.lastIndexOf(':');

@@ -1,214 +1,224 @@
 import { z } from 'zod/v4';
-import {
-  ExtensionsSchema,
-  jsonValuesEqual,
-  OpaqueIdSchema,
-  Rfc3339UtcSchema,
-} from '../common.js';
-import {
-  CitationSchema,
-  CollectionProvenanceSchema,
-  ResearchProfileSchema,
-  RuntimeEffectiveTargetSchema,
-  SemanticFactsSchema,
-  UsageSchema,
-} from '../domain/index.js';
+import { isForbiddenExtensionKey, Rfc3339UtcSchema } from '../common.js';
 
-/**
- * Descriptive, terminal provenance that is safe to exchange between runtimes.
- * Request correlation belongs to the enclosing ResearchResponse; execution
- * attempts, slots, and replacements are deliberately TypeScript-internal.
- */
-export const ResearchResultProvenanceSchema = z.strictObject({
-  requested_profile: ResearchProfileSchema,
-  effective_profile: ResearchProfileSchema,
-  effective_target: RuntimeEffectiveTargetSchema.optional(),
-  collection: CollectionProvenanceSchema,
-  extensions: ExtensionsSchema.optional(),
-});
+const OpenStringSchema = z.string().min(1);
+export const TerminalIdSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: Wire IDs exclude controls.
+    /^(?!\s)(?!.*\s$)[^\0-\x1f\x7f]+$/,
+    'Identifiers cannot have surrounding whitespace or control characters',
+  );
+const DecimalSchema = z
+  .string()
+  .regex(/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/, 'Expected a decimal string');
 
-export const ResearchResultSchema = z
+export const SourceKindSchema = z.enum([
+  'web_page',
+  'news_article',
+  'x_post',
+  'file',
+  'place',
+  'video',
+  'forum_post',
+  'unknown',
+]);
+
+/** An embedded, untrusted source identifier. */
+export const SourceSchema = z
   .strictObject({
-    result_id: OpaqueIdSchema,
-    content_format: z.enum(['plain_text', 'markdown']),
-    content: z.string().min(1).max(2_000_000),
-    semantic_facts: SemanticFactsSchema,
-    citations: z.array(CitationSchema).max(10_000),
-    provenance: ResearchResultProvenanceSchema,
-    usage: UsageSchema.optional(),
-    completed_at: Rfc3339UtcSchema,
-    extensions: ExtensionsSchema.optional(),
+    kind: SourceKindSchema,
+    url: OpenStringSchema.optional(),
+    provider_reference: TerminalIdSchema.optional(),
+    title: OpenStringSchema.optional(),
+    publisher: OpenStringSchema.optional(),
+    published_at: Rfc3339UtcSchema.optional(),
   })
-  .superRefine((result, ctx) => {
-    const facts = result.semantic_facts;
-    const profile = result.provenance.effective_profile;
-    const effectiveTarget = result.provenance.effective_target;
-    const configuredTargetKinds = new Set(
-      [
-        profile.identity.target.primary.kind,
-        profile.identity.target.underlying?.kind,
-      ].filter(
-        (kind): kind is 'model' | 'agent' | 'preset' => kind !== undefined,
-      ),
-    );
-
-    const requested = result.provenance.requested_profile;
-    const effective = result.provenance.effective_profile;
-    if (requested.result_kind !== effective.result_kind) {
+  .superRefine((source, ctx) => {
+    if (!source.url && !source.provider_reference) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Effective profile must preserve requested result_kind',
-        path: ['provenance', 'effective_profile', 'result_kind'],
-      });
-    }
-    if (requested.observation_mode !== effective.observation_mode) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Effective profile must preserve requested observation_mode',
-        path: ['provenance', 'effective_profile', 'observation_mode'],
-      });
-    }
-    if (
-      requested.result_kind === 'surface_observation' &&
-      requested.surface_id !== effective.surface_id
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Effective surface observation must preserve surface_id',
-        path: ['provenance', 'effective_profile', 'surface_id'],
-      });
-    }
-    if (
-      requested.observation_mode === 'surface_snapshot' &&
-      requested.retrieval_method !== effective.retrieval_method
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Effective surface snapshot must preserve retrieval_method',
-        path: ['provenance', 'effective_profile', 'retrieval_method'],
-      });
-    }
-
-    if (
-      effectiveTarget !== undefined &&
-      profile.identity.target.primary.model_selection === 'not_applicable'
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Runtime effective targets are inapplicable when the profile target is not_applicable',
-        path: ['provenance', 'effective_target'],
-      });
-    } else if (
-      effectiveTarget !== undefined &&
-      configuredTargetKinds.size > 0 &&
-      !configuredTargetKinds.has(effectiveTarget.kind)
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Runtime effective target kind must match a declared profile target',
-        path: ['provenance', 'effective_target', 'kind'],
-      });
-    }
-
-    const profileFields = [
-      ['provider', profile.identity],
-      ['access_mode', profile.access_mode],
-      ['operator_id', profile.operator_id],
-      ['collector_id', profile.collector_id],
-      ['surface_id', profile.surface_id],
-      ['surface_context', profile.surface_context],
-    ] as const;
-    const bindCollection = (
-      collection: typeof result.provenance.collection,
-      path: PropertyKey[],
-    ) =>
-      profileFields.forEach(([field, expected]) => {
-        if (!jsonValuesEqual(collection[field], expected))
-          ctx.addIssue({
-            code: 'custom',
-            message: `Collection ${field} must match the producing effective profile`,
-            path: [...path, field],
-          });
-      });
-    bindCollection(result.provenance.collection, ['provenance', 'collection']);
-    result.citations.forEach((citation, index) => {
-      bindCollection(citation.provenance, ['citations', index, 'provenance']);
-    });
-
-    if (!facts.result_kinds.includes(profile.result_kind)) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Result semantic facts must include the effective profile result kind',
-        path: ['semantic_facts', 'result_kinds'],
-      });
-    }
-    if (!facts.retrieval_methods.includes(profile.retrieval_method)) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Result semantic facts must include the effective profile retrieval method',
-        path: ['semantic_facts', 'retrieval_methods'],
-      });
-    }
-    for (const [index, corpus] of facts.corpora.entries()) {
-      if (!profile.corpora.includes(corpus)) {
-        ctx.addIssue({
-          code: 'custom',
-          message:
-            'Result semantic facts cannot claim corpora outside the effective profile',
-          path: ['semantic_facts', 'corpora', index],
-        });
-      }
-    }
-    if (facts.observation_mode !== profile.observation_mode) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Result observation mode must match the effective profile observation mode',
-        path: ['semantic_facts', 'observation_mode'],
-      });
-    }
-    if (
-      profile.surface_id !== undefined &&
-      facts.measured_surface_id !== profile.surface_id
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Result measured surface must match the effective profile surface',
-        path: ['semantic_facts', 'measured_surface_id'],
-      });
-    }
-    if (
-      profile.surface_id === undefined &&
-      facts.measured_surface_id !== undefined
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Result semantic facts cannot claim a measured surface absent from the effective profile',
-        path: ['semantic_facts', 'measured_surface_id'],
-      });
-    }
-    if (
-      (profile.grounding_policy === 'required' &&
-        facts.grounding_outcome !== 'used') ||
-      (profile.grounding_policy === 'none' &&
-        facts.grounding_outcome === 'used')
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        message:
-          'Result grounding outcome must satisfy the effective profile grounding policy',
-        path: ['semantic_facts', 'grounding_outcome'],
+        message: 'Sources require a URL or provider_reference',
+        path: ['url'],
       });
     }
   });
 
+export const CitationSchema = z.strictObject({
+  id: TerminalIdSchema,
+  derivation: z.enum([
+    'provider_reported',
+    'collector_extracted',
+    'librarium_inferred',
+  ]),
+  source: SourceSchema,
+  excerpt: OpenStringSchema.optional(),
+  locator: OpenStringSchema.optional(),
+});
+
+export const UsageSchema = z
+  .strictObject({
+    prompt_tokens: z.number().int().safe().nonnegative().optional(),
+    completion_tokens: z.number().int().safe().nonnegative().optional(),
+    cache_write_input_tokens: z.number().int().safe().nonnegative().optional(),
+    cache_read_input_tokens: z.number().int().safe().nonnegative().optional(),
+    reasoning_tokens: z.number().int().safe().nonnegative().optional(),
+    actual_cost: DecimalSchema.optional(),
+    estimated_cost: DecimalSchema.optional(),
+    currency: OpenStringSchema.optional(),
+  })
+  .superRefine((usage, ctx) => {
+    if ((usage.actual_cost || usage.estimated_cost) && !usage.currency) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Costs require currency',
+        path: ['currency'],
+      });
+    }
+  });
+
+const ProviderMetaValueSchema = z.json();
+const rawKey = (key: string): boolean => {
+  const normalized = key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .replace(/[^a-z\d]+/g, '_');
+  return (
+    /(?:^|_)raw(?:_|$)/.test(normalized) ||
+    /(?:^|_)provider_(?:response|payload|body)(?:_|$)/.test(normalized)
+  );
+};
+const completeRawContainer = (key: string, value: unknown): boolean => {
+  const normalized = key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .toLowerCase();
+  if (
+    !['response', 'payload', 'body'].includes(normalized) ||
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  )
+    return false;
+  const keys = Object.keys(value);
+  return (
+    keys.includes('headers') &&
+    (keys.includes('status') || keys.includes('status_code'))
+  );
+};
+const inspectProviderMeta = (
+  value: unknown,
+  path: PropertyKey[],
+  ctx: z.RefinementCtx,
+): void => {
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => {
+      inspectProviderMeta(child, [...path, index], ctx);
+    });
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, child] of Object.entries(value)) {
+    if (
+      isForbiddenExtensionKey(key) ||
+      rawKey(key) ||
+      completeRawContainer(key, child)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'provider_meta cannot contain credential or raw-response fields',
+        path: [...path, key],
+      });
+    }
+    inspectProviderMeta(child, [...path, key], ctx);
+  }
+};
+
+/** Provider-specific public metadata; producers must allowlist and redact it. */
+export const ProviderMetaSchema = z
+  .record(z.string().min(1), ProviderMetaValueSchema)
+  .superRefine((value, ctx) => inspectProviderMeta(value, [], ctx));
+
+const ContextSchema = z.strictObject({
+  locale: OpenStringSchema.optional(),
+  country: OpenStringSchema.optional(),
+  device: OpenStringSchema.optional(),
+  authentication: z
+    .enum(['anonymous', 'authenticated', 'managed', 'unknown'])
+    .optional(),
+});
+
+export const ResultProvenanceSchema = z
+  .strictObject({
+    result_kind: z.enum([
+      'search_results',
+      'grounded_answer',
+      'research_report',
+      'model_answer',
+    ]),
+    retrieval_methods: z.array(
+      z.enum([
+        'search_endpoint',
+        'model_search_tool',
+        'research_agent',
+        'model_only',
+      ]),
+    ),
+    corpora: z.array(z.enum(['web', 'news', 'x', 'files', 'places'])),
+    observed_at: Rfc3339UtcSchema,
+    collector: OpenStringSchema.optional(),
+    surface: OpenStringSchema.optional(),
+    context: ContextSchema.optional(),
+  })
+  .superRefine((provenance, ctx) => {
+    if (provenance.surface && !provenance.collector) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Surface requires collector',
+        path: ['collector'],
+      });
+    }
+  });
+
+const ResultBase = {
+  id: TerminalIdSchema,
+  requested_profile: OpenStringSchema,
+  provider: OpenStringSchema,
+  profile: OpenStringSchema,
+  provenance: ResultProvenanceSchema,
+  citations: z.array(CitationSchema),
+  completed_at: Rfc3339UtcSchema,
+  model: OpenStringSchema.optional(),
+  fallback_reason: OpenStringSchema.optional(),
+  usage: UsageSchema.optional(),
+  provider_meta: ProviderMetaSchema.optional(),
+};
+
+/** One terminal result with exactly one structurally-discriminated payload. */
+export const ResearchResultSchema = z.union([
+  z.strictObject({
+    ...ResultBase,
+    content_format: z.literal('markdown'),
+    content: z.string(),
+  }),
+  z.strictObject({
+    ...ResultBase,
+    content_format: z.literal('text'),
+    content: z.string(),
+  }),
+  z.strictObject({
+    ...ResultBase,
+    content_format: z.literal('json'),
+    content: z.union([z.record(z.string(), z.json()), z.array(z.json())]),
+  }),
+]);
+
+export type Citation = z.infer<typeof CitationSchema>;
+export type Source = z.infer<typeof SourceSchema>;
+export type Usage = z.infer<typeof UsageSchema>;
+export type ResultProvenance = z.infer<typeof ResultProvenanceSchema>;
 export type ResearchResult = z.infer<typeof ResearchResultSchema>;
-export type ResearchResultProvenance = z.infer<
-  typeof ResearchResultProvenanceSchema
->;
