@@ -22,6 +22,7 @@ import {
 } from '../core/provider-selection.js';
 import { executeResearchRun } from '../core/research-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
 import type {
   Config,
   DeduplicatedSource,
@@ -223,6 +224,28 @@ export async function executeRun(
       }
 
       const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
+      emitProductionShadowDiagnostic(
+        {
+          config,
+          env: process.env,
+          transport: {
+            kind: 'cli',
+            input: {
+              query,
+              providers: opts.providers,
+              group: opts.group,
+              mode: opts.mode,
+              parallel: opts.parallel,
+              timeoutSeconds: opts.timeout,
+              maxCostUsd: opts.maxCost,
+              maxEstimatedCostUsd: opts.maxEstimatedCost,
+              fallback: opts.fallback,
+              refine: opts.refine,
+            },
+          },
+        },
+        (message) => process.stderr.write(`${message}\n`),
+      );
       const credentials = createNodeCredentialContext();
       const initResult = await initializeProviders({
         ...config,

@@ -20,6 +20,7 @@ import {
   executeResearchRun,
 } from '../core/research-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
 import type { Config, Defaults } from '../types.js';
 
 /**
@@ -101,13 +102,32 @@ export async function runResearchSilent(
 ): Promise<SilentRunResult> {
   const onWarn =
     deps.onWarn ?? ((message: string) => process.stderr.write(`${message}\n`));
-  const credentials = deps.credentials ?? createNodeCredentialContext();
 
   const cliFlags: Partial<Defaults> = {};
   if (args.mode) cliFlags.mode = args.mode;
   const config = deps.loadMergedConfig
     ? deps.loadMergedConfig()
     : defaultLoadMergedConfig(cliFlags);
+
+  emitProductionShadowDiagnostic(
+    {
+      config,
+      env: process.env,
+      transport: {
+        kind: 'silent_mcp',
+        input: {
+          query: args.query,
+          providers: args.providers,
+          group: args.group,
+          mode: args.mode,
+          refine: args.refine,
+        },
+      },
+    },
+    onWarn,
+  );
+
+  const credentials = deps.credentials ?? createNodeCredentialContext();
 
   const initialize = deps.initialize ?? initializeProviders;
   const initResult = await initialize({ ...config, credentials });
