@@ -45,6 +45,7 @@ import type {
   ProviderReport,
   ProviderUsage,
   RunManifest,
+  RunTaskState,
 } from './types.js';
 
 export type {
@@ -70,6 +71,22 @@ export interface CommitRetrievedInput {
   readonly now?: number;
 }
 
+/**
+ * The subset of durable task fields that a poll reconciliation may mutate.
+ * Retrieval timestamps are intentionally owned by commitRetrieved so a poll
+ * cannot accidentally mark a task as retrieved.
+ */
+export type RunArtifactTaskUpdate = Partial<
+  Pick<
+    RunTaskState,
+    | 'status'
+    | 'lastPolledAt'
+    | 'completedAt'
+    | 'providerStatus'
+    | 'lastPollError'
+  >
+>;
+
 interface ValidatedReportFields {
   readonly tier: ProviderReport['tier'];
   readonly durationMs: number;
@@ -83,6 +100,9 @@ interface ValidatedReportFields {
 }
 
 const RETRIEVED_SENTINEL = Symbol('run-artifact-already-retrieved');
+const TASK_ALREADY_RETRIEVED_SENTINEL = Symbol(
+  'run-artifact-task-already-retrieved',
+);
 
 const RESERVED_ARTIFACT_NAMES = new Set([
   'run.json',
@@ -140,6 +160,39 @@ function assertKnownKeys(
 
 function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isTerminalTaskStatus(status: string): boolean {
+  return (
+    status === 'completed' || status === 'failed' || status === 'cancelled'
+  );
+}
+
+function assertUniqueManifestIdentities(
+  manifest: RunManifest,
+  runDir: string,
+): void {
+  const providerIds = new Set<string>();
+  const taskIds = new Set<string>();
+  for (const report of manifest.providers) {
+    if (providerIds.has(report.id)) {
+      throw new RunManifestError(
+        `Run manifest contains duplicate provider ID ${report.id}`,
+        resolve(runDir, 'run.json'),
+      );
+    }
+    providerIds.add(report.id);
+    if (report.task) {
+      const key = `${report.id}\u0000${report.task.taskId}`;
+      if (taskIds.has(key)) {
+        throw new RunManifestError(
+          `Run manifest contains duplicate provider task ${report.id}/${report.task.taskId}`,
+          resolve(runDir, 'run.json'),
+        );
+      }
+      taskIds.add(key);
+    }
+  }
 }
 
 export interface ProviderArtifactFileNames {
@@ -212,7 +265,9 @@ export class RunArtifactRepository {
     // Validate the manifest path through the same containment gate as every
     // declared artifact before delegating strict parsing/error semantics.
     this.resolveContainedPath(safeRunDir, fixedFile('manifest'));
-    return this.readManifestImpl(safeRunDir);
+    const manifest = this.readManifestImpl(safeRunDir);
+    assertUniqueManifestIdentities(manifest, safeRunDir);
+    return manifest;
   }
 
   tryReadManifest(runDir: string): RunManifest | null {
@@ -463,6 +518,182 @@ export class RunArtifactRepository {
 
   hasArtifact(runDir: string, fileName: string): boolean {
     return this.hasArtifactResolved(this.assertRunDirectory(runDir), fileName);
+  }
+
+  /**
+   * Persist one poll/reconciliation update under the manifest mutation lock.
+   * This is deliberately narrower than the core manifest mutators: callers
+   * cannot provide arbitrary report fields, output paths, or retrieval state.
+   * The lifecycle timestamp is supplied by the caller so a reconciliation
+   * pass can use its injected clock deterministically.
+   */
+  updateTask(
+    runDir: string,
+    providerId: string,
+    taskId: string,
+    updates: RunArtifactTaskUpdate,
+    now: number,
+  ): RunArtifactSnapshot {
+    const canonicalRunDir = this.assertRunDirectory(runDir);
+    this.assertMutationTimestamp(now);
+    this.validateTaskUpdate(updates);
+    const before = this.readManifest(canonicalRunDir);
+    const target = before.providers.find(
+      (report) => report.id === providerId && report.task?.taskId === taskId,
+    );
+    if (!target?.task) {
+      throw new Error(
+        `Task ${providerId}/${taskId} is not recorded in run.json`,
+      );
+    }
+    if (
+      target.task.retrievedAt !== undefined ||
+      isTerminalTaskStatus(target.task.status)
+    ) {
+      return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
+    }
+    try {
+      this.mutateManifestImpl(canonicalRunDir, (manifest) => {
+        const index = manifest.providers.findIndex(
+          (report) =>
+            report.id === providerId && report.task?.taskId === taskId,
+        );
+        if (index < 0) {
+          throw new Error(
+            `Task ${providerId}/${taskId} is not recorded in run.json`,
+          );
+        }
+        const report = manifest.providers[index];
+        const task = report?.task;
+        if (!report || !task) {
+          throw new Error(
+            `Task ${providerId}/${taskId} has no durable task state`,
+          );
+        }
+        if (
+          task.retrievedAt !== undefined ||
+          isTerminalTaskStatus(task.status)
+        ) {
+          throw TASK_ALREADY_RETRIEVED_SENTINEL;
+        }
+        if (task.status === 'running' && updates.status === 'pending') {
+          throw TASK_ALREADY_RETRIEVED_SENTINEL;
+        }
+        const nextUpdates = { ...updates };
+        if (
+          nextUpdates.lastPolledAt !== undefined &&
+          task.lastPolledAt !== undefined
+        ) {
+          nextUpdates.lastPolledAt = Math.max(
+            task.lastPolledAt,
+            nextUpdates.lastPolledAt,
+          );
+        }
+        if (
+          nextUpdates.completedAt !== undefined &&
+          task.completedAt !== undefined
+        ) {
+          nextUpdates.completedAt = Math.max(
+            task.completedAt,
+            nextUpdates.completedAt,
+          );
+        }
+        report.task = { ...task, ...nextUpdates };
+        if (
+          report.task.status === 'failed' ||
+          report.task.status === 'cancelled'
+        ) {
+          report.status = 'error';
+          report.error =
+            report.task.lastPollError ??
+            (report.task.status === 'cancelled'
+              ? 'Task was cancelled'
+              : 'Task failed');
+        }
+        applyRunLifecycle(manifest, now);
+      });
+    } catch (error) {
+      if (error === TASK_ALREADY_RETRIEVED_SENTINEL) {
+        return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
+      }
+      throw error;
+    }
+    return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
+  }
+
+  /**
+   * Terminalize a task whose exact background provider is no longer available.
+   * This is intentionally separate from updateTask's monotonic poll lane so a
+   * completed-but-unretrieved task can be failed once without allowing stale
+   * poll updates to regress any terminal state.
+   */
+  failUnretrievedTask(
+    runDir: string,
+    providerId: string,
+    taskId: string,
+    now: number,
+  ): RunArtifactSnapshot {
+    const canonicalRunDir = this.assertRunDirectory(runDir);
+    this.assertMutationTimestamp(now);
+    const before = this.readManifest(canonicalRunDir);
+    const target = before.providers.find(
+      (report) => report.id === providerId && report.task?.taskId === taskId,
+    );
+    if (!target?.task) {
+      throw new Error(
+        `Task ${providerId}/${taskId} is not recorded in run.json`,
+      );
+    }
+    if (
+      target.task.retrievedAt !== undefined ||
+      target.task.status === 'failed' ||
+      target.task.status === 'cancelled'
+    ) {
+      return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
+    }
+    try {
+      this.mutateManifestImpl(canonicalRunDir, (manifest) => {
+        const index = manifest.providers.findIndex(
+          (report) =>
+            report.id === providerId && report.task?.taskId === taskId,
+        );
+        if (index < 0) {
+          throw new Error(
+            `Task ${providerId}/${taskId} is not recorded in run.json`,
+          );
+        }
+        const report = manifest.providers[index];
+        const task = report?.task;
+        if (!report || !task) {
+          throw new Error(
+            `Task ${providerId}/${taskId} has no durable task state`,
+          );
+        }
+        if (
+          task.retrievedAt !== undefined ||
+          task.status === 'failed' ||
+          task.status === 'cancelled'
+        ) {
+          throw TASK_ALREADY_RETRIEVED_SENTINEL;
+        }
+        report.task = {
+          ...task,
+          status: 'failed',
+          completedAt: task.completedAt ?? now,
+          providerStatus: 'unsupported_provider',
+          lastPollError: 'provider.unavailable',
+        };
+        report.status = 'error';
+        report.error = 'provider.unavailable';
+        applyRunLifecycle(manifest, now);
+      });
+    } catch (error) {
+      if (error === TASK_ALREADY_RETRIEVED_SENTINEL) {
+        return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
+      }
+      throw error;
+    }
+    return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
   }
 
   /**
@@ -759,6 +990,48 @@ export class RunArtifactRepository {
         : {}),
       ...(report.preventFallback === true ? { preventFallback: true } : {}),
     };
+  }
+
+  private assertMutationTimestamp(value: number): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(
+        'Manifest mutation timestamp must be a finite nonnegative safe integer',
+      );
+    }
+  }
+
+  private validateTaskUpdate(updates: RunArtifactTaskUpdate): void {
+    if (!isRecord(updates)) throw new Error('Task update must be an object');
+    assertKnownKeys(
+      updates,
+      new Set([
+        'status',
+        'lastPolledAt',
+        'completedAt',
+        'providerStatus',
+        'lastPollError',
+      ]),
+      'task update',
+    );
+    if (
+      updates.status !== undefined &&
+      (typeof updates.status !== 'string' || !TASK_STATUSES.has(updates.status))
+    ) {
+      throw new Error('Task update status is invalid');
+    }
+    for (const key of ['lastPolledAt', 'completedAt'] as const) {
+      if (updates[key] !== undefined && !Number.isSafeInteger(updates[key])) {
+        throw new Error(`Task update ${key} is invalid`);
+      }
+      if (updates[key] !== undefined && updates[key] < 0) {
+        throw new Error(`Task update ${key} is invalid`);
+      }
+    }
+    for (const key of ['providerStatus', 'lastPollError'] as const) {
+      if (updates[key] !== undefined && !isSafeString(updates[key])) {
+        throw new Error(`Task update ${key} is unsafe`);
+      }
+    }
   }
 
   private validateInputTask(value: unknown): void {
