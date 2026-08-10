@@ -32,6 +32,9 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
+    "test:packed": "npm run build && node scripts/verify-packed-consumer.mjs",
+    "test:engine-floor": "node scripts/verify-packed-consumer.mjs --expect-engine-rejection",
+    "test:sea": "npm run build:sea && node scripts/verify-sea.mjs",
     "test:workers": "npm run build && vitest run --config vitest.workers.config.ts",
     "test:pty": "npm run build && vitest run --config vitest.pty.config.ts",
     "test:watch": "vitest",
@@ -43,7 +46,7 @@
     "@clack/prompts": "^1.7.0",
     "@inquirer/prompts": "^7.10.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "marked": "^18.0.9",
     "ora": "^9.4.1",
     "p-limit": "^7.3.0",
@@ -74,7 +77,7 @@
     }
   },
   "engines": {
-    "node": ">=20.12"
+    "node": ">=22.12.0"
   },
   "files": [
     "dist"

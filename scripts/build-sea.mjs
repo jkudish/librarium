@@ -12,9 +12,15 @@
  */
 
 import { execSync } from 'node:child_process';
-import { copyFileSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { arch, platform } from 'node:os';
 import { join } from 'node:path';
-import { platform, arch } from 'node:os';
 
 const DIST = 'dist';
 const SEA_CONFIG = join(DIST, 'sea-config.json');
@@ -45,22 +51,37 @@ console.log(`  Output:  ${outputPath}`);
 
 // Step 1: Bundle with esbuild into CJS (SEA requires CJS)
 console.log('\n1. Bundling with esbuild...');
-run(`npx esbuild src/cli.ts --bundle --platform=node --target=node20 --format=cjs --outfile=${CJS_BUNDLE} --define:__VERSION__='"${pkg.version}"' --external:fsevents`);
+run(
+  `npx esbuild src/cli.ts --bundle --platform=node --target=node22.12 --format=cjs --outfile=${CJS_BUNDLE} --define:__VERSION__='"${pkg.version}"' --external:fsevents`,
+);
 
 // Step 2: Generate SEA config and blob
 console.log('\n2. Generating SEA blob...');
-writeFileSync(SEA_CONFIG, JSON.stringify({
-  main: CJS_BUNDLE,
-  output: SEA_BLOB,
-  disableExperimentalSEAWarning: true,
-  useCodeCache: true,
-}, null, 2));
+writeFileSync(
+  SEA_CONFIG,
+  JSON.stringify(
+    {
+      main: CJS_BUNDLE,
+      output: SEA_BLOB,
+      disableExperimentalSEAWarning: true,
+      useCodeCache: true,
+    },
+    null,
+    2,
+  ),
+);
 
 run(`"${process.execPath}" --experimental-sea-config ${SEA_CONFIG}`);
 
 // Step 3: Copy node binary
 console.log('\n3. Copying Node.js binary...');
+rmSync(outputPath, { force: true });
 copyFileSync(process.execPath, outputPath);
+if (!isWindows) {
+  // Homebrew's Node binary can be read-only in the Cellar. postject needs the
+  // copied executable to be writable before it can inject the SEA blob.
+  chmodSync(outputPath, 0o755);
+}
 
 // Step 4: Remove macOS code signature (required before injection)
 if (isMac) {

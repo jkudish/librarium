@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/librarium"><img src="https://img.shields.io/npm/v/librarium?color=cb3837&label=npm" alt="npm version" /></a>
   <a href="https://github.com/jkudish/librarium/actions/workflows/ci.yml"><img src="https://github.com/jkudish/librarium/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/jkudish/librarium/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/librarium?color=blue" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/node/v/librarium?color=5fa04e" alt="Node >= 20.12" />
+  <img src="https://img.shields.io/node/v/librarium?color=5fa04e" alt="Node >= 22.12" />
 </p>
 
 <p align="center">
@@ -38,7 +38,7 @@ The full docs live at **[librarium.agentsy.build](https://librarium.agentsy.buil
 ## Quick Start
 
 ```bash
-# Install (requires Node.js >= 20.12)
+# Install from npm (requires Node.js >= 22.12)
 npm install -g librarium
 
 # Start guided setup if no providers are configured yet
@@ -69,7 +69,7 @@ Plus provider groups, automatic fallbacks, and custom providers from npm or loca
 
 ## Installation
 
-### npm (requires Node.js >= 20.12)
+### npm (requires Node.js >= 22.12)
 
 ```bash
 npm install -g librarium
@@ -99,11 +99,17 @@ brew install jkudish/tap/librarium
 curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh
 ```
 
+The standalone and Homebrew installations ship a self-contained executable with
+its own Node runtime. They do not require Node.js to be installed on the host.
+
 ### npx (no install)
 
 ```bash
 npx librarium run "your query"
 ```
+
+The npm, pnpm, yarn, and npx methods, including `librarium/core` and
+`librarium/node` library imports, require Node.js 22.12 or newer.
 
 ### Upgrade
 
