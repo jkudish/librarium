@@ -50,7 +50,9 @@ describe('published terminal interchange snapshot', () => {
       'usage',
     ]);
     expect(
-      list(join(root, 'schema')).map((path) => relative(root, path)),
+      list(join(root, 'schema')).map((path) =>
+        relative(root, path).replaceAll('\\', '/'),
+      ),
     ).toEqual(['schema/interchange.schema.json']);
   });
 
