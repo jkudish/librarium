@@ -22,6 +22,11 @@ const FNV_64_OFFSET_BASIS = 0xcbf2_9ce4_8422_2325n;
 const FNV_64_PRIME = 0x0000_0100_0000_01b3n;
 const UINT64_MASK = 0xffff_ffff_ffff_ffffn;
 
+/** Locale-independent UTF-16 ordering shared by catalog arrays and JSON keys. */
+export function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /**
  * Canonical JSON: object keys sorted, array order preserved, `undefined`
  * omitted. Key sorting is what makes the fingerprint independent of the order
@@ -38,7 +43,7 @@ export function canonicalJson(value: unknown): string {
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+      .sort(([left], [right]) => compareCanonicalStrings(left, right));
     return `{${entries
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
       .join(',')}}`;

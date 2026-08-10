@@ -3,6 +3,7 @@ import {
   CATALOG_FINGERPRINT_PREFIX,
   canonicalJson,
   catalogFingerprint,
+  compareCanonicalStrings,
   isCatalogFingerprint,
 } from '../src/core/catalog-fingerprint.js';
 
@@ -32,6 +33,15 @@ describe('catalog fingerprint -- shape', () => {
 });
 
 describe('catalog fingerprint -- insertion-order independence', () => {
+  it('uses locale-independent string ordering', () => {
+    const values = ['éclair', 'alpha', 'Beta'];
+    expect([...values].sort(compareCanonicalStrings)).toEqual([
+      'Beta',
+      'alpha',
+      'éclair',
+    ]);
+  });
+
   it('sorts object keys so declaration order cannot change the value', () => {
     expect(canonicalJson({ b: 1, a: 2 })).toBe('{"a":2,"b":1}');
     expect(catalogFingerprint({ b: 1, a: 2, c: { z: 1, y: 2 } })).toBe(

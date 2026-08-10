@@ -83,6 +83,76 @@ function keys(values: readonly { provider_id: string; profile_id: string }[]) {
   return values.map((value) => `${value.provider_id}/${value.profile_id}`);
 }
 
+function customProviderConfig(
+  overrides: Partial<Config> & { defaults?: Partial<Config['defaults']> } = {},
+): Config {
+  return config({
+    providers: { 'acme-adapter': { enabled: true } },
+    customProviders: {
+      'acme-adapter': {
+        type: 'npm',
+        module: 'acme-provider',
+        executionProfile: {
+          bindingId: 'acme.search.v1',
+          profile: {
+            identity: {
+              provider_id: 'acme-provider',
+              profile_id: 'search',
+              target: { primary: { model_selection: 'not_applicable' } },
+            },
+            result_kind: 'search_results',
+            observation_mode: 'api_output',
+            corpora: ['web'],
+            retrieval_method: 'search_endpoint',
+            access_mode: 'direct',
+            operator_id: 'acme-provider',
+            invocation: 'inline',
+            resumability: 'none',
+          },
+        },
+      },
+    },
+    trustedProviderIds: ['acme-adapter'],
+    ...overrides,
+  });
+}
+
+const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
+  entry.profiles.some((profile) => profile.status === 'planned'),
+).map((entry) => entry.provider_id);
+
+function customIdentityConfig(
+  adapterId: string,
+  providerId: string,
+  profileId = 'search',
+  enabled = true,
+): Config {
+  const base = customProviderConfig();
+  const metadata = base.customProviders['acme-adapter']?.executionProfile;
+  if (!metadata) throw new Error('missing custom metadata fixture');
+  return config({
+    providers: { [adapterId]: { enabled } },
+    customProviders: {
+      [adapterId]: {
+        type: 'npm',
+        module: 'must-not-load',
+        executionProfile: {
+          ...metadata,
+          profile: {
+            ...metadata.profile,
+            identity: {
+              ...metadata.profile.identity,
+              provider_id: providerId,
+              profile_id: profileId,
+            },
+          },
+        },
+      },
+    },
+    trustedProviderIds: [adapterId],
+  });
+}
+
 function map(
   config: Config,
   options: Omit<ConfigurationMappingOptions, 'authoredGroups'> & {
@@ -96,6 +166,166 @@ function map(
 }
 
 describe('configuration mapping', () => {
+  it('maps only trusted enabled custom metadata into exact groups and reserves', () => {
+    const source = customProviderConfig({
+      providers: {
+        exa: { enabled: true, fallback: 'acme-adapter' },
+        'acme-adapter': { enabled: true },
+      },
+      groups: { team: ['acme-adapter'] },
+    });
+    const mapped = map(source, {
+      requestDeadlineMs: 300_000,
+      credentials: credentials(),
+    });
+    expect(mapped.preflight.issues).toEqual([]);
+    expect(mapped.custom_profile_bindings).toEqual([
+      expect.objectContaining({
+        adapter_id: 'acme-adapter',
+        binding_id: 'acme.search.v1',
+      }),
+    ]);
+    expect(mapped.groups.team).toEqual(['acme-provider/search']);
+    expect(keys(mapped.reserve)).toEqual(['acme-provider/search']);
+    expect(mapped.catalog.resolveGroup('custom:team')).toEqual([
+      expect.objectContaining({
+        provider_id: 'acme-provider',
+        profile_id: 'search',
+      }),
+    ]);
+
+    for (const filtered of [
+      customProviderConfig({ trustedProviderIds: [] }),
+      customProviderConfig({
+        providers: { 'acme-adapter': { enabled: false } },
+      }),
+    ]) {
+      const result = map(filtered, { requestDeadlineMs: 300_000 });
+      expect(result.custom_profile_bindings).toEqual([]);
+      expect(result.catalog.get('acme-provider', 'search')).toBeUndefined();
+    }
+  });
+
+  it.each(PLANNED_PROVIDER_IDS)(
+    'keeps planned built-in adapter id %s reserved during mapping',
+    (providerId) => {
+      const source = customIdentityConfig(
+        providerId,
+        'custom-identity',
+        'search',
+      );
+      const mapped = map(source, { requestDeadlineMs: 300_000 });
+      expect(mapped.custom_profile_bindings).toEqual([]);
+      expect(mapped.preflight.issues).not.toContainEqual(
+        expect.objectContaining({ code: 'custom_provider_profile_missing' }),
+      );
+    },
+  );
+
+  it.each([...PLANNED_PROVIDER_IDS, 'openai-deep'])(
+    'rejects custom metadata claiming reserved provider identity %s',
+    (providerId) => {
+      const mapped = map(customIdentityConfig('acme-adapter', providerId), {
+        requestDeadlineMs: 300_000,
+      });
+      expect(mapped.custom_profile_bindings).toEqual([]);
+      expect(mapped.preflight.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'custom_provider_profile_provider_id_reserved',
+          path: '/customProviders/acme-adapter/executionProfile/profile/identity/provider_id',
+        }),
+      );
+    },
+  );
+
+  it.each([
+    {
+      source: customIdentityConfig('acme/adapter', 'acme-provider'),
+      code: 'custom_provider_adapter_id_unaddressable',
+      path: '/customProviders/acme~1adapter',
+    },
+    {
+      source: customIdentityConfig('acme~adapter', 'acme/provider'),
+      code: 'custom_provider_profile_id_unaddressable',
+      path: '/customProviders/acme~0adapter/executionProfile/profile/identity/provider_id',
+    },
+    {
+      source: customIdentityConfig('acme-adapter', 'acme/provider'),
+      code: 'custom_provider_profile_id_unaddressable',
+      path: '/customProviders/acme-adapter/executionProfile/profile/identity/provider_id',
+    },
+    {
+      source: customIdentityConfig(
+        'acme-adapter',
+        'acme-provider',
+        'search/v2',
+      ),
+      code: 'custom_provider_profile_id_unaddressable',
+      path: '/customProviders/acme-adapter/executionProfile/profile/identity/profile_id',
+    },
+  ])(
+    'returns a stable $code issue instead of throwing',
+    ({ source, code, path }) => {
+      expect(() => map(source, { requestDeadlineMs: 300_000 })).not.toThrow();
+      const mapped = map(source, { requestDeadlineMs: 300_000 });
+      expect(mapped.custom_profile_bindings).toEqual([]);
+      expect(mapped.preflight.issues).toContainEqual(
+        expect.objectContaining({ code, path }),
+      );
+    },
+  );
+
+  it.each(['', ' acme-adapter', 'acme\u0001adapter'])(
+    'rejects invalid eligible adapter record key %j without throwing',
+    (adapterId) => {
+      const mapped = map(customIdentityConfig(adapterId, 'acme-provider'), {
+        requestDeadlineMs: 300_000,
+      });
+      expect(mapped.custom_profile_bindings).toEqual([]);
+      expect(mapped.preflight.issues).toContainEqual(
+        expect.objectContaining({ code: 'custom_provider_adapter_id_invalid' }),
+      );
+    },
+  );
+
+  it('admits a trusted disabled custom profile only as a configured reserve', () => {
+    const source = customProviderConfig({
+      providers: {
+        exa: { enabled: true, fallback: 'acme-adapter' },
+        'acme-adapter': { enabled: false },
+      },
+    });
+    const mapped = map(source, {
+      requestDeadlineMs: 300_000,
+      credentials: credentials(),
+    });
+    expect(mapped.preflight.issues).toEqual([]);
+    expect(mapped.custom_profile_bindings).toHaveLength(1);
+    expect(mapped.reserve_only_adapter_ids).toEqual(['acme-adapter']);
+    expect(keys(mapped.reserve)).toEqual(['acme-provider/search']);
+    expect(
+      mapped.catalog.get('acme-provider', 'search')?.availability,
+    ).toMatchObject({ enabled: false, reserve_only: true, selectable: false });
+    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
+  });
+
+  it('owns and freezes custom profile bindings independently of caller config', () => {
+    const source = customProviderConfig();
+    const mapped = map(source, { requestDeadlineMs: 300_000 });
+    const digest = mapped.catalog.digest;
+    expect(Object.isFrozen(mapped.custom_profile_bindings)).toBe(true);
+    expect(Object.isFrozen(mapped.custom_profile_bindings[0]?.profile)).toBe(
+      true,
+    );
+    const metadata = source.customProviders['acme-adapter']?.executionProfile;
+    if (!metadata) throw new Error('missing custom metadata fixture');
+    metadata.profile.identity.provider_id = 'mutated';
+    expect(
+      mapped.custom_profile_bindings[0]?.profile.identity.provider_id,
+    ).toBe('acme-provider');
+    expect(mapped.catalog.digest).toBe(digest);
+  });
+
   it('orders preflight diagnostics by phase, path, code, and profile key', () => {
     const sorted = sortPreparationDiagnostics([
       {

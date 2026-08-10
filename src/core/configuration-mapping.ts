@@ -4,8 +4,10 @@ import {
   type ProviderNameEntry,
   resolveProviderToken,
 } from '../constants.js';
+import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Config, ProviderConfig } from '../types.js';
 import { customWorkflowId } from './builtin-workflows.js';
+import { compareCanonicalStrings } from './catalog-fingerprint.js';
 import type { CredentialContext } from './credentials.js';
 import {
   type AdapterProfileBinding,
@@ -15,15 +17,20 @@ import {
 import {
   buildProviderCatalog,
   type CatalogProfileTarget,
+  type CustomCatalogProfile,
   type ProviderCatalog,
 } from './profile-catalog.js';
 import { BUILTIN_PROVIDER_DEFINITIONS } from './provider-descriptor.js';
-import type { ProviderCatalogEntry } from './provider-profiles.js';
+import {
+  BUILTIN_PROVIDER_CATALOG,
+  type ProviderCatalogEntry,
+} from './provider-profiles.js';
 import type {
   PreparationIssue,
   PreparationNotice,
 } from './research-request.js';
 import { comparePreparationDiagnostics } from './research-request.js';
+import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import type {
   CanonicalTransportDefaults,
   ConfigurationTransportInput,
@@ -67,6 +74,8 @@ export interface ConfigurationMappingResult {
   readonly group_aliases: Readonly<Record<string, string>>;
   readonly reserve: readonly CatalogProfileTarget[];
   readonly reserve_only_adapter_ids: readonly string[];
+  /** Trust-filtered, closure-free custom bindings used by private ingress. */
+  readonly custom_profile_bindings: readonly CustomCatalogProfile[];
   readonly preflight: ConfigurationPreflight;
 }
 
@@ -110,11 +119,29 @@ function publicRecord<T>(
   return Object.fromEntries(Object.entries(record));
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value))
+    return value;
+  Object.freeze(value);
+  for (const nested of Object.values(value)) deepFreeze(nested);
+  return value;
+}
+
+function ownCustomProfiles(
+  profiles: readonly CustomCatalogProfile[],
+): readonly CustomCatalogProfile[] {
+  return deepFreeze(structuredClone(profiles));
+}
+
 function ownValue<T>(
   record: Readonly<Record<string, T>>,
   key: string,
 ): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function escapePointerSegment(segment: string): string {
+  return segment.replaceAll('~', '~0').replaceAll('/', '~1');
 }
 
 function canonicalProviderId(id: string): string {
@@ -128,6 +155,7 @@ function canonicalProviderId(id: string): string {
  */
 export function resolveConfigurationProfileToken(
   token: string,
+  customProfiles: readonly CustomCatalogProfile[] = [],
 ): ConfigurationProfileTokenResolution {
   const trimmed = token.trim();
   const qualified = trimmed.split('/');
@@ -136,9 +164,10 @@ export function resolveConfigurationProfileToken(
       provider_id: qualified[0],
       profile_id: qualified[1],
     };
-    const known = [...adapterProfileBindings().values()].some((binding) =>
-      sameProfile(binding, target),
-    );
+    const known = [
+      ...adapterProfileBindings().values(),
+      ...customProfiles.map(customProfileBinding),
+    ].some((binding) => sameProfile(binding, target));
     return known
       ? { kind: 'exact', token: trimmed, target }
       : { kind: 'unknown', token: trimmed, suggestions: [] };
@@ -150,9 +179,20 @@ export function resolveConfigurationProfileToken(
   const direct = adapterProfileBinding(trimmed);
   if (direct) return exactToken(trimmed, direct);
 
-  const catalogMatches = [...adapterProfileBindings().values()]
+  const directCustom = customProfiles.find(
+    (profile) => profile.adapter_id === trimmed,
+  );
+  if (directCustom)
+    return exactToken(trimmed, customProfileBinding(directCustom));
+
+  const catalogMatches = [
+    ...adapterProfileBindings().values(),
+    ...customProfiles.map(customProfileBinding),
+  ]
     .filter((binding) => binding.provider_id === trimmed)
-    .sort((left, right) => profileKey(left).localeCompare(profileKey(right)));
+    .sort((left, right) =>
+      compareCanonicalStrings(profileKey(left), profileKey(right)),
+    );
   if (catalogMatches.length === 1)
     return exactToken(trimmed, catalogMatches[0]);
   if (catalogMatches.length > 1) {
@@ -200,9 +240,14 @@ export function resolveConfigurationProfileToken(
       candidates: exactTargetsForProviderEntries(provider.candidates),
     };
   }
-  const matches = [...adapterProfileBindings().values()]
+  const matches = [
+    ...adapterProfileBindings().values(),
+    ...customProfiles.map(customProfileBinding),
+  ]
     .filter((binding) => binding.provider_id === provider.id)
-    .sort((left, right) => profileKey(left).localeCompare(profileKey(right)));
+    .sort((left, right) =>
+      compareCanonicalStrings(profileKey(left), profileKey(right)),
+    );
   if (matches.length === 1) {
     return exactToken(
       trimmed,
@@ -250,7 +295,8 @@ function exactTargetsForProviderEntries(
       ]),
     ).values(),
   ].sort((left, right) =>
-    `${left.provider_id}/${left.profile_id}`.localeCompare(
+    compareCanonicalStrings(
+      `${left.provider_id}/${left.profile_id}`,
       `${right.provider_id}/${right.profile_id}`,
     ),
   );
@@ -258,7 +304,10 @@ function exactTargetsForProviderEntries(
 
 function exactToken(
   token: string,
-  binding: AdapterProfileBinding,
+  binding: Pick<
+    AdapterProfileBinding,
+    'adapter_id' | 'provider_id' | 'profile_id'
+  >,
   alias?: { readonly from: string; readonly adapter_id: string },
 ): ConfigurationProfileTokenResolution {
   return {
@@ -270,6 +319,165 @@ function exactToken(
     },
     ...(alias && { alias }),
   };
+}
+
+function customProfileBinding(
+  profile: CustomCatalogProfile,
+): AdapterProfileBinding {
+  return {
+    adapter_id: profile.adapter_id,
+    provider_id: profile.profile.identity.provider_id,
+    profile_id: profile.profile.identity.profile_id,
+  };
+}
+
+function customCatalogProfileCandidates(
+  config: Config,
+): CustomCatalogProfile[] {
+  const trusted = new Set(config.trustedProviderIds);
+  const candidates: CustomCatalogProfile[] = [];
+  for (const [adapterId, source] of Object.entries(config.customProviders)) {
+    if (
+      RESERVED_BUILTIN_PROVIDER_IDS.has(adapterId) ||
+      !trusted.has(adapterId) ||
+      source.executionProfile === undefined
+    ) {
+      continue;
+    }
+    candidates.push({
+      adapter_id: adapterId,
+      binding_id: source.executionProfile.bindingId,
+      profile: source.executionProfile.profile,
+      ...(source.executionProfile.credential && {
+        credential_env_var: source.executionProfile.credential.envVar,
+      }),
+    });
+  }
+  return candidates;
+}
+
+function validateCustomCatalogProfiles(
+  candidates: readonly CustomCatalogProfile[],
+  catalog: readonly ProviderCatalogEntry[] = BUILTIN_PROVIDER_CATALOG,
+): {
+  profiles: CustomCatalogProfile[];
+  issues: PreparationIssue[];
+} {
+  const profiles: CustomCatalogProfile[] = [];
+  const issues: PreparationIssue[] = [];
+  const profileKeys = new Set(
+    catalog.flatMap((entry) =>
+      entry.profiles.map((profile) =>
+        JSON.stringify([entry.provider_id, profile.profile_id]),
+      ),
+    ),
+  );
+  const bindingKeys = new Set<string>();
+
+  for (const candidate of candidates) {
+    const adapterId = candidate.adapter_id;
+    const basePath = `/customProviders/${escapePointerSegment(adapterId)}/executionProfile`;
+    let addressable = true;
+    if (!OpaqueIdSchema.safeParse(adapterId).success) {
+      addressable = false;
+      issues.push({
+        code: 'custom_provider_adapter_id_invalid',
+        phase: 'migration',
+        path: `/customProviders/${escapePointerSegment(adapterId)}`,
+        message:
+          'Custom-provider adapter ids must be non-empty, trimmed, control-free opaque identifiers.',
+      });
+    }
+    if (adapterId.includes('/')) {
+      addressable = false;
+      issues.push({
+        code: 'custom_provider_adapter_id_unaddressable',
+        phase: 'migration',
+        path: `/customProviders/${escapePointerSegment(adapterId)}`,
+        message:
+          'Custom-provider adapter ids cannot contain the "/" selector delimiter.',
+      });
+    }
+    const providerId = candidate.profile.identity.provider_id;
+    const profileId = candidate.profile.identity.profile_id;
+    if (RESERVED_BUILTIN_PROVIDER_IDS.has(providerId)) {
+      addressable = false;
+      issues.push({
+        code: 'custom_provider_profile_provider_id_reserved',
+        phase: 'migration',
+        path: `${basePath}/profile/identity/provider_id`,
+        message:
+          'A custom profile cannot claim a current, planned, or retired built-in provider id.',
+      });
+    }
+    for (const [field, value] of [
+      ['provider_id', providerId],
+      ['profile_id', profileId],
+    ] as const) {
+      if (!value.includes('/')) continue;
+      addressable = false;
+      issues.push({
+        code: 'custom_provider_profile_id_unaddressable',
+        phase: 'migration',
+        path: `${basePath}/profile/identity/${field}`,
+        message: `Custom-provider profile ${field} cannot contain the "/" selector delimiter.`,
+      });
+    }
+    if (!addressable) continue;
+    if (!OpaqueIdSchema.safeParse(candidate.binding_id).success) {
+      issues.push({
+        code: 'custom_provider_binding_id_invalid',
+        phase: 'migration',
+        path: `${basePath}/bindingId`,
+        message:
+          'Custom-provider binding ids must be non-empty, trimmed, control-free opaque identifiers.',
+      });
+      continue;
+    }
+    if (candidate.profile.resumability === 'process_local') {
+      issues.push({
+        code: 'custom_provider_process_local_unsupported',
+        phase: 'migration',
+        path: `${basePath}/profile/resumability`,
+        message:
+          'Custom-provider shadow planning supports inline or durable background profiles; process-local resumability remains on the v1 runtime path.',
+      });
+      continue;
+    }
+    const profile = customProfileBinding(candidate);
+    const identityTuple = JSON.stringify([
+      profile.provider_id,
+      profile.profile_id,
+    ]);
+    const identityDisplay = profileKey(profile);
+    if (profileKeys.has(identityTuple)) {
+      issues.push({
+        code: 'custom_provider_profile_duplicate',
+        phase: 'migration',
+        path: `${basePath}/profile/identity`,
+        message:
+          'Each custom provider must declare a unique provider/profile identity.',
+        profile_key: identityDisplay,
+      });
+      continue;
+    }
+    const bindingKey = JSON.stringify([adapterId, candidate.binding_id]);
+    if (bindingKeys.has(bindingKey)) {
+      issues.push({
+        code: 'custom_provider_binding_duplicate',
+        phase: 'migration',
+        path: `${basePath}/bindingId`,
+        message:
+          'Each custom provider must declare a unique adapter/binding identity.',
+        profile_key: identityDisplay,
+      });
+      continue;
+    }
+    profileKeys.add(identityTuple);
+    bindingKeys.add(bindingKey);
+    profiles.push(candidate);
+  }
+  return { profiles, issues };
 }
 
 function canonicalizeProviderConfigs(
@@ -387,6 +595,7 @@ function authoredGroups(
 
 function canonicalizeGroups(
   groups: Readonly<Record<string, readonly string[]>>,
+  customProfiles: readonly CustomCatalogProfile[] = [],
 ): {
   groups: Record<string, string[]>;
   notices: PreparationNotice[];
@@ -400,7 +609,10 @@ function canonicalizeGroups(
     const seen = new Set<string>();
     for (const [index, member] of members.entries()) {
       const path = `/groups/${name}/${index}`;
-      const resolution = resolveConfigurationProfileToken(member);
+      const resolution = resolveConfigurationProfileToken(
+        member,
+        customProfiles,
+      );
       if (resolution.kind === 'unknown') {
         issues.push({
           code: 'configuration_group_member_unknown',
@@ -460,6 +672,7 @@ function groupAliases(
 
 function fallbackReserve(
   providerConfigs: Readonly<Record<string, ProviderConfig>>,
+  customProfiles: readonly CustomCatalogProfile[] = [],
 ): {
   reserve: CatalogProfileTarget[];
   reserveOnlyAdapterIds: string[];
@@ -503,7 +716,11 @@ function fallbackReserve(
       continue;
     }
 
-    const source = adapterProfileBinding(adapterId);
+    const source =
+      adapterProfileBinding(adapterId) ??
+      customProfiles
+        .filter((profile) => profile.adapter_id === adapterId)
+        .map(customProfileBinding)[0];
     if (!source) {
       issues.push({
         code: 'configuration_fallback_unbound_source',
@@ -514,7 +731,11 @@ function fallbackReserve(
       });
       continue;
     }
-    const target = adapterProfileBinding(fallback);
+    const target =
+      adapterProfileBinding(fallback) ??
+      customProfiles
+        .filter((profile) => profile.adapter_id === fallback)
+        .map(customProfileBinding)[0];
     if (!target) {
       issues.push({
         code: ownValue(providerConfigs, fallback)
@@ -647,11 +868,35 @@ export function mapConfiguration(
 ): ConfigurationMappingResult {
   const providerConfigMapping = materializeProviderConfigs(config);
   const providerConfigs = providerConfigMapping.providerConfigs;
+  const customCandidates = customCatalogProfileCandidates(config);
+  // Disabled custom providers are admitted only when a validated configured
+  // fallback edge needs them as reserve-only targets. This preliminary pass
+  // determines that eligibility; final diagnostics and reserve facts are
+  // recomputed after semantic validation below.
+  const preliminaryFallback = fallbackReserve(
+    providerConfigs,
+    customCandidates,
+  );
+  const reserveOnly = new Set(preliminaryFallback.reserveOnlyAdapterIds);
+  const eligibleCustomCandidates = customCandidates.filter(
+    (candidate) =>
+      providerConfigs[candidate.adapter_id]?.enabled === true ||
+      reserveOnly.has(candidate.adapter_id),
+  );
+  const custom = validateCustomCatalogProfiles(
+    eligibleCustomCandidates,
+    options.catalog ?? BUILTIN_PROVIDER_CATALOG,
+  );
+  const customProfiles = ownCustomProfiles(custom.profiles);
   const authored = authoredGroups(options.authoredGroups);
-  const canonicalGroups = canonicalizeGroups(authored);
+  const canonicalGroups = canonicalizeGroups(authored, customProfiles);
   const groups = canonicalGroups.groups;
-  const fallback = fallbackReserve(providerConfigs);
-  const issues = [...canonicalGroups.issues, ...fallback.issues];
+  const fallback = fallbackReserve(providerConfigs, customProfiles);
+  const issues = [
+    ...custom.issues,
+    ...canonicalGroups.issues,
+    ...fallback.issues,
+  ];
   const transportDefaults = canonicalDefaults(
     config,
     options.requestDeadlineMs,
@@ -666,6 +911,7 @@ export function mapConfiguration(
     // derives a v2 default roster.
     reserve: fallback.reserve,
     reserveOnlyAdapterIds: fallback.reserveOnlyAdapterIds,
+    customProfiles,
   });
   const notices = [
     ...canonicalGroups.notices,
@@ -696,6 +942,7 @@ export function mapConfiguration(
     group_aliases: aliases,
     reserve: fallback.reserve,
     reserve_only_adapter_ids: fallback.reserveOnlyAdapterIds,
+    custom_profile_bindings: customProfiles,
     preflight: { notices, issues: allIssues },
   };
 }

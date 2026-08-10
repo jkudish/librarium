@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
+
+const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
+  entry.profiles.some((profile) => profile.status === 'planned'),
+).map((entry) => entry.provider_id);
 
 // The `librarium/node` entry point is the documented Node-only bridge that lets
 // library consumers (not just the CLI) load npm/script custom providers and
@@ -190,4 +195,54 @@ describe('librarium/node entry', () => {
     expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
     expect(existsSync(markerPath)).toBe(false);
   });
+
+  it.each(PLANNED_PROVIDER_IDS)(
+    'rejects planned built-in id %s before importing npm code',
+    async (providerId) => {
+      const markerPath = join(tmpDir, `${providerId}-npm-loaded`);
+      writeNpmProvider(providerId, markerPath);
+      const result = await loadCustomProviders({
+        providers: { [providerId]: { enabled: true } },
+        customProviders: {
+          [providerId]: { type: 'npm', module: providerId },
+        },
+        trustedProviderIds: [providerId],
+      });
+      expect(result.loadedIds).not.toContain(providerId);
+      expect(result.skippedIds).toContain(providerId);
+      expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
+      expect(existsSync(markerPath)).toBe(false);
+    },
+  );
+
+  it.each(PLANNED_PROVIDER_IDS)(
+    'rejects planned built-in id %s before spawning script describe code',
+    async (providerId) => {
+      const markerPath = join(tmpDir, `${providerId}-script-described`);
+      const scriptPath = join(tmpDir, `${providerId}-provider-script.mjs`);
+      writeFileSync(
+        scriptPath,
+        [
+          "import { writeFileSync } from 'node:fs';",
+          `writeFileSync(${JSON.stringify(markerPath)}, 'described');`,
+        ].join('\n'),
+        'utf-8',
+      );
+      const result = await loadCustomProviders({
+        providers: { [providerId]: { enabled: true } },
+        customProviders: {
+          [providerId]: {
+            type: 'script',
+            command: process.execPath,
+            args: [scriptPath],
+          },
+        },
+        trustedProviderIds: [providerId],
+      });
+      expect(result.loadedIds).not.toContain(providerId);
+      expect(result.skippedIds).toContain(providerId);
+      expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
+      expect(existsSync(markerPath)).toBe(false);
+    },
+  );
 });

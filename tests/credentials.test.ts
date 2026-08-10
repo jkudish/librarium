@@ -56,4 +56,23 @@ describe('credential references', () => {
     ).toBeUndefined();
     expect(hasCredential('keychain:BRAVE_API_KEY', context)).toBe(false);
   });
+
+  it('never resolves inherited environment properties as credentials', () => {
+    expect(Object.hasOwn(process.env, 'hasOwnProperty')).toBe(false);
+    expect(
+      resolveCredential('$hasOwnProperty', { env: process.env }),
+    ).toBeUndefined();
+    expect(hasCredential('$hasOwnProperty', { env: process.env })).toBe(false);
+
+    const inherited = Object.create({
+      ACME_API_KEY: 'prototype-key',
+    }) as Record<string, string>;
+    expect(
+      resolveCredential('$ACME_API_KEY', { env: inherited }),
+    ).toBeUndefined();
+    inherited.ACME_API_KEY = 'own-key';
+    expect(resolveCredential('$ACME_API_KEY', { env: inherited })).toBe(
+      'own-key',
+    );
+  });
 });

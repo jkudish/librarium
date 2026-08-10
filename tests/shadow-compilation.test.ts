@@ -45,6 +45,60 @@ function credentials() {
   };
 }
 
+function customExecutionProfile(
+  invocation: 'inline' | 'background' = 'inline',
+) {
+  return {
+    identity: {
+      provider_id: 'acme',
+      profile_id: invocation === 'inline' ? 'search' : 'research',
+      target: { primary: { model_selection: 'not_applicable' as const } },
+    },
+    result_kind:
+      invocation === 'inline'
+        ? ('search_results' as const)
+        : ('research_report' as const),
+    ...(invocation === 'background' && {
+      grounding_policy: 'required' as const,
+    }),
+    observation_mode: 'api_output' as const,
+    corpora: ['web' as const],
+    retrieval_method:
+      invocation === 'inline'
+        ? ('search_endpoint' as const)
+        : ('research_agent' as const),
+    access_mode: 'direct' as const,
+    operator_id: 'acme',
+    invocation,
+    resumability:
+      invocation === 'inline' ? ('none' as const) : ('durable' as const),
+  };
+}
+
+function customSource(
+  overrides: Partial<Config> & { defaults?: Partial<Config['defaults']> } = {},
+): Config {
+  return config({
+    providers: { 'acme-adapter': { enabled: true } },
+    customProviders: {
+      'acme-adapter': {
+        type: 'npm',
+        module: 'must-not-be-imported',
+        executionProfile: {
+          bindingId: 'acme.search.v1',
+          profile: customExecutionProfile(),
+        },
+      },
+    },
+    trustedProviderIds: ['acme-adapter'],
+    ...overrides,
+  });
+}
+
+const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
+  entry.profiles.some((profile) => profile.status === 'planned'),
+).map((entry) => entry.provider_id);
+
 function preparation() {
   const counts = new Map<string, number>();
   return {
@@ -447,11 +501,293 @@ describe('private shadow compilation', () => {
     }
   });
 
+  it('plans trusted custom profiles by adapter, qualified identity, group, and default without loading code', () => {
+    const source = customSource({ groups: { team: ['acme-adapter'] } });
+    for (const transport of [
+      {
+        kind: 'mcp' as const,
+        input: { query: 'adapter', providers: ['acme-adapter'] },
+      },
+      {
+        kind: 'mcp' as const,
+        input: { query: 'qualified', providers: ['acme/search'] },
+      },
+      {
+        kind: 'mcp' as const,
+        input: { query: 'group', group: 'team' },
+      },
+      { kind: 'mcp' as const, input: { query: 'default' } },
+    ]) {
+      const result = compile(source, transport);
+      expect(profileKeys(result)).toEqual(['acme/search']);
+      if (!result.ok) continue;
+      expect(result.prepared.profile_plans_by_identity).toEqual(
+        expect.objectContaining({
+          [JSON.stringify([
+            'acme',
+            'search',
+            'not_applicable',
+            null,
+            null,
+            null,
+            null,
+            null,
+          ])]: expect.objectContaining({
+            binding: {
+              adapter_id: 'acme-adapter',
+              binding_id: 'acme.search.v1',
+            },
+          }),
+        }),
+      );
+    }
+  });
+
+  it('plans a compatible custom fallback and durable async profile', () => {
+    const fallbackSource = customSource({
+      providers: {
+        exa: { enabled: true, fallback: 'acme-adapter' },
+        'acme-adapter': { enabled: true },
+      },
+    });
+    const fallback = compile(fallbackSource, {
+      kind: 'mcp',
+      input: { query: 'fallback', providers: ['exa'] },
+    });
+    expect(fallback.ok).toBe(true);
+    if (fallback.ok) {
+      expect(
+        fallback.prepared.request.fallback_reserve.map(
+          (candidate) =>
+            `${candidate.profile.identity.provider_id}/${candidate.profile.identity.profile_id}`,
+        ),
+      ).toEqual(['acme/search']);
+    }
+
+    const durable = customSource({
+      defaults: { mode: 'async' },
+      customProviders: {
+        'acme-adapter': {
+          type: 'script',
+          command: 'must-not-run',
+          executionProfile: {
+            bindingId: 'acme.research.v1',
+            profile: customExecutionProfile('background'),
+          },
+        },
+      },
+    });
+    const asyncResult = compile(durable, {
+      kind: 'mcp',
+      input: {
+        query: 'durable',
+        mode: 'async',
+        providers: ['acme-adapter'],
+      },
+    });
+    expect(profileKeys(asyncResult)).toEqual(['acme/research']);
+  });
+
+  it('keeps untrusted and disabled custom declarations out and rejects process-local planning', () => {
+    const untrusted = customSource({ trustedProviderIds: [] });
+    const disabled = customSource({
+      providers: { 'acme-adapter': { enabled: false } },
+    });
+    for (const source of [untrusted, disabled]) {
+      const result = compile(source, {
+        kind: 'mcp',
+        input: { query: 'not eligible', providers: ['acme-adapter'] },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.issues).toContainEqual(
+          expect.objectContaining({ code: 'shadow_provider_token_unknown' }),
+        );
+      }
+    }
+
+    const processLocal = customSource({
+      customProviders: {
+        'acme-adapter': {
+          type: 'npm',
+          module: 'must-not-import',
+          executionProfile: {
+            bindingId: 'acme.local.v1',
+            profile: {
+              ...customExecutionProfile('background'),
+              resumability: 'process_local',
+            },
+          },
+        },
+      },
+    });
+    const result = compile(processLocal, {
+      kind: 'mcp',
+      input: { query: 'local', providers: ['acme-adapter'] },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'custom_provider_process_local_unsupported',
+        }),
+      );
+    }
+  });
+
+  it.each(PLANNED_PROVIDER_IDS)(
+    'keeps planned built-in adapter id %s reserved in shadow compilation',
+    (providerId) => {
+      const result = compile(
+        config({
+          providers: { [providerId]: { enabled: true } },
+          customProviders: {
+            [providerId]: {
+              type: 'npm',
+              module: 'must-not-import',
+              executionProfile: {
+                bindingId: 'malicious.v1',
+                profile: customExecutionProfile(),
+              },
+            },
+          },
+          trustedProviderIds: [providerId],
+        }),
+        {
+          kind: 'mcp',
+          input: { query: providerId, providers: [providerId] },
+        },
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.issues).toContainEqual(
+          expect.objectContaining({ code: 'shadow_provider_token_unknown' }),
+        );
+        expect(result.issues).not.toContainEqual(
+          expect.objectContaining({ code: 'custom_provider_profile_missing' }),
+        );
+      }
+    },
+  );
+
+  it('returns structured reserved-provider and slash diagnostics without throwing', () => {
+    const cases = [
+      {
+        source: customSource({
+          customProviders: {
+            'acme-adapter': {
+              type: 'npm',
+              module: 'must-not-import',
+              executionProfile: {
+                bindingId: 'acme.v1',
+                profile: {
+                  ...customExecutionProfile(),
+                  identity: {
+                    ...customExecutionProfile().identity,
+                    provider_id: 'parallel',
+                  },
+                },
+              },
+            },
+          },
+        }),
+        code: 'custom_provider_profile_provider_id_reserved',
+      },
+      {
+        source: config({
+          providers: { 'acme/adapter': { enabled: true } },
+          customProviders: {
+            'acme/adapter': {
+              type: 'npm',
+              module: 'must-not-import',
+              executionProfile: {
+                bindingId: 'acme.v1',
+                profile: customExecutionProfile(),
+              },
+            },
+          },
+          trustedProviderIds: ['acme/adapter'],
+        }),
+        code: 'custom_provider_adapter_id_unaddressable',
+      },
+      {
+        source: customSource({
+          customProviders: {
+            'acme-adapter': {
+              type: 'npm',
+              module: 'must-not-import',
+              executionProfile: {
+                bindingId: 'acme.v1',
+                profile: {
+                  ...customExecutionProfile(),
+                  identity: {
+                    ...customExecutionProfile().identity,
+                    provider_id: 'acme/provider',
+                  },
+                },
+              },
+            },
+          },
+        }),
+        code: 'custom_provider_profile_id_unaddressable',
+      },
+      {
+        source: customSource({
+          customProviders: {
+            'acme-adapter': {
+              type: 'npm',
+              module: 'must-not-import',
+              executionProfile: {
+                bindingId: 'acme.v1',
+                profile: {
+                  ...customExecutionProfile(),
+                  identity: {
+                    ...customExecutionProfile().identity,
+                    profile_id: 'search/v2',
+                  },
+                },
+              },
+            },
+          },
+        }),
+        code: 'custom_provider_profile_id_unaddressable',
+      },
+    ];
+    for (const { source, code } of cases) {
+      expect(() =>
+        compile(source, {
+          kind: 'mcp',
+          input: {
+            query: code,
+            providers: [Object.keys(source.providers)[0]!],
+          },
+        }),
+      ).not.toThrow();
+      const result = compile(source, {
+        kind: 'mcp',
+        input: { query: code, providers: [Object.keys(source.providers)[0]!] },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.issues).toContainEqual(expect.objectContaining({ code }));
+      }
+    }
+  });
+
   it('never treats built-in ids or aliases as missing custom profiles', () => {
     const canonical = compile(
       config({
         providers: { exa: { enabled: true } },
-        customProviders: { exa: { type: 'npm', module: 'malicious-exa' } },
+        customProviders: {
+          exa: {
+            type: 'npm',
+            module: 'malicious-exa',
+            executionProfile: {
+              bindingId: 'malicious.v1',
+              profile: customExecutionProfile(),
+            },
+          },
+        },
         trustedProviderIds: ['exa'],
       }),
       {
@@ -468,7 +804,14 @@ describe('private shadow compilation', () => {
       config({
         providers: { 'openai-deep': { enabled: true } },
         customProviders: {
-          'openai-deep': { type: 'npm', module: 'malicious-openai' },
+          'openai-deep': {
+            type: 'npm',
+            module: 'malicious-openai',
+            executionProfile: {
+              bindingId: 'malicious.v1',
+              profile: customExecutionProfile(),
+            },
+          },
         },
         trustedProviderIds: ['openai-deep'],
         defaults: { mode: 'async' },

@@ -56,7 +56,10 @@ export function resolveCredential(
   }
 
   if (value.startsWith('$')) {
-    return context.env?.[value.slice(1)];
+    const name = value.slice(1);
+    if (!context.env || !Object.hasOwn(context.env, name)) return undefined;
+    const resolved = context.env[name];
+    return typeof resolved === 'string' ? resolved : undefined;
   }
 
   if (isKeychainCredentialRef(value)) {

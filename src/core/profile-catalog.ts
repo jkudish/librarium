@@ -1,3 +1,4 @@
+import { OpaqueIdSchema } from '../contracts/common.js';
 import type {
   ExecutionProfile,
   ProviderIdentity,
@@ -12,7 +13,10 @@ import {
   migrateUserWorkflowNames,
   RESERVED_WORKFLOW_IDS,
 } from './builtin-workflows.js';
-import { catalogFingerprint } from './catalog-fingerprint.js';
+import {
+  catalogFingerprint,
+  compareCanonicalStrings,
+} from './catalog-fingerprint.js';
 import { type CredentialContext, hasCredential } from './credentials.js';
 import type {
   FrozenPlanningCatalog,
@@ -35,6 +39,7 @@ import type {
   PreparationIssue,
   PreparationNotice,
 } from './research-request.js';
+import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 
 export class ProviderCatalogError extends Error {}
 
@@ -48,7 +53,7 @@ export type AvailabilityReason =
 export interface ResolvedCatalogProfile {
   readonly declaration: ExecutableProfileDeclaration;
   readonly profile: ExecutionProfile;
-  readonly binding?: ProfileBinding;
+  readonly binding?: CatalogProfileBinding;
   readonly estimate?: NetworkFreeEstimate;
   readonly availability: {
     readonly enabled: boolean;
@@ -58,6 +63,25 @@ export interface ResolvedCatalogProfile {
     readonly selectable: boolean;
     readonly reasons: readonly string[];
   };
+}
+
+/** Closure-free identity used by the planner for built-in and custom adapters. */
+export interface CatalogProfileBinding {
+  readonly provider_id: string;
+  readonly profile_id: string;
+  readonly adapter_id: string;
+  readonly binding_id: string;
+}
+
+/**
+ * A trusted custom provider's planning-only declaration. Runtime code loading
+ * and operation validation remain outside this Worker-safe catalog boundary.
+ */
+export interface CustomCatalogProfile {
+  readonly adapter_id: string;
+  readonly binding_id: string;
+  readonly profile: ExecutionProfile;
+  readonly credential_env_var?: string;
 }
 
 /** A `provider_id/profile_id` reference used by configured rosters. */
@@ -79,6 +103,8 @@ export interface ProviderCatalogOptions {
   readonly reserve?: readonly CatalogProfileTarget[];
   /** Adapter ids which are disabled for primary selection but valid reserve. */
   readonly reserveOnlyAdapterIds?: readonly string[];
+  /** Already trust-filtered custom profiles; untrusted/disabled code stays out. */
+  readonly customProfiles?: readonly CustomCatalogProfile[];
 }
 
 export interface WorkflowOmission {
@@ -222,6 +248,62 @@ function resolveDeclaration(
   });
 }
 
+function customDeclaration(
+  profile: ExecutionProfile,
+  selectionOrder: number,
+): ExecutableProfileDeclaration {
+  const { identity, extensions: _extensions, ...facts } = profile;
+  return {
+    ...facts,
+    profile_id: identity.profile_id,
+    target: identity.target,
+    selection_order: selectionOrder,
+    status: 'implemented',
+    workflows: profile.result_kind === 'research_report' ? ['deep'] : [],
+  };
+}
+
+function resolveCustomProfile(
+  custom: CustomCatalogProfile,
+  selectionOrder: number,
+  options: ProviderCatalogOptions,
+): ResolvedCatalogProfile {
+  const providerConfig = bindingConfig(options, custom.adapter_id);
+  const enabled = providerConfig?.enabled === true;
+  const reserveOnly =
+    !enabled &&
+    options.reserveOnlyAdapterIds?.includes(custom.adapter_id) === true;
+  const credentialReference =
+    providerConfig?.apiKey ??
+    (custom.credential_env_var ? `$${custom.credential_env_var}` : undefined);
+  const credentialValid = custom.credential_env_var
+    ? hasCredential(credentialReference, options.credentials ?? {})
+    : true;
+  const reasons: string[] = [];
+  if (!enabled) reasons.push('profile_disabled');
+  if (!credentialValid) reasons.push('credential_missing');
+  const profile = ownFrozen(custom.profile);
+  const binding = ownFrozen<CatalogProfileBinding>({
+    provider_id: profile.identity.provider_id,
+    profile_id: profile.identity.profile_id,
+    adapter_id: custom.adapter_id,
+    binding_id: custom.binding_id,
+  });
+  return Object.freeze({
+    declaration: ownFrozen(customDeclaration(profile, selectionOrder)),
+    profile,
+    binding,
+    availability: ownFrozen({
+      enabled,
+      reserve_only: reserveOnly,
+      credential_valid: credentialValid,
+      configuration_valid: true,
+      selectable: enabled && credentialValid,
+      reasons,
+    }),
+  });
+}
+
 /**
  * Catalog construction is network-free, deterministic, and total: a missing,
  * duplicated, or orphaned binding fails here rather than at execution time.
@@ -252,8 +334,110 @@ export function buildProviderCatalog(
     }
   }
 
-  const resolved: ResolvedCatalogProfile[] = refs.map(
-    ({ entry, declaration }) =>
+  const declaredCustomProfiles = ownFrozen(
+    [...(options.customProfiles ?? [])].sort((left, right) => {
+      const leftKey = JSON.stringify([
+        left.profile.identity.provider_id,
+        left.profile.identity.profile_id,
+        left.adapter_id,
+        left.binding_id,
+      ]);
+      const rightKey = JSON.stringify([
+        right.profile.identity.provider_id,
+        right.profile.identity.profile_id,
+        right.adapter_id,
+        right.binding_id,
+      ]);
+      return compareCanonicalStrings(leftKey, rightKey);
+    }),
+  );
+  const customProfiles = declaredCustomProfiles.filter((custom) => {
+    const enabled = bindingConfig(options, custom.adapter_id)?.enabled === true;
+    return (
+      enabled ||
+      options.reserveOnlyAdapterIds?.includes(custom.adapter_id) === true
+    );
+  });
+  const profileKeys = new Set(
+    refs.map(({ entry, declaration }) =>
+      JSON.stringify([entry.provider_id, declaration.profile_id]),
+    ),
+  );
+  const adapterBindingKeys = new Set(
+    [...bindings.values()].map((binding) =>
+      JSON.stringify([binding.adapter_id, binding.binding_id]),
+    ),
+  );
+  const builtinAdapterIds = new Set(
+    [...bindings.values()].map((binding) => binding.adapter_id),
+  );
+  for (const custom of customProfiles) {
+    for (const [field, value] of [
+      ['adapter id', custom.adapter_id],
+      ['binding id', custom.binding_id],
+    ] as const) {
+      if (!OpaqueIdSchema.safeParse(value).success) {
+        throw new ProviderCatalogError(
+          `Custom provider ${field} must be a canonical opaque identifier: ${JSON.stringify(value)}`,
+        );
+      }
+    }
+    if (
+      builtinAdapterIds.has(custom.adapter_id) ||
+      RESERVED_BUILTIN_PROVIDER_IDS.has(custom.adapter_id)
+    ) {
+      throw new ProviderCatalogError(
+        `Custom provider adapter id is reserved: ${custom.adapter_id}`,
+      );
+    }
+    if (
+      RESERVED_BUILTIN_PROVIDER_IDS.has(custom.profile.identity.provider_id)
+    ) {
+      throw new ProviderCatalogError(
+        `Custom provider profile provider id is reserved: ${custom.profile.identity.provider_id}`,
+      );
+    }
+    for (const [field, value] of [
+      ['adapter id', custom.adapter_id],
+      ['provider id', custom.profile.identity.provider_id],
+      ['profile id', custom.profile.identity.profile_id],
+    ] as const) {
+      if (value.includes('/')) {
+        throw new ProviderCatalogError(
+          `Custom provider ${field} cannot contain the selector delimiter "/": ${value}`,
+        );
+      }
+    }
+    const profileTuple = JSON.stringify([
+      custom.profile.identity.provider_id,
+      custom.profile.identity.profile_id,
+    ]);
+    const profileDisplay = catalogProfileKey(
+      custom.profile.identity.provider_id,
+      custom.profile.identity.profile_id,
+    );
+    if (profileKeys.has(profileTuple)) {
+      throw new ProviderCatalogError(
+        `Duplicate provider profile declaration: ${profileDisplay}`,
+      );
+    }
+    profileKeys.add(profileTuple);
+    if (custom.profile.resumability === 'process_local') {
+      throw new ProviderCatalogError(
+        `Custom provider profiles cannot use process_local resumability: ${custom.adapter_id}`,
+      );
+    }
+    const bindingKey = JSON.stringify([custom.adapter_id, custom.binding_id]);
+    if (adapterBindingKeys.has(bindingKey)) {
+      throw new ProviderCatalogError(
+        `Duplicate adapter binding declaration: ${bindingKey}`,
+      );
+    }
+    adapterBindingKeys.add(bindingKey);
+  }
+
+  const resolved: ResolvedCatalogProfile[] = [
+    ...refs.map(({ entry, declaration }) =>
       resolveDeclaration(
         entry,
         declaration,
@@ -262,7 +446,11 @@ export function buildProviderCatalog(
         ),
         options,
       ),
-  );
+    ),
+    ...customProfiles.map((custom, index) =>
+      resolveCustomProfile(custom, refs.length + index + 1, options),
+    ),
+  ];
   const byKey = new Map(resolved.map((item) => [profileKeyOf(item), item]));
 
   // The catalog owns its selection policy from here on. Groups, defaults, and
@@ -525,7 +713,9 @@ export function buildProviderCatalog(
 
   const planningProfiles: PlanningProfile[] = resolved
     .filter(
-      (item): item is ResolvedCatalogProfile & { binding: ProfileBinding } =>
+      (
+        item,
+      ): item is ResolvedCatalogProfile & { binding: CatalogProfileBinding } =>
         item.binding !== undefined,
     )
     .map((item) => ({
@@ -552,6 +742,7 @@ export function buildProviderCatalog(
   );
   const digest = catalogFingerprint({
     revision,
+    custom_profiles: customProfiles,
     profiles: planningProfiles,
     workflows: BUILTIN_WORKFLOW_IDS.map((id) => ({
       workflow_id: id,

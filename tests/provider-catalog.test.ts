@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ExecutionProfileSchema } from '../src/contracts/domain/index.js';
+import {
+  type ExecutionProfile,
+  ExecutionProfileSchema,
+} from '../src/contracts/domain/index.js';
 import { fallbackCompatibilityIssues } from '../src/contracts/interchange/compatibility.js';
 import type { CredentialContext } from '../src/core/credentials.js';
 import {
@@ -13,6 +16,7 @@ import {
 } from '../src/core/profile-bindings.js';
 import {
   buildProviderCatalog,
+  type CustomCatalogProfile,
   type ProviderCatalog,
   type ProviderCatalogOptions,
 } from '../src/core/profile-catalog.js';
@@ -51,6 +55,35 @@ function catalog(options: ProviderCatalogOptions = {}): ProviderCatalog {
     credentials: allCredentials(),
     ...options,
   });
+}
+
+function customProfile(
+  overrides: Partial<CustomCatalogProfile> & {
+    profile?: Partial<ExecutionProfile>;
+  } = {},
+): CustomCatalogProfile {
+  const profile: ExecutionProfile = {
+    identity: {
+      provider_id: 'acme',
+      profile_id: 'search',
+      target: { primary: { model_selection: 'not_applicable' } },
+    },
+    result_kind: 'search_results',
+    observation_mode: 'api_output',
+    corpora: ['web'],
+    retrieval_method: 'search_endpoint',
+    access_mode: 'direct',
+    operator_id: 'acme',
+    invocation: 'inline',
+    resumability: 'none',
+    ...overrides.profile,
+  };
+  return {
+    adapter_id: 'acme-adapter',
+    binding_id: 'acme.search.v1',
+    ...overrides,
+    profile,
+  };
 }
 
 function keysOf(
@@ -106,6 +139,10 @@ const PLANNED_MATRIX = [
   ['valyu', 'search'],
   ['valyu', 'research'],
 ] as const;
+
+const PLANNED_PROVIDER_IDS = [
+  ...new Set(PLANNED_MATRIX.map(([providerId]) => providerId)),
+];
 
 const SURFACE_PROFILES = [
   'searchapi-chatgpt/surface',
@@ -446,6 +483,423 @@ describe('provider catalog -- determinism and immutability', () => {
     expect(Object.isFrozen(entries[0])).toBe(false);
     expect(built.entries).not.toBe(entries);
     expect(built.entries).toEqual(entries);
+  });
+});
+
+describe('provider catalog -- trusted custom planning profiles', () => {
+  it('derives keyless, env, literal, and keychain credential availability', () => {
+    const keyless = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [customProfile()],
+    });
+    expect(keyless.get('acme', 'search')?.availability.selectable).toBe(true);
+
+    const credentialed = customProfile({ credential_env_var: 'ACME_API_KEY' });
+    const missing = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [credentialed],
+      credentials: { env: {} },
+    });
+    expect(missing.get('acme', 'search')?.availability.reasons).toContain(
+      'credential_missing',
+    );
+    const fromEnv = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [credentialed],
+      credentials: { env: { ACME_API_KEY: 'env-key' } },
+    });
+    expect(fromEnv.get('acme', 'search')?.availability.selectable).toBe(true);
+    const literal = buildProviderCatalog({
+      providerConfigs: {
+        'acme-adapter': { enabled: true, apiKey: 'literal-key' },
+      },
+      customProfiles: [credentialed],
+    });
+    expect(literal.get('acme', 'search')?.availability.selectable).toBe(true);
+    const keychain = buildProviderCatalog({
+      providerConfigs: {
+        'acme-adapter': { enabled: true, apiKey: 'keychain:acme' },
+      },
+      customProfiles: [credentialed],
+      credentials: {
+        resolveCredential: (reference) =>
+          reference === 'keychain:acme' ? 'keychain-key' : undefined,
+      },
+    });
+    expect(keychain.get('acme', 'search')?.availability.selectable).toBe(true);
+  });
+
+  it('does not treat inherited environment properties as custom credentials', () => {
+    const inheritedName = customProfile({
+      credential_env_var: 'hasOwnProperty',
+    });
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [inheritedName],
+      credentials: { env: process.env },
+    });
+
+    expect(Object.hasOwn(process.env, 'hasOwnProperty')).toBe(false);
+    expect(built.get('acme', 'search')?.availability).toEqual(
+      expect.objectContaining({
+        credential_valid: false,
+        selectable: false,
+        reasons: expect.arrayContaining(['credential_missing']),
+      }),
+    );
+  });
+
+  it('keeps custom bindings closure-free, immutable, and in the digest', () => {
+    const input = customProfile();
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [input],
+    });
+    const resolved = built.get('acme', 'search');
+    expect(resolved?.binding).toEqual({
+      provider_id: 'acme',
+      profile_id: 'search',
+      adapter_id: 'acme-adapter',
+      binding_id: 'acme.search.v1',
+    });
+    expect(resolved?.binding).not.toHaveProperty('resolve');
+    const digest = built.digest;
+    input.profile.identity.provider_id = 'mutated';
+    expect(built.get('acme', 'search')).toBe(resolved);
+    expect(built.digest).toBe(digest);
+
+    const changed = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [customProfile({ binding_id: 'acme.search.v2' })],
+    });
+    expect(changed.revision).toBe(built.revision);
+    expect(changed.digest).not.toBe(built.digest);
+  });
+
+  it('selects custom profiles through capabilities and the all workflow', () => {
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [customProfile()],
+    });
+    expect(keysOf(built.workflow('all').members)).toContain('acme/search');
+    const result = prepare(
+      {
+        selector: {
+          kind: 'capabilities',
+          requirements: { result_kind: 'search_results', corpora: ['web'] },
+        },
+      },
+      built,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      keysOf(
+        result.prepared.request.slots.map((slot) => slot.primary.identity),
+      ),
+    ).toEqual(['acme/search']);
+  });
+
+  it('derives deep workflow membership for custom research profiles', () => {
+    const research = customProfile({
+      binding_id: 'acme.research.v1',
+      profile: {
+        identity: {
+          provider_id: 'acme',
+          profile_id: 'research',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+        result_kind: 'research_report',
+        grounding_policy: 'required',
+        retrieval_method: 'research_agent',
+        invocation: 'background',
+        resumability: 'durable',
+      },
+    });
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [research],
+    });
+
+    expect(keysOf(built.workflow('deep').members)).toContain('acme/research');
+    expect(built.get('acme', 'research')?.declaration.workflows).toEqual([
+      'deep',
+    ]);
+  });
+
+  it('orders custom profiles with locale-independent canonical strings', () => {
+    const mixedCase = customProfile({
+      adapter_id: 'adapter-Beta',
+      binding_id: 'binding-Beta',
+      profile: {
+        identity: {
+          provider_id: 'Beta',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    });
+    const nonAscii = customProfile({
+      adapter_id: 'adapter-éclair',
+      binding_id: 'binding-éclair',
+      profile: {
+        identity: {
+          provider_id: 'éclair',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    });
+    const lowerCase = customProfile({
+      adapter_id: 'adapter-alpha',
+      binding_id: 'binding-alpha',
+      profile: {
+        identity: {
+          provider_id: 'alpha',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    });
+    const inputs = [nonAscii, lowerCase, mixedCase];
+    const options = {
+      providerConfigs: Object.fromEntries(
+        inputs.map((item) => [item.adapter_id, { enabled: true }]),
+      ),
+      customProfiles: inputs,
+    };
+
+    const built = buildProviderCatalog(options);
+    expect(
+      keysOf(
+        built
+          .workflow('all')
+          .members.filter(({ provider_id }) =>
+            ['Beta', 'alpha', 'éclair'].includes(provider_id),
+          ),
+      ),
+    ).toEqual(['Beta/search', 'alpha/search', 'éclair/search']);
+    expect(
+      buildProviderCatalog({
+        ...options,
+        customProfiles: [...inputs].reverse(),
+      }).digest,
+    ).toBe(built.digest);
+  });
+
+  it('rejects reserved ids, duplicate identities/bindings, and process-local profiles', () => {
+    expect(() =>
+      buildProviderCatalog({
+        providerConfigs: { exa: { enabled: true } },
+        customProfiles: [customProfile({ adapter_id: 'exa' })],
+      }),
+    ).toThrow(/reserved/i);
+    expect(() =>
+      buildProviderCatalog({
+        providerConfigs: { 'openai-deep': { enabled: true } },
+        customProfiles: [customProfile({ adapter_id: 'openai-deep' })],
+      }),
+    ).toThrow(/reserved/i);
+    expect(() =>
+      buildProviderCatalog({
+        providerConfigs: {
+          'acme-adapter': { enabled: true },
+          'acme-other': { enabled: true },
+        },
+        customProfiles: [
+          customProfile(),
+          customProfile({ adapter_id: 'acme-other' }),
+        ],
+      }),
+    ).toThrow(/duplicate provider profile/i);
+    expect(() =>
+      buildProviderCatalog({
+        providerConfigs: { 'acme-adapter': { enabled: true } },
+        customProfiles: [
+          customProfile(),
+          customProfile({
+            profile: {
+              identity: {
+                provider_id: 'acme-two',
+                profile_id: 'search',
+                target: {
+                  primary: { model_selection: 'not_applicable' },
+                },
+              },
+            },
+          }),
+        ],
+      }),
+    ).toThrow(/duplicate adapter binding/i);
+    expect(() =>
+      buildProviderCatalog({
+        providerConfigs: { 'acme-adapter': { enabled: true } },
+        customProfiles: [
+          customProfile({
+            profile: {
+              invocation: 'background',
+              resumability: 'process_local',
+            },
+          }),
+        ],
+      }),
+    ).toThrow(/process_local/i);
+  });
+
+  it.each([...PLANNED_PROVIDER_IDS, 'openai-deep'])(
+    'reserves the adapter and declared provider identity %s',
+    (reservedId) => {
+      expect(() =>
+        buildProviderCatalog({
+          providerConfigs: { [reservedId]: { enabled: true } },
+          customProfiles: [customProfile({ adapter_id: reservedId })],
+        }),
+      ).toThrow(/reserved/i);
+      expect(() =>
+        buildProviderCatalog({
+          providerConfigs: { 'acme-adapter': { enabled: true } },
+          customProfiles: [
+            customProfile({
+              profile: {
+                identity: {
+                  provider_id: reservedId,
+                  profile_id: 'novel',
+                  target: {
+                    primary: { model_selection: 'not_applicable' },
+                  },
+                },
+              },
+            }),
+          ],
+        }),
+      ).toThrow(/provider id is reserved/i);
+    },
+  );
+
+  it('excludes ordinary disabled declarations but preserves reserve-only availability', () => {
+    const declaration = customProfile();
+    const disabled = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: false } },
+      customProfiles: [declaration],
+    });
+    expect(disabled.get('acme', 'search')).toBeUndefined();
+    expect(keysOf(disabled.workflow('all').members)).not.toContain(
+      'acme/search',
+    );
+
+    const reserveOnly = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: false } },
+      customProfiles: [declaration],
+      reserveOnlyAdapterIds: ['acme-adapter'],
+      reserve: [{ provider_id: 'acme', profile_id: 'search' }],
+    });
+    expect(reserveOnly.get('acme', 'search')?.availability).toMatchObject({
+      enabled: false,
+      reserve_only: true,
+      selectable: false,
+    });
+    expect(reserveOnly.resolveDefault()).toEqual([]);
+    expect(keysOf(reserveOnly.workflow('all').members)).not.toContain(
+      'acme/search',
+    );
+    expect(keysOf(reserveOnly.resolveConfiguredReserve([]))).toEqual([
+      'acme/search',
+    ]);
+  });
+
+  it('keeps slash-capable binding ids opaque without global false collisions', () => {
+    const built = buildProviderCatalog({
+      providerConfigs: {
+        'acme-adapter': { enabled: true },
+        'other-adapter': { enabled: true },
+      },
+      customProfiles: [
+        customProfile({ binding_id: 'binding/with/slashes' }),
+        customProfile({
+          adapter_id: 'other-adapter',
+          binding_id: 'binding/with/slashes',
+          profile: {
+            identity: {
+              provider_id: 'other-provider',
+              profile_id: 'search',
+              target: { primary: { model_selection: 'not_applicable' } },
+            },
+          },
+        }),
+      ],
+    });
+    expect(built.get('acme', 'search')?.binding?.binding_id).toBe(
+      'binding/with/slashes',
+    );
+    expect(built.get('other-provider', 'search')?.binding?.binding_id).toBe(
+      'binding/with/slashes',
+    );
+  });
+
+  it.each([
+    customProfile({ adapter_id: '' }),
+    customProfile({ adapter_id: ' acme-adapter' }),
+    customProfile({ adapter_id: 'acme\u0001adapter' }),
+    customProfile({ binding_id: ' invalid ' }),
+  ])('rejects invalid direct adapter/binding identity %#', (declaration) => {
+    expect(() =>
+      buildProviderCatalog({
+        providerConfigs: { [declaration.adapter_id]: { enabled: true } },
+        customProfiles: [declaration],
+      }),
+    ).toThrow(/canonical opaque identifier/i);
+  });
+
+  it.each([
+    customProfile({ adapter_id: 'acme/adapter' }),
+    customProfile({
+      profile: {
+        identity: {
+          provider_id: 'acme/provider',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    }),
+    customProfile({
+      profile: {
+        identity: {
+          provider_id: 'acme',
+          profile_id: 'search/v2',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    }),
+  ])(
+    'rejects direct custom identities containing selector delimiters %#',
+    (declaration) => {
+      expect(() =>
+        buildProviderCatalog({
+          providerConfigs: { [declaration.adapter_id]: { enabled: true } },
+          customProfiles: [declaration],
+        }),
+      ).toThrow(/selector delimiter/i);
+    },
+  );
+
+  it('rejects a custom profile with unknown cost under a hard budget', () => {
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [customProfile()],
+      defaults: [{ provider_id: 'acme', profile_id: 'search' }],
+    });
+    const result = prepare(
+      { budgets: { max_estimated_cost_microusd: '1000000' } },
+      built,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'budget_estimate_required',
+        profile_key: expect.stringContaining('acme'),
+      }),
+    );
   });
 });
 
