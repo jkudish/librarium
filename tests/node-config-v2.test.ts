@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibrariumConfigV2 } from '../src/core/config-v2.js';
+import { safeWriteFile } from '../src/core/fs-utils.js';
 import {
   ConfigV2FileError,
   loadConfigV2,
@@ -139,6 +140,12 @@ describe('explicit Node v2 config files', () => {
     expect(() => saveConfigV2(config(), { path })).toThrow(ConfigV2FileError);
     expect(existsSync(path)).toBe(false);
     expect(existsSync(dirname(path))).toBe(false);
+  });
+
+  it('preserves ordinary mode-only atomic writes on every platform', () => {
+    const path = join(directory, 'ordinary-write.txt');
+    safeWriteFile(path, 'legacy-compatible', { mode: 0o600 });
+    expect(readFileSync(path, 'utf8')).toBe('legacy-compatible');
   });
 
   it('atomically replaces an existing config without leaving temp files', () => {

@@ -28,7 +28,7 @@ export function safeWriteFile(
   if (options?.ownerOnly && process.platform === 'win32') {
     throw new Error('Owner-only writes are unsupported on Windows.');
   }
-  const expectedMode = options?.ownerOnly ? 0o600 : options?.mode;
+  const createMode = options?.ownerOnly ? 0o600 : options?.mode;
   if (
     options?.ownerOnly &&
     options.mode !== undefined &&
@@ -43,11 +43,13 @@ export function safeWriteFile(
     writeFileSync(tmp, content, {
       encoding: 'utf-8',
       flag: 'wx',
-      mode: expectedMode,
+      mode: createMode,
     });
-    if (expectedMode !== undefined) {
+    if (options?.ownerOnly) {
+      const expectedMode = 0o600;
       // The mode argument is subject to umask; chmod and verify the exact
-      // final bits while the file is still uncommitted.
+      // owner-only bits while the file is still uncommitted. Ordinary callers
+      // that provide only `mode` keep their historical platform semantics.
       chmodSync(tmp, expectedMode);
       if ((statSync(tmp).mode & 0o777) !== expectedMode) {
         throw new Error(
