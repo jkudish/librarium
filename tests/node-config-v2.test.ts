@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibrariumConfigV2 } from '../src/core/config-v2.js';
 import {
@@ -109,6 +110,7 @@ describe('explicit Node v2 config files', () => {
   });
 
   it('validates before an atomic owner-only save', () => {
+    if (process.platform === 'win32') return;
     const path = join(directory, 'nested', 'config.json');
     saveConfigV2(config(), { path });
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(config());
@@ -118,7 +120,29 @@ describe('explicit Node v2 config files', () => {
     expect(readdirSync(join(directory, 'nested'))).toEqual(['config.json']);
   });
 
+  it('verifies owner-only mode after a restrictive umask before rename', () => {
+    if (process.platform === 'win32') return;
+    const path = join(directory, 'umask', 'config.json');
+    mkdirSync(dirname(path), { recursive: true });
+    const previousUmask = process.umask(0o400);
+    try {
+      saveConfigV2(config(), { path });
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    } finally {
+      process.umask(previousUmask);
+    }
+  });
+
+  it('rejects owner-only saves on Windows before creating directories', () => {
+    if (process.platform !== 'win32') return;
+    const path = join(directory, 'windows', 'config.json');
+    expect(() => saveConfigV2(config(), { path })).toThrow(ConfigV2FileError);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(dirname(path))).toBe(false);
+  });
+
   it('atomically replaces an existing config without leaving temp files', () => {
+    if (process.platform === 'win32') return;
     const path = join(directory, 'config.json');
     saveConfigV2(config(), { path });
     const replacement: LibrariumConfigV2 = {
@@ -150,6 +174,7 @@ describe('explicit Node v2 config files', () => {
   });
 
   it('saves and reloads the same materialized chat defaults', () => {
+    if (process.platform === 'win32') return;
     const path = join(directory, 'config.json');
     const source: LibrariumConfigV2 = {
       ...config(),

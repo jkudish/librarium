@@ -1557,8 +1557,10 @@ Node services:
   global state.
 - `loadConfigV2({ global_path, project_path? })` reads and migrates without
   rewriting either file.
-- `saveConfigV2(config, { path })` is the explicit atomic, owner-only v2 write
-  boundary. It validates before touching disk.
+- `saveConfigV2(config, { path })` is the explicit atomic v2 write boundary. It
+  validates first and enforces owner-only permissions before commit on Unix;
+  Windows fails before touching disk until an equivalent ACL writer is
+  available.
 
 ```ts
 import {

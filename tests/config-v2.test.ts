@@ -76,6 +76,14 @@ function customSource(
   };
 }
 
+function nestedObjects(count: number): Record<string, unknown> {
+  let value: unknown = 'leaf';
+  for (let index = 0; index < count; index += 1) {
+    value = { next: value };
+  }
+  return value as Record<string, unknown>;
+}
+
 describe('public v2 configuration migration', () => {
   it('migrates exact v1 defaults, mixed mode, costs, and runtime fields', () => {
     const result = migrateConfig({
@@ -233,6 +241,30 @@ describe('public v2 configuration migration', () => {
     });
     expect(result.config.providers['perplexity-sonar-pro']?.enabled).toBe(true);
     expect(result.config.providers).not.toHaveProperty('openai-deep-o3');
+  });
+
+  it('prefers openai-deep-o3 over openai-deep when canonical is absent', () => {
+    for (const providers of [
+      {
+        'openai-deep': { enabled: true, model: 'deep-model' },
+        'openai-deep-o3': { enabled: true, model: 'o3-model' },
+      },
+      {
+        'openai-deep-o3': { enabled: true, model: 'o3-model' },
+        'openai-deep': { enabled: true, model: 'deep-model' },
+      },
+    ]) {
+      const result = migrateConfig({ global: v1({ providers }) });
+      expect(result.ok).toBe(true);
+      if (!result.ok) continue;
+      expect(result.config.providers['openai-research']).toMatchObject({
+        enabled: true,
+        model: 'o3-model',
+      });
+      expect(result.notices).toContainEqual(
+        expect.objectContaining({ code: 'config_provider_alias_collision' }),
+      );
+    }
   });
 
   it('makes canonical provider ids win every alias collision independent of JSON order', () => {
@@ -582,6 +614,29 @@ describe('public v2 configuration migration', () => {
     }
   });
 
+  it('rejects duplicate custom provider/profile identities deterministically', () => {
+    const first = customSource('shared-provider');
+    const second = customSource('shared-provider');
+    second.execution_profile.binding_id = 'shared-provider.search.v2';
+    const result = validateConfigV2(
+      v2({
+        custom_providers: {
+          first: first,
+          second: second,
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'config_custom_profile_duplicate',
+          path: '/custom_providers/second/execution_profile/profile/identity',
+        }),
+      );
+    }
+  });
+
   it('rejects enabled and fallback custom code that was not explicitly trusted', () => {
     const enabled = validateConfigV2(
       v2({
@@ -858,6 +913,164 @@ describe('public v2 configuration migration', () => {
       }),
     );
     expect(badDeadline.ok).toBe(false);
+  });
+
+  it('bounds own JSON nesting before recursive descent without throwing', () => {
+    const atBoundary = v2({
+      custom_providers: {
+        acme: {
+          type: 'npm',
+          module: 'acme-provider',
+          options: nestedObjects(61),
+        },
+      },
+    });
+    const validatedBoundary = validateConfigV2(atBoundary);
+    const migratedBoundary = migrateConfig({ global: atBoundary });
+    expect(validatedBoundary.ok).toBe(true);
+    expect(migratedBoundary.ok).toBe(true);
+
+    const overBoundaryInput = v2({
+      custom_providers: {
+        acme: {
+          type: 'npm',
+          module: 'acme-provider',
+          options: nestedObjects(62),
+        },
+      },
+    });
+    let overBoundary: ReturnType<typeof validateConfigV2>;
+    let migratedOverBoundary: ReturnType<typeof migrateConfig>;
+    expect(() => {
+      overBoundary = validateConfigV2(overBoundaryInput);
+      migratedOverBoundary = migrateConfig({ global: overBoundaryInput });
+    }).not.toThrow();
+    expect(overBoundary?.ok).toBe(false);
+    expect(migratedOverBoundary?.ok).toBe(false);
+    if (overBoundary?.ok || migratedOverBoundary?.ok) return;
+    expect(overBoundary?.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'config_input_too_deep',
+        path: expect.stringMatching(
+          /^\/custom_providers\/acme\/options(?:\/next)+$/,
+        ),
+      }),
+    );
+    expect(migratedOverBoundary?.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'config_input_too_deep',
+        path: expect.stringMatching(
+          /^\/global\/custom_providers\/acme\/options(?:\/next)+$/,
+        ),
+      }),
+    );
+  });
+
+  it('rejects unsafe dictionary keys recursively in custom source bags', () => {
+    const result = validateConfigV2(
+      v2({
+        custom_providers: {
+          acme: {
+            type: 'npm',
+            module: 'acme-provider',
+            options: JSON.parse(
+              '{"safe":{"constructor_value":true},"nested":{"constructor":{"ok":true}}}',
+            ),
+          },
+          script: {
+            type: 'script',
+            command: 'script-provider',
+            env: JSON.parse('{"__proto__":"blocked","normal":"ok"}'),
+            options: JSON.parse('{"prototype":{"ok":true}}'),
+          },
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'config_dictionary_key_unsafe',
+          path: '/custom_providers/acme/options/nested/constructor',
+        }),
+        expect.objectContaining({
+          code: 'config_dictionary_key_unsafe',
+          path: '/custom_providers/script/env/__proto__',
+        }),
+        expect.objectContaining({
+          code: 'config_dictionary_key_unsafe',
+          path: '/custom_providers/script/options/prototype',
+        }),
+      ]),
+    );
+  });
+
+  it('rejects self, two-node, and longer fallback cycles before reserve materialization', () => {
+    const self = validateConfigV2(
+      v2({ providers: { exa: { enabled: true, fallback: 'exa' } } }),
+    );
+    expect(self.ok).toBe(false);
+    if (!self.ok) {
+      expect(self.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'config_fallback_self_reference',
+          path: '/providers/exa/fallback',
+        }),
+      );
+    }
+
+    const twoNode = validateConfigV2(
+      v2({
+        providers: {
+          exa: { enabled: true, fallback: 'brave-search' },
+          'brave-search': { enabled: true, fallback: 'exa' },
+        },
+      }),
+    );
+    expect(twoNode.ok).toBe(false);
+    if (!twoNode.ok) {
+      expect(twoNode.issues).toContainEqual(
+        expect.objectContaining({ code: 'config_fallback_cycle' }),
+      );
+    }
+
+    const disabledEdge = validateConfigV2(
+      v2({
+        providers: {
+          exa: { enabled: true, fallback: 'brave-search' },
+          'brave-search': { enabled: false, fallback: 'exa' },
+        },
+      }),
+    );
+    expect(disabledEdge.ok).toBe(true);
+    if (disabledEdge.ok) {
+      expect(disabledEdge.fallback_reserve_adapter_ids).toEqual([
+        'brave-search',
+      ]);
+      expect(disabledEdge.notices).not.toContainEqual(
+        expect.objectContaining({ code: 'config_fallback_cycle' }),
+      );
+    }
+
+    const longer = validateConfigV2(
+      v2({
+        providers: {
+          exa: { enabled: true, fallback: 'brave-search' },
+          'brave-search': { enabled: true, fallback: 'tavily' },
+          tavily: { enabled: true, fallback: 'exa' },
+        },
+      }),
+    );
+    expect(longer.ok).toBe(false);
+    if (!longer.ok) {
+      expect(longer.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'config_fallback_cycle',
+          path: expect.stringMatching(/^\/providers\/[^/]+\/fallback$/),
+        }),
+      );
+    }
   });
 
   it('is deterministic, pure, and does not mutate either input', () => {

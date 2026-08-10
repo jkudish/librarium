@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { CONFIG_FILE_MODE, PROJECT_CONFIG_FILE } from './constants.js';
 import {
@@ -105,8 +105,10 @@ export function loadConfigV2(
 /**
  * Explicitly persist a validated native v2 configuration.
  *
- * The write is atomic and owner-only. Loading and ordinary execution never
- * call this function, so migration cannot silently rewrite user files.
+ * The write is atomic and owner-only on Unix. Windows fails before touching
+ * disk until Librarium can establish and verify an equivalent ACL. Loading and
+ * ordinary execution never call this function, so migration cannot silently
+ * rewrite user files.
  */
 export function saveConfigV2(
   config: LibrariumConfigV2,
@@ -119,19 +121,17 @@ export function saveConfigV2(
       validated.issues,
     );
   }
+  if (process.platform === 'win32') {
+    throw new ConfigV2FileError(
+      'Owner-only config saves are unsupported on Windows because no equivalent ACL is established.',
+    );
+  }
   const path = resolve(options.path);
   mkdirSync(dirname(path), { recursive: true });
   safeWriteFile(path, `${JSON.stringify(validated.config, null, 2)}\n`, {
     mode: CONFIG_FILE_MODE,
+    ownerOnly: true,
   });
-  if (
-    process.platform !== 'win32' &&
-    (statSync(path).mode & 0o777) !== CONFIG_FILE_MODE
-  ) {
-    throw new ConfigV2FileError(
-      `Saved config mode must be ${CONFIG_FILE_MODE.toString(8)}.`,
-    );
-  }
 }
 
 /** Conventional project path helper; it performs no filesystem access. */

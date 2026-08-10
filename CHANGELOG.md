@@ -52,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   groups become `custom:<name>`; provider aliases, trust, options, fallbacks,
   exact budgets, and reserve-only providers are validated deterministically.
   Ordinary loading never rewrites files; `librarium/node` exposes the explicit
-  validated atomic save boundary.
+  validated atomic save boundary, enforcing owner-only permissions on Unix and
+  failing before writes on Windows until an equivalent ACL writer is available.
 - **Breaking v2 package boundary:** `librarium` is now a side-effect-free,
   Worker-safe schema and catalog entry; `librarium/core` explicitly exposes
   injected catalog, planning, transport, coordination, and execution ports

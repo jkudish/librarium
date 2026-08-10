@@ -475,9 +475,18 @@ type OwnJsonCloneResult =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly issues: readonly PreparationIssue[] };
 
+/**
+ * Configuration is intentionally bounded before schema parsing so hostile
+ * JSON-like input cannot exhaust the JavaScript call stack. The root
+ * container is depth one, so this permits 64 nested arrays/objects and rejects
+ * the 65th before descending into it.
+ */
+const MAX_JSON_NESTING = 64;
+
 function ownJsonClone(
   input: unknown,
   basePath: PropertyKey[] = [],
+  initialDepth = 0,
 ): OwnJsonCloneResult {
   const issues: PreparationIssue[] = [];
   const active = new WeakSet<object>();
@@ -487,7 +496,22 @@ function ownJsonClone(
     return null;
   };
 
-  const clone = (value: unknown, path: PropertyKey[]): unknown => {
+  const rejectTooDeep = (path: PropertyKey[]): null => {
+    issues.push(
+      issue(
+        'config_input_too_deep',
+        pointer(path),
+        `Configuration nesting cannot exceed ${MAX_JSON_NESTING} arrays or objects.`,
+      ),
+    );
+    return null;
+  };
+
+  const clone = (
+    value: unknown,
+    path: PropertyKey[],
+    depth: number,
+  ): unknown => {
     if (
       value === null ||
       typeof value === 'string' ||
@@ -506,6 +530,7 @@ function ownJsonClone(
         'Configuration values must be JSON data without functions, accessors, symbols, bigint, or undefined.',
       );
     }
+    if (depth >= MAX_JSON_NESTING) return rejectTooDeep(path);
     if (active.has(value)) {
       return reject(path, 'Configuration values cannot contain cycles.');
     }
@@ -550,7 +575,7 @@ function ownJsonClone(
           );
           continue;
         }
-        result.push(clone(descriptor.value, [...path, index]));
+        result.push(clone(descriptor.value, [...path, index], depth + 1));
       }
       active.delete(value);
       return result;
@@ -584,7 +609,7 @@ function ownJsonClone(
         continue;
       }
       Object.defineProperty(result, key, {
-        value: clone(descriptor.value, [...path, key]),
+        value: clone(descriptor.value, [...path, key], depth + 1),
         enumerable: true,
         configurable: true,
         writable: true,
@@ -594,7 +619,7 @@ function ownJsonClone(
     return result;
   };
 
-  const value = clone(input, basePath);
+  const value = clone(input, basePath, initialDepth);
   return issues.length > 0 ? { ok: false, issues } : { ok: true, value };
 }
 
@@ -616,42 +641,51 @@ const UNSAFE_DICTIONARY_KEYS = new Set([
   'constructor',
   'prototype',
 ]);
+const CONFIG_DICTIONARY_FIELDS = new Set([
+  'providers',
+  'customProviders',
+  'custom_providers',
+  'groups',
+]);
 
 function unsafeDictionaryIssues(
   input: unknown,
   prefix?: 'global' | 'project',
 ): PreparationIssue[] {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
-    return [];
-  }
-  const record = input as Record<string, unknown>;
   const issues: PreparationIssue[] = [];
-  for (const field of [
-    'providers',
-    'customProviders',
-    'custom_providers',
-    'groups',
-  ]) {
-    const dictionary = Object.hasOwn(record, field) ? record[field] : undefined;
-    if (
-      typeof dictionary !== 'object' ||
-      dictionary === null ||
-      Array.isArray(dictionary)
-    ) {
-      continue;
+  const basePath: PropertyKey[] = prefix ? [prefix] : [];
+  const visit = (value: unknown, path: PropertyKey[]): void => {
+    if (typeof value !== 'object' || value === null) return;
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        visit(value[index], [...path, index]);
+      }
+      return;
     }
-    for (const key of Object.keys(dictionary)) {
-      const local = key.startsWith('custom:') ? key.slice(7) : key;
-      if (!UNSAFE_DICTIONARY_KEYS.has(local)) continue;
-      issues.push(
-        issue(
-          'config_dictionary_key_unsafe',
-          pointer([...(prefix ? [prefix] : []), field, key]),
-          'Configuration dictionary keys cannot use JavaScript prototype names.',
-        ),
-      );
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(value)) {
+      // Legacy/native dictionary ids may be persisted as custom:<name>;
+      // preserve the historical rejection for prototype names after prefix.
+      const parent = path.at(-1);
+      const local =
+        typeof parent === 'string' &&
+        CONFIG_DICTIONARY_FIELDS.has(parent) &&
+        key.startsWith('custom:')
+          ? key.slice('custom:'.length)
+          : key;
+      if (UNSAFE_DICTIONARY_KEYS.has(local)) {
+        issues.push(
+          issue(
+            'config_dictionary_key_unsafe',
+            pointer([...path, key]),
+            'Configuration dictionary keys cannot use JavaScript prototype names.',
+          ),
+        );
+      }
+      visit(record[key], [...path, key]);
     }
-  }
+  };
+  visit(input, basePath);
   return issues;
 }
 
@@ -1183,6 +1217,53 @@ function requirementsFor(
   };
 }
 
+/**
+ * Return one deterministic source id for each non-self fallback cycle. The
+ * fallback graph has at most one outgoing edge per provider, so an iterative
+ * walk is enough and avoids adding another recursive path to config handling.
+ */
+function fallbackCycleSources(
+  edges: readonly {
+    readonly source: string;
+    readonly target: string;
+  }[],
+): string[] {
+  const fallbackBySource = new Map(
+    edges.map(({ source, target }) => [source, target]),
+  );
+  const visited = new Set<string>();
+  const cycles = new Set<string>();
+
+  for (const start of [...fallbackBySource.keys()].sort()) {
+    if (visited.has(start)) continue;
+    const path: string[] = [];
+    const positions = new Map<string, number>();
+    let current: string | undefined = start;
+
+    while (
+      current !== undefined &&
+      fallbackBySource.has(current) &&
+      !visited.has(current)
+    ) {
+      const existing = positions.get(current);
+      if (existing !== undefined) {
+        const cycle = path.slice(existing);
+        if (cycle.length > 1) {
+          cycles.add([...cycle].sort().join('\u0000'));
+        }
+        break;
+      }
+      positions.set(current, path.length);
+      path.push(current);
+      current = fallbackBySource.get(current);
+    }
+
+    for (const id of path) visited.add(id);
+  }
+
+  return [...cycles].map((cycle) => cycle.split('\u0000').sort()[0]).sort();
+}
+
 function semanticIssues(config: LibrariumConfigV2): {
   issues: PreparationIssue[];
   notices: PreparationNotice[];
@@ -1250,7 +1331,6 @@ function semanticIssues(config: LibrariumConfigV2): {
   const bindings = buildProfileBindings(declarations);
   const profileByAdapter = new Map<string, ExecutionProfile>();
   const customProfileKeys = new Set<string>(declarations.keys());
-  const customBindingKeys = new Set<string>();
   for (const [id, source] of Object.entries(config.custom_providers)) {
     const execution = source.execution_profile;
     if (!execution) {
@@ -1319,19 +1399,7 @@ function semanticIssues(config: LibrariumConfigV2): {
       );
       continue;
     }
-    const bindingKey = `${id}\u0000${execution.binding_id}`;
-    if (customBindingKeys.has(bindingKey)) {
-      issues.push(
-        issue(
-          'config_custom_binding_duplicate',
-          pointer(['custom_providers', id, 'execution_profile', 'binding_id']),
-          'Every custom adapter/binding identity tuple must be unique.',
-        ),
-      );
-      continue;
-    }
     customProfileKeys.add(profileKey);
-    customBindingKeys.add(bindingKey);
     if (trusted.has(id)) profileByAdapter.set(id, execution.profile);
   }
 
@@ -1392,10 +1460,10 @@ function semanticIssues(config: LibrariumConfigV2): {
     }
   }
 
-  const fallbackReserve: string[] = [];
-  const reserveOnly: string[] = [];
-  const seenReserve = new Set<string>();
-  const acceptedSources = new Set<string>();
+  const acceptedEdges: Array<{
+    readonly source: string;
+    readonly target: string;
+  }> = [];
   for (const [id, provider] of Object.entries(config.providers)) {
     const fallback = provider.fallback;
     if (!fallback) continue;
@@ -1483,22 +1551,47 @@ function semanticIssues(config: LibrariumConfigV2): {
       );
       continue;
     }
-    acceptedSources.add(id);
-    if (!seenReserve.has(fallback)) {
-      seenReserve.add(fallback);
-      fallbackReserve.push(fallback);
+    acceptedEdges.push({ source: id, target: fallback });
+  }
+
+  const cycleSources = fallbackCycleSources(acceptedEdges);
+  if (cycleSources.length > 0) {
+    for (const id of cycleSources) {
+      issues.push(
+        issue(
+          'config_fallback_cycle',
+          pointer(['providers', id, 'fallback']),
+          'Fallback providers cannot form a cycle.',
+        ),
+      );
     }
-    if (target.enabled === false && !reserveOnly.includes(fallback)) {
-      reserveOnly.push(fallback);
+    // Do not materialize any reserve from a graph that contains a cycle. This
+    // keeps the failure before reserve construction and avoids partial plans.
+    return { issues, notices, fallbackReserve: [], reserveOnly: [] };
+  }
+
+  const fallbackReserve: string[] = [];
+  const reserveOnly: string[] = [];
+  const seenReserve = new Set<string>();
+  for (const { target } of acceptedEdges) {
+    if (!seenReserve.has(target)) {
+      seenReserve.add(target);
+      fallbackReserve.push(target);
+    }
+    if (
+      config.providers[target]?.enabled === false &&
+      !reserveOnly.includes(target)
+    ) {
+      reserveOnly.push(target);
     }
   }
-  for (const id of acceptedSources) {
-    const fallback = config.providers[id]?.fallback;
-    if (fallback && acceptedSources.has(fallback)) {
+  const acceptedSources = new Set(acceptedEdges.map(({ source }) => source));
+  for (const { source, target } of acceptedEdges) {
+    if (acceptedSources.has(target)) {
       notices.push(
         notice(
           'configuration_fallback_chain_flattened',
-          pointer(['providers', id, 'fallback']),
+          pointer(['providers', source, 'fallback']),
           'A fallback chain was flattened into the ordered global fallback reserve.',
         ),
       );
@@ -1586,7 +1679,9 @@ export function migrateConfig(
   input: ConfigMigrationInput,
 ): ConfigMigrationResult {
   const issues: PreparationIssue[] = [];
-  const clonedInput = ownJsonClone(input);
+  // The migration wrapper is transport-only; offset it so the nested global
+  // and project documents have the same depth budget as direct validation.
+  const clonedInput = ownJsonClone(input, [], -1);
   if (!clonedInput.ok) {
     return {
       ok: false,
@@ -1612,6 +1707,14 @@ export function migrateConfig(
     };
   }
   const migrationInput = clonedInput.value as Record<string, unknown>;
+  const unsafe = unsafeDictionaryIssues(migrationInput);
+  if (unsafe.length > 0) {
+    return {
+      ok: false,
+      issues: sortDiagnostics(unsafe),
+      notices: [],
+    };
+  }
   const unexpected = Object.keys(migrationInput).filter(
     (key) => key !== 'global' && key !== 'project',
   );

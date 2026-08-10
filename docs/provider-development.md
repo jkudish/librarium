@@ -58,9 +58,10 @@ Usage"). The boundary matters for provider development:
 - **`librarium/node`** exposes `loadCustomProviders()` for explicitly trusted
   npm modules and scripts. It returns provider instances without registering
   them. It also owns explicit config-file load/save: loads never rewrite and
-  `saveConfigV2()` validates before an atomic owner-only write. Complete
-  configured runs still go through the `librarium` CLI while the v2 high-level
-  library runner is finalized.
+  `saveConfigV2()` validates before an atomic owner-only Unix write. Windows
+  fails before touching disk until an equivalent ACL writer is available.
+  Complete configured runs still go through the `librarium` CLI while the v2
+  high-level library runner is finalized.
 
 > **Security:** an allowed npm module or script executes arbitrary code with
 > the Librarium process's permissions and inherited environment.
