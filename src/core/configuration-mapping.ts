@@ -1,7 +1,7 @@
 import {
   normalizeProviderName,
+  PROVIDER_ID_ALIASES,
   type ProviderNameEntry,
-  resolveProviderId,
   resolveProviderToken,
 } from '../constants.js';
 import type { Config, ProviderConfig } from '../types.js';
@@ -97,6 +97,29 @@ const PROVIDER_NAME_ENTRIES: readonly ProviderNameEntry[] =
     id: definition.id,
     displayName: definition.display.name,
   }));
+
+/** Internal config-derived maps must never inherit JSON-authored keys. */
+function safeRecord<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
+/** Return an ordinary public record while retaining an own `__proto__` key. */
+function publicRecord<T>(
+  record: Readonly<Record<string, T>>,
+): Record<string, T> {
+  return Object.fromEntries(Object.entries(record));
+}
+
+function ownValue<T>(
+  record: Readonly<Record<string, T>>,
+  key: string,
+): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function canonicalProviderId(id: string): string {
+  return Object.hasOwn(PROVIDER_ID_ALIASES, id) ? PROVIDER_ID_ALIASES[id]! : id;
+}
 
 /**
  * Purely resolve a legacy provider/display/qualified token to one exact
@@ -255,13 +278,13 @@ function canonicalizeProviderConfigs(
   providerConfigs: Record<string, ProviderConfig>;
   notices: PreparationNotice[];
 } {
-  const providerConfigs: Record<string, ProviderConfig> = {};
+  const providerConfigs = safeRecord<ProviderConfig>();
   const notices: PreparationNotice[] = [];
   const openAiCandidates = [
     'openai-deep',
     'openai-deep-o3',
     'openai-research',
-  ].filter((id) => providers[id] !== undefined);
+  ].filter((id) => ownValue(providers, id) !== undefined);
   const selectedOpenAi = openAiCandidates.includes('openai-research')
     ? 'openai-research'
     : openAiCandidates.includes('openai-deep-o3')
@@ -271,9 +294,9 @@ function canonicalizeProviderConfigs(
         : undefined;
 
   for (const [id, config] of Object.entries(providers)) {
-    const adapterId = resolveProviderId(id);
+    const adapterId = canonicalProviderId(id);
     const fallback = config.fallback
-      ? resolveProviderId(config.fallback)
+      ? canonicalProviderId(config.fallback)
       : undefined;
     if (adapterId !== id) {
       notices.push({
@@ -307,7 +330,7 @@ function canonicalizeProviderConfigs(
       });
       continue;
     }
-    if (!providerConfigs[adapterId] || id === adapterId) {
+    if (!ownValue(providerConfigs, adapterId) || id === adapterId) {
       providerConfigs[adapterId] = normalized;
       continue;
     }
@@ -319,14 +342,14 @@ function canonicalizeProviderConfigs(
         'A colliding provider alias was ignored because its canonical adapter is configured.',
     });
   }
-  return { providerConfigs, notices };
+  return { providerConfigs: publicRecord(providerConfigs), notices };
 }
 
 function materializeProviderConfigs(config: Config): {
   providerConfigs: Record<string, ProviderConfig>;
   notices: PreparationNotice[];
 } {
-  const byAdapter: Record<string, ProviderConfig> = {};
+  const byAdapter = safeRecord<ProviderConfig>();
   const bindings = adapterProfileBindings();
   const normalized = canonicalizeProviderConfigs(config.providers);
 
@@ -346,14 +369,20 @@ function materializeProviderConfigs(config: Config): {
     };
   }
 
-  return { providerConfigs: byAdapter, notices: normalized.notices };
+  return {
+    providerConfigs: publicRecord(byAdapter),
+    notices: normalized.notices,
+  };
 }
 
 function authoredGroups(
   provenance: AuthoredGroupProvenance,
 ): Record<string, readonly string[]> {
   // Project authoring intentionally wins without reordering either layer.
-  return { ...provenance.global, ...provenance.project };
+  return Object.fromEntries([
+    ...Object.entries(provenance.global),
+    ...Object.entries(provenance.project),
+  ]);
 }
 
 function canonicalizeGroups(
@@ -363,7 +392,7 @@ function canonicalizeGroups(
   notices: PreparationNotice[];
   issues: PreparationIssue[];
 } {
-  const mapped: Record<string, string[]> = {};
+  const mapped = safeRecord<string[]>();
   const notices: PreparationNotice[] = [];
   const issues: PreparationIssue[] = [];
   for (const [name, members] of Object.entries(groups)) {
@@ -410,7 +439,7 @@ function canonicalizeGroups(
     }
     mapped[name] = exact;
   }
-  return { groups: mapped, notices, issues };
+  return { groups: publicRecord(mapped), notices, issues };
 }
 
 function groupAliases(
@@ -418,15 +447,15 @@ function groupAliases(
   catalog: ProviderCatalog,
 ): Record<string, string> {
   const customGroups = new Set(catalog.custom_group_ids);
-  const aliases: Record<string, string> = {};
+  const aliases = safeRecord<string>();
   for (const name of Object.keys(groups)) {
     if (name.startsWith('custom:')) continue;
     const target = customWorkflowId(name);
-    if (customGroups.has(target) && !groups[target]) {
+    if (customGroups.has(target) && ownValue(groups, target) === undefined) {
       aliases[name] = target;
     }
   }
-  return aliases;
+  return publicRecord(aliases);
 }
 
 function fallbackReserve(
@@ -488,18 +517,18 @@ function fallbackReserve(
     const target = adapterProfileBinding(fallback);
     if (!target) {
       issues.push({
-        code: providerConfigs[fallback]
+        code: ownValue(providerConfigs, fallback)
           ? 'configuration_fallback_unbound_target'
           : 'configuration_fallback_unknown_adapter',
         phase: 'migration',
         path,
-        message: providerConfigs[fallback]
+        message: ownValue(providerConfigs, fallback)
           ? 'The fallback adapter has no exact executable profile binding.'
           : 'The fallback adapter is not a known implemented adapter.',
       });
       continue;
     }
-    if (!providerConfigs[fallback]) {
+    if (!ownValue(providerConfigs, fallback)) {
       issues.push({
         code: 'configuration_fallback_target_unconfigured',
         phase: 'migration',
@@ -545,7 +574,7 @@ function fallbackReserve(
       });
     }
     if (
-      providerConfigs[edge.fallback]?.enabled === false &&
+      ownValue(providerConfigs, edge.fallback)?.enabled === false &&
       !reserveOnly.has(edge.fallback)
     ) {
       reserveOnly.add(edge.fallback);

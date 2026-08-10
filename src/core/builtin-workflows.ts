@@ -127,7 +127,7 @@ function sortedRecord(
 export function migrateUserWorkflowNames(
   groups: Readonly<Record<string, readonly string[]>>,
 ): WorkflowMigrationResult {
-  const migrated: Record<string, readonly string[]> = {};
+  const migrated = Object.create(null) as Record<string, readonly string[]>;
   const notices: PreparationNotice[] = [];
   const issues: PreparationIssue[] = [];
 
@@ -138,7 +138,7 @@ export function migrateUserWorkflowNames(
     }
 
     const renamed = customWorkflowId(name);
-    if (renamed in groups) {
+    if (Object.hasOwn(groups, renamed)) {
       // Preserve both definitions verbatim; the reserved key keeps resolving to
       // the built-in workflow and `custom:<name>` keeps the user's group.
       migrated[name] = members;

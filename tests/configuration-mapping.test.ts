@@ -323,6 +323,56 @@ describe('configuration mapping', () => {
     }
   });
 
+  it('preserves JSON-authored prototype-like group names as own custom groups', () => {
+    const source = config({
+      providers: {
+        exa: { enabled: true },
+        tavily: { enabled: true },
+        'brave-search': { enabled: true },
+      },
+    });
+    source.groups = JSON.parse(
+      '{"__proto__":["exa"],"constructor":["tavily"],"prototype":["brave-search"]}',
+    ) as Config['groups'];
+    const mapped = map(source, {
+      requestDeadlineMs: 2_000_000,
+      credentials: credentials(),
+    });
+
+    expect(Object.getPrototypeOf(mapped.groups)).toBe(Object.prototype);
+    for (const [name, member] of [
+      ['__proto__', 'exa/search'],
+      ['constructor', 'tavily/search'],
+      ['prototype', 'brave-search/search'],
+    ]) {
+      expect(Object.hasOwn(mapped.groups, name)).toBe(true);
+      expect(mapped.groups[name]).toEqual([member]);
+      expect(mapped.group_aliases[name]).toBe(`custom:${name}`);
+      expect(mapped.catalog.custom_group_ids).toContain(`custom:${name}`);
+    }
+    expect(keys(mapped.catalog.resolveGroup('custom:__proto__') ?? [])).toEqual(
+      ['exa/search'],
+    );
+  });
+
+  it('handles a JSON-authored provider prototype key without prototype lookup', () => {
+    const source = config();
+    source.providers = JSON.parse(
+      '{"__proto__":{"enabled":true,"fallback":"exa"},"exa":{"enabled":true}}',
+    ) as Config['providers'];
+    const mapped = map(source, {
+      requestDeadlineMs: 2_000_000,
+      credentials: credentials(),
+    });
+    expect(mapped.preflight.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'configuration_fallback_unbound_source',
+        path: '/providers/__proto__/fallback',
+      }),
+    );
+    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
+  });
+
   it('retains raw global and project authored layers with project precedence', () => {
     const global = config({
       groups: {
