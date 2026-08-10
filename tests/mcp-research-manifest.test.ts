@@ -61,6 +61,7 @@ describe('silent research live manifest', () => {
       });
       throw new Error('dispatch exploded');
     });
+    const warnings: string[] = [];
 
     await expect(
       runResearchSilent(
@@ -74,9 +75,16 @@ describe('silent research live manifest', () => {
           }),
           dispatch,
           credentials: { env: {} },
+          onWarn: (message) => warnings.push(message),
         },
       ),
     ).rejects.toThrow('dispatch exploded');
+
+    expect(warnings).toContainEqual(
+      expect.stringMatching(
+        /^\[librarium\] shadow: issues=\d+ issues_codes=[a-z0-9_,]+; notices=\d+ notices_codes=/,
+      ),
+    );
 
     const runDir = readdirSync(baseDir).map((entry) => join(baseDir, entry))[0];
     expect(readRunManifest(runDir as string)).toMatchObject({

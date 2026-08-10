@@ -1142,8 +1142,24 @@ describe('private shadow compilation', () => {
       write: false,
       logLevel: 'silent',
     });
-    expect(Object.keys(production.metafile.inputs).join('\n')).not.toContain(
-      'shadow-compilation',
-    );
+    const diagnosticImporters = Object.entries(production.metafile.inputs)
+      .filter(([, input]) =>
+        input.imports.some(({ path }) =>
+          path.includes('node-shadow-diagnostics'),
+        ),
+      )
+      .map(([path]) => path)
+      .sort();
+    expect(diagnosticImporters).toEqual([
+      'src/commands/run.ts',
+      'src/mcp/research.ts',
+    ]);
+    const shadowImporters = Object.entries(production.metafile.inputs)
+      .filter(([, input]) =>
+        input.imports.some(({ path }) => path.includes('shadow-compilation')),
+      )
+      .map(([path]) => path)
+      .sort();
+    expect(shadowImporters).toEqual(['src/node-shadow-diagnostics.ts']);
   });
 });
