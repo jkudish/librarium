@@ -150,8 +150,8 @@ describe('private shadow compiler in workerd', () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     if (!result.ok) return;
     expect(result.prepared.policy.limits).toMatchObject({
-      request_deadline_ms: 210_000,
-      background_attempt_deadline_ms: 210_000,
+      request_deadline_ms: 525_000,
+      background_attempt_deadline_ms: 525_000,
     });
   });
 
@@ -173,7 +173,7 @@ describe('private shadow compiler in workerd', () => {
           GEMINI_API_KEY: 'worker-test-key',
         },
       },
-      requestDeadlineMs: 250_000,
+      requestDeadlineMs: 600_000,
       transport: {
         kind: 'silent_mcp',
         input: {
@@ -195,12 +195,13 @@ describe('private shadow compiler in workerd', () => {
     expect(result.ok, JSON.stringify(result)).toBe(true);
     if (!result.ok) return;
     expect(result.prepared.policy.limits).toMatchObject({
-      request_deadline_ms: 250_000,
-      background_attempt_deadline_ms: 210_000,
+      request_deadline_ms: 600_000,
+      background_attempt_deadline_ms: 525_000,
     });
     expect(result.notices).toContainEqual(
       expect.objectContaining({
         code: 'explicit_request_deadline_may_truncate_plan',
+        path: '/deadline_migration/explicit_request_deadline_ms',
       }),
     );
   });

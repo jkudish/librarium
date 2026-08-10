@@ -50,33 +50,62 @@ export type V1RequestDeadlineDerivationResult =
 export interface BackgroundTransportOverheadPolicy {
   readonly submit_timeout_ms: number;
   readonly final_poll_sleep_ms: number;
-  readonly poll_timeout_ms: number;
-  readonly retrieve_timeout_ms: number;
+  readonly poll_attempt_timeout_ms: number;
+  readonly poll_ceiling_ms: number;
+  readonly retrieve_attempt_timeout_ms: number;
+  readonly retrieve_ceiling_ms: number;
   readonly total_ms: number;
+}
+
+/**
+ * Audited against `http-client.ts`: default safe GETs use MAX_RETRIES + 1 = 4
+ * attempts, three intervening delays, INITIAL_RETRY_DELAY_MS exponential
+ * jitter caps of 1s/2s/4s, and a 30s maxDelayMs cap for Retry-After. Because
+ * Retry-After replaces jitter when present, its 90s aggregate is the ceiling.
+ */
+export const V1_SAFE_GET_RETRY_CEILING = Object.freeze({
+  max_attempts: 4,
+  retry_delay_count: 3,
+  retry_after_cap_ms: 30_000,
+  jitter_caps_ms: Object.freeze([1_000, 2_000, 4_000] as const),
+  maximum_retry_delay_ms: 90_000,
+});
+
+function safeGetCeilingMs(attemptTimeoutMs: number): number {
+  return (
+    V1_SAFE_GET_RETRY_CEILING.max_attempts * attemptTimeoutMs +
+    V1_SAFE_GET_RETRY_CEILING.maximum_retry_delay_ms
+  );
 }
 
 const OPENAI_BACKGROUND_TRANSPORT = Object.freeze({
   submit_timeout_ms: 30_000,
   final_poll_sleep_ms: 5_000,
-  poll_timeout_ms: 15_000,
-  retrieve_timeout_ms: 30_000,
-  total_ms: 80_000,
+  poll_attempt_timeout_ms: 15_000,
+  poll_ceiling_ms: safeGetCeilingMs(15_000),
+  retrieve_attempt_timeout_ms: 30_000,
+  retrieve_ceiling_ms: safeGetCeilingMs(30_000),
+  total_ms: 395_000,
 });
 
 const GEMINI_BACKGROUND_TRANSPORT = Object.freeze({
   submit_timeout_ms: 30_000,
   final_poll_sleep_ms: 15_000,
-  poll_timeout_ms: 15_000,
-  retrieve_timeout_ms: 30_000,
-  total_ms: 90_000,
+  poll_attempt_timeout_ms: 15_000,
+  poll_ceiling_ms: safeGetCeilingMs(15_000),
+  retrieve_attempt_timeout_ms: 30_000,
+  retrieve_ceiling_ms: safeGetCeilingMs(30_000),
+  total_ms: 405_000,
 });
 
 const PERPLEXITY_BACKGROUND_TRANSPORT = Object.freeze({
   submit_timeout_ms: 30_000,
   final_poll_sleep_ms: 0,
-  poll_timeout_ms: 15_000,
-  retrieve_timeout_ms: 30_000,
-  total_ms: 75_000,
+  poll_attempt_timeout_ms: 15_000,
+  poll_ceiling_ms: safeGetCeilingMs(15_000),
+  retrieve_attempt_timeout_ms: 30_000,
+  retrieve_ceiling_ms: safeGetCeilingMs(30_000),
+  total_ms: 390_000,
 });
 
 /**

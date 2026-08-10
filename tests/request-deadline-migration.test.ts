@@ -18,6 +18,7 @@ import {
 import {
   deriveV1RequestDeadline,
   V1_BACKGROUND_TRANSPORT_OVERHEAD_BY_PROFILE,
+  V1_SAFE_GET_RETRY_CEILING,
   type V1RequestDeadlineMigrationContext,
   v1BackgroundTransportOverheadMs,
 } from '../src/core/request-deadline-migration.js';
@@ -168,7 +169,7 @@ describe('v1 total request-deadline migration', () => {
         profile('openai-research', 'background'),
       ]),
     );
-    expect(result).toMatchObject({ ok: true, request_deadline_ms: 110_000 });
+    expect(result).toMatchObject({ ok: true, request_deadline_ms: 425_000 });
   });
 
   it('uses trusted custom profile invocation as the canonical attempt class', () => {
@@ -220,7 +221,7 @@ describe('v1 total request-deadline migration', () => {
 
   it('lets a valid explicit request deadline override the formula', () => {
     const result = deriveV1RequestDeadline(
-      context({ explicit_request_deadline_ms: 300_000 }),
+      context({ explicit_request_deadline_ms: 1_000_000 }),
       admittedPlan(
         [profile('primary')],
         [
@@ -231,9 +232,9 @@ describe('v1 total request-deadline migration', () => {
     );
     expect(result).toEqual({
       ok: true,
-      request_deadline_ms: 300_000,
-      effective_background_attempt_deadline_ms: 110_000,
-      derived_full_plan_minimum_ms: 230_000,
+      request_deadline_ms: 1_000_000,
+      effective_background_attempt_deadline_ms: 425_000,
+      derived_full_plan_minimum_ms: 860_000,
       source: 'explicit_override',
       notices: [],
     });
@@ -243,7 +244,7 @@ describe('v1 total request-deadline migration', () => {
     const result = deriveV1RequestDeadline(
       context({
         max_parallel: 1,
-        explicit_request_deadline_ms: 120_000,
+        explicit_request_deadline_ms: 500_000,
       }),
       admittedPlan([
         profile('openai-research', 'background'),
@@ -252,9 +253,9 @@ describe('v1 total request-deadline migration', () => {
     );
     expect(result).toMatchObject({
       ok: true,
-      request_deadline_ms: 120_000,
-      effective_background_attempt_deadline_ms: 100_000,
-      derived_full_plan_minimum_ms: 200_000,
+      request_deadline_ms: 500_000,
+      effective_background_attempt_deadline_ms: 415_000,
+      derived_full_plan_minimum_ms: 830_000,
       source: 'explicit_override',
       notices: [
         expect.objectContaining({
@@ -267,7 +268,7 @@ describe('v1 total request-deadline migration', () => {
 
   it('rejects an explicit total below the effective attempt cap', () => {
     const result = deriveV1RequestDeadline(
-      context({ explicit_request_deadline_ms: 99_999 }),
+      context({ explicit_request_deadline_ms: 414_999 }),
       admittedPlan([profile('openai-research', 'background')]),
     );
     expect(result).toMatchObject({
@@ -291,9 +292,9 @@ describe('v1 total request-deadline migration', () => {
     );
     expect(result).toMatchObject({
       ok: true,
-      effective_background_attempt_deadline_ms: 110_000,
-      derived_full_plan_minimum_ms: 220_000,
-      request_deadline_ms: 220_000,
+      effective_background_attempt_deadline_ms: 425_000,
+      derived_full_plan_minimum_ms: 850_000,
+      request_deadline_ms: 850_000,
     });
   });
 
@@ -442,6 +443,39 @@ describe('v1 total request-deadline migration', () => {
     });
   });
 
+  it('applies selected retry overhead exactly at the 7-day boundary without clamping', () => {
+    const selected = admittedPlan([profile('gemini-deep', 'background')]);
+    const boundary = deriveV1RequestDeadline(
+      context({
+        max_parallel: 1,
+        raw_background_attempt_deadline_ms: 604_395_000,
+      }),
+      selected,
+    );
+    expect(boundary).toMatchObject({
+      ok: true,
+      request_deadline_ms: 604_800_000,
+      effective_background_attempt_deadline_ms: 604_800_000,
+    });
+
+    const plusOne = deriveV1RequestDeadline(
+      context({
+        max_parallel: 1,
+        raw_background_attempt_deadline_ms: 604_395_001,
+      }),
+      selected,
+    );
+    expect(plusOne).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          code: 'request_deadline_contract_maximum_exceeded',
+          path: '/deadline_migration/effective_background_attempt_deadline_ms',
+        }),
+      ],
+    });
+  });
+
   it('reports safe-integer overflow separately from the contract maximum', () => {
     const result = deriveV1RequestDeadline(
       context({
@@ -461,41 +495,71 @@ describe('v1 total request-deadline migration', () => {
     });
   });
 
+  it('pins the audited safe-GET Retry-After ceiling above jitter backoff', () => {
+    expect(V1_SAFE_GET_RETRY_CEILING).toEqual({
+      max_attempts: 4,
+      retry_delay_count: 3,
+      retry_after_cap_ms: 30_000,
+      jitter_caps_ms: [1_000, 2_000, 4_000],
+      maximum_retry_delay_ms: 90_000,
+    });
+    expect(3 * 30_000).toBeGreaterThan(1_000 + 2_000 + 4_000);
+    expect(V1_SAFE_GET_RETRY_CEILING.maximum_retry_delay_ms).toBe(3 * 30_000);
+  });
+
   it('classifies audited OpenAI, Gemini, and Perplexity background overhead explicitly', () => {
     expect(V1_BACKGROUND_TRANSPORT_OVERHEAD_BY_PROFILE).toEqual({
       'openai-research/research': {
         submit_timeout_ms: 30_000,
         final_poll_sleep_ms: 5_000,
-        poll_timeout_ms: 15_000,
-        retrieve_timeout_ms: 30_000,
-        total_ms: 80_000,
+        poll_attempt_timeout_ms: 15_000,
+        poll_ceiling_ms: 150_000,
+        retrieve_attempt_timeout_ms: 30_000,
+        retrieve_ceiling_ms: 210_000,
+        total_ms: 395_000,
       },
       'gemini-deep/research': {
         submit_timeout_ms: 30_000,
         final_poll_sleep_ms: 15_000,
-        poll_timeout_ms: 15_000,
-        retrieve_timeout_ms: 30_000,
-        total_ms: 90_000,
+        poll_attempt_timeout_ms: 15_000,
+        poll_ceiling_ms: 150_000,
+        retrieve_attempt_timeout_ms: 30_000,
+        retrieve_ceiling_ms: 210_000,
+        total_ms: 405_000,
       },
       'perplexity-sonar-deep/research': {
         submit_timeout_ms: 30_000,
         final_poll_sleep_ms: 0,
-        poll_timeout_ms: 15_000,
-        retrieve_timeout_ms: 30_000,
-        total_ms: 75_000,
+        poll_attempt_timeout_ms: 15_000,
+        poll_ceiling_ms: 150_000,
+        retrieve_attempt_timeout_ms: 30_000,
+        retrieve_ceiling_ms: 210_000,
+        total_ms: 390_000,
       },
     });
+    for (const policy of Object.values(
+      V1_BACKGROUND_TRANSPORT_OVERHEAD_BY_PROFILE,
+    )) {
+      expect(policy.poll_ceiling_ms).toBe(4 * 15_000 + 3 * 30_000);
+      expect(policy.retrieve_ceiling_ms).toBe(4 * 30_000 + 3 * 30_000);
+      expect(policy.total_ms).toBe(
+        policy.submit_timeout_ms +
+          policy.final_poll_sleep_ms +
+          policy.poll_ceiling_ms +
+          policy.retrieve_ceiling_ms,
+      );
+    }
     expect(
       v1BackgroundTransportOverheadMs(profile('openai-research', 'background')),
-    ).toBe(80_000);
+    ).toBe(395_000);
     expect(
       v1BackgroundTransportOverheadMs(profile('gemini-deep', 'background')),
-    ).toBe(90_000);
+    ).toBe(405_000);
     expect(
       v1BackgroundTransportOverheadMs(
         profile('perplexity-sonar-deep', 'background'),
       ),
-    ).toBe(75_000);
+    ).toBe(390_000);
     expect(
       v1BackgroundTransportOverheadMs(
         profile('unknown-background', 'background'),
