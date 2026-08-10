@@ -119,6 +119,8 @@ jobs:
 
   below-floor:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [autoformat]
     if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
 
@@ -150,6 +152,8 @@ jobs:
 
   sea:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [autoformat]
     if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
 

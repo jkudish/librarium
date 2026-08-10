@@ -88,7 +88,7 @@ describe('run manifest v2 store', () => {
       bundle: true,
       platform: 'node',
       format: 'esm',
-      target: 'node20',
+      target: 'node22.12',
     });
     await Promise.all(
       Array.from(

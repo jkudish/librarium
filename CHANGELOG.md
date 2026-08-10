@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking Node and CLI baseline:** Node-based Librarium installs now require
+  Node.js 22.12 or newer and use Commander 15. CLI query, provider, mode,
+  concurrency, timeout, budget, cleanup, usage, completion-shell, and config
+  inputs are validated before command actions run. Invalid completion-shell
+  arguments intentionally exit with status 1. Standalone and Homebrew binaries
+  remain self-contained and do not require a host Node.js installation.
 - SearchAPI now authenticates through `Authorization: Bearer` without placing
   credentials in URLs. The strict `zeroRetention` option sends
   `zero_retention=true` and fails closed with no fallback or privacy downgrade
