@@ -11,7 +11,23 @@ import {
   resolveEnvVar,
   validateFallbacks,
 } from '../src/core/config.js';
-import type { Config, ProjectConfig } from '../src/types.js';
+import { type Config, ConfigSchema, type ProjectConfig } from '../src/types.js';
+
+const CUSTOM_EXECUTION_PROFILE = {
+  identity: {
+    provider_id: 'acme',
+    profile_id: 'search',
+    target: { primary: { model_selection: 'not_applicable' as const } },
+  },
+  result_kind: 'search_results' as const,
+  observation_mode: 'api_output' as const,
+  corpora: ['web' as const],
+  retrieval_method: 'search_endpoint' as const,
+  access_mode: 'direct' as const,
+  operator_id: 'acme',
+  invocation: 'inline' as const,
+  resumability: 'none' as const,
+};
 
 const PRIOR_COMPREHENSIVE = [
   'perplexity-sonar-deep',
@@ -331,6 +347,72 @@ describe('loadConfig', () => {
   });
 });
 
+describe('custom-provider execution profile config', () => {
+  it('validates the strict canonical profile and credential declaration', () => {
+    const parsed = ConfigSchema.safeParse({
+      ...storedConfig(),
+      customProviders: {
+        acme: {
+          type: 'npm',
+          module: 'acme-provider',
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: CUSTOM_EXECUTION_PROFILE,
+            credential: { envVar: 'ACME_API_KEY' },
+          },
+        },
+      },
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects malformed metadata even when the provider is untrusted', () => {
+    const unknownProfileField = ConfigSchema.safeParse({
+      ...storedConfig(),
+      customProviders: {
+        acme: {
+          type: 'npm',
+          module: 'acme-provider',
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: { ...CUSTOM_EXECUTION_PROFILE, unexpected: true },
+          },
+        },
+      },
+    });
+    const invalidEnv = ConfigSchema.safeParse({
+      ...storedConfig(),
+      customProviders: {
+        acme: {
+          type: 'npm',
+          module: 'acme-provider',
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: CUSTOM_EXECUTION_PROFILE,
+            credential: { envVar: 'not-valid!' },
+          },
+        },
+      },
+    });
+    const invalidBinding = ConfigSchema.safeParse({
+      ...storedConfig(),
+      customProviders: {
+        acme: {
+          type: 'npm',
+          module: 'acme-provider',
+          executionProfile: {
+            bindingId: ' invalid ',
+            profile: CUSTOM_EXECUTION_PROFILE,
+          },
+        },
+      },
+    });
+    expect(unknownProfileField.success).toBe(false);
+    expect(invalidEnv.success).toBe(false);
+    expect(invalidBinding.success).toBe(false);
+  });
+});
+
 describe('mergeConfigs', () => {
   const baseGlobal: Config = {
     version: 1,
@@ -553,18 +635,35 @@ describe('mergeConfigs', () => {
       {
         ...baseGlobal,
         customProviders: {
-          overridden: { type: 'npm', module: 'global-provider' },
+          overridden: {
+            type: 'npm',
+            module: 'global-provider',
+            executionProfile: {
+              bindingId: 'global.v1',
+              profile: CUSTOM_EXECUTION_PROFILE,
+            },
+          },
         },
         trustedProviderIds: ['overridden'],
       },
       {
         customProviders: {
-          overridden: { type: 'npm', module: 'project-provider' },
+          overridden: {
+            type: 'npm',
+            module: 'project-provider',
+            executionProfile: {
+              bindingId: 'project.v1',
+              profile: CUSTOM_EXECUTION_PROFILE,
+            },
+          },
         },
       },
     );
 
     expect(merged.trustedProviderIds).toEqual([]);
+    expect(merged.customProviders.overridden?.executionProfile?.bindingId).toBe(
+      'project.v1',
+    );
   });
 
   it('keeps a project override trusted when the project explicitly trusts it', () => {

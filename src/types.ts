@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import { OpaqueIdSchema } from './contracts/common.js';
+import {
+  type ExecutionProfile,
+  ExecutionProfileSchema,
+} from './contracts/domain/index.js';
 
 // Provider tiers
 export type ProviderTier =
@@ -255,11 +260,44 @@ export const ProjectProviderConfigSchema = z.object({
 });
 export type ProjectProviderConfig = z.infer<typeof ProjectProviderConfigSchema>;
 
+export interface CustomProviderExecutionProfile {
+  bindingId: string;
+  profile: ExecutionProfile;
+  credential?: { envVar: string };
+}
+
+export const CustomProviderExecutionProfileSchema: z.ZodType<CustomProviderExecutionProfile> =
+  z.strictObject({
+    bindingId: z.custom<string>(
+      (value) => OpaqueIdSchema.safeParse(value).success,
+      'Custom-provider bindingId must be a canonical opaque identifier',
+    ),
+    // The legacy config layer uses Zod 3 while the canonical contract uses
+    // Zod 4. Validate with the canonical schema at this boundary and retain its
+    // exact inferred type without weakening or duplicating the contract.
+    profile: z.custom<ExecutionProfile>(
+      (value) => ExecutionProfileSchema.safeParse(value).success,
+      'Invalid canonical execution profile',
+    ),
+    credential: z
+      .strictObject({
+        envVar: z
+          .string()
+          .trim()
+          .regex(
+            /^[A-Za-z_][A-Za-z0-9_]*$/,
+            'Custom-provider credential envVar must be a valid environment variable name',
+          ),
+      })
+      .optional(),
+  });
+
 export const NpmProviderSourceSchema = z.object({
   type: z.literal('npm'),
   module: z.string().min(1),
   export: z.string().optional(),
   options: z.record(z.unknown()).optional(),
+  executionProfile: CustomProviderExecutionProfileSchema.optional(),
 });
 export type NpmProviderSource = z.infer<typeof NpmProviderSourceSchema>;
 
@@ -270,6 +308,7 @@ export const ScriptProviderSourceSchema = z.object({
   cwd: z.string().optional(),
   env: z.record(z.string()).optional(),
   options: z.record(z.unknown()).optional(),
+  executionProfile: CustomProviderExecutionProfileSchema.optional(),
 });
 export type ScriptProviderSource = z.infer<typeof ScriptProviderSourceSchema>;
 

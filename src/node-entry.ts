@@ -16,7 +16,7 @@ import {
   loadCustomProviders as loadCustomProvidersInternal,
 } from './adapters/custom.js';
 import { getAllProviders, registerProvider } from './adapters/index.js';
-import { BUILTIN_PROVIDER_DEFINITIONS } from './core/provider-descriptor.js';
+import { RESERVED_BUILTIN_PROVIDER_IDS } from './core/reserved-provider-ids.js';
 import type { Config } from './types.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
@@ -43,10 +43,7 @@ export async function loadCustomProviders(
   options: LoadCustomProvidersOptions = {},
 ): Promise<CustomProviderLoadResult> {
   const reservedProviderIds = new Set([
-    ...BUILTIN_PROVIDER_DEFINITIONS.flatMap(({ id, aliases }) => [
-      id,
-      ...aliases,
-    ]),
+    ...RESERVED_BUILTIN_PROVIDER_IDS,
     ...getAllProviders().map((provider) => provider.id),
     ...(options.reservedProviderIds ?? []),
   ]);

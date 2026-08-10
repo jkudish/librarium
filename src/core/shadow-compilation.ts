@@ -1,4 +1,3 @@
-import { PROVIDER_ID_ALIASES } from '../constants.js';
 import type { Config } from '../types.js';
 import {
   REMOVED_BUILTIN_WORKFLOW_IDS,
@@ -14,13 +13,14 @@ import type {
   PreparationDependencies,
   PreparedResearchExecution,
 } from './execution-plan.js';
-import { BUILTIN_PROVIDER_DEFINITIONS } from './provider-descriptor.js';
+import type { CustomCatalogProfile } from './profile-catalog.js';
 import type {
   PreparationIssue,
   PreparationNotice,
   ProfileTarget,
 } from './research-request.js';
 import { sortPreparationDiagnostics } from './research-request.js';
+import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
   type CanonicalTransportDefaults,
   type CliTransportInput,
@@ -74,14 +74,10 @@ interface ResolvedProviderTokens {
   readonly issues: readonly PreparationIssue[];
 }
 
-const RESERVED_BUILTIN_PROVIDER_TOKENS = new Set([
-  ...BUILTIN_PROVIDER_DEFINITIONS.map(({ id }) => id),
-  ...Object.keys(PROVIDER_ID_ALIASES),
-]);
-
 function resolveProviderTokens(
   tokens: readonly string[] | undefined,
   missingCustomProviderIds: ReadonlySet<string>,
+  customProfiles: readonly CustomCatalogProfile[],
 ): ResolvedProviderTokens {
   if (tokens === undefined) return { targets: [], notices: [], issues: [] };
 
@@ -116,7 +112,7 @@ function resolveProviderTokens(
       });
       continue;
     }
-    const resolution = resolveConfigurationProfileToken(token);
+    const resolution = resolveConfigurationProfileToken(token, customProfiles);
     if (resolution.kind === 'unknown') {
       issues.push({
         code: 'shadow_provider_token_unknown',
@@ -254,10 +250,11 @@ function missingCustomProviderIds(config: Config): readonly string[] {
   const trusted = new Set(config.trustedProviderIds);
   return Object.keys(config.customProviders).filter(
     (id) =>
-      !RESERVED_BUILTIN_PROVIDER_TOKENS.has(id) &&
+      !RESERVED_BUILTIN_PROVIDER_IDS.has(id) &&
       trusted.has(id) &&
       Object.hasOwn(config.providers, id) &&
-      config.providers[id]?.enabled === true,
+      config.providers[id]?.enabled === true &&
+      config.customProviders[id]?.executionProfile === undefined,
   );
 }
 
@@ -399,6 +396,7 @@ export function compileShadowRequest(
   const resolved = resolveProviderTokens(
     rawProviders,
     new Set(missingCustomProviderIds(input.config)),
+    mapped.custom_profile_bindings,
   );
   // A supplied provider selection owns selector precedence, even when its
   // tokens are invalid. Its error should not be obscured by an ignored group.
