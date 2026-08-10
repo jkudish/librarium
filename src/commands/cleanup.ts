@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
+import { parsePositiveDays } from '../cli-parsers.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { formatRunDate } from './browse-data.js';
 import {
@@ -32,7 +33,7 @@ export function registerCleanupCommand(program: Command): void {
     .option(
       '--days <n>',
       'Age threshold in days (default: 30)',
-      Number.parseInt,
+      parsePositiveDays,
       30,
     )
     .option('--all', 'Delete every run directory regardless of age')

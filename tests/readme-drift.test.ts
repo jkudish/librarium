@@ -1,25 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { registerAnswerCommand } from '../src/commands/answer.js';
-import { registerBrowseCommand } from '../src/commands/browse.js';
-import { registerCleanupCommand } from '../src/commands/cleanup.js';
-import { registerCompletionsCommand } from '../src/commands/completions.js';
-import { registerConfigCommand } from '../src/commands/config.js';
-import { registerDoctorCommand } from '../src/commands/doctor.js';
-import { registerGroupsCommand } from '../src/commands/groups.js';
-import { registerHtmlCommand } from '../src/commands/html.js';
-import { registerInitCommand } from '../src/commands/init.js';
-import { registerInstallSkillCommand } from '../src/commands/install-skill.js';
-import { registerJsonlCommand } from '../src/commands/jsonl.js';
-import { registerLsCommand } from '../src/commands/ls.js';
-import { registerMcpCommand } from '../src/commands/mcp.js';
-import { registerRefineCommand } from '../src/commands/refine.js';
-import { registerRunCommand } from '../src/commands/run.js';
-import { registerStatusCommand } from '../src/commands/status.js';
-import { registerUpgradeCommand } from '../src/commands/upgrade.js';
-import { registerUsageCommand } from '../src/commands/usage.js';
+import { createCliProgram } from '../src/cli-program.js';
 import { DEFAULT_GROUPS, PROVIDER_ENV_VARS } from '../src/constants.js';
 
 /**
@@ -42,32 +24,7 @@ const README = readFileSync(
   'utf-8',
 );
 
-/** Build the real program exactly as src/cli.ts does. */
-function buildProgram(): Command {
-  const program = new Command();
-  program.name('librarium');
-  registerRunCommand(program);
-  registerAnswerCommand(program);
-  registerStatusCommand(program);
-  registerUsageCommand(program);
-  registerBrowseCommand(program);
-  registerHtmlCommand(program);
-  registerJsonlCommand(program);
-  registerRefineCommand(program);
-  registerCompletionsCommand(program);
-  registerLsCommand(program);
-  registerGroupsCommand(program);
-  registerInitCommand(program);
-  registerDoctorCommand(program);
-  registerConfigCommand(program);
-  registerCleanupCommand(program);
-  registerUpgradeCommand(program);
-  registerInstallSkillCommand(program);
-  registerMcpCommand(program);
-  return program;
-}
-
-const program = buildProgram();
+const program = createCliProgram();
 
 describe('README drift: commands', () => {
   const commandNames = program.commands.map((c) => c.name());

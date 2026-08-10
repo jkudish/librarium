@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createCliProgram } from '../src/cli-program.js';
 import { citationWarnings, renderSourceLink } from '../src/commands/answer.js';
 import {
   buildSynthesisPrompt,
@@ -112,9 +113,10 @@ describe('citation validation warnings', () => {
 
 describe('answer command completions parity', () => {
   it('includes answer with its flags and group completion in all shells', () => {
-    const zsh = zshCompletions();
-    const bash = bashCompletions();
-    const fish = fishCompletions();
+    const program = createCliProgram();
+    const zsh = zshCompletions(program);
+    const bash = bashCompletions(program);
+    const fish = fishCompletions(program);
     for (const script of [zsh, bash, fish]) {
       expect(script).toContain('answer');
     }

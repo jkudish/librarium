@@ -2,12 +2,20 @@ import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
-import { type Command, InvalidArgumentError } from 'commander';
+import type { Command } from 'commander';
 import ora from 'ora';
 import {
   getAllProviders,
   initializeProviders,
 } from '../adapters/node-registry.js';
+import {
+  parseMode,
+  parseParallel,
+  parseProviders,
+  parseResearchQuery,
+  parseTimeoutSeconds,
+  parseUsdBudget,
+} from '../cli-parsers.js';
 import {
   BUDGET_SKIP_REASON,
   createBudgetTracker,
@@ -128,28 +136,32 @@ export interface ExecuteRunHooks {
  * circuit breaker. Shared by `run` and `answer` so both validate identically.
  */
 export function parseMaxCost(value: string): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new InvalidArgumentError('must be a positive number of USD.');
-  }
-  return parsed;
+  return parseUsdBudget(value);
 }
 
 export function registerRunCommand(program: Command): void {
   program
     .command('run')
     .description('Run a research query across multiple providers')
-    .argument('<query>', 'The research query')
+    .argument('<query>', 'The research query', parseResearchQuery)
     .option(
       '-p, --providers <ids>',
       'Comma-separated provider IDs',
-      (v: string) => v.split(','),
+      parseProviders,
     )
     .option('-g, --group <name>', 'Use a predefined provider group')
-    .option('-m, --mode <mode>', 'Execution mode: sync, async, or mixed')
+    .option(
+      '-m, --mode <mode>',
+      'Execution mode: sync, async, or mixed',
+      parseMode,
+    )
     .option('-o, --output <dir>', 'Output base directory')
-    .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
-    .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
+    .option('--parallel <n>', 'Max parallel requests', parseParallel)
+    .option(
+      '--timeout <n>',
+      'Timeout per provider in seconds',
+      parseTimeoutSeconds,
+    )
     .option(
       '--max-cost <usd>',
       'Stop launching providers once API-reported cost crosses this budget (USD)',

@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { parseResearchQuery } from '../cli-parsers.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext, EnvRecord } from '../core/credentials.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
@@ -176,10 +177,11 @@ export async function refineQuery(
 
 export function registerRefineCommand(program: Command): void {
   program
-    .command('refine <query>')
+    .command('refine')
     .description(
       'Rewrite a query into tier-tuned variants (no dispatch); suggests a group',
     )
+    .argument('<query>', 'The research query', parseResearchQuery)
     .option('--json', 'Output JSON')
     .action(async (query: string, opts: { json?: boolean }) => {
       try {

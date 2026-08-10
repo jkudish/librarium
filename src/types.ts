@@ -319,13 +319,15 @@ export const CustomProviderSourceSchema = z.discriminatedUnion('type', [
 export type CustomProviderSource = z.infer<typeof CustomProviderSourceSchema>;
 
 // Defaults config
+export const LegacyExecutionModeSchema = z.enum(['sync', 'async', 'mixed']);
+
 export const DefaultsSchema = z.object({
   outputDir: z.string().default('./agents/librarium'),
   maxParallel: z.number().default(6),
   timeout: z.number().default(30),
   asyncTimeout: z.number().default(1800),
   asyncPollInterval: z.number().default(30),
-  mode: z.enum(['sync', 'async', 'mixed']).default('mixed'),
+  mode: LegacyExecutionModeSchema.default('mixed'),
   llmWebSearch: z.boolean().default(true),
   // Optional runtime spend circuit breaker. Honest budget: only API-reported
   // costs count toward it (see src/core/budget.ts). Unset means no limit.
@@ -374,7 +376,7 @@ export const ProjectConfigSchema = z.object({
       timeout: z.number().optional(),
       asyncTimeout: z.number().optional(),
       asyncPollInterval: z.number().optional(),
-      mode: z.enum(['sync', 'async', 'mixed']).optional(),
+      mode: LegacyExecutionModeSchema.optional(),
       llmWebSearch: z.boolean().optional(),
       maxCostUsd: z.number().optional(),
       maxEstimatedCostUsd: z.number().optional(),
