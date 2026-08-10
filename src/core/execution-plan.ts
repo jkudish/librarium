@@ -1,3 +1,4 @@
+import { z } from 'zod/v4';
 import {
   CONTRACT_LIMITS,
   OpaqueIdSchema,
@@ -134,10 +135,84 @@ export type PreparationResult =
       readonly notices: readonly PreparationNotice[];
     };
 
-interface SelectedProfile {
+type ResearchAdmissionRequest = Omit<CanonicalResearchRequest, 'limits'>;
+
+export interface AdmittedSelectedProfile {
   readonly entry: PlanningProfile;
   readonly path: string;
   readonly requirements?: EvidenceRequirements;
+}
+
+const RESEARCH_ADMISSION_BRAND: unique symbol = Symbol(
+  'librarium.research-admission',
+);
+const MINTED_RESEARCH_ADMISSIONS = new WeakSet<object>();
+
+/**
+ * Opaque, deeply frozen result of catalog validation, exact selection,
+ * fallback compatibility, and budget admission. Only this module can mint it.
+ */
+export interface ResearchExecutionAdmission {
+  readonly [RESEARCH_ADMISSION_BRAND]: true;
+  readonly request: ResearchAdmissionRequest;
+  readonly primaries: readonly AdmittedSelectedProfile[];
+  readonly reserve: readonly AdmittedSelectedProfile[];
+  readonly provisional_slots: readonly RequestSlot[];
+  readonly catalog: {
+    readonly revision: string;
+    readonly digest: string;
+  };
+  readonly notices: readonly PreparationNotice[];
+}
+
+export type ResearchAdmissionResult =
+  | {
+      readonly ok: true;
+      readonly admission: ResearchExecutionAdmission;
+      readonly notices: readonly PreparationNotice[];
+    }
+  | {
+      readonly ok: false;
+      readonly issues: readonly PreparationIssue[];
+      readonly notices: readonly PreparationNotice[];
+    };
+
+const UnresolvedV1ResearchRequestSchema = CanonicalResearchRequestSchema.omit({
+  limits: true,
+}).extend({
+  // The total and effective background attempt limit do not exist until the
+  // exact frozen plan has been admitted. This strict private shape carries
+  // only limits which are independently knowable before selection.
+  limits: z.strictObject({
+    max_concurrency: z
+      .number()
+      .int()
+      .min(RESEARCH_REQUEST_LIMITS.minConcurrency)
+      .max(RESEARCH_REQUEST_LIMITS.maxConcurrency),
+    inline_attempt_deadline_ms: z
+      .number()
+      .int()
+      .min(RESEARCH_REQUEST_LIMITS.minDeadlineMs)
+      .max(RESEARCH_REQUEST_LIMITS.maxDeadlineMs),
+    poll_interval_ms: z
+      .number()
+      .int()
+      .min(RESEARCH_REQUEST_LIMITS.minPollIntervalMs)
+      .max(RESEARCH_REQUEST_LIMITS.maxPollIntervalMs),
+  }),
+});
+
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) {
+    return value;
+  }
+  Object.freeze(value);
+  for (const nested of Object.values(value)) deepFreeze(nested);
+  return value;
+}
+
+function ownFrozen<T>(value: T): T {
+  return deepFreeze(structuredClone(value));
 }
 
 function escapeJsonPointerToken(token: string): string {
@@ -237,7 +312,7 @@ function duplicateTargetIssues(
 }
 
 function canonicalSetIssues(
-  request: CanonicalResearchRequest,
+  request: ResearchAdmissionRequest,
 ): PreparationIssue[] {
   const issues = duplicateTargetIssues(
     request.exclusions,
@@ -314,8 +389,8 @@ function resolveTargets(
   catalog: FrozenPlanningCatalog,
   basePath: string,
   issues: PreparationIssue[],
-): SelectedProfile[] {
-  const selected: SelectedProfile[] = [];
+): AdmittedSelectedProfile[] {
+  const selected: AdmittedSelectedProfile[] = [];
   for (const [index, target] of targets.entries()) {
     const path = `${basePath}/${index}`;
     const matches = catalog.profiles.filter(({ profile }) =>
@@ -355,8 +430,8 @@ function resolveIdentities(
   byKey: ReadonlyMap<string, PlanningProfile>,
   path: string,
   issues: PreparationIssue[],
-): SelectedProfile[] {
-  const selected: SelectedProfile[] = [];
+): AdmittedSelectedProfile[] {
+  const selected: AdmittedSelectedProfile[] = [];
   for (const identity of identities) {
     const entry = findCatalogEntry(byKey, identity);
     if (!entry) {
@@ -375,7 +450,7 @@ function resolveIdentities(
 }
 
 function profileAvailabilityIssues(
-  selection: SelectedProfile,
+  selection: AdmittedSelectedProfile,
   mode: CanonicalResearchRequest['mode'],
   allowReserveOnly = false,
 ): PreparationIssue[] {
@@ -431,7 +506,7 @@ function profileAvailabilityIssues(
 
 function isUsableCapabilityMatch(
   entry: PlanningProfile,
-  request: CanonicalResearchRequest,
+  request: ResearchAdmissionRequest,
   requirements: EvidenceRequirements,
 ): boolean {
   return (
@@ -446,12 +521,12 @@ function isUsableCapabilityMatch(
 }
 
 function selectPrimaries(
-  request: CanonicalResearchRequest,
+  request: ResearchAdmissionRequest,
   catalog: FrozenPlanningCatalog,
   byKey: ReadonlyMap<string, PlanningProfile>,
   issues: PreparationIssue[],
-): SelectedProfile[] {
-  let selected: SelectedProfile[];
+): AdmittedSelectedProfile[] {
+  let selected: AdmittedSelectedProfile[];
   switch (request.selector.kind) {
     case 'targets':
       selected = resolveTargets(
@@ -512,7 +587,7 @@ function selectPrimaries(
   }
 
   if (request.selector.kind !== 'capabilities') {
-    const retained: SelectedProfile[] = [];
+    const retained: AdmittedSelectedProfile[] = [];
     for (const selection of selected) {
       if (isExcluded(selection.entry.profile.identity, request.exclusions)) {
         if (request.selector.kind === 'targets') {
@@ -723,14 +798,14 @@ function validateCatalogIdentity(
 }
 
 function resolveReserve(
-  request: CanonicalResearchRequest,
+  request: ResearchAdmissionRequest,
   catalog: FrozenPlanningCatalog,
   byKey: ReadonlyMap<string, PlanningProfile>,
-  primaries: readonly SelectedProfile[],
+  primaries: readonly AdmittedSelectedProfile[],
   slots: readonly RequestSlot[],
   issues: PreparationIssue[],
   notices: PreparationNotice[],
-): SelectedProfile[] {
+): AdmittedSelectedProfile[] {
   if (request.fallback.kind === 'disabled') return [];
 
   const fallback = request.fallback;
@@ -748,7 +823,7 @@ function resolveReserve(
         );
 
   const used = new Set(primaries.map(({ entry }) => profileKey(entry.profile)));
-  const retained: SelectedProfile[] = [];
+  const retained: AdmittedSelectedProfile[] = [];
   for (const selection of reserve) {
     const key = profileKey(selection.entry.profile);
     const diagnosticKey = profileIdentityKey(selection.entry.profile.identity);
@@ -851,9 +926,9 @@ function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
 }
 
 function validatePrimaryBudgetAdmission(
-  request: CanonicalResearchRequest,
-  primaries: readonly SelectedProfile[],
-  reserve: readonly SelectedProfile[],
+  request: ResearchAdmissionRequest,
+  primaries: readonly AdmittedSelectedProfile[],
+  reserve: readonly AdmittedSelectedProfile[],
   issues: PreparationIssue[],
 ): void {
   if (!request.budgets) return;
@@ -890,32 +965,26 @@ function validatePrimaryBudgetAdmission(
   }
 }
 
-export function prepareResearchExecution(
-  input: unknown,
-  catalog: FrozenPlanningCatalog,
-  dependencies: PreparationDependencies,
-): PreparationResult {
-  const migration = migrateLegacyResearchRequest(input);
-  const notices: PreparationNotice[] = [...migration.notices];
-  const canonical = CanonicalResearchRequestSchema.safeParse(migration.input);
-  if (!canonical.success) {
-    const issues = canonical.error.issues.map((issue) => {
-      const path = jsonPointer(issue.path);
-      return {
-        code: canonicalIssueCode(path, issue.message),
-        phase: 'canonicalization' as const,
-        path,
-        message: issue.message,
-      };
-    });
+function canonicalizationIssues(error: {
+  readonly issues: readonly { path: PropertyKey[]; message: string }[];
+}): PreparationIssue[] {
+  return error.issues.map((issue) => {
+    const path = jsonPointer(issue.path);
     return {
-      ok: false,
-      issues: sortDiagnostics(issues),
-      notices: sortDiagnostics(notices),
+      code: canonicalIssueCode(path, issue.message),
+      phase: 'canonicalization' as const,
+      path,
+      message: issue.message,
     };
-  }
+  });
+}
 
-  const request = canonical.data;
+function admitValidatedResearchExecution(
+  request: ResearchAdmissionRequest,
+  catalog: FrozenPlanningCatalog,
+  initialNotices: readonly PreparationNotice[],
+): ResearchAdmissionResult {
+  const notices: PreparationNotice[] = [...initialNotices];
   const issues = canonicalSetIssues(request);
   if (issues.length > 0) {
     return {
@@ -973,6 +1042,162 @@ export function prepareResearchExecution(
     };
   }
 
+  const frozenRequest = ownFrozen(request);
+  const frozenPrimaries = ownFrozen(primaries);
+  const frozenReserve = ownFrozen(reserve);
+  const frozenSlots = ownFrozen(provisionalSlots);
+  const frozenCatalogIdentity = ownFrozen(catalogIdentity);
+  const sortedNotices = ownFrozen(sortDiagnostics(notices));
+  const admission = deepFreeze({
+    [RESEARCH_ADMISSION_BRAND]: true as const,
+    request: frozenRequest,
+    primaries: frozenPrimaries,
+    reserve: frozenReserve,
+    provisional_slots: frozenSlots,
+    catalog: frozenCatalogIdentity,
+    notices: sortedNotices,
+  });
+  // Registration is the final minting step. A branded or frozen lookalike is
+  // not an admission unless this module completed every validation and freeze.
+  MINTED_RESEARCH_ADMISSIONS.add(admission);
+  return { ok: true, admission, notices: sortedNotices };
+}
+
+export type CanonicalResearchAdmissionResult =
+  | {
+      readonly ok: true;
+      readonly admission: ResearchExecutionAdmission;
+      readonly limits: CanonicalResearchRequest['limits'];
+      readonly notices: readonly PreparationNotice[];
+    }
+  | {
+      readonly ok: false;
+      readonly issues: readonly PreparationIssue[];
+      readonly notices: readonly PreparationNotice[];
+    };
+
+/** Pure canonical validation, catalog selection, and admission; no clock/IDs. */
+export function admitResearchExecution(
+  input: unknown,
+  catalog: FrozenPlanningCatalog,
+): CanonicalResearchAdmissionResult {
+  const migration = migrateLegacyResearchRequest(input);
+  const notices = [...migration.notices];
+  const canonical = CanonicalResearchRequestSchema.safeParse(migration.input);
+  if (!canonical.success) {
+    return {
+      ok: false,
+      issues: sortDiagnostics(canonicalizationIssues(canonical.error)),
+      notices: sortDiagnostics(notices),
+    };
+  }
+  const { limits, ...request } = canonical.data;
+  const admitted = admitValidatedResearchExecution(request, catalog, notices);
+  return admitted.ok ? { ...admitted, limits } : admitted;
+}
+
+/**
+ * Strict two-phase v1 admission. Missing total/effective background limits are
+ * intentional and cannot be mistaken for a canonical request.
+ */
+export function admitUnresolvedV1ResearchExecution(
+  input: unknown,
+  catalog: FrozenPlanningCatalog,
+):
+  | {
+      readonly ok: true;
+      readonly admission: ResearchExecutionAdmission;
+      readonly unresolved_limits: z.infer<
+        typeof UnresolvedV1ResearchRequestSchema
+      >['limits'];
+      readonly notices: readonly PreparationNotice[];
+    }
+  | {
+      readonly ok: false;
+      readonly issues: readonly PreparationIssue[];
+      readonly notices: readonly PreparationNotice[];
+    } {
+  const migration = migrateLegacyResearchRequest(input);
+  const notices = [...migration.notices];
+  const unresolved = UnresolvedV1ResearchRequestSchema.safeParse(
+    migration.input,
+  );
+  if (!unresolved.success) {
+    return {
+      ok: false,
+      issues: sortDiagnostics(canonicalizationIssues(unresolved.error)),
+      notices: sortDiagnostics(notices),
+    };
+  }
+  const { limits, ...request } = unresolved.data;
+  const admitted = admitValidatedResearchExecution(request, catalog, notices);
+  return admitted.ok ? { ...admitted, unresolved_limits: limits } : admitted;
+}
+
+export function isMintedResearchExecutionAdmission(
+  admission: unknown,
+): admission is ResearchExecutionAdmission {
+  if (typeof admission !== 'object' || admission === null) return false;
+  const candidate = admission as Partial<ResearchExecutionAdmission>;
+  return (
+    MINTED_RESEARCH_ADMISSIONS.has(admission) &&
+    candidate[RESEARCH_ADMISSION_BRAND] === true &&
+    Object.isFrozen(admission) &&
+    candidate.primaries !== undefined &&
+    Object.isFrozen(candidate.primaries) &&
+    candidate.reserve !== undefined &&
+    Object.isFrozen(candidate.reserve)
+  );
+}
+
+/**
+ * Inject final limits, rerun canonical/set validation, then cross the sole
+ * clock/ID boundary without repeating catalog selection.
+ */
+export function materializeResearchExecution(
+  admission: ResearchExecutionAdmission,
+  limits: CanonicalResearchRequest['limits'],
+  dependencies: PreparationDependencies,
+): PreparationResult {
+  if (!isMintedResearchExecutionAdmission(admission)) {
+    return {
+      ok: false,
+      issues: [
+        {
+          code: 'research_admission_invalid',
+          phase: 'validation',
+          path: '/admission',
+          message:
+            'Execution materialization requires an opaque frozen admission produced by this planner.',
+        },
+      ],
+      notices: [],
+    };
+  }
+
+  const canonical = CanonicalResearchRequestSchema.safeParse({
+    ...admission.request,
+    limits,
+  });
+  if (!canonical.success) {
+    return {
+      ok: false,
+      issues: sortDiagnostics(canonicalizationIssues(canonical.error)),
+      notices: admission.notices,
+    };
+  }
+  const setIssues = canonicalSetIssues(canonical.data);
+  if (setIssues.length > 0) {
+    return {
+      ok: false,
+      issues: sortDiagnostics(setIssues),
+      notices: admission.notices,
+    };
+  }
+
+  const request = canonical.data;
+  const { primaries, reserve, provisional_slots: provisionalSlots } = admission;
+
   // Everything above is network-free admission and must remain free of caller
   // effects. Only a fully accepted plan may observe time or allocate IDs.
   const requestedAt = new Date(dependencies.clock.now()).toISOString();
@@ -1016,7 +1241,7 @@ export function prepareResearchExecution(
           message: issue.message,
         })),
       ),
-      notices: sortDiagnostics(notices),
+      notices: admission.notices,
     };
   }
 
@@ -1026,7 +1251,7 @@ export function prepareResearchExecution(
       return [plan.profile_key, plan];
     }),
   );
-  const sortedNotices = sortDiagnostics(notices);
+  const sortedNotices = sortDiagnostics(admission.notices);
   const prepared: PreparedResearchExecution = {
     request: compiled.data,
     policy: {
@@ -1037,10 +1262,24 @@ export function prepareResearchExecution(
       refinement: request.refinement,
     },
     profile_plans_by_identity: profilePlans,
-    catalog: catalogIdentity,
+    catalog: admission.catalog,
     notices: sortedNotices,
   };
   return { ok: true, prepared, notices: sortedNotices };
+}
+
+export function prepareResearchExecution(
+  input: unknown,
+  catalog: FrozenPlanningCatalog,
+  dependencies: PreparationDependencies,
+): PreparationResult {
+  const admitted = admitResearchExecution(input, catalog);
+  if (!admitted.ok) return admitted;
+  return materializeResearchExecution(
+    admitted.admission,
+    admitted.limits,
+    dependencies,
+  );
 }
 
 export { profileIdentityKey };

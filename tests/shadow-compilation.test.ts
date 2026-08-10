@@ -882,29 +882,6 @@ describe('private shadow compilation', () => {
     }
     expect(collisionDependencies.calls()).toBe(0);
 
-    const deadlineSource = config({ providers: { exa: { enabled: true } } });
-    const deadlineDependencies = countedPreparation();
-    const deadline = compileShadowRequest({
-      config: deadlineSource,
-      authoredGroups: { global: deadlineSource.groups, project: {} },
-      credentials: credentials(),
-      transport: {
-        kind: 'mcp',
-        input: { query: 'deadline', providers: ['exa'] },
-      },
-      preparation: deadlineDependencies.dependencies,
-    });
-    expect(deadline.ok).toBe(false);
-    if (!deadline.ok) {
-      expect(deadline.issues).toEqual([
-        expect.objectContaining({
-          code: 'configuration_request_deadline_required',
-          path: '/defaults/requestDeadlineMs',
-        }),
-      ]);
-    }
-    expect(deadlineDependencies.calls()).toBe(0);
-
     const inexactSource = config({
       providers: { exa: { enabled: true } },
       defaults: { maxEstimatedCostUsd: 0.0000001 },
@@ -925,6 +902,29 @@ describe('private shadow compilation', () => {
       );
     }
     expect(inexactDependencies.calls()).toBe(0);
+  });
+
+  it('derives a bounded shadow deadline before materialization effects', () => {
+    const source = config({ providers: { exa: { enabled: true } } });
+    const dependencies = countedPreparation();
+    const result = compileShadowRequest({
+      config: source,
+      authoredGroups: { global: source.groups, project: {} },
+      credentials: credentials(),
+      transport: {
+        kind: 'mcp',
+        input: { query: 'deadline', providers: ['exa'] },
+      },
+      preparation: dependencies.dependencies,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.prepared.policy.limits).toMatchObject({
+        request_deadline_ms: 300_000,
+        background_attempt_deadline_ms: 300_000,
+      });
+    }
+    expect(dependencies.calls()).toBe(3);
   });
 
   it('sorts merged diagnostics globally and prepares CLI, MCP, and silent MCP identically', () => {

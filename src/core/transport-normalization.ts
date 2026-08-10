@@ -57,6 +57,18 @@ export interface CanonicalTransportDefaults {
   readonly budgets?: ExactBudgetLimits;
 }
 
+/** @internal Private two-phase v1 defaults; never a canonical request. */
+export interface UnresolvedV1TransportDefaults {
+  readonly mode: 'sync' | 'async' | 'mixed';
+  readonly limits: Pick<
+    ResearchExecutionLimits,
+    'max_concurrency' | 'inline_attempt_deadline_ms' | 'poll_interval_ms'
+  >;
+  readonly fallback: FallbackIntent;
+  readonly refinement: RefinementIntent;
+  readonly budgets?: ExactBudgetLimits;
+}
+
 export type TransportNormalizationResult =
   | {
       readonly ok: true;
@@ -153,10 +165,10 @@ function presentSelectorCandidates(
 }
 
 function mergeLimits(
-  defaults: ResearchExecutionLimits,
+  defaults: ResearchExecutionLimits | UnresolvedV1TransportDefaults['limits'],
   overrides: Partial<ResearchExecutionLimits> | undefined,
-): ResearchExecutionLimits {
-  const merged = { ...defaults };
+): Partial<ResearchExecutionLimits> {
+  const merged: Partial<ResearchExecutionLimits> = { ...defaults };
   if (!overrides) return merged;
   for (const field of [
     'max_concurrency',
@@ -174,7 +186,7 @@ function mergeLimits(
 function normalizeTransportRequest(
   source: TransportSource,
   projection: TransportProjection,
-  defaults: CanonicalTransportDefaults,
+  defaults: CanonicalTransportDefaults | UnresolvedV1TransportDefaults,
 ): TransportNormalizationResult {
   const issues: PreparationIssue[] = [...(projection.issues ?? [])];
   const notices: PreparationNotice[] = [];
@@ -506,51 +518,59 @@ export function normalizeCliRequest(
   input: CliTransportInput,
   defaults: CanonicalTransportDefaults,
 ): TransportNormalizationResult {
+  return normalizeTransportRequest('cli', cliProjection(input), defaults);
+}
+
+function cliProjection(input: CliTransportInput): TransportProjection {
   const issues: PreparationIssue[] = [];
   const limits: Partial<ResearchExecutionLimits> = {};
   if (input.parallel !== undefined) limits.max_concurrency = input.parallel;
   if (input.timeoutSeconds !== undefined) {
     limits.inline_attempt_deadline_ms = input.timeoutSeconds * 1_000;
   }
-  return normalizeTransportRequest(
-    'cli',
-    {
-      fields: {
-        query: input.query,
-        mode: input.mode,
-        selector: {
-          targets: targetsFromRawOrExactTargets(
-            input.providers,
-            input.exactTargets,
-            issues,
-          ),
-          group:
-            input.group === undefined
-              ? undefined
-              : { value: input.group, raw_path: '/group' },
-        },
-        fallback: toggleIntent<FallbackIntent>(
-          input.fallback,
-          { kind: 'configured' },
-          { kind: 'disabled' },
-        ),
-        limits,
-        budgets: usdBudgets(
-          input.maxCostUsd,
-          input.maxEstimatedCostUsd,
-          '',
+  return {
+    fields: {
+      query: input.query,
+      mode: input.mode,
+      selector: {
+        targets: targetsFromRawOrExactTargets(
+          input.providers,
+          input.exactTargets,
           issues,
         ),
-        refinement: toggleIntent<RefinementIntent>(
-          input.refine,
-          { kind: 'requested' },
-          { kind: 'disabled' },
-        ),
+        group:
+          input.group === undefined
+            ? undefined
+            : { value: input.group, raw_path: '/group' },
       },
-      issues,
+      fallback: toggleIntent<FallbackIntent>(
+        input.fallback,
+        { kind: 'configured' },
+        { kind: 'disabled' },
+      ),
+      limits,
+      budgets: usdBudgets(
+        input.maxCostUsd,
+        input.maxEstimatedCostUsd,
+        '',
+        issues,
+      ),
+      refinement: toggleIntent<RefinementIntent>(
+        input.refine,
+        { kind: 'requested' },
+        { kind: 'disabled' },
+      ),
     },
-    defaults,
-  );
+    issues,
+  };
+}
+
+/** @internal Shadow-only normalization with deliberately unresolved limits. */
+export function normalizeCliRequestUnresolved(
+  input: CliTransportInput,
+  defaults: UnresolvedV1TransportDefaults,
+): TransportNormalizationResult {
+  return normalizeTransportRequest('cli', cliProjection(input), defaults);
 }
 
 /** Mirrors the MCP `research` tool arguments (and the silent pipeline args). */
@@ -598,9 +618,29 @@ export function normalizeMcpRequest(
   return normalizeTransportRequest('mcp', mcpProjection(input), defaults);
 }
 
+/** @internal Shadow-only normalization with deliberately unresolved limits. */
+export function normalizeMcpRequestUnresolved(
+  input: McpTransportInput,
+  defaults: UnresolvedV1TransportDefaults,
+): TransportNormalizationResult {
+  return normalizeTransportRequest('mcp', mcpProjection(input), defaults);
+}
+
 export function normalizeSilentMcpRequest(
   input: McpTransportInput,
   defaults: CanonicalTransportDefaults,
+): TransportNormalizationResult {
+  return normalizeTransportRequest(
+    'silent_mcp',
+    mcpProjection(input),
+    defaults,
+  );
+}
+
+/** @internal Shadow-only normalization with deliberately unresolved limits. */
+export function normalizeSilentMcpRequestUnresolved(
+  input: McpTransportInput,
+  defaults: UnresolvedV1TransportDefaults,
 ): TransportNormalizationResult {
   return normalizeTransportRequest(
     'silent_mcp',

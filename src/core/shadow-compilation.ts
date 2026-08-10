@@ -13,7 +13,12 @@ import type {
   PreparationDependencies,
   PreparedResearchExecution,
 } from './execution-plan.js';
+import {
+  admitUnresolvedV1ResearchExecution,
+  materializeResearchExecution,
+} from './execution-plan.js';
 import type { CustomCatalogProfile } from './profile-catalog.js';
+import { deriveV1RequestDeadline } from './request-deadline-migration.js';
 import type {
   PreparationIssue,
   PreparationNotice,
@@ -22,14 +27,13 @@ import type {
 import { sortPreparationDiagnostics } from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
-  type CanonicalTransportDefaults,
   type CliTransportInput,
-  compileNormalizedTransportRequest,
   type McpTransportInput,
-  normalizeCliRequest,
-  normalizeMcpRequest,
-  normalizeSilentMcpRequest,
+  normalizeCliRequestUnresolved,
+  normalizeMcpRequestUnresolved,
+  normalizeSilentMcpRequestUnresolved,
   type TransportNormalizationResult,
+  type UnresolvedV1TransportDefaults,
 } from './transport-normalization.js';
 
 /**
@@ -50,7 +54,7 @@ export interface ShadowCompilationInput {
   /** Preserves which group spellings were explicitly authored. */
   readonly authoredGroups: AuthoredGroupProvenance;
   readonly credentials: CredentialContext;
-  /** The v1 total request-deadline formula remains deliberately unresolved. */
+  /** Optional explicit total; otherwise the exact selected plan derives it. */
   readonly requestDeadlineMs?: number;
   readonly transport: ShadowCompilationTransport;
   readonly preparation: PreparationDependencies;
@@ -301,7 +305,7 @@ function collisionGroupDiagnostics(
 
 function normalizeTransport(
   transport: ShadowCompilationTransport,
-  defaults: CanonicalTransportDefaults,
+  defaults: UnresolvedV1TransportDefaults,
   targets: readonly ProfileTarget[] | undefined,
   group: string | undefined,
 ): TransportNormalizationResult {
@@ -319,7 +323,7 @@ function normalizeTransport(
         ...(targets !== undefined && { exactTargets: targets }),
         ...(group !== undefined && { group }),
       };
-      return normalizeCliRequest(projected, defaults);
+      return normalizeCliRequestUnresolved(projected, defaults);
     }
     case 'mcp': {
       const projected: McpTransportInput = {
@@ -329,7 +333,7 @@ function normalizeTransport(
         ...(targets !== undefined && { exactTargets: targets }),
         ...(group !== undefined && { group }),
       };
-      return normalizeMcpRequest(projected, defaults);
+      return normalizeMcpRequestUnresolved(projected, defaults);
     }
     case 'silent_mcp': {
       const projected: McpTransportInput = {
@@ -339,7 +343,7 @@ function normalizeTransport(
         ...(targets !== undefined && { exactTargets: targets }),
         ...(group !== undefined && { group }),
       };
-      return normalizeSilentMcpRequest(projected, defaults);
+      return normalizeSilentMcpRequestUnresolved(projected, defaults);
     }
   }
 }
@@ -364,7 +368,11 @@ export function compileShadowRequest(
 
   // Mapping is the gate: neither token conversion nor transport normalization
   // may run until collisions, catalog facts, and deadline policy are sound.
-  if (mapperIssues.length > 0 || mapped.transport_defaults === undefined) {
+  if (
+    mapperIssues.length > 0 ||
+    mapped.deadline_migration === undefined ||
+    mapped.unresolved_transport_defaults === undefined
+  ) {
     return {
       ok: false,
       issues: sortPreparationDiagnostics([
@@ -431,19 +439,88 @@ export function compileShadowRequest(
 
   const normalized = normalizeTransport(
     input.transport,
-    mapped.transport_defaults,
+    mapped.unresolved_transport_defaults,
     rawProviders === undefined ? undefined : resolved.targets,
     group.group,
   );
-  const compiled = compileNormalizedTransportRequest(
-    normalized,
+  if (!normalized.ok) {
+    return {
+      ok: false,
+      issues: normalized.issues,
+      notices: sortPreparationDiagnostics([
+        ...mapperNotices,
+        ...effectiveGroupNotices,
+        ...resolved.notices,
+        ...normalized.notices,
+      ]),
+    };
+  }
+
+  const admitted = admitUnresolvedV1ResearchExecution(
+    normalized.request,
     mapped.catalog,
+  );
+  if (!admitted.ok) {
+    return {
+      ok: false,
+      issues: admitted.issues,
+      notices: sortPreparationDiagnostics([
+        ...mapperNotices,
+        ...effectiveGroupNotices,
+        ...resolved.notices,
+        ...normalized.notices,
+        ...admitted.notices,
+      ]),
+    };
+  }
+
+  const unresolvedMode = normalized.request.mode;
+  const derived = deriveV1RequestDeadline(
+    {
+      ...mapped.deadline_migration,
+      max_parallel: admitted.unresolved_limits.max_concurrency,
+      inline_attempt_deadline_ms:
+        admitted.unresolved_limits.inline_attempt_deadline_ms,
+      poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
+      legacy_mode:
+        unresolvedMode === 'mixed' ? 'mixed' : admitted.admission.request.mode,
+    },
+    admitted.admission,
+  );
+  if (!derived.ok) {
+    return {
+      ok: false,
+      issues: derived.issues,
+      notices: sortPreparationDiagnostics([
+        ...mapperNotices,
+        ...effectiveGroupNotices,
+        ...resolved.notices,
+        ...normalized.notices,
+        ...admitted.notices,
+        ...derived.notices,
+      ]),
+    };
+  }
+
+  const compiled = materializeResearchExecution(
+    admitted.admission,
+    {
+      max_concurrency: admitted.unresolved_limits.max_concurrency,
+      request_deadline_ms: derived.request_deadline_ms,
+      inline_attempt_deadline_ms:
+        admitted.unresolved_limits.inline_attempt_deadline_ms,
+      background_attempt_deadline_ms:
+        derived.effective_background_attempt_deadline_ms,
+      poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
+    },
     input.preparation,
   );
   const notices = sortPreparationDiagnostics([
     ...mapperNotices,
     ...effectiveGroupNotices,
     ...resolved.notices,
+    ...normalized.notices,
+    ...derived.notices,
     ...compiled.notices,
   ]);
   return compiled.ok

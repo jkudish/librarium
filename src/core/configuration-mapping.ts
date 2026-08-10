@@ -25,23 +25,29 @@ import {
   BUILTIN_PROVIDER_CATALOG,
   type ProviderCatalogEntry,
 } from './provider-profiles.js';
+import type { V1RequestDeadlineMigrationContext } from './request-deadline-migration.js';
 import type {
   PreparationIssue,
   PreparationNotice,
 } from './research-request.js';
-import { comparePreparationDiagnostics } from './research-request.js';
+import {
+  comparePreparationDiagnostics,
+  RESEARCH_REQUEST_LIMITS,
+} from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import type {
   CanonicalTransportDefaults,
   ConfigurationTransportInput,
+  UnresolvedV1TransportDefaults,
 } from './transport-normalization.js';
 import { exactUsdBudgets } from './transport-normalization.js';
 
 /** Dependencies are injected so mapping stays pure and network-free. */
 export interface ConfigurationMappingOptions {
   /**
-   * The v1 total request deadline has no approved conversion formula yet.
-   * Callers must supply the already-approved canonical deadline explicitly.
+   * An explicit canonical total deadline. When omitted, mapping exposes only
+   * the validated v1 migration context; a caller must derive the total after
+   * concrete primary/reserve selection and perform final schema validation.
    */
   readonly requestDeadlineMs?: number;
   /** Required to prevent injected v1 DEFAULT_GROUPS entering the catalog. */
@@ -66,8 +72,16 @@ export interface ConfigurationPreflight {
  */
 export interface ConfigurationMappingResult {
   readonly catalog: ProviderCatalog;
-  /** Omitted until the caller supplies the explicitly approved request limit. */
+  /** Omitted until the caller supplies a valid explicit request limit. */
   readonly transport_defaults?: CanonicalTransportDefaults;
+  /**
+   * Validated timing facts for the later two-phase deadline migration. This is
+   * not a canonical policy and cannot be dispatched without plan derivation
+   * and final schema validation.
+   */
+  readonly deadline_migration?: V1RequestDeadlineMigrationContext;
+  /** Private two-phase defaults which intentionally omit unresolved limits. */
+  readonly unresolved_transport_defaults?: UnresolvedV1TransportDefaults;
   readonly transport_input: ConfigurationTransportInput;
   readonly groups: Readonly<Record<string, readonly string[]>>;
   /** v1 group spelling to the exact catalog group id. */
@@ -820,40 +834,218 @@ function profileKey(binding: AdapterProfileBinding): string {
   return `${binding.provider_id}/${binding.profile_id}`;
 }
 
-function canonicalDefaults(
-  config: Config,
-  requestDeadlineMs: number | undefined,
+function timingIntegerIssue(path: string, label: string): PreparationIssue {
+  return {
+    code: 'configuration_deadline_invalid_integer',
+    phase: 'migration',
+    path,
+    message: `${label} must be a positive safe integer.`,
+  };
+}
+
+function millisecondsFromV1Seconds(
+  value: number,
+  path: string,
+  label: string,
   issues: PreparationIssue[],
-): CanonicalTransportDefaults | undefined {
-  if (requestDeadlineMs === undefined) {
+): number | undefined {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    issues.push(timingIntegerIssue(path, label));
+    return undefined;
+  }
+  const exact = BigInt(value) * 1_000n;
+  if (exact > BigInt(Number.MAX_SAFE_INTEGER)) {
     issues.push({
-      code: 'configuration_request_deadline_required',
+      code: 'configuration_deadline_arithmetic_overflow',
       phase: 'migration',
-      path: '/defaults/requestDeadlineMs',
-      message:
-        'The v1 total request-deadline conversion is not approved. Supply requestDeadlineMs explicitly when mapping this configuration.',
+      path,
+      message: `${label} cannot be represented exactly in milliseconds.`,
     });
     return undefined;
   }
-  const budgets = exactUsdBudgets(
-    config.defaults.maxCostUsd,
-    config.defaults.maxEstimatedCostUsd,
-    '/defaults',
+  if (exact > BigInt(RESEARCH_REQUEST_LIMITS.maxDeadlineMs)) {
+    issues.push({
+      code: 'configuration_deadline_contract_maximum_exceeded',
+      phase: 'migration',
+      path,
+      message: `${label} exceeds the ${RESEARCH_REQUEST_LIMITS.maxDeadlineMs}ms contract maximum.`,
+    });
+    return undefined;
+  }
+  return Number(exact);
+}
+
+function pollIntervalMillisecondsFromV1Seconds(
+  value: number,
+  issues: PreparationIssue[],
+): number | undefined {
+  const path = '/defaults/asyncPollInterval';
+  if (!Number.isSafeInteger(value) || value < 1) {
+    issues.push({
+      code: 'configuration_poll_interval_invalid_integer',
+      phase: 'migration',
+      path,
+      message:
+        'Background poll interval must be a positive safe integer in seconds.',
+    });
+    return undefined;
+  }
+  const exact = BigInt(value) * 1_000n;
+  if (exact > BigInt(Number.MAX_SAFE_INTEGER)) {
+    issues.push({
+      code: 'configuration_poll_interval_arithmetic_overflow',
+      phase: 'migration',
+      path,
+      message:
+        'Background poll interval cannot be represented exactly in milliseconds.',
+    });
+    return undefined;
+  }
+  if (
+    exact < BigInt(RESEARCH_REQUEST_LIMITS.minPollIntervalMs) ||
+    exact > BigInt(RESEARCH_REQUEST_LIMITS.maxPollIntervalMs)
+  ) {
+    issues.push({
+      code: 'configuration_poll_interval_out_of_bounds',
+      phase: 'migration',
+      path,
+      message: `Background poll interval must resolve within ${RESEARCH_REQUEST_LIMITS.minPollIntervalMs} through ${RESEARCH_REQUEST_LIMITS.maxPollIntervalMs} milliseconds.`,
+    });
+    return undefined;
+  }
+  return Number(exact);
+}
+
+function deadlineMigrationContext(
+  config: Config,
+  requestDeadlineMs: number | undefined,
+  issues: PreparationIssue[],
+): V1RequestDeadlineMigrationContext | undefined {
+  const issueCount = issues.length;
+  const maxParallel = config.defaults.maxParallel;
+  if (
+    !Number.isSafeInteger(maxParallel) ||
+    maxParallel < RESEARCH_REQUEST_LIMITS.minConcurrency ||
+    maxParallel > RESEARCH_REQUEST_LIMITS.maxConcurrency
+  ) {
+    issues.push({
+      code: 'configuration_deadline_concurrency_out_of_bounds',
+      phase: 'migration',
+      path: '/defaults/maxParallel',
+      message: `Deadline derivation concurrency must be an integer from ${RESEARCH_REQUEST_LIMITS.minConcurrency} through ${RESEARCH_REQUEST_LIMITS.maxConcurrency}.`,
+    });
+  }
+  const inlineAttemptDeadlineMs = millisecondsFromV1Seconds(
+    config.defaults.timeout,
+    '/defaults/timeout',
+    'Inline attempt timeout',
+    issues,
   );
-  issues.push(...budgets.issues);
-  if (budgets.issues.length > 0) return undefined;
+  const backgroundAttemptDeadlineMs = millisecondsFromV1Seconds(
+    config.defaults.asyncTimeout,
+    '/defaults/asyncTimeout',
+    'Background attempt timeout',
+    issues,
+  );
+  const pollIntervalMs = pollIntervalMillisecondsFromV1Seconds(
+    config.defaults.asyncPollInterval,
+    issues,
+  );
+  if (
+    pollIntervalMs !== undefined &&
+    backgroundAttemptDeadlineMs !== undefined &&
+    pollIntervalMs > backgroundAttemptDeadlineMs
+  ) {
+    issues.push({
+      code: 'configuration_poll_interval_exceeds_background_attempt',
+      phase: 'migration',
+      path: '/defaults/asyncPollInterval',
+      message:
+        'Background poll interval cannot exceed the background attempt timeout.',
+    });
+  }
+  if (
+    requestDeadlineMs !== undefined &&
+    (!Number.isSafeInteger(requestDeadlineMs) ||
+      requestDeadlineMs < RESEARCH_REQUEST_LIMITS.minDeadlineMs)
+  ) {
+    issues.push(
+      timingIntegerIssue(
+        '/defaults/requestDeadlineMs',
+        `Explicit request deadline in milliseconds (minimum ${RESEARCH_REQUEST_LIMITS.minDeadlineMs})`,
+      ),
+    );
+  } else if (
+    requestDeadlineMs !== undefined &&
+    requestDeadlineMs > RESEARCH_REQUEST_LIMITS.maxDeadlineMs
+  ) {
+    issues.push({
+      code: 'configuration_deadline_contract_maximum_exceeded',
+      phase: 'migration',
+      path: '/defaults/requestDeadlineMs',
+      message: `Explicit request deadline exceeds the ${RESEARCH_REQUEST_LIMITS.maxDeadlineMs}ms contract maximum.`,
+    });
+  }
+  if (
+    requestDeadlineMs !== undefined &&
+    inlineAttemptDeadlineMs !== undefined &&
+    backgroundAttemptDeadlineMs !== undefined &&
+    (requestDeadlineMs < inlineAttemptDeadlineMs ||
+      requestDeadlineMs < backgroundAttemptDeadlineMs)
+  ) {
+    issues.push({
+      code: 'configuration_request_deadline_less_than_attempt_deadline',
+      phase: 'migration',
+      path: '/defaults/requestDeadlineMs',
+      message:
+        'The explicit request deadline cannot be shorter than either v1 attempt timeout.',
+    });
+  }
+
+  if (
+    issues.length !== issueCount ||
+    inlineAttemptDeadlineMs === undefined ||
+    backgroundAttemptDeadlineMs === undefined ||
+    pollIntervalMs === undefined
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    kind: 'v1_request_deadline_migration',
+    max_parallel: maxParallel,
+    inline_attempt_deadline_ms: inlineAttemptDeadlineMs,
+    raw_background_attempt_deadline_ms: backgroundAttemptDeadlineMs,
+    poll_interval_ms: pollIntervalMs,
+    legacy_mode: config.defaults.mode,
+    ...(requestDeadlineMs !== undefined && {
+      explicit_request_deadline_ms: requestDeadlineMs,
+    }),
+  });
+}
+
+function canonicalDefaults(
+  config: Config,
+  deadlineMigration: V1RequestDeadlineMigrationContext | undefined,
+  budgets: ReturnType<typeof exactUsdBudgets>['budgets'],
+): CanonicalTransportDefaults | undefined {
+  if (deadlineMigration?.explicit_request_deadline_ms === undefined) {
+    return undefined;
+  }
   return {
     mode: config.defaults.mode,
     limits: {
-      max_concurrency: config.defaults.maxParallel,
-      request_deadline_ms: requestDeadlineMs,
-      inline_attempt_deadline_ms: config.defaults.timeout * 1_000,
-      background_attempt_deadline_ms: config.defaults.asyncTimeout * 1_000,
-      poll_interval_ms: config.defaults.asyncPollInterval * 1_000,
+      max_concurrency: deadlineMigration.max_parallel,
+      request_deadline_ms: deadlineMigration.explicit_request_deadline_ms,
+      inline_attempt_deadline_ms: deadlineMigration.inline_attempt_deadline_ms,
+      // Native explicit defaults retain the raw v1 timeout; the migrated
+      // shadow path expands it with selected-provider transport overhead.
+      background_attempt_deadline_ms:
+        deadlineMigration.raw_background_attempt_deadline_ms,
+      poll_interval_ms: deadlineMigration.poll_interval_ms,
     },
     fallback: { kind: 'configured' },
     refinement: { kind: 'disabled' },
-    ...(budgets.budgets && { budgets: budgets.budgets }),
+    ...(budgets && { budgets }),
   };
 }
 
@@ -897,11 +1089,36 @@ export function mapConfiguration(
     ...canonicalGroups.issues,
     ...fallback.issues,
   ];
-  const transportDefaults = canonicalDefaults(
+  const deadlineMigration = deadlineMigrationContext(
     config,
     options.requestDeadlineMs,
     issues,
   );
+  const budgetResult = exactUsdBudgets(
+    config.defaults.maxCostUsd,
+    config.defaults.maxEstimatedCostUsd,
+    '/defaults',
+  );
+  issues.push(...budgetResult.issues);
+  const unresolvedTransportDefaults =
+    deadlineMigration && budgetResult.issues.length === 0
+      ? deepFreeze({
+          mode: config.defaults.mode,
+          limits: {
+            max_concurrency: deadlineMigration.max_parallel,
+            inline_attempt_deadline_ms:
+              deadlineMigration.inline_attempt_deadline_ms,
+            poll_interval_ms: deadlineMigration.poll_interval_ms,
+          },
+          fallback: { kind: 'configured' as const },
+          refinement: { kind: 'disabled' as const },
+          ...(budgetResult.budgets && { budgets: budgetResult.budgets }),
+        })
+      : undefined;
+  const transportDefaults =
+    budgetResult.issues.length === 0
+      ? canonicalDefaults(config, deadlineMigration, budgetResult.budgets)
+      : undefined;
   const catalog = buildProviderCatalog({
     ...(options.catalog && { catalog: options.catalog }),
     providerConfigs,
@@ -927,6 +1144,10 @@ export function mapConfiguration(
   return {
     catalog,
     ...(transportDefaults && { transport_defaults: transportDefaults }),
+    ...(deadlineMigration && { deadline_migration: deadlineMigration }),
+    ...(unresolvedTransportDefaults && {
+      unresolved_transport_defaults: unresolvedTransportDefaults,
+    }),
     transport_input: {
       defaults: {
         mode: config.defaults.mode,
