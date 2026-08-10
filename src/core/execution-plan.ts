@@ -943,21 +943,22 @@ export function prepareResearchExecution(
     ]),
   );
   const primaries = selectPrimaries(request, catalog, byKey, issues);
-
-  const requestedAt = new Date(dependencies.clock.now()).toISOString();
-  const slots: RequestSlot[] = primaries.map((selection, position) => ({
-    slot_id: dependencies.ids.next('slot'),
-    position,
-    requirements:
-      selection.requirements ?? requirementsForProfile(selection.entry.profile),
-    primary: selection.entry.profile,
-  }));
+  const provisionalSlots: RequestSlot[] = primaries.map(
+    (selection, position) => ({
+      slot_id: `provisional-slot-${position}`,
+      position,
+      requirements:
+        selection.requirements ??
+        requirementsForProfile(selection.entry.profile),
+      primary: selection.entry.profile,
+    }),
+  );
   const reserve = resolveReserve(
     request,
     catalog,
     byKey,
     primaries,
-    slots,
+    provisionalSlots,
     issues,
     notices,
   );
@@ -971,6 +972,16 @@ export function prepareResearchExecution(
       notices: sortDiagnostics(notices),
     };
   }
+
+  // Everything above is network-free admission and must remain free of caller
+  // effects. Only a fully accepted plan may observe time or allocate IDs.
+  const requestedAt = new Date(dependencies.clock.now()).toISOString();
+  const slots: RequestSlot[] = provisionalSlots.map(
+    ({ slot_id: _provisionalId, ...slot }) => ({
+      ...slot,
+      slot_id: dependencies.ids.next('slot'),
+    }),
+  );
 
   const fallbackReserve = reserve.map((selection, position) => ({
     candidate_id: dependencies.ids.next('fallback_candidate'),

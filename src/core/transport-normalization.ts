@@ -337,6 +337,36 @@ function targetsFromProviderIds(
   return { value: targets, raw_path: path };
 }
 
+/**
+ * Keep raw provider-token handling intact for existing ingress callers while
+ * allowing the private configuration compiler to hand over exact catalog
+ * identities. The two lanes are deliberately mutually exclusive: accepting
+ * both would make the selected strategy dependent on undocumented precedence.
+ */
+function targetsFromRawOrExactTargets(
+  providerIds: readonly string[] | undefined,
+  exactTargets: readonly ProfileTarget[] | undefined,
+  issues: PreparationIssue[],
+): SelectorCandidateInput<readonly ProfileTarget[]> | undefined {
+  if (providerIds !== undefined && exactTargets !== undefined) {
+    issues.push({
+      code: 'transport_raw_and_exact_targets_conflict',
+      phase: 'transport',
+      path: '/providers',
+      message:
+        'Raw provider tokens and exact resolved targets cannot be supplied together. Supply exactly one selection form.',
+    });
+    return undefined;
+  }
+  if (exactTargets !== undefined) {
+    // The exact lane is an internal replacement for this transport's raw
+    // provider tokens, so keep all later selector diagnostics at the public
+    // ingress path rather than exposing the private implementation detail.
+    return { value: exactTargets, raw_path: '/providers' };
+  }
+  return targetsFromProviderIds(providerIds, '/providers', issues);
+}
+
 export function exactUsdBudgets(
   maxCostUsd: number | undefined,
   maxEstimatedCostUsd: number | undefined,
@@ -456,6 +486,12 @@ export function normalizeLibraryRequest(
 export interface CliTransportInput {
   readonly query?: string;
   readonly providers?: readonly string[];
+  /**
+   * Private compiler lane for already-resolved catalog targets. Public CLI
+   * callers continue to use `providers`; passing both is rejected so a raw
+   * token can never silently win over an exact target.
+   */
+  readonly exactTargets?: readonly ProfileTarget[];
   readonly group?: string;
   readonly mode?: string;
   readonly parallel?: number;
@@ -483,9 +519,9 @@ export function normalizeCliRequest(
         query: input.query,
         mode: input.mode,
         selector: {
-          targets: targetsFromProviderIds(
+          targets: targetsFromRawOrExactTargets(
             input.providers,
-            '/providers',
+            input.exactTargets,
             issues,
           ),
           group:
@@ -521,6 +557,8 @@ export function normalizeCliRequest(
 export interface McpTransportInput {
   readonly query?: string;
   readonly providers?: readonly string[];
+  /** See CliTransportInput.exactTargets. */
+  readonly exactTargets?: readonly ProfileTarget[];
   readonly group?: string;
   readonly mode?: string;
   readonly refine?: boolean;
@@ -533,7 +571,11 @@ function mcpProjection(input: McpTransportInput): TransportProjection {
       query: input.query,
       mode: input.mode,
       selector: {
-        targets: targetsFromProviderIds(input.providers, '/providers', issues),
+        targets: targetsFromRawOrExactTargets(
+          input.providers,
+          input.exactTargets,
+          issues,
+        ),
         group:
           input.group === undefined
             ? undefined
