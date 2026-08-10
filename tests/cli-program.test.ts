@@ -17,7 +17,10 @@ async function expectRejectedBeforeAction(
   const output = { writeErr: () => {}, writeOut: () => {} };
   program.configureOutput(output);
   const action = vi.fn();
-  command(program, commandName).configureOutput(output).action(action);
+  command(program, commandName)
+    .exitOverride()
+    .configureOutput(output)
+    .action(action);
 
   await expect(
     program.parseAsync(['node', 'librarium', ...args]),
@@ -70,6 +73,21 @@ describe('CLI program factory', () => {
     await expectRejectedBeforeAction(['config', 'edit'], 'config');
     await expectRejectedBeforeAction(['cleanup', '--days', '-1'], 'cleanup');
     await expectRejectedBeforeAction(['usage', '--days', '1.5'], 'usage');
+  });
+
+  it('uses exit code 1 for an invalid completion shell in v2', async () => {
+    const program = createCliProgram();
+    program.exitOverride();
+    const output = { writeErr: () => {}, writeOut: () => {} };
+    program.configureOutput(output);
+    command(program, 'completions').exitOverride().configureOutput(output);
+
+    await expect(
+      program.parseAsync(['node', 'librarium', 'completions', 'pwsh']),
+    ).rejects.toMatchObject({
+      code: 'commander.invalidArgument',
+      exitCode: 1,
+    });
   });
 
   it('keeps Commander lone-negation fallback semantics aligned', async () => {

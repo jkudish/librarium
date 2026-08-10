@@ -30,6 +30,14 @@ describe('strict CLI parsers', () => {
       'perplexity',
     ]);
     expect(() => parseProviders('openai,,perplexity')).toThrow(/non-empty/);
+    expect(
+      parseProviders(
+        Array.from(
+          { length: CLI_LIMITS.providers },
+          (_, index) => `provider-${index}`,
+        ).join(','),
+      ),
+    ).toHaveLength(CLI_LIMITS.providers);
     expect(() =>
       parseProviders(
         Array.from(
@@ -52,8 +60,10 @@ describe('strict CLI parsers', () => {
     expect(parseParallel('64')).toBe(64);
     expect(parseParallel('01')).toBe(1);
     expect(parseParallel('+01')).toBe(1);
+    expect(parseTimeoutSeconds('1')).toBe(1);
     expect(parseTimeoutSeconds('604800')).toBe(604_800);
     expect(parsePositiveDays('365')).toBe(365);
+    expect(() => parsePositiveDays('0')).toThrow(/between 1/);
 
     for (const invalid of ['1.5', '1day', '-1', '0']) {
       expect(() => parseParallel(invalid)).toThrow();

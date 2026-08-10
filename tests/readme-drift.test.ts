@@ -26,6 +26,15 @@ const README = readFileSync(
 
 const program = createCliProgram();
 
+function commandSection(commandName: string): string {
+  const heading = `### \`${commandName}\``;
+  const start = README.indexOf(heading);
+  if (start === -1) return '';
+  const rest = README.slice(start + heading.length);
+  const nextHeading = rest.search(/^### /m);
+  return nextHeading === -1 ? rest : rest.slice(0, nextHeading);
+}
+
 describe('README drift: commands', () => {
   const commandNames = program.commands.map((c) => c.name());
 
@@ -70,7 +79,11 @@ describe('README drift: command flags', () => {
         .map((opt) => opt.long)
         .filter((long): long is string => Boolean(long) && long !== '--help');
 
-      const missing = longFlags.filter((flag) => !README.includes(flag));
+      // Answer mirrors most of run's options, so scope its assertion to the
+      // answer section; a run-table mention must not mask answer-doc drift.
+      const documentation =
+        commandName === 'answer' ? commandSection(commandName) : README;
+      const missing = longFlags.filter((flag) => !documentation.includes(flag));
       expect(
         missing,
         `README.md (\`${commandName}\` section) is missing flag(s): ${missing.join(', ')}.`,
