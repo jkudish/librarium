@@ -6,7 +6,7 @@ const result = await build({
   bundle: true,
   format: 'esm',
   platform: 'node',
-  target: 'node20',
+  target: 'node22.12',
   write: false,
 });
 

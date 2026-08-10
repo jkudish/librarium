@@ -1,4 +1,5 @@
-import type { Command } from 'commander';
+import type { Command, Option } from 'commander';
+import { type CompletionShell, parseCompletionShell } from '../cli-parsers.js';
 import { DEFAULT_GROUPS } from '../constants.js';
 
 /**
@@ -10,101 +11,50 @@ interface CommandSpec {
   name: string;
   description: string;
   flags: string[];
+  groupAware: boolean;
 }
-
-/** Commands that accept a -g/--group flag and so get group-name completion. */
-const GROUP_AWARE_COMMANDS = new Set(['run', 'answer']);
-
-const COMMANDS: CommandSpec[] = [
-  {
-    name: 'run',
-    description: 'Run a research query across providers',
-    flags: [
-      '--providers',
-      '--group',
-      '--mode',
-      '--output',
-      '--parallel',
-      '--timeout',
-      '--json',
-      '--html',
-      '--open',
-      '--refine',
-    ],
-  },
-  {
-    name: 'answer',
-    description: 'Synthesize one grounded, cited answer from a fan-out',
-    flags: [
-      '--providers',
-      '--group',
-      '--mode',
-      '--output',
-      '--parallel',
-      '--timeout',
-      '--json',
-      '--refine',
-      '--html',
-      '--jsonl',
-      '--open',
-    ],
-  },
-  {
-    name: 'status',
-    description: 'Check async deep-research tasks',
-    flags: ['--wait', '--retrieve', '--json'],
-  },
-  {
-    name: 'browse',
-    description: 'Browse past runs interactively',
-    flags: ['--output'],
-  },
-  {
-    name: 'html',
-    description: 'Generate report.html for a run',
-    flags: ['--open'],
-  },
-  {
-    name: 'refine',
-    description: 'Rewrite a query into tier-tuned variants',
-    flags: ['--json'],
-  },
-  { name: 'ls', description: 'List providers', flags: ['--json'] },
-  { name: 'groups', description: 'List or manage groups', flags: ['--json'] },
-  { name: 'init', description: 'Set up configuration', flags: ['--auto'] },
-  { name: 'doctor', description: 'Provider health check', flags: ['--json'] },
-  { name: 'config', description: 'Show resolved config', flags: ['--json'] },
-  {
-    name: 'cleanup',
-    description: 'Delete old run directories',
-    flags: ['--days', '--dry-run'],
-  },
-  { name: 'upgrade', description: 'Upgrade librarium', flags: [] },
-  {
-    name: 'install-skill',
-    description: 'Install the agent skill',
-    flags: [],
-  },
-  {
-    name: 'completions',
-    description: 'Print shell completion script',
-    flags: [],
-  },
-];
 
 const GROUP_NAMES = Object.keys(DEFAULT_GROUPS);
 
-export function zshCompletions(): string {
-  const commandLines = COMMANDS.map(
-    (c) => `    '${c.name}:${c.description}'`,
-  ).join('\n');
-  const cases = COMMANDS.filter((c) => c.flags.length > 0)
-    .map((c) => {
-      const flagWords = c.flags.join(' ');
-      const groupCase = GROUP_AWARE_COMMANDS.has(c.name)
+function optionFlags(option: Option): string[] {
+  return [option.short, option.long].filter(
+    (flag): flag is string => typeof flag === 'string',
+  );
+}
+
+/** Read completion metadata from the same Commander tree used at runtime. */
+function commandSpecs(program: Command): CommandSpec[] {
+  return program.commands.map((command) => {
+    const flags = command.options.flatMap(optionFlags);
+    return {
+      name: command.name(),
+      description: command.description(),
+      flags,
+      groupAware: command.options.some((option) => option.long === '--group'),
+    };
+  });
+}
+
+function singleQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+export function zshCompletions(program: Command): string {
+  const commands = commandSpecs(program);
+  const commandLines = commands
+    .map(
+      (command) =>
+        `    ${singleQuote(`${command.name}:${command.description}`)}`,
+    )
+    .join('\n');
+  const cases = commands
+    .filter((command) => command.flags.length > 0)
+    .map((command) => {
+      const flagWords = command.flags.join(' ');
+      const groupCase = command.groupAware
         ? `\n      if [[ $words[CURRENT-1] == '-g' || $words[CURRENT-1] == '--group' ]]; then\n        compadd ${GROUP_NAMES.join(' ')}\n        return\n      fi`
         : '';
-      return `    ${c.name})${groupCase}\n      compadd -- ${flagWords}\n      ;;`;
+      return `    ${command.name})${groupCase}\n      compadd -- ${flagWords}\n      ;;`;
     })
     .join('\n');
 
@@ -133,10 +83,18 @@ fi
 `;
 }
 
-export function bashCompletions(): string {
-  const names = COMMANDS.map((c) => c.name).join(' ');
-  const flagCases = COMMANDS.filter((c) => c.flags.length > 0)
-    .map((c) => `    ${c.name}) flags="${c.flags.join(' ')}" ;;`)
+export function bashCompletions(program: Command): string {
+  const commands = commandSpecs(program);
+  const names = commands.map((command) => command.name).join(' ');
+  const groupAwareNames = commands
+    .filter((command) => command.groupAware)
+    .map((command) => command.name)
+    .join(' ');
+  const flagCases = commands
+    .filter((command) => command.flags.length > 0)
+    .map(
+      (command) => `    ${command.name}) flags="${command.flags.join(' ')}" ;;`,
+    )
     .join('\n');
 
   return `# librarium bash completions. Install:
@@ -152,7 +110,7 @@ _librarium_completions() {
     return
   fi
 
-  if [[ "\${prev}" == "-g" || "\${prev}" == "--group" ]]; then
+  if [[ " ${groupAwareNames} " == *" \${cmd} "* && ( "\${prev}" == "-g" || "\${prev}" == "--group" ) ]]; then
     COMPREPLY=( $(compgen -W "${GROUP_NAMES.join(' ')}" -- "\${cur}") )
     return
   fi
@@ -167,20 +125,28 @@ complete -F _librarium_completions librarium
 `;
 }
 
-export function fishCompletions(): string {
-  const commandLines = COMMANDS.map(
-    (c) =>
-      `complete -c librarium -n __fish_use_subcommand -a ${c.name} -d '${c.description}'`,
-  ).join('\n');
-  const flagLines = COMMANDS.flatMap((c) =>
-    c.flags.map(
-      (flag) =>
-        `complete -c librarium -n '__fish_seen_subcommand_from ${c.name}' -l ${flag.replace(/^--/, '')}`,
-    ),
-  ).join('\n');
-  const groupLine = `complete -c librarium -n '__fish_seen_subcommand_from ${[
-    ...GROUP_AWARE_COMMANDS,
-  ].join(' ')}' -s g -l group -a '${GROUP_NAMES.join(' ')}'`;
+export function fishCompletions(program: Command): string {
+  const commands = commandSpecs(program);
+  const commandLines = commands
+    .map(
+      (command) =>
+        `complete -c librarium -n __fish_use_subcommand -a ${command.name} -d ${singleQuote(command.description)}`,
+    )
+    .join('\n');
+  const flagLines = commands
+    .flatMap((command) =>
+      command.flags
+        .filter((flag) => flag !== '-g' && flag !== '--group')
+        .map((flag) => {
+          const kind = flag.startsWith('--') ? '-l' : '-s';
+          return `complete -c librarium -n '__fish_seen_subcommand_from ${command.name}' ${kind} ${flag.replace(/^-+/, '')}`;
+        }),
+    )
+    .join('\n');
+  const groupLine = `complete -c librarium -n '__fish_seen_subcommand_from ${commands
+    .filter((command) => command.groupAware)
+    .map((command) => command.name)
+    .join(' ')}' -s g -l group -a '${GROUP_NAMES.join(' ')}'`;
 
   return `# librarium fish completions. Install:
 #   librarium completions fish > ~/.config/fish/completions/librarium.fish
@@ -192,24 +158,20 @@ ${groupLine}
 
 export function registerCompletionsCommand(program: Command): void {
   program
-    .command('completions <shell>')
+    .command('completions')
     .description('Print a shell completion script (zsh, bash, or fish)')
-    .action((shell: string) => {
+    .argument('<shell>', 'Shell to generate for', parseCompletionShell)
+    .action((shell: CompletionShell) => {
       switch (shell) {
         case 'zsh':
-          process.stdout.write(zshCompletions());
+          process.stdout.write(zshCompletions(program));
           break;
         case 'bash':
-          process.stdout.write(bashCompletions());
+          process.stdout.write(bashCompletions(program));
           break;
         case 'fish':
-          process.stdout.write(fishCompletions());
+          process.stdout.write(fishCompletions(program));
           break;
-        default:
-          console.error(
-            `Unsupported shell "${shell}". Supported: zsh, bash, fish.`,
-          );
-          process.exitCode = 2;
       }
     });
 }

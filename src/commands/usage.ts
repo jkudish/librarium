@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
+import { parsePositiveDays } from '../cli-parsers.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { formatRunDate } from './browse-data.js';
 import { formatCost, formatTokens } from './run-format.js';
@@ -18,7 +19,7 @@ export function registerUsageCommand(program: Command): void {
     .option(
       '--days <n>',
       'Only include runs from the last N days',
-      Number.parseInt,
+      parsePositiveDays,
     )
     .option('--json', 'Output JSON')
     .option('-o, --output <dir>', 'Output base directory')

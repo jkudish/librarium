@@ -10,7 +10,7 @@
   <a href="https://www.npmjs.com/package/librarium"><img src="https://img.shields.io/npm/v/librarium?color=cb3837&label=npm" alt="npm version" /></a>
   <a href="https://github.com/jkudish/librarium/actions/workflows/ci.yml"><img src="https://github.com/jkudish/librarium/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
   <a href="https://github.com/jkudish/librarium/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/librarium?color=blue" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/node/v/librarium?color=5fa04e" alt="Node >= 20.12" />
+  <img src="https://img.shields.io/node/v/librarium?color=5fa04e" alt="Node >= 22.12" />
 </p>
 
 <p align="center">
@@ -38,7 +38,7 @@ The full docs live at **[librarium.agentsy.build](https://librarium.agentsy.buil
 ## Quick Start
 
 ```bash
-# Install (requires Node.js >= 20.12)
+# Install from npm (requires Node.js >= 22.12)
 npm install -g librarium
 
 # Start guided setup if no providers are configured yet
@@ -69,7 +69,7 @@ Plus provider groups, automatic fallbacks, and custom providers from npm or loca
 
 ## Installation
 
-### npm (requires Node.js >= 20.12)
+### npm (requires Node.js >= 22.12)
 
 ```bash
 npm install -g librarium
@@ -99,11 +99,17 @@ brew install jkudish/tap/librarium
 curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh
 ```
 
+The standalone and Homebrew installations ship a self-contained executable with
+its own Node runtime. They do not require Node.js to be installed on the host.
+
 ### npx (no install)
 
 ```bash
 npx librarium run "your query"
 ```
+
+The npm, pnpm, yarn, and npx methods, including `librarium/core` and
+`librarium/node` library imports, require Node.js 22.12 or newer.
 
 ### Upgrade
 
@@ -396,6 +402,25 @@ librarium answer <query> [options]
 
 `answer` runs the same fan-out as `run` (defaulting to the `quick` group, overridable with `-g`/`-p`/`-m` and the usual run flags), then makes one LLM synthesis call over the successful providers' content plus the deduped source list. The model is instructed to answer only from the findings, cite with inline `[n]` indices that map to the numbered source list, and state what is uncertain rather than invent. The answer is rendered in the terminal followed by a hyperlinked source list, and written to `answer.md` in the run directory.
 
+| Flag | Description |
+|---|---|
+| `-p, --providers <ids\|names>` | Use specific provider IDs or display names instead of the default `quick` group |
+| `-g, --group <name>` | Use a predefined provider group |
+| `-m, --mode <mode>` | Execution mode: `sync`, `async`, or `mixed` |
+| `-o, --output <dir>` | Output base directory |
+| `--parallel <n>` | Max parallel requests |
+| `--timeout <n>` | Timeout per provider in seconds |
+| `--max-cost <usd>` | Stop launching providers once API-reported cost crosses this budget |
+| `--max-estimated-cost <usd>` | Skip launches once reserved estimated cost crosses this ceiling |
+| `--no-fallback` | Disable configured provider fallbacks for an exact provider matrix |
+| `-y, --yes` | Skip the deep-research pre-flight confirm |
+| `--json` | Output `run.json` to stdout |
+| `--refine` | Rewrite the query into tier-tuned variants before dispatch |
+| `--verify` | Add a bounded evidence-verification pass after synthesis |
+| `--html` | Generate `report.html` in the run directory |
+| `--jsonl` | Generate `results.jsonl` in the run directory |
+| `--open` | Open the output directory (or `report.html` with `--html`) when complete |
+
 ```
 $ librarium answer "what changed in postgres 17 logical replication"
 
@@ -427,7 +452,7 @@ $ librarium answer "what changed in postgres 17 logical replication"
   ▸ ~/research/agents/librarium/1781136000-what-changed-in-postgres-17/
 ```
 
-The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--max-cost`, `--max-estimated-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
+The synthesis call uses the first available of OpenAI (`gpt-5-mini`), Gemini (`gemini-2.5-flash`), or Perplexity (`sonar`), overridable via an `answer: { provider, model }` config key that falls back to the `refine` config and then to those defaults. Synthesis fails open: if every client fails (quota, auth, timeout), a detailed warning prints and the run summary and output directory still appear, so the research is never lost. The exit code reflects the run, not the synthesis. `answer` accepts the same run flags, including `--no-fallback`, `--max-cost`, `--max-estimated-cost`, `--html`, and `--jsonl`. When the run directory contains `answer.md`, both `report.html` (an Answer section leading the report) and `results.jsonl` (an `"type":"answer"` line) pick it up automatically on generation and regeneration. The interactive wizard also offers grounded synthesis after its refine prompt when an LLM client key is configured.
 
 Pass `--verify` to add a bounded, opt-in evidence pass after synthesis. Librarium selects up to eight material factual claims, checks the independent source evidence already returned by the fan-out, and only then collects evidence from up to three successful targeted searches for unresolved claims. A query whose provider attempts all fail does not consume that successful-query allowance. Follow-ups start with eligible successful `ai-grounded` and `raw-search` providers from the original run and may traverse their configured eligible fallback chains, including a fallback provider that was not part of the original result set; deep-research providers are never used. Each selected claim gets at most one query with at most three provider attempts, honoring configured fallbacks, eligible alternates, the inherited per-call timeout, and both inherited cost ceilings. If either ceiling is already exhausted by the original fan-out, verification makes no LLM or provider call. Verification fails open: any incomplete evidence, budget exhaustion, provider failure, or LLM failure leaves the original grounded `answer.md` intact.
 

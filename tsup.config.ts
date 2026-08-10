@@ -5,7 +5,7 @@ const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
 const shared: Options = {
   format: ['esm'],
-  target: 'node20',
+  target: 'node22.12',
   outDir: 'dist',
   splitting: false,
   sourcemap: true,
@@ -40,7 +40,7 @@ export default defineConfig([
   // Platform is `neutral`: core's reachable graph is edge-safe, and the
   // Node-only code reachable only from `node-entry` (custom.ts -> child_process
   // etc.) stays isolated in the node-specific chunk. Node built-ins resolve
-  // fine under the esm/node20 target. The shared chunk reachable from core must
+  // fine under the esm/node22.12 target. The shared chunk reachable from core must
   // remain free of Node-only APIs -- the workers test guards this.
   {
     ...shared,

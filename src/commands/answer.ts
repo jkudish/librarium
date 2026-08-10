@@ -1,5 +1,12 @@
 import { join } from 'node:path';
 import type { Command } from 'commander';
+import {
+  parseMode,
+  parseParallel,
+  parseProviders,
+  parseResearchQuery,
+  parseTimeoutSeconds,
+} from '../cli-parsers.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import type { Config, ProviderDispatchResult } from '../types.js';
@@ -45,17 +52,25 @@ export function registerAnswerCommand(program: Command): void {
     .description(
       'Fan out a query and synthesize one grounded, cited answer from the results',
     )
-    .argument('<query>', 'The research query')
+    .argument('<query>', 'The research query', parseResearchQuery)
     .option(
       '-p, --providers <ids>',
       'Comma-separated provider IDs',
-      (v: string) => v.split(','),
+      parseProviders,
     )
     .option('-g, --group <name>', 'Use a predefined provider group')
-    .option('-m, --mode <mode>', 'Execution mode: sync, async, or mixed')
+    .option(
+      '-m, --mode <mode>',
+      'Execution mode: sync, async, or mixed',
+      parseMode,
+    )
     .option('-o, --output <dir>', 'Output base directory')
-    .option('--parallel <n>', 'Max parallel requests', Number.parseInt)
-    .option('--timeout <n>', 'Timeout per provider in seconds', Number.parseInt)
+    .option('--parallel <n>', 'Max parallel requests', parseParallel)
+    .option(
+      '--timeout <n>',
+      'Timeout per provider in seconds',
+      parseTimeoutSeconds,
+    )
     .option(
       '--max-cost <usd>',
       'Stop launching providers once API-reported cost crosses this budget (USD)',
@@ -67,6 +82,10 @@ export function registerAnswerCommand(program: Command): void {
       parseMaxCost,
     )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
+    .option(
+      '--no-fallback',
+      'Disable configured provider fallbacks for an exact provider matrix',
+    )
     .option('--json', 'Output run.json to stdout')
     .option(
       '--refine',

@@ -1,6 +1,9 @@
 import { z } from 'zod/v4';
 import { OpaqueIdSchema } from '../contracts/common.js';
-import { EvidenceRequirementsSchema } from '../contracts/interchange/request.js';
+import {
+  EvidenceRequirementsSchema,
+  ExecutionModeSchema,
+} from '../contracts/interchange/request.js';
 
 export const RESEARCH_REQUEST_LIMITS = {
   queryLength: 100_000,
@@ -14,6 +17,15 @@ export const RESEARCH_REQUEST_LIMITS = {
   minPollIntervalMs: 100,
   maxPollIntervalMs: 5 * 60 * 1_000,
 } as const;
+
+export const ResearchQuerySchema = z
+  .string()
+  .trim()
+  .min(1, 'must not be blank.')
+  .max(
+    RESEARCH_REQUEST_LIMITS.queryLength,
+    `must be at most ${RESEARCH_REQUEST_LIMITS.queryLength.toLocaleString('en-US')} characters.`,
+  );
 
 export const ExactMicrousdSchema = z
   .string()
@@ -143,8 +155,8 @@ export const RefinementIntentSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const CanonicalResearchRequestSchema = z.strictObject({
-  query: z.string().trim().min(1).max(RESEARCH_REQUEST_LIMITS.queryLength),
-  mode: z.enum(['sync', 'async']),
+  query: ResearchQuerySchema,
+  mode: ExecutionModeSchema,
   selector: ResearchSelectorSchema,
   fallback: FallbackIntentSchema,
   limits: ResearchExecutionLimitsSchema,

@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
+import { parseConfigAction } from '../cli-parsers.js';
 import {
   CONFIG_FILE,
   loadConfig,
@@ -14,7 +15,7 @@ export function registerConfigCommand(program: Command): void {
   program
     .command('config')
     .description('Print or edit librarium configuration')
-    .argument('[action]', 'Use "menu" to edit settings')
+    .argument('[action]', 'Use "menu" to edit settings', parseConfigAction)
     .option('--json', 'Output raw JSON')
     .option('--global', 'Show only global config (ignore project config)')
     .option('--menu', 'Open the interactive config menu')
@@ -23,12 +24,6 @@ export function registerConfigCommand(program: Command): void {
         if (opts.menu || action === 'menu') {
           await runConfigMenu();
           return;
-        }
-
-        if (action) {
-          throw new Error(
-            `Unknown config action "${action}". Use "librarium config menu" to edit settings.`,
-          );
         }
 
         const globalConfig = loadConfig();
