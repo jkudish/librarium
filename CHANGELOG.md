@@ -46,12 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking v2 package boundary:** `librarium` is now a side-effect-free,
+  Worker-safe schema and catalog entry; `librarium/core` explicitly exposes
+  injected catalog, planning, transport, coordination, and execution ports
+  without concrete adapters or global registries; and `librarium/node` adds a
+  load-only trusted custom-provider service and Node credential context. The
+  CLI remains available only through the `librarium` executable. Legacy
+  dispatcher, registry, adapter-constructor, file-runner, and raw keychain
+  exports are no longer public.
 - **Breaking Node and CLI baseline:** Node-based Librarium installs now require
-  Node.js 22.12 or newer and use Commander 15. CLI query, provider, mode,
-  concurrency, timeout, budget, cleanup, usage, completion-shell, and config
-  inputs are validated before command actions run. Invalid completion-shell
-  arguments intentionally exit with status 1. Standalone and Homebrew binaries
-  remain self-contained and do not require a host Node.js installation.
+  Node.js 22.12 or newer and use Commander 15. CLI query shape, provider-list
+  shape/count, mode, concurrency, timeout, budget, cleanup/usage day,
+  completion-shell, and config-action inputs are validated before command
+  actions run. Invalid completion-shell arguments intentionally exit with
+  status 1. Standalone and Homebrew binaries remain self-contained and do not
+  require a host Node.js installation.
 - SearchAPI now authenticates through `Authorization: Bearer` without placing
   credentials in URLs. The strict `zeroRetention` option sends
   `zero_retention=true` and fails closed with no fallback or privacy downgrade

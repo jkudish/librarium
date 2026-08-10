@@ -4,39 +4,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
+import { RESERVED_BUILTIN_PROVIDER_IDS } from '../src/core/reserved-provider-ids.js';
 
-const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
-  entry.profiles.some((profile) => profile.status === 'planned'),
-).map((entry) => entry.provider_id);
-
-// The `librarium/node` entry point is the documented Node-only bridge that lets
-// library consumers (not just the CLI) load npm/script custom providers and
-// register them into the core registry.
+const BUILTIN_IDS = BUILTIN_PROVIDER_CATALOG.map(
+  ({ provider_id }) => provider_id,
+);
+const RESERVED_IDS = [...RESERVED_BUILTIN_PROVIDER_IDS].sort();
 
 describe('librarium/node entry', () => {
   let tmpDir: string;
   let originalCwd: string;
-  let loadCustomProviders: typeof import('../src/node-entry.js').loadCustomProviders;
-  let registerCustomProviders: typeof import('../src/node-entry.js').registerCustomProviders;
-  let executeResearchRun: typeof import('../src/node-entry.js').executeResearchRun;
-  let getProvider: typeof import('../src/adapters/index.js').getProvider;
-  let getAllProviders: typeof import('../src/adapters/index.js').getAllProviders;
-  let initializeProviders: typeof import('../src/adapters/index.js').initializeProviders;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     tmpDir = join(tmpdir(), `librarium-node-entry-${randomUUID().slice(0, 8)}`);
     mkdirSync(tmpDir, { recursive: true });
     originalCwd = process.cwd();
     process.chdir(tmpDir);
     vi.resetModules();
-    const nodeEntry = await import('../src/node-entry.js');
-    loadCustomProviders = nodeEntry.loadCustomProviders;
-    registerCustomProviders = nodeEntry.registerCustomProviders;
-    executeResearchRun = nodeEntry.executeResearchRun;
-    const registry = await import('../src/adapters/index.js');
-    getProvider = registry.getProvider;
-    getAllProviders = registry.getAllProviders;
-    initializeProviders = registry.initializeProviders;
   });
 
   afterEach(() => {
@@ -45,31 +29,24 @@ describe('librarium/node entry', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes the documented load/register API', () => {
-    expect(typeof loadCustomProviders).toBe('function');
-    expect(typeof registerCustomProviders).toBe('function');
-    expect(typeof executeResearchRun).toBe('function');
-  });
-
   function writeNpmProvider(id: string, topLevelEffectPath?: string): void {
-    const pkgDir = join(tmpDir, 'node_modules', id);
-    mkdirSync(pkgDir, { recursive: true });
+    const packageDirectory = join(tmpDir, 'node_modules', id);
+    mkdirSync(packageDirectory, { recursive: true });
     writeFileSync(
       join(tmpDir, 'package.json'),
       JSON.stringify({ name: 'tmp-project', private: true }, null, 2),
-      'utf-8',
     );
     writeFileSync(
-      join(pkgDir, 'package.json'),
-      JSON.stringify(
-        { name: id, version: '1.0.0', type: 'module', exports: './index.mjs' },
-        null,
-        2,
-      ),
-      'utf-8',
+      join(packageDirectory, 'package.json'),
+      JSON.stringify({
+        name: id,
+        version: '1.0.0',
+        type: 'module',
+        exports: './index.mjs',
+      }),
     );
     writeFileSync(
-      join(pkgDir, 'index.mjs'),
+      join(packageDirectory, 'index.mjs'),
       [
         ...(topLevelEffectPath
           ? [
@@ -79,7 +56,7 @@ describe('librarium/node entry', () => {
           : []),
         'export default {',
         `  id: '${id}',`,
-        "  displayName: 'Lib Provider',",
+        "  displayName: 'Library Provider',",
         "  tier: 'ai-grounded',",
         "  execution: 'inline',",
         "  envVar: '',",
@@ -88,63 +65,74 @@ describe('librarium/node entry', () => {
         '    return {',
         `      provider: '${id}',`,
         "      tier: 'ai-grounded',",
-        '      content: `lib:${query}`,',
+        '      content: `library:${query}`,',
         '      citations: [],',
         '      durationMs: 1,',
         '    };',
         '  },',
         '};',
-        '',
       ].join('\n'),
-      'utf-8',
     );
   }
 
-  it('loadCustomProviders loads a trusted provider without registering it', async () => {
-    writeNpmProvider('lib-provider');
+  function writeScriptProbe(id: string, markerPath: string): string {
+    const scriptPath = join(tmpDir, `${id.replaceAll('/', '-')}-provider.mjs`);
+    writeFileSync(
+      scriptPath,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(markerPath)}, 'described');`,
+      ].join('\n'),
+    );
+    return scriptPath;
+  }
 
-    const result = await loadCustomProviders({
-      providers: { 'lib-provider': { enabled: true } },
+  it('loads trusted custom providers without mutating a public registry', async () => {
+    writeNpmProvider('library-provider');
+    const node = await import('../src/node-entry.js');
+
+    const result = await node.loadCustomProviders({
+      providers: { 'library-provider': { enabled: true } },
       customProviders: {
-        'lib-provider': { type: 'npm', module: 'lib-provider' },
+        'library-provider': { type: 'npm', module: 'library-provider' },
       },
-      trustedProviderIds: ['lib-provider'],
+      trustedProviderIds: ['library-provider'],
     });
 
     expect(result.warnings).toEqual([]);
-    expect(result.loadedIds).toContain('lib-provider');
-    expect(result.providers).toHaveLength(1);
-    expect(result.providers[0].source).toBe('npm');
-    // load-only: registry untouched
-    expect(getProvider('lib-provider')).toBeUndefined();
+    expect(result.loadedIds).toEqual(['library-provider']);
+    await expect(
+      result.providers[0]?.execute('hello', { timeout: 5 }),
+    ).resolves.toMatchObject({ content: 'library:hello' });
+    expect(node).not.toHaveProperty('registerCustomProviders');
+    expect(node).not.toHaveProperty('executeResearchRun');
   });
 
-  it('registerCustomProviders registers loaded providers into the core registry', async () => {
-    writeNpmProvider('lib-provider');
-    await initializeProviders();
-    const builtinCount = getAllProviders().length;
+  it.each(RESERVED_IDS)(
+    'rejects reserved built-in id %s before importing custom code',
+    async (providerId) => {
+      const markerPath = join(tmpDir, `${providerId}-loaded`);
+      writeNpmProvider(providerId, markerPath);
+      const { loadCustomProviders } = await import('../src/node-entry.js');
 
-    const result = await registerCustomProviders({
-      providers: { 'lib-provider': { enabled: true } },
-      customProviders: {
-        'lib-provider': { type: 'npm', module: 'lib-provider' },
-      },
-      trustedProviderIds: ['lib-provider'],
-    });
+      const result = await loadCustomProviders({
+        providers: { [providerId]: { enabled: true } },
+        customProviders: {
+          [providerId]: { type: 'npm', module: providerId },
+        },
+        trustedProviderIds: [providerId],
+      });
 
-    expect(result.loadedIds).toContain('lib-provider');
-    const registered = getProvider('lib-provider');
-    expect(registered).toBeDefined();
-    expect(registered?.source).toBe('npm');
-    expect(getAllProviders()).toHaveLength(builtinCount + 1);
+      expect(result.skippedIds).toContain(providerId);
+      expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
+      expect(existsSync(markerPath)).toBe(false);
+    },
+  );
 
-    const executed = await registered!.execute('hi', { timeout: 5 });
-    expect(executed.content).toBe('lib:hi');
-  });
-
-  it('rejects canonical built-in IDs before importing npm code', async () => {
-    const markerPath = join(tmpDir, 'npm-provider-loaded');
+  it('cannot bypass built-in protection with an empty additional reserve', async () => {
+    const markerPath = join(tmpDir, 'exa-loaded');
     writeNpmProvider('exa', markerPath);
+    const { loadCustomProviders } = await import('../src/node-entry.js');
 
     const result = await loadCustomProviders(
       {
@@ -152,28 +140,17 @@ describe('librarium/node entry', () => {
         customProviders: { exa: { type: 'npm', module: 'exa' } },
         trustedProviderIds: ['exa'],
       },
-      {
-        reservedProviderIds: [],
-      },
+      { reservedProviderIds: [] },
     );
 
-    expect(result.loadedIds).not.toContain('exa');
     expect(result.skippedIds).toContain('exa');
-    expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
     expect(existsSync(markerPath)).toBe(false);
   });
 
-  it('rejects built-in aliases before spawning script describe code', async () => {
-    const markerPath = join(tmpDir, 'script-provider-described');
-    const scriptPath = join(tmpDir, 'reserved-provider-script.mjs');
-    writeFileSync(
-      scriptPath,
-      [
-        "import { writeFileSync } from 'node:fs';",
-        `writeFileSync(${JSON.stringify(markerPath)}, 'described');`,
-      ].join('\n'),
-      'utf-8',
-    );
+  it('rejects a built-in alias before spawning script describe code', async () => {
+    const markerPath = join(tmpDir, 'alias-described');
+    const scriptPath = writeScriptProbe('openai-deep', markerPath);
+    const { loadCustomProviders } = await import('../src/node-entry.js');
 
     const result = await loadCustomProviders(
       {
@@ -190,44 +167,18 @@ describe('librarium/node entry', () => {
       { reservedProviderIds: [] },
     );
 
-    expect(result.loadedIds).not.toContain('openai-deep');
     expect(result.skippedIds).toContain('openai-deep');
-    expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
     expect(existsSync(markerPath)).toBe(false);
   });
 
-  it.each(PLANNED_PROVIDER_IDS)(
-    'rejects planned built-in id %s before importing npm code',
+  it.each(RESERVED_IDS)(
+    'rejects reserved script id %s before describe/spawn',
     async (providerId) => {
-      const markerPath = join(tmpDir, `${providerId}-npm-loaded`);
-      writeNpmProvider(providerId, markerPath);
-      const result = await loadCustomProviders({
-        providers: { [providerId]: { enabled: true } },
-        customProviders: {
-          [providerId]: { type: 'npm', module: providerId },
-        },
-        trustedProviderIds: [providerId],
-      });
-      expect(result.loadedIds).not.toContain(providerId);
-      expect(result.skippedIds).toContain(providerId);
-      expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
-      expect(existsSync(markerPath)).toBe(false);
-    },
-  );
+      const safeId = providerId.replaceAll('/', '-');
+      const markerPath = join(tmpDir, `${safeId}-described`);
+      const scriptPath = writeScriptProbe(providerId, markerPath);
+      const { loadCustomProviders } = await import('../src/node-entry.js');
 
-  it.each(PLANNED_PROVIDER_IDS)(
-    'rejects planned built-in id %s before spawning script describe code',
-    async (providerId) => {
-      const markerPath = join(tmpDir, `${providerId}-script-described`);
-      const scriptPath = join(tmpDir, `${providerId}-provider-script.mjs`);
-      writeFileSync(
-        scriptPath,
-        [
-          "import { writeFileSync } from 'node:fs';",
-          `writeFileSync(${JSON.stringify(markerPath)}, 'described');`,
-        ].join('\n'),
-        'utf-8',
-      );
       const result = await loadCustomProviders({
         providers: { [providerId]: { enabled: true } },
         customProviders: {
@@ -239,10 +190,16 @@ describe('librarium/node entry', () => {
         },
         trustedProviderIds: [providerId],
       });
-      expect(result.loadedIds).not.toContain(providerId);
+
       expect(result.skippedIds).toContain(providerId);
       expect(result.warnings.join(' ')).toMatch(/conflicts with a built-in/);
       expect(existsSync(markerPath)).toBe(false);
     },
   );
+
+  it('covers every current and planned catalog identity in the reserved set', () => {
+    expect(
+      BUILTIN_IDS.every((id) => RESERVED_BUILTIN_PROVIDER_IDS.has(id)),
+    ).toBe(true);
+  });
 });

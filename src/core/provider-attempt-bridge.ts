@@ -2,23 +2,23 @@ import type {
   DurableHandle,
   ExecutionProfile,
   StructuredError,
-} from './contracts/domain/index.js';
+} from '../contracts/domain/index.js';
 import {
   ExecutionProfileSchema,
   executionProfilesEqual,
-} from './contracts/domain/index.js';
-import type { AttemptLaunch } from './core/coordinator.js';
-import type { AdapterBindingIdentity } from './core/execution-plan.js';
+} from '../contracts/domain/index.js';
+import type { AsyncTaskHandle, Provider, ProviderResult } from '../types.js';
+import type { AttemptLaunch } from './coordinator.js';
+import type { AdapterBindingIdentity } from './execution-plan.js';
 import type {
   AttemptExecutionContext,
   AttemptExecutionPort,
   AttemptExecutionResult,
-} from './core/execution-runtime.js';
-import type { AsyncTaskHandle, Provider, ProviderResult } from './types.js';
+} from './execution-runtime.js';
 
 type BackgroundProvider = Extract<Provider, { execution: 'background' }>;
 
-export interface NodeExecutionBridgeDependencies {
+export interface ProviderAttemptBridgeDependencies {
   /** Exact binding lookup only: aliases and selector policy are absent. */
   resolveExactBinding(binding: AdapterBindingIdentity):
     | {
@@ -211,11 +211,11 @@ async function retrieveCompletedTask(
 }
 
 /**
- * Node-only compatibility bridge. A launch is already frozen to one binding;
+ * Provider compatibility bridge. A launch is already frozen to one binding;
  * this bridge only resolves that exact adapter id and invokes its lifecycle.
  */
-export function createNodeAttemptBridge(
-  dependencies: NodeExecutionBridgeDependencies,
+export function createProviderAttemptBridge(
+  dependencies: ProviderAttemptBridgeDependencies,
 ): AttemptExecutionPort {
   const now = dependencies.now ?? Date.now;
   const wait = dependencies.wait ?? defaultWait;

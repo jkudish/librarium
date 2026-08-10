@@ -105,6 +105,9 @@ vi.mock('../src/core/provider-selection.js', () => {
 vi.mock('../src/core/prompt-builder.js', () => ({
   generateSlug: () => 'fixture-slug',
   resolveOutputDir: () => '/tmp/unused-cli-output',
+}));
+
+vi.mock('../src/node-run-directory.js', () => ({
   createRunDir: () => '/tmp/unused-mcp-output',
 }));
 

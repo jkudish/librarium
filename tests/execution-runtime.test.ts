@@ -13,7 +13,7 @@ import {
   type AttemptExecutionPort,
   runPreparedExecution,
 } from '../src/core/execution-runtime.js';
-import { createNodeAttemptBridge } from '../src/node-execution-bridge.js';
+import { createProviderAttemptBridge } from '../src/core/provider-attempt-bridge.js';
 import type { Provider, ProviderResult } from '../src/types.js';
 
 const start = Date.parse('2026-08-09T12:00:00.000Z');
@@ -316,7 +316,7 @@ describe('private prepared execution runtime', () => {
     const result = await runPreparedExecution(plan, {
       store,
       coordinator: coordinatorDependencies(),
-      attempts: createNodeAttemptBridge({
+      attempts: createProviderAttemptBridge({
         resolveExactBinding,
         now: () => start,
       }),
@@ -369,7 +369,7 @@ describe('private prepared execution runtime', () => {
       {
         store,
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: (binding) =>
             binding.adapter_id === 'adapter-durable'
               ? resolvedBinding('durable', durable)
@@ -416,7 +416,7 @@ describe('private prepared execution runtime', () => {
       {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: (binding) =>
             binding.adapter_id === 'adapter-durable'
               ? resolvedBinding('durable', durable)
@@ -580,7 +580,7 @@ describe('private prepared execution runtime', () => {
     const result = await runPreparedExecution(prepared([profile('primary')]), {
       store: new InMemoryCoordinationStateStore(),
       coordinator: coordinatorDependencies(),
-      attempts: createNodeAttemptBridge({
+      attempts: createProviderAttemptBridge({
         resolveExactBinding: () => ({
           binding: {
             adapter_id: 'adapter-primary',
@@ -633,7 +633,7 @@ describe('private prepared execution runtime', () => {
         {
           store: new InMemoryCoordinationStateStore(),
           coordinator: coordinatorDependencies(),
-          attempts: createNodeAttemptBridge({
+          attempts: createProviderAttemptBridge({
             resolveExactBinding: () =>
               resolvedBinding(
                 'primary',
@@ -678,7 +678,7 @@ describe('private prepared execution runtime', () => {
     const result = await runPreparedExecution(prepared([plannedProfile]), {
       store: new InMemoryCoordinationStateStore(),
       coordinator: coordinatorDependencies(),
-      attempts: createNodeAttemptBridge({
+      attempts: createProviderAttemptBridge({
         resolveExactBinding: () =>
           resolvedBinding('primary', provider, resolvedProfile),
         now: () => start,
@@ -734,7 +734,7 @@ describe('private prepared execution runtime', () => {
       {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: (binding) =>
             binding.adapter_id === 'adapter-durable'
               ? resolvedBinding('durable', durable)
@@ -784,7 +784,7 @@ describe('private prepared execution runtime', () => {
       {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: () => resolvedBinding('durable', durable),
           now: () => start,
         }),
@@ -825,7 +825,7 @@ describe('private prepared execution runtime', () => {
       {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: () => resolvedBinding('durable', durable),
           now: () => start,
         }),
@@ -886,7 +886,7 @@ describe('private prepared execution runtime', () => {
         {
           store: new InMemoryCoordinationStateStore(),
           coordinator: coordinatorDependencies(),
-          attempts: createNodeAttemptBridge({
+          attempts: createProviderAttemptBridge({
             resolveExactBinding: () => resolvedBinding('durable', durable),
             now: () => start,
           }),
@@ -983,7 +983,7 @@ describe('private prepared execution runtime', () => {
         {
           store: new InMemoryCoordinationStateStore(),
           coordinator: systemCoordinatorDependencies(),
-          attempts: createNodeAttemptBridge({
+          attempts: createProviderAttemptBridge({
             resolveExactBinding: (binding) =>
               binding.adapter_id === 'adapter-primary'
                 ? resolvedBinding('primary', primary)
@@ -1041,7 +1041,7 @@ describe('private prepared execution runtime', () => {
         {
           store: new InMemoryCoordinationStateStore(),
           coordinator: systemCoordinatorDependencies(),
-          attempts: createNodeAttemptBridge({
+          attempts: createProviderAttemptBridge({
             resolveExactBinding: (binding) =>
               binding.adapter_id === 'adapter-durable'
                 ? resolvedBinding('durable', durable)
@@ -1103,7 +1103,7 @@ describe('private prepared execution runtime', () => {
         {
           store: new InMemoryCoordinationStateStore(),
           coordinator: systemCoordinatorDependencies(),
-          attempts: createNodeAttemptBridge({
+          attempts: createProviderAttemptBridge({
             resolveExactBinding: (binding) =>
               binding.adapter_id === 'adapter-durable'
                 ? resolvedBinding('durable', durable)
@@ -1167,7 +1167,7 @@ describe('private prepared execution runtime', () => {
       {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: (binding) =>
             binding.adapter_id === 'adapter-durable'
               ? resolvedBinding('durable', durable)
@@ -1223,7 +1223,7 @@ describe('private prepared execution runtime', () => {
       {
         store: new InMemoryCoordinationStateStore(),
         coordinator: coordinatorDependencies(),
-        attempts: createNodeAttemptBridge({
+        attempts: createProviderAttemptBridge({
           resolveExactBinding: (binding) =>
             binding.adapter_id === 'adapter-durable'
               ? resolvedBinding('durable', durable)
@@ -1362,7 +1362,7 @@ describe('private prepared execution runtime', () => {
     const result = await runPreparedExecution(prepared([profile('primary')]), {
       store: new InMemoryCoordinationStateStore(),
       coordinator: coordinatorDependencies(),
-      attempts: createNodeAttemptBridge({
+      attempts: createProviderAttemptBridge({
         resolveExactBinding: () => resolvedBinding('primary', provider),
         now: () => start,
       }),

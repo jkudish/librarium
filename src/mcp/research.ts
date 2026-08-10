@@ -6,11 +6,7 @@ import {
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
-import {
-  type CreateRunDirDeps,
-  createRunDir,
-  generateSlug,
-} from '../core/prompt-builder.js';
+import { generateSlug } from '../core/prompt-builder.js';
 import {
   ProviderSelectionError,
   resolveProviderSelection as resolveProviderSelectionCore,
@@ -20,6 +16,7 @@ import {
   executeResearchRun,
 } from '../core/research-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import { type CreateRunDirDeps, createRunDir } from '../node-run-directory.js';
 import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
 import type { Config, Defaults } from '../types.js';
 

@@ -1,4 +1,4 @@
-import { registerCustomProviders } from '../node-entry.js';
+import { loadCustomProviders } from '../node-entry.js';
 import {
   getAllProviders,
   getExactProvider,
@@ -30,14 +30,14 @@ export async function initializeProviders(
     return builtinResult;
   }
 
-  // Reuse the same load-and-register path the library `librarium/node` entry
-  // exposes -- one implementation, two callers. Reserved IDs default to the
-  // built-ins just registered above.
-  const customResult = await registerCustomProviders({
+  // Reuse the public trust-filtered loader, then keep the legacy global
+  // registration step private to the CLI compatibility path.
+  const customResult = await loadCustomProviders({
     customProviders,
     trustedProviderIds: config.trustedProviderIds ?? [],
     providers: config.providers ?? {},
   });
+  for (const provider of customResult.providers) registerProvider(provider);
 
   return {
     warnings: [...builtinResult.warnings, ...customResult.warnings],

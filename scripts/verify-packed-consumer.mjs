@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { builtinModules } from 'node:module';
+import { build as esbuild } from 'esbuild';
 
 const expectEngineRejection = process.argv.includes(
   '--expect-engine-rejection',
@@ -12,18 +22,63 @@ const root = process.cwd();
 const workspace = mkdtempSync(join(tmpdir(), 'librarium-packed-consumer-'));
 const packDirectory = join(workspace, 'pack');
 const consumerDirectory = join(workspace, 'consumer');
-// The temporary consumer isolates package resolution. Reuse the caller's npm
-// cache so this gate does not redownload the dependency graph after `npm ci`.
 const npmEnvironment = process.env;
+const NODE_BUILTINS = new Set(
+  builtinModules.flatMap((specifier) => [
+    specifier,
+    specifier.startsWith('node:') ? specifier.slice(5) : `node:${specifier}`,
+  ]),
+);
+
+const ROOT_EXPORTS = [
+  'BUILTIN_PROVIDER_CATALOG',
+  'CitationSchema',
+  'ResearchErrorSchema',
+  'ResearchRequestSchema',
+  'ResearchResponseSchema',
+  'ResearchResultSchema',
+  'ResultProvenanceSchema',
+  'SourceSchema',
+  'UsageSchema',
+  'VERSION',
+].sort();
+
+const CORE_EXPORTS = [
+  ...ROOT_EXPORTS,
+  'HttpRequestAbortedError',
+  'HttpRequestTimeoutError',
+  'HttpResponseTooLargeError',
+  'InMemoryCoordinationStateStore',
+  'ProviderCatalogError',
+  'admitResearchExecution',
+  'buildPrompt',
+  'buildProviderCatalog',
+  'createProviderAttemptBridge',
+  'generateSlug',
+  'httpRequest',
+  'httpStreamRequest',
+  'materializeResearchExecution',
+  'prepareResearchExecution',
+  'resolveOutputDir',
+  'runPreparedExecution',
+  'updateCoordinationState',
+].sort();
+
+const NODE_EXPORTS = [
+  ...CORE_EXPORTS,
+  'createNodeCredentialContext',
+  'loadCustomProviders',
+].sort();
 
 function npmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
-function runNode(args, cwd = consumerDirectory) {
+function runNode(args, cwd = consumerDirectory, environment = process.env) {
   return execFileSync(process.execPath, args, {
     cwd,
     encoding: 'utf8',
+    env: environment,
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
 }
@@ -61,16 +116,413 @@ function runInstalledCli(args) {
   }).trim();
 }
 
+function listFiles(directory, base = directory) {
+  const files = [];
+  for (const name of readdirSync(directory)) {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) files.push(...listFiles(path, base));
+    else files.push(relative(base, path).split(sep).join('/'));
+  }
+  return files.sort();
+}
+
+function assertEqual(actual, expected, label) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `${label} mismatch:\nexpected ${JSON.stringify(expected)}\nreceived ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+function verifyTarballInventory(packResult) {
+  const actual = packResult.files.map(({ path }) => path).sort();
+  const expected = [
+    'LICENSE',
+    'README.md',
+    'package.json',
+    ...listFiles(join(root, 'dist')).map((path) => `dist/${path}`),
+  ].sort();
+  assertEqual(actual, expected, 'Packed tarball inventory');
+
+  for (const forbidden of [
+    'dist/cli.d.ts',
+    'dist/cli.d.ts.map',
+    'contracts/v1',
+  ]) {
+    if (actual.some((path) => path === forbidden || path.startsWith(`${forbidden}/`))) {
+      throw new Error(`Forbidden packed artifact: ${forbidden}`);
+    }
+  }
+}
+
+function verifyExports() {
+  const source = `
+    const checks = ${JSON.stringify({
+      librarium: ROOT_EXPORTS,
+      'librarium/core': CORE_EXPORTS,
+      'librarium/node': NODE_EXPORTS,
+    })};
+    for (const [specifier, expected] of Object.entries(checks)) {
+      const actual = Object.keys(await import(specifier)).sort();
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(specifier + ' exports ' + JSON.stringify(actual));
+      }
+    }
+    for (const specifier of [
+      'librarium/cli',
+      'librarium/contracts/v1',
+      'librarium/package.json',
+      'librarium/adapters',
+      'librarium/internal',
+    ]) {
+      try {
+        await import(specifier);
+        throw new Error('Unexpected public subpath: ' + specifier);
+      } catch (error) {
+        if (error?.code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw error;
+      }
+    }
+  `;
+  runNode(['--input-type=module', '--eval', source]);
+}
+
+function verifyImportSideEffects() {
+  const home = join(workspace, 'poisoned-home');
+  // Keep the poisoned cwd below the consumer so bare package resolution still
+  // reaches the installed tarball while filesystem effects remain isolated.
+  const cwd = join(consumerDirectory, 'poisoned-cwd');
+  mkdirSync(home);
+  mkdirSync(cwd);
+  const source = `
+    import { readdirSync } from 'node:fs';
+    const before = JSON.stringify(readdirSync('.').sort());
+    const exitCodeBefore = process.exitCode;
+    process.argv = [process.execPath, 'librarium', 'config', 'init'];
+    process.exit = (code) => { throw new Error('process.exit:' + code); };
+    process.stdout.write = () => { throw new Error('stdout write'); };
+    process.stderr.write = () => { throw new Error('stderr write'); };
+    for (const method of ['on', 'once', 'addListener', 'prependListener']) {
+      const original = process[method].bind(process);
+      process[method] = (event, ...args) => {
+        if (String(event).startsWith('SIG')) throw new Error('signal listener:' + event);
+        return original(event, ...args);
+      };
+    }
+    await import('librarium');
+    await import('librarium/core');
+    await import('librarium/node');
+    if (process.exitCode !== exitCodeBefore) {
+      throw new Error('import changed process.exitCode');
+    }
+    const after = JSON.stringify(readdirSync('.').sort());
+    if (before !== after) throw new Error('import wrote files');
+  `;
+  runNode(['--input-type=module', '--eval', source], cwd, {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+  });
+  if (readdirSync(home).length !== 0 || readdirSync(cwd).length !== 0) {
+    throw new Error('Root/core/node import changed the filesystem');
+  }
+}
+
+function verifyDeclarations() {
+  const workerSourcePath = join(consumerDirectory, 'worker-consumer.ts');
+  const workerConfigPath = join(consumerDirectory, 'worker-tsconfig.json');
+  writeFileSync(
+    workerSourcePath,
+    `
+      import {
+        BUILTIN_PROVIDER_CATALOG,
+        type BuiltinWorkflowId,
+        type DeclarableWorkflowId,
+        type ExecutionProfile,
+        type ProfileTarget,
+        type ProviderIdentity,
+        ResearchRequestSchema,
+        type ResearchRequest,
+      } from 'librarium';
+      import {
+        type AsyncPollResult,
+        type AsyncTaskHandle,
+        type AttemptLaunch,
+        buildProviderCatalog,
+        type CatalogProviderConfig,
+        type CoordinatorDependencies,
+        type CoordinatorState,
+        type DurableHandle,
+        type InterchangeRequest,
+        type LegacyProviderTier,
+        type PreparationNotice,
+        type ProviderCitation,
+        type StructuredError,
+        type AttemptExecutionPort,
+        type HttpClient,
+      } from 'librarium/core';
+      declare const launch: AttemptLaunch;
+      declare const error: StructuredError;
+      declare const handle: DurableHandle;
+      declare const coordinator: CoordinatorDependencies;
+      declare const state: CoordinatorState;
+      declare const preparedRequest: InterchangeRequest;
+      declare const notice: PreparationNotice;
+      declare const task: AsyncTaskHandle;
+      declare const poll: AsyncPollResult;
+      declare const tier: LegacyProviderTier;
+      declare const providerCitation: ProviderCitation;
+      declare const identity: ProviderIdentity;
+      declare const target: ProfileTarget;
+      declare const workflow: BuiltinWorkflowId;
+      declare const declaredWorkflow: DeclarableWorkflowId;
+      const catalogConfig: CatalogProviderConfig = {
+        enabled: true,
+        model: 'fixture-model',
+      };
+      const request: ResearchRequest = ResearchRequestSchema.parse({
+        query: 'packed declaration consumer',
+        mode: 'sync',
+        selector: { kind: 'default' },
+        fallback: { kind: 'disabled' },
+        limits: {
+          max_concurrency: 1,
+          request_deadline_ms: 1000,
+          inline_attempt_deadline_ms: 1000,
+          background_attempt_deadline_ms: 1000,
+          poll_interval_ms: 100,
+        },
+      });
+      const client: HttpClient = async <T>() => ({
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        data: {} as T,
+        durationMs: 1,
+      });
+      const port: AttemptExecutionPort = {
+        async execute(received, context) {
+          const typedLaunch: AttemptLaunch = received;
+          const profile: ExecutionProfile = typedLaunch.profile;
+          await context.submissionAccepted(handle);
+          return {
+            kind: 'finished',
+            finished: {
+              outcome: 'failed',
+              error,
+              durable_handle: handle,
+            },
+          };
+        },
+      };
+      void [
+        BUILTIN_PROVIDER_CATALOG,
+        buildProviderCatalog,
+        request,
+        client,
+        port,
+        launch,
+        coordinator,
+        state,
+        preparedRequest,
+        notice,
+        task,
+        poll,
+        tier,
+        providerCitation,
+        identity,
+        target,
+        workflow,
+        declaredWorkflow,
+        catalogConfig,
+      ];
+    `,
+  );
+  writeFileSync(
+    workerConfigPath,
+    JSON.stringify({
+      compilerOptions: {
+        target: 'ES2023',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        noEmit: true,
+        skipLibCheck: false,
+        types: [],
+        lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+      },
+      files: ['./worker-consumer.ts'],
+    }),
+  );
+  execFileSync(
+    process.execPath,
+    [
+      resolve(root, 'node_modules/typescript/bin/tsc'),
+      '-p',
+      workerConfigPath,
+    ],
+    { cwd: consumerDirectory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+
+  const nodeSourcePath = join(consumerDirectory, 'node-consumer.ts');
+  const nodeConfigPath = join(consumerDirectory, 'node-tsconfig.json');
+  writeFileSync(
+    nodeSourcePath,
+    `
+      import {
+        type CustomProviderExecutionProfileConfig,
+        type CustomProviderLoadConfig,
+        type CustomProviderLoadResult,
+        type CustomProviderRuntimeConfig,
+        type ExecutionProfile,
+        type LoadCustomProvidersOptions,
+        type NpmCustomProviderSource,
+        type ScriptCustomProviderSource,
+        createNodeCredentialContext,
+        loadCustomProviders,
+      } from 'librarium/node';
+      declare const profile: ExecutionProfile;
+      const credentials = createNodeCredentialContext({ TEST_KEY: 'value' });
+      const executionProfile: CustomProviderExecutionProfileConfig = {
+        bindingId: 'fixture.binding',
+        profile,
+      };
+      const npmSource: NpmCustomProviderSource = {
+        type: 'npm',
+        module: 'fixture-provider',
+        executionProfile,
+      };
+      const scriptSource: ScriptCustomProviderSource = {
+        type: 'script',
+        command: 'fixture-provider',
+      };
+      const provider: CustomProviderRuntimeConfig = { enabled: true };
+      const config: CustomProviderLoadConfig = {
+        customProviders: { npmSource, scriptSource },
+        trustedProviderIds: ['npmSource', 'scriptSource'],
+        providers: { npmSource: provider, scriptSource: provider },
+      };
+      const options: LoadCustomProvidersOptions = { reservedProviderIds: [] };
+      const loaded: Promise<CustomProviderLoadResult> = loadCustomProviders(
+        config,
+        options,
+      );
+      void credentials;
+      void loaded;
+    `,
+  );
+  writeFileSync(
+    nodeConfigPath,
+    JSON.stringify({
+      compilerOptions: {
+        target: 'ES2023',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        noEmit: true,
+        skipLibCheck: false,
+        types: ['node'],
+        typeRoots: [resolve(root, 'node_modules/@types')],
+        lib: ['ES2023', 'DOM', 'DOM.Iterable'],
+      },
+      files: ['./node-consumer.ts'],
+    }),
+  );
+  execFileSync(
+    process.execPath,
+    [resolve(root, 'node_modules/typescript/bin/tsc'), '-p', nodeConfigPath],
+    { cwd: consumerDirectory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+
+  const nodeDeclaration = readFileSync(join(root, 'dist/node.d.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+  if (/\bConfig\b/.test(nodeDeclaration)) {
+    throw new Error('The public Node declaration leaks the legacy Config type');
+  }
+}
+
+async function verifyWorkerSafeGraph() {
+  const scan = await esbuild({
+    entryPoints: [
+      join(root, 'src/index.ts'),
+      join(root, 'src/core-entry.ts'),
+    ],
+    outdir: join(workspace, 'worker-scan'),
+    bundle: true,
+    splitting: true,
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2023',
+    packages: 'external',
+    write: false,
+    metafile: true,
+    define: { __VERSION__: JSON.stringify('packed-verifier') },
+  });
+  const inputs = Object.keys(scan.metafile.inputs).map((path) =>
+    path.split(sep).join('/'),
+  );
+  const forbiddenSources = [
+    'src/adapters/custom.ts',
+    'src/commands/',
+    'src/mcp/',
+    'src/node-',
+    'src/cli',
+    'src/core/config.ts',
+    'src/core/install-method.ts',
+  ];
+  for (const input of inputs) {
+    if (forbiddenSources.some((fragment) => input.includes(fragment))) {
+      throw new Error(`Worker-safe graph reached ${input}`);
+    }
+  }
+  for (const [output, metadata] of Object.entries(scan.metafile.outputs)) {
+    for (const imported of metadata.imports) {
+      if (imported.external && NODE_BUILTINS.has(imported.path)) {
+        throw new Error(`${output} imports Node builtin ${imported.path}`);
+      }
+    }
+  }
+
+  const distEntries = [join(root, 'dist/index.js'), join(root, 'dist/core.js')];
+  const visited = new Set();
+  const visit = (path) => {
+    if (visited.has(path)) return;
+    visited.add(path);
+    const source = readFileSync(path, 'utf8');
+    const specifiers = [
+      ...source.matchAll(/(?:from\s*|import\s*)["']([^"']+)["']/g),
+      ...source.matchAll(/(?:import|require)\s*\(\s*["']([^"']+)["']/g),
+    ].map((match) => match[1]);
+    for (const specifier of specifiers) {
+      if (NODE_BUILTINS.has(specifier)) {
+        throw new Error(
+          `Worker-safe output imports Node builtin ${specifier}: ${path}`,
+        );
+      }
+      if (specifier.startsWith('./')) {
+        visit(resolve(dirname(path), specifier));
+      }
+    }
+  };
+  for (const entry of distEntries) visit(entry);
+}
+
 try {
   mkdirSync(packDirectory);
   mkdirSync(consumerDirectory);
 
-  execFileSync(npmCommand(), ['pack', '--pack-destination', packDirectory], {
-    cwd: root,
-    encoding: 'utf8',
-    env: npmEnvironment,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
+  const packOutput = execFileSync(
+    npmCommand(),
+    ['pack', '--json', '--pack-destination', packDirectory],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      env: npmEnvironment,
+      stdio: ['ignore', 'pipe', 'inherit'],
+    },
+  );
+  const [packResult] = JSON.parse(packOutput);
+  if (!packResult) throw new Error('npm pack did not return a package result');
 
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   if (pkg.engines?.node !== '>=22.12.0') {
@@ -78,10 +530,8 @@ try {
       `Expected package engines.node to be >=22.12.0, received ${String(pkg.engines?.node)}`,
     );
   }
-  const tarball = resolve(
-    packDirectory,
-    `${pkg.name.replace('@', '').replace('/', '-')}-${pkg.version}.tgz`,
-  );
+  verifyTarballInventory(packResult);
+  const tarball = resolve(packDirectory, packResult.filename);
 
   execFileSync(npmCommand(), ['init', '--yes'], {
     cwd: consumerDirectory,
@@ -139,10 +589,14 @@ try {
       );
     }
 
+    await verifyWorkerSafeGraph();
+    verifyExports();
+    verifyImportSideEffects();
+    verifyDeclarations();
     runNode([
       '--input-type=module',
       '--eval',
-      "await import('librarium/core'); await import('librarium/node');",
+      "await import('librarium'); await import('librarium/core'); await import('librarium/node');",
     ]);
 
     runInstalledCli(['--help']);
@@ -154,7 +608,7 @@ try {
     }
 
     console.log(
-      `Verified packed ${pkg.name}@${pkg.version} on ${process.version}: install, CLI, core, node`,
+      `Verified packed ${pkg.name}@${pkg.version} on ${process.version}: inventory, exports, declarations, Worker-safe graph, side effects, CLI`,
     );
   }
 } finally {

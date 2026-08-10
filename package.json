@@ -3,12 +3,12 @@
   "version": "1.4.1",
   "description": "Fan out research queries to multiple search and deep-research APIs in parallel",
   "type": "module",
-  "main": "./dist/cli.js",
-  "types": "./dist/cli.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./core": {
       "types": "./dist/core.d.ts",
@@ -22,14 +22,17 @@
   "bin": {
     "librarium": "dist/cli.js"
   },
+  "sideEffects": [
+    "./dist/cli.js"
+  ],
   "scripts": {
-    "build": "tsup",
+    "build": "node scripts/clean-dist.mjs && tsup",
     "build:sea": "node scripts/build-sea.mjs",
     "contracts:generate": "node scripts/generate-contract-snapshot.mjs",
     "benchmark": "node benchmark/cli.mjs",
     "benchmark:validate": "node benchmark/validate.mjs",
     "benchmark:ci": "node benchmark/ci.mjs",
-    "dev": "tsup --watch",
+    "dev": "node scripts/clean-dist.mjs && tsup --watch",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
     "test:packed": "npm run build && node scripts/verify-packed-consumer.mjs",
