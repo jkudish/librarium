@@ -171,6 +171,40 @@ describe('mcp tool surface', () => {
     ]);
     await server.close();
   });
+
+  it('passes the merged config to check_async', async () => {
+    const config = makeConfig();
+    const runDir = join(baseDir, 'check-async');
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      join(runDir, 'run.json'),
+      JSON.stringify(makeManifest({ outputDir: runDir })),
+    );
+    const checkAsync = vi.fn().mockResolvedValue({
+      runDir,
+      polled: 0,
+      retrieved: 0,
+      tasks: [],
+    });
+    const { client, server } = await connect({
+      loadMergedConfig: () => config,
+      checkAsync,
+      initialize: vi.fn().mockResolvedValue({
+        warnings: [],
+        loadedCustomProviders: [],
+        skippedCustomProviders: [],
+      }),
+    });
+
+    const result = await client.callTool({
+      name: 'check_async',
+      arguments: { runDir },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(checkAsync).toHaveBeenCalledWith(runDir, false, config);
+    await server.close();
+  });
 });
 
 describe('research tool', () => {

@@ -72,6 +72,7 @@ vi.mock('../src/core/config.js', () => ({
 
 import { registerStatusCommand } from '../src/commands/status.js';
 import { loadAsyncTasks, saveAsyncTasks } from '../src/core/async-manager.js';
+import { providerArtifactFileNames } from '../src/node-run-artifacts.js';
 
 function program(): Command {
   const command = new Command();
@@ -161,9 +162,12 @@ describe('status command', () => {
     await program().parseAsync(['node', 'test', 'status', '--retrieve']);
 
     expect(state.retrieve).toHaveBeenCalledTimes(1);
-    expect(readFileSync(join(dir, 'status-command-mock.md'), 'utf8')).toBe(
-      'Completed research.',
-    );
+    expect(
+      readFileSync(
+        join(dir, providerArtifactFileNames('status-command-mock').outputFile),
+        'utf8',
+      ),
+    ).toBe('Completed research.');
     expect(loadAsyncTasks(dir)).toEqual([]);
   });
 
@@ -180,7 +184,11 @@ describe('status command', () => {
 
     expect(state.poll).not.toHaveBeenCalled();
     expect(state.retrieve).toHaveBeenCalledTimes(1);
-    expect(existsSync(join(dir, 'status-command-mock.md'))).toBe(true);
+    expect(
+      existsSync(
+        join(dir, providerArtifactFileNames('status-command-mock').outputFile),
+      ),
+    ).toBe(true);
     expect(loadAsyncTasks(dir)).toEqual([]);
   });
 
@@ -196,7 +204,21 @@ describe('status command', () => {
     expect(state.retrieve).toHaveBeenCalledTimes(2);
     expect(loadAsyncTasks(firstDir)).toEqual([]);
     expect(loadAsyncTasks(secondDir)).toEqual([]);
-    expect(existsSync(join(firstDir, 'status-command-mock.md'))).toBe(true);
-    expect(existsSync(join(secondDir, 'status-command-mock.md'))).toBe(true);
+    expect(
+      existsSync(
+        join(
+          firstDir,
+          providerArtifactFileNames('status-command-mock').outputFile,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      existsSync(
+        join(
+          secondDir,
+          providerArtifactFileNames('status-command-mock').outputFile,
+        ),
+      ),
+    ).toBe(true);
   });
 });

@@ -71,6 +71,13 @@ export interface CommitRetrievedInput {
   readonly now?: number;
 }
 
+/** Outcome of one retrieval commit attempt. */
+export interface CommitRetrievedResult {
+  readonly snapshot: RunArtifactSnapshot;
+  /** True only when this invocation committed artifacts and run.json. */
+  readonly committed: boolean;
+}
+
 /**
  * The subset of durable task fields that a poll reconciliation may mutate.
  * Retrieval timestamps are intentionally owned by commitRetrieved so a poll
@@ -702,7 +709,7 @@ export class RunArtifactRepository {
    * metadata can survive a retry, but a task is never marked retrieved until
    * the source rebuild and manifest commit both succeed.
    */
-  commitRetrieved(input: CommitRetrievedInput): RunArtifactSnapshot {
+  commitRetrieved(input: CommitRetrievedInput): CommitRetrievedResult {
     const runDir = this.assertRunDirectory(input.runDir);
     const commitNow = input.now ?? this.now();
     if (!Number.isSafeInteger(commitNow) || commitNow < 0) {
@@ -730,7 +737,10 @@ export class RunArtifactRepository {
       );
     }
     if (beforeTarget.task?.retrievedAt !== undefined) {
-      return this.readSnapshot(runDir, { view: 'authoritative' });
+      return {
+        snapshot: this.readSnapshot(runDir, { view: 'authoritative' }),
+        committed: false,
+      };
     }
     if (beforeTarget.task?.status !== 'completed') {
       throw new Error(
@@ -846,11 +856,17 @@ export class RunArtifactRepository {
       });
     } catch (error) {
       if (error === RETRIEVED_SENTINEL) {
-        return this.readSnapshot(runDir, { view: 'authoritative' });
+        return {
+          snapshot: this.readSnapshot(runDir, { view: 'authoritative' }),
+          committed: false,
+        };
       }
       throw error;
     }
-    return this.readSnapshot(runDir, { view: 'authoritative' });
+    return {
+      snapshot: this.readSnapshot(runDir, { view: 'authoritative' }),
+      committed: true,
+    };
   }
 
   private validateCommittedReport(

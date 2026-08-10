@@ -97,6 +97,54 @@ function provider(
 }
 
 describe('RunReconciliationService', () => {
+  it('counts and regenerates only the service invocation that wins a concurrent retrieval commit', async () => {
+    const runDir = makeRun([
+      pending('brave-search', 'concurrent', 'completed'),
+    ]);
+    const repository = new RunArtifactRepository();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = 0;
+    let bothEntered!: () => void;
+    const both = new Promise<void>((resolve) => {
+      bothEntered = resolve;
+    });
+    const retrieve = vi.fn(async () => {
+      entered++;
+      if (entered === 2) bothEntered();
+      await released;
+      return successResult('brave-search');
+    });
+    const regenerate = vi.fn();
+    const service = () =>
+      new RunReconciliationService({
+        repository,
+        resolveBackgroundProvider: () =>
+          provider(async () => ({ status: 'completed' }), retrieve),
+        getProviderConfig: () => undefined,
+        now: () => 50,
+        regenerateDerivedArtifacts: regenerate,
+      });
+
+    const first = service().reconcileOnce(runDir, { retrieve: true });
+    const second = service().reconcileOnce(runDir, { retrieve: true });
+    await both;
+    release();
+    const results = await Promise.all([first, second]);
+
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(results.map((result) => result.retrieved).sort()).toEqual([0, 1]);
+    expect(regenerate).toHaveBeenCalledTimes(1);
+    expect(
+      results
+        .flatMap((result) => result.tasks)
+        .filter((task) => task.retrievedThisPass),
+    ).toHaveLength(1);
+    expect(readRunManifest(runDir).providers[0]?.task?.retrievedAt).toBe(50);
+  });
+
   it('polls, rescans, and retrieves newly completed plus pre-existing tasks', async () => {
     const runDir = makeRun([
       pending('brave-search', 'new-task'),

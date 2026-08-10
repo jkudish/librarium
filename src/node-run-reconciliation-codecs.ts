@@ -210,9 +210,12 @@ export type ReconciliationTaskOutcome =
 export interface ReconciliationTaskResult {
   readonly provider: string;
   readonly taskId: string;
+  readonly submittedAt: number;
   readonly status: ReconciliationTaskOutcome;
   readonly polled: boolean;
   readonly retrieved: boolean;
+  /** True only when this reconciliation pass committed the retrieval. */
+  readonly retrievedThisPass: boolean;
   readonly providerStatus?: string;
   readonly lastPolledAt?: number;
   readonly completedAt?: number;
@@ -225,6 +228,7 @@ export function taskResultFromReport(
   report: Readonly<{
     task?: {
       taskId: string;
+      submittedAt: number;
       status: AsyncTaskStatus;
       providerStatus?: string;
       lastPolledAt?: number;
@@ -243,9 +247,10 @@ export function taskResultFromReport(
   return {
     provider,
     taskId: task.taskId,
+    submittedAt: task.submittedAt,
     status:
       overrideStatus ??
-      (retrieved
+      (retrieved || task.retrievedAt !== undefined
         ? 'retrieved'
         : task.status === 'failed'
           ? 'failed'
@@ -253,7 +258,8 @@ export function taskResultFromReport(
             ? 'cancelled'
             : task.status),
     polled,
-    retrieved,
+    retrieved: retrieved || task.retrievedAt !== undefined,
+    retrievedThisPass: retrieved,
     ...(task.providerStatus === undefined
       ? {}
       : { providerStatus: task.providerStatus }),
@@ -266,6 +272,8 @@ export function taskResultFromReport(
     ...(task.retrievedAt === undefined
       ? {}
       : { retrievedAt: task.retrievedAt }),
-    ...(error === undefined ? {} : { error }),
+    ...(error === undefined && task.lastPollError === undefined
+      ? {}
+      : { error: error ?? task.lastPollError }),
   };
 }

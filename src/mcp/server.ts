@@ -211,7 +211,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
               : `No runs found under ${baseDir}.`,
           );
         }
-        const result = await checkAsync(runDir, args.retrieve ?? false);
+        const result = await checkAsync(runDir, args.retrieve ?? false, config);
         return jsonResult(result);
       } catch (e) {
         return errorResult(`check_async failed: ${describeError(e)}`);

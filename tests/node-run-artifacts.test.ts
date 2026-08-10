@@ -319,12 +319,23 @@ describe('RunArtifactRepository', () => {
     const committed = new RunArtifactRepository({
       now: () => 10,
     }).commitRetrieved(input);
-    expect(committed.manifest.providers[0]?.task?.retrievedAt).toBe(10);
-    expect(committed.manifest.sources).toEqual({
+    expect(committed.committed).toBe(true);
+    expect(committed.snapshot.manifest.providers[0]?.task?.retrievedAt).toBe(
+      10,
+    );
+    expect(committed.snapshot.manifest.sources).toEqual({
       total: 1,
       unique: 1,
       file: 'sources.json',
     });
+
+    const alreadyCommitted = new RunArtifactRepository({
+      now: () => 11,
+    }).commitRetrieved(input);
+    expect(alreadyCommitted.committed).toBe(false);
+    expect(alreadyCommitted.snapshot.manifest.revision).toBe(
+      committed.snapshot.manifest.revision,
+    );
   });
 
   it('rejects malformed commit inputs before write-ahead artifacts', () => {
@@ -520,8 +531,14 @@ describe('RunArtifactRepository', () => {
     const committed = new RunArtifactRepository({
       now: () => 10,
     }).commitRetrieved(input);
-    expect(committed.manifest.providers[1]?.task?.retrievedAt).toBe(10);
-    expect(committed.manifest.sources).toMatchObject({ total: 2, unique: 2 });
+    expect(committed.committed).toBe(true);
+    expect(committed.snapshot.manifest.providers[1]?.task?.retrievedAt).toBe(
+      10,
+    );
+    expect(committed.snapshot.manifest.sources).toMatchObject({
+      total: 2,
+      unique: 2,
+    });
   });
 
   it('serializes same-task commits so the winner owns a coherent artifact set', async () => {

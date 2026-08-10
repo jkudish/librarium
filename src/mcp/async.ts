@@ -1,21 +1,8 @@
-import { join } from 'node:path';
-import { getExactProvider } from '../adapters/node-registry.js';
-import { sanitizeId } from '../constants.js';
 import {
-  asyncPollFailureUpdates,
-  asyncPollUpdates,
-  loadAsyncTasks,
-  updateAsyncTask,
-} from '../core/async-manager.js';
-import { normalizeUsage } from '../core/dispatcher.js';
-import { safeWriteFile } from '../core/fs-utils.js';
-import { buildProviderMetering } from '../core/metering.js';
-import { updateRunManifestAfterRetrieve } from '../core/retrieval-manifest.js';
-import type {
-  AsyncTaskHandle,
-  AsyncTaskStatus,
-  ProviderReport,
-} from '../types.js';
+  createNodeRunReconciliationRuntime,
+  type ReconciliationResult,
+} from '../node-run-reconciliation-runtime.js';
+import type { AsyncTaskStatus, Config } from '../types.js';
 
 /**
  * Silent async polling + retrieval for the MCP `check_async` tool. One poll
@@ -42,76 +29,43 @@ export interface CheckAsyncResult {
   polled: number;
   retrieved: number;
   tasks: TaskState[];
+  /** Fixed diagnostic only; never a provider or filesystem error string. */
+  error?: 'artifact.reconciliation_failed';
+  regenerationError?: 'artifact.regeneration_failed';
 }
 
-/** Retrieve one completed task silently; returns true on success. */
-async function retrieveTaskSilent(
-  task: AsyncTaskHandle,
-  dir: string,
-  state: TaskState,
-): Promise<boolean> {
-  const provider = getExactProvider(task.provider);
-  if (provider?.execution !== 'background') {
-    state.retrieveError = `Provider ${task.provider} does not support retrieval`;
-    return false;
-  }
-  try {
-    const result = await provider.retrieve(task);
-    if (result.error) {
-      state.retrieveError = result.error;
-      return false;
-    }
-    const safeId = sanitizeId(task.provider);
-    const outputFile = `${safeId}.md`;
-    const metaFile = `${safeId}.meta.json`;
-    const usage = normalizeUsage(result);
-    // Same metering normalization path as sync dispatch and `status --retrieve`,
-    // so MCP-retrieved async results carry metering on run.json/.meta.json too.
-    const metering = buildProviderMetering(task.provider, undefined, usage);
-
-    safeWriteFile(join(dir, outputFile), result.content);
-    safeWriteFile(
-      join(dir, metaFile),
-      JSON.stringify(
-        {
-          provider: result.provider,
-          tier: result.tier,
-          model: result.model,
-          durationMs: result.durationMs,
-          citationCount: result.citations.length,
-          tokenUsage: result.tokenUsage,
-          usage,
-          metering,
-          citations: result.citations,
-        },
-        null,
-        2,
-      ),
-    );
-
-    const report: ProviderReport = {
-      id: task.provider,
-      tier: result.tier,
-      status: 'success',
-      durationMs: result.durationMs,
-      wordCount: result.content.split(/\s+/).filter(Boolean).length,
-      citationCount: result.citations.length,
-      outputFile,
-      metaFile,
-      usage,
-      metering,
-    };
-    if (!updateRunManifestAfterRetrieve(dir, report, task.taskId)) {
-      state.retrieveError = 'Retrieved result, but could not update run.json';
-      return false;
-    }
-
-    state.retrieved = true;
-    return true;
-  } catch (e) {
-    state.retrieveError = e instanceof Error ? e.message : String(e);
-    return false;
-  }
+function taskState(result: ReconciliationResult): TaskState[] {
+  return result.tasks.map((task) => ({
+    provider: task.provider,
+    taskId: task.taskId,
+    // The MCP contract has always exposed durable task states, not the
+    // service's transport outcomes. A retrieved task therefore remains
+    // completed with an additive retrieved flag.
+    status:
+      task.status === 'retrieved'
+        ? 'completed'
+        : task.status === 'unsupported'
+          ? 'failed'
+          : task.status === 'error' && task.completedAt !== undefined
+            ? 'completed'
+            : (task.status as AsyncTaskStatus),
+    submittedAt: task.submittedAt,
+    ...(task.completedAt === undefined
+      ? {}
+      : { completedAt: task.completedAt }),
+    ...(task.retrieved ? { retrieved: true } : {}),
+    ...(task.error === undefined
+      ? {}
+      : task.status === 'error' && task.completedAt !== undefined
+        ? { retrieveError: task.error }
+        : { error: task.error }),
+    ...(task.providerStatus === undefined
+      ? {}
+      : { providerStatus: task.providerStatus }),
+    ...(task.lastPolledAt === undefined
+      ? {}
+      : { lastPolledAt: task.lastPolledAt }),
+  }));
 }
 
 /**
@@ -121,90 +75,48 @@ async function retrieveTaskSilent(
 export async function checkAsyncTasks(
   runDir: string,
   retrieve: boolean,
+  config?: Config,
 ): Promise<CheckAsyncResult> {
-  const tasks = loadAsyncTasks(runDir);
-  const states: TaskState[] = [];
-  let polled = 0;
-  let retrieved = 0;
-
-  for (const task of tasks) {
-    const state: TaskState = {
-      provider: task.provider,
-      taskId: task.taskId,
-      status: task.status,
-      submittedAt: task.submittedAt,
-      ...(task.completedAt ? { completedAt: task.completedAt } : {}),
-      ...(task.providerStatus ? { providerStatus: task.providerStatus } : {}),
-      ...(task.lastPolledAt ? { lastPolledAt: task.lastPolledAt } : {}),
-      ...(task.lastPollError ? { error: task.lastPollError } : {}),
-    };
-
-    if (task.status === 'pending' || task.status === 'running') {
-      const provider = getExactProvider(task.provider);
-      if (provider?.execution === 'background') {
-        polled++;
-        try {
-          const poll = await provider.poll(task);
-          const updated = updateAsyncTask(
-            runDir,
-            task.provider,
-            task.taskId,
-            asyncPollUpdates(poll),
-          );
-          Object.assign(task, updated ?? asyncPollUpdates(poll));
-          state.status = task.status;
-          state.completedAt = task.completedAt;
-          state.providerStatus = task.providerStatus;
-          state.lastPolledAt = task.lastPolledAt;
-          state.error = task.lastPollError;
-        } catch (e) {
-          const error = e instanceof Error ? e.message : String(e);
-          const updated = updateAsyncTask(
-            runDir,
-            task.provider,
-            task.taskId,
-            asyncPollFailureUpdates(error),
-          );
-          Object.assign(task, updated ?? asyncPollFailureUpdates(error));
-          state.lastPolledAt = task.lastPolledAt;
-          state.error = task.lastPollError;
-        }
-      } else {
-        const error = `Provider ${task.provider} does not support polling after this upgrade`;
-        const updated = updateAsyncTask(
-          runDir,
-          task.provider,
-          task.taskId,
-          asyncPollUpdates({
-            status: 'failed',
-            rawStatus: 'unsupported_provider',
-            message: error,
-          }),
-        );
-        Object.assign(
-          task,
-          updated ??
-            asyncPollUpdates({
-              status: 'failed',
-              rawStatus: 'unsupported_provider',
-              message: error,
-            }),
-        );
-        state.status = task.status;
-        state.completedAt = task.completedAt;
-        state.providerStatus = task.providerStatus;
-        state.lastPolledAt = task.lastPolledAt;
-        state.error = task.lastPollError;
-      }
-    }
-
-    if (retrieve && state.status === 'completed') {
-      const ok = await retrieveTaskSilent(task, runDir, state);
-      if (ok) retrieved++;
-    }
-
-    states.push(state);
+  if (!config && process.env.NODE_ENV !== 'test') {
+    throw new Error('check_async requires merged provider configuration');
   }
-
-  return { runDir, polled, retrieved, tasks: states };
+  try {
+    const runtime = createNodeRunReconciliationRuntime(
+      config ?? {
+        version: 1,
+        defaults: {
+          outputDir: '',
+          maxParallel: 1,
+          timeout: 30,
+          asyncTimeout: 1800,
+          asyncPollInterval: 10,
+          mode: 'mixed',
+          llmWebSearch: true,
+        },
+        providers: {},
+        customProviders: {},
+        trustedProviderIds: [],
+        groups: {},
+      },
+    );
+    const result = await runtime.service.reconcileOnce(runDir, { retrieve });
+    return {
+      runDir: result.runDir,
+      polled: result.polled,
+      retrieved: result.retrieved,
+      tasks: taskState(result),
+      ...(result.regenerationError === undefined
+        ? {}
+        : { regenerationError: 'artifact.regeneration_failed' as const }),
+    };
+  } catch {
+    // check_async remains a best-effort, protocol-safe inspection endpoint.
+    return {
+      runDir,
+      polled: 0,
+      retrieved: 0,
+      tasks: [],
+      error: 'artifact.reconciliation_failed',
+    };
+  }
 }

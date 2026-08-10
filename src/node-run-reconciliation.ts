@@ -474,7 +474,7 @@ export class RunReconciliationService {
             : {}),
         };
         try {
-          const committed = this.repository.commitRetrieved({
+          const commit = this.repository.commitRetrieved({
             runDir,
             providerId: report.id,
             taskId: task.taskId,
@@ -483,8 +483,9 @@ export class RunReconciliationService {
             meta,
             now: commitNow,
           });
+          if (!commit.committed) continue;
           retrieved++;
-          const committedProvider = committed.manifest.providers.find(
+          const committedProvider = commit.snapshot.manifest.providers.find(
             (candidate) =>
               candidate.id === report.id &&
               candidate.task?.taskId === task.taskId,

@@ -1,45 +1,41 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
-import {
-  getExactProvider,
-  getProvider,
-  initializeProviders,
-} from '../adapters/node-registry.js';
-import { sanitizeId } from '../constants.js';
-import {
-  asyncPollFailureUpdates,
-  asyncPollUpdates,
-  getPendingTasks,
-  loadAsyncTasks,
-  updateAsyncTask,
-} from '../core/async-manager.js';
+import { initializeProviders } from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
-import { normalizeUsage } from '../core/dispatcher.js';
-import { safeWriteFile } from '../core/fs-utils.js';
-import { buildProviderMetering } from '../core/metering.js';
-import { updateRunManifestAfterRetrieve } from '../core/retrieval-manifest.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
-import type {
-  AsyncTaskHandle,
-  ProviderConfig,
-  ProviderReport,
-} from '../types.js';
-import { writeHtmlReport } from './html-report.js';
-import { writeJsonlReport } from './jsonl-report.js';
+import {
+  createNodeRunReconciliationRuntime,
+  type NodeRunReconciliationRuntime,
+  type ReconciliationResult,
+} from '../node-run-reconciliation-runtime.js';
+import type { AsyncTaskHandle, Config, ProviderReport } from '../types.js';
 import {
   computeLineWidths,
   dimText,
-  fileUrl,
   formatProviderLine,
-  hyperlink,
   isColorEnabled,
-  type LineWidths,
 } from './run-format.js';
 
+const RECONCILIATION_FAILED = 'artifact.reconciliation_failed';
+const REGENERATION_FAILED = 'artifact.regeneration_failed';
+
+interface ReconciledRun {
+  readonly runDir: string;
+  readonly result?: ReconciliationResult;
+  readonly error?: typeof RECONCILIATION_FAILED;
+  readonly refreshed: readonly string[];
+}
+
+interface ReconcileRunsResult {
+  readonly runs: readonly ReconciledRun[];
+  readonly polled: number;
+  readonly retrieved: number;
+  readonly errors: readonly (typeof RECONCILIATION_FAILED)[];
+  readonly regenerationErrors: readonly (typeof REGENERATION_FAILED)[];
+}
+
 function formatTaskAge(submittedAt: number): string {
-  // submittedAt is in milliseconds
   const ageMs = Date.now() - submittedAt;
   const ageMin = Math.floor(ageMs / 60000);
   if (ageMin < 1) return 'just now';
@@ -55,191 +51,198 @@ function formatTaskStatus(task: AsyncTaskHandle): string {
   return `  ${task.provider} | Task: ${task.taskId.slice(0, 20)}... | Status: ${task.status}${remote}${error} | Submitted: ${formatTaskAge(task.submittedAt)}`;
 }
 
-/** Column widths across a set of async tasks so result lines align. */
-function widthsForTasks(tasks: AsyncTaskHandle[]): LineWidths {
-  return computeLineWidths(
-    tasks.map((task) => task.provider),
-    tasks.map((task) => getProvider(task.provider)?.tier ?? 'deep-research'),
+function persistedTasks(
+  runtime: NodeRunReconciliationRuntime,
+  runDirs: readonly string[],
+): AsyncTaskHandle[] {
+  const tasks: AsyncTaskHandle[] = [];
+  for (const runDir of runDirs) {
+    const snapshot = runtime.repository.tryReadSnapshot(runDir, {
+      view: 'authoritative',
+    });
+    if (!snapshot) continue;
+    for (const report of snapshot.manifest.providers) {
+      const task = report.task;
+      if (!task || task.retrievedAt !== undefined) continue;
+      tasks.push({
+        provider: report.id,
+        taskId: task.taskId,
+        query: snapshot.manifest.query,
+        submittedAt: task.submittedAt,
+        status: task.status,
+        outputDir: snapshot.runDir,
+        ...(task.lastPolledAt === undefined
+          ? {}
+          : { lastPolledAt: task.lastPolledAt }),
+        ...(task.completedAt === undefined
+          ? {}
+          : { completedAt: task.completedAt }),
+        ...(task.providerStatus === undefined
+          ? {}
+          : { providerStatus: task.providerStatus }),
+        ...(task.lastPollError === undefined
+          ? {}
+          : { lastPollError: task.lastPollError }),
+      });
+    }
+  }
+  return tasks;
+}
+
+async function reconcileRuns(
+  runtime: NodeRunReconciliationRuntime,
+  runDirs: readonly string[],
+  retrieve: boolean,
+): Promise<ReconcileRunsResult> {
+  const runs: ReconciledRun[] = [];
+  const errors: (typeof RECONCILIATION_FAILED)[] = [];
+  const regenerationErrors: (typeof REGENERATION_FAILED)[] = [];
+  let polled = 0;
+  let retrieved = 0;
+
+  for (const runDir of runDirs) {
+    try {
+      const refreshed = ['summary.md', 'report.html', 'results.jsonl'].filter(
+        (fileName) => runtime.repository.hasArtifact(runDir, fileName),
+      );
+      const result = await runtime.service.reconcileOnce(runDir, { retrieve });
+      polled += result.polled;
+      retrieved += result.retrieved;
+      if (result.regenerationError !== undefined)
+        regenerationErrors.push(REGENERATION_FAILED);
+      runs.push({ runDir, result, refreshed });
+    } catch {
+      errors.push(RECONCILIATION_FAILED);
+      runs.push({
+        runDir,
+        error: RECONCILIATION_FAILED,
+        refreshed: [],
+      });
+    }
+  }
+  return { runs, polled, retrieved, errors, regenerationErrors };
+}
+
+/** Compatibility shim; lifecycle work remains in the reconciliation service. */
+export async function reconcilePendingTasksOnce(
+  tasks: AsyncTaskHandle[],
+  config: Config,
+): Promise<void> {
+  const runtime = createNodeRunReconciliationRuntime(config);
+  const runDirs = [
+    ...new Set(
+      tasks
+        .map((task) => task.outputDir)
+        .filter((runDir): runDir is string => Boolean(runDir)),
+    ),
+  ];
+  await reconcileRuns(runtime, runDirs, false);
+}
+
+function printTasks(
+  tasks: AsyncTaskHandle[],
+  print: (line: string) => void,
+): void {
+  const pending = tasks.filter(
+    (task) => task.status === 'pending' || task.status === 'running',
+  );
+  const completed = tasks.filter((task) => task.status === 'completed');
+  const terminal = tasks.filter(
+    (task) => task.status === 'failed' || task.status === 'cancelled',
+  );
+  if (pending.length > 0) {
+    print(`\nPending async tasks (${pending.length}):\n`);
+    for (const task of pending) print(formatTaskStatus(task));
+  }
+  if (completed.length > 0) {
+    print(`\nCompleted (awaiting retrieval): ${completed.length}\n`);
+    for (const task of completed) print(formatTaskStatus(task));
+  }
+  if (terminal.length > 0) {
+    print(`\nTerminal async tasks (${terminal.length}):\n`);
+    for (const task of terminal) print(formatTaskStatus(task));
+  }
+  print(
+    '\nUse --wait to poll and auto-retrieve, --retrieve to fetch completed results.',
   );
 }
 
-async function retrieveTask(
-  task: AsyncTaskHandle,
-  dir: string,
-  spinner: ReturnType<typeof ora>,
-  widths: LineWidths,
-  color: boolean,
+function printRetrieved(
+  runtime: NodeRunReconciliationRuntime,
+  pass: ReconcileRunsResult,
+  rendered: Set<string>,
   print: (line: string) => void,
-  providerConfig?: ProviderConfig,
-): Promise<boolean> {
-  const provider = getExactProvider(task.provider);
-  if (provider?.execution !== 'background') {
-    spinner.text = `Provider ${task.provider} does not support retrieval`;
-    return false;
-  }
-
-  try {
-    spinner.text = `Retrieving ${task.provider}...`;
-    const result = await provider.retrieve(task);
-
-    if (result.error) {
-      // Retrieval failed (transport error, parse failure, provider error):
-      // keep the task on disk so a later --retrieve can try again, and do not
-      // write empty output files over nothing.
-      const failureReport: ProviderReport = {
-        id: task.provider,
-        tier: result.tier,
-        status: 'error',
-        durationMs: result.durationMs,
-        wordCount: 0,
-        citationCount: 0,
-        outputFile: '',
-        metaFile: '',
-        metering: buildProviderMetering(task.provider),
-        error: result.error,
-      };
-      const wasSpinning = spinner.isSpinning;
-      if (wasSpinning) spinner.stop();
-      print(formatProviderLine(failureReport, widths, color));
-      if (wasSpinning) spinner.start();
-      spinner.text = `Retrieval failed for ${task.provider}: ${result.error}`;
-      return false;
+  color: boolean,
+): void {
+  for (const run of pass.runs) {
+    const result = run.result;
+    if (!result) continue;
+    const snapshot = runtime.repository.tryReadSnapshot(run.runDir, {
+      view: 'authoritative',
+    });
+    if (!snapshot) continue;
+    const reports: ProviderReport[] = [];
+    for (const task of result.tasks) {
+      if (!task.retrievedThisPass) continue;
+      const key = `${run.runDir}\0${task.provider}\0${task.taskId}`;
+      if (rendered.has(key)) continue;
+      const report = snapshot.manifest.providers.find(
+        (candidate) =>
+          candidate.id === task.provider &&
+          candidate.task?.taskId === task.taskId,
+      );
+      if (!report) continue;
+      rendered.add(key);
+      reports.push(report);
     }
-
-    const safeId = sanitizeId(task.provider);
-    const outputFile = `${safeId}.md`;
-    const metaFile = `${safeId}.meta.json`;
-    const usage = normalizeUsage(result);
-    // Same metering normalization path as sync dispatch, so retrieved
-    // async deep-research results carry metering (and provider_reported cost)
-    // just like their sync counterparts, including any configured pricing.
-    const metering = buildProviderMetering(
-      task.provider,
-      providerConfig,
-      usage,
+    const widths = computeLineWidths(
+      reports.map((report) => report.id),
+      reports.map((report) => report.tier),
     );
-
-    safeWriteFile(join(dir, outputFile), result.content);
-    safeWriteFile(
-      join(dir, metaFile),
-      JSON.stringify(
-        {
-          provider: result.provider,
-          tier: result.tier,
-          model: result.model,
-          durationMs: result.durationMs,
-          citationCount: result.citations.length,
-          tokenUsage: result.tokenUsage,
-          usage,
-          metering,
-          citations: result.citations,
-        },
-        null,
-        2,
-      ),
-    );
-
-    const words = result.content.split(/\s+/).filter(Boolean).length;
-    const cites = result.citations.length;
-
-    const report: ProviderReport = {
-      id: task.provider,
-      tier: result.tier,
-      status: 'success',
-      durationMs: result.durationMs,
-      wordCount: words,
-      citationCount: cites,
-      outputFile,
-      metaFile,
-      usage,
-      metering,
-    };
-
-    // Fold the retrieved result back into run.json and sources.json so JSON
-    // consumers, browse tallies, and regenerated reports see the final state.
-    if (!updateRunManifestAfterRetrieve(dir, report, task.taskId)) {
-      spinner.text = `Retrieved ${task.provider}, but could not update run.json; task kept for retry`;
-      return false;
-    }
-
-    // If an HTML report was already generated for this run, regenerate it so
-    // the retrieved result fills in.
-    const reportPath = join(dir, 'report.html');
-    if (existsSync(reportPath)) {
-      writeHtmlReport(dir);
+    for (const report of reports) {
       print(
-        `  regenerated ${hyperlink(reportPath, fileUrl(reportPath), color)}`,
+        `${formatProviderLine(report, widths, color)}   ${dimText(
+          `${report.outputFile}, ${report.wordCount} words`,
+          color,
+        )}`,
       );
     }
-
-    // If a JSONL report was already generated for this run, regenerate it so
-    // the retrieved result fills in.
-    const jsonlPath = join(dir, 'results.jsonl');
-    if (existsSync(jsonlPath)) {
-      writeJsonlReport(dir);
-      print(`  regenerated ${hyperlink(jsonlPath, fileUrl(jsonlPath), color)}`);
+    if (result.regenerated) {
+      for (const fileName of run.refreshed) print(`  regenerated ${fileName}`);
     }
-
-    spinner.text = `Retrieved ${task.provider} -> ${outputFile}`;
-
-    // Render the retrieved result with the same table line as `librarium run`,
-    // with the retrieval details as a dim suffix.
-    const wasSpinning = spinner.isSpinning;
-    if (wasSpinning) spinner.stop();
-    print(
-      `${formatProviderLine(report, widths, color)}   ${dimText(
-        `${outputFile}, ${words} words`,
-        color,
-      )}`,
-    );
-    if (wasSpinning) spinner.start();
-    return true;
-  } catch (e) {
-    spinner.text = `Error retrieving ${task.provider}: ${e instanceof Error ? e.message : String(e)}`;
-    return false;
   }
 }
 
-/** Reconcile each active task once without waiting or retrieving. */
-export async function reconcilePendingTasksOnce(
+function reportWarnings(pass: ReconcileRunsResult): boolean {
+  for (const error of pass.errors)
+    process.stderr.write(`[librarium] warning: ${error}\n`);
+  for (const error of pass.regenerationErrors)
+    process.stderr.write(`[librarium] warning: ${error}\n`);
+  return pass.errors.length > 0 || pass.regenerationErrors.length > 0;
+}
+
+/** Keep terminal output and warnings from corrupting an active ora frame. */
+function withSpinnerStopped(
+  spinner: ReturnType<typeof ora>,
+  action: () => void,
+  restart: boolean,
+): void {
+  const wasSpinning = spinner.isSpinning;
+  if (wasSpinning) spinner.stop();
+  action();
+  if (wasSpinning && restart) spinner.start();
+}
+
+function jsonPayload(
   tasks: AsyncTaskHandle[],
-): Promise<void> {
-  for (const task of tasks) {
-    const provider = getExactProvider(task.provider);
-    if (provider?.execution !== 'background' || !task.outputDir) {
-      if (task.outputDir) {
-        updateAsyncTask(
-          task.outputDir,
-          task.provider,
-          task.taskId,
-          asyncPollUpdates({
-            status: 'failed',
-            rawStatus: 'unsupported_provider',
-            message: `Provider ${task.provider} does not support polling after this upgrade`,
-          }),
-        );
-      }
-      continue;
-    }
-    try {
-      const result = await provider.poll(task);
-      updateAsyncTask(
-        task.outputDir,
-        task.provider,
-        task.taskId,
-        asyncPollUpdates(result),
-      );
-    } catch (error) {
-      updateAsyncTask(
-        task.outputDir,
-        task.provider,
-        task.taskId,
-        asyncPollFailureUpdates(
-          error instanceof Error ? error.message : String(error),
-        ),
-      );
-    }
-  }
+  errors: readonly (typeof RECONCILIATION_FAILED)[],
+  regenerationErrors: readonly (typeof REGENERATION_FAILED)[],
+): Record<string, unknown> {
+  return {
+    tasks,
+    ...(errors.length === 0 ? {} : { errors }),
+    ...(regenerationErrors.length === 0 ? {} : { regenerationErrors }),
+  };
 }
 
 export function registerStatusCommand(program: Command): void {
@@ -251,328 +254,143 @@ export function registerStatusCommand(program: Command): void {
     .option('--json', 'Output JSON')
     .action(async (opts) => {
       try {
-        const globalConfig = loadConfig();
-        const projectConfig = loadProjectConfig(process.cwd());
-        const config = mergeConfigs(globalConfig, projectConfig);
+        const config = mergeConfigs(
+          loadConfig(),
+          loadProjectConfig(process.cwd()),
+        );
         const credentials = createNodeCredentialContext();
-        const initResult = await initializeProviders({
+        const initialized = await initializeProviders({
           ...config,
           credentials,
         });
-        for (const warning of initResult.warnings) {
-          console.error(`[librarium] warning: ${warning}`);
-        }
+        for (const warning of initialized.warnings)
+          process.stderr.write(`[librarium] warning: ${warning}\n`);
+
+        const runtime = createNodeRunReconciliationRuntime(config);
         const baseDir = resolve(config.defaults.outputDir);
-        // In --json mode stdout must stay pure JSON, so all table/progress
-        // lines are routed to stderr (where the ora spinner already lives).
-        const prettyStream = opts.json ? process.stderr : process.stdout;
-        const color = isColorEnabled(prettyStream);
-        const pretty = (line: string): void => {
-          prettyStream.write(`${line}\n`);
-        };
-
-        // Gather all async tasks (pending + completed unretrieved)
-        const pendingTasks = getPendingTasks(baseDir);
-        const terminalTasks = getTerminalTasks(baseDir);
-        let allTasks = [...pendingTasks, ...terminalTasks];
-
-        if (allTasks.length === 0) {
-          if (opts.json) {
+        const runDirs = runtime.repository
+          .discoverRuns(baseDir, Number.MAX_SAFE_INTEGER)
+          .map((run) => run.runDir);
+        let tasks = persistedTasks(runtime, runDirs);
+        if (tasks.length === 0) {
+          if (opts.json)
             console.log(
               JSON.stringify({ tasks: [], message: 'No async tasks' }),
             );
-          } else {
-            console.log('No async tasks.');
-          }
+          else console.log('No async tasks.');
           return;
         }
 
-        if (!opts.wait) {
-          // Plain status and standalone --retrieve both reconcile once first.
-          await reconcilePendingTasksOnce(pendingTasks);
+        const prettyStream = opts.json ? process.stderr : process.stdout;
+        const print = (line: string): void => {
+          prettyStream.write(`${line}\n`);
+        };
+        const color = isColorEnabled(prettyStream);
+        const rendered = new Set<string>();
+        const errors: (typeof RECONCILIATION_FAILED)[] = [];
+        const regenerationErrors: (typeof REGENERATION_FAILED)[] = [];
+        const record = (pass: ReconcileRunsResult): void => {
+          errors.push(...pass.errors);
+          regenerationErrors.push(...pass.regenerationErrors);
+          if (!opts.json) {
+            printRetrieved(runtime, pass, rendered, print, color);
+            reportWarnings(pass);
+          }
+        };
 
-          if (opts.retrieve) {
-            // Retrieval below rescans persisted state and picks up tasks that
-            // completed during this single reconciliation pass.
-          } else {
-            const refreshedPending = getPendingTasks(baseDir);
-            const refreshedTerminal = getTerminalTasks(baseDir);
-            allTasks = [...refreshedPending, ...refreshedTerminal];
-            if (opts.json) {
-              console.log(JSON.stringify({ tasks: allTasks }, null, 2));
-              return;
-            }
-            if (refreshedPending.length > 0) {
-              console.log(
-                `\nPending async tasks (${refreshedPending.length}):\n`,
+        if (opts.wait) {
+          const spinner = ora(`Polling ${tasks.length} async tasks...`).start();
+          let totalRetrieved = 0;
+          let remaining = true;
+          try {
+            while (remaining) {
+              const pass = await reconcileRuns(runtime, runDirs, true);
+              totalRetrieved += pass.retrieved;
+              withSpinnerStopped(spinner, () => record(pass), true);
+              tasks = persistedTasks(runtime, runDirs);
+              const failedRuns = new Set(
+                pass.runs
+                  .filter((run) => run.error !== undefined)
+                  .map((run) => run.runDir),
               );
-              for (const task of refreshedPending) {
-                console.log(formatTaskStatus(task));
+              remaining = tasks.some(
+                (task) =>
+                  !failedRuns.has(task.outputDir ?? '') &&
+                  (task.status === 'pending' || task.status === 'running'),
+              );
+              if (remaining) {
+                spinner.text = `Polling ${tasks.filter((task) => task.status === 'pending' || task.status === 'running').length} async tasks...`;
+                await new Promise<void>((done) =>
+                  setTimeout(done, config.defaults.asyncPollInterval * 1000),
+                );
               }
             }
-            const refreshedCompleted = refreshedTerminal.filter(
-              (task) => task.status === 'completed',
-            );
-            if (refreshedCompleted.length > 0) {
-              console.log(
-                `\nCompleted (awaiting retrieval): ${refreshedCompleted.length}\n`,
+            if (errors.length > 0 || regenerationErrors.length > 0) {
+              spinner.warn('Async reconciliation finished with errors.');
+            } else {
+              spinner.succeed(
+                totalRetrieved > 0
+                  ? `All async tasks completed; retrieved ${totalRetrieved} results.`
+                  : 'All async tasks completed.',
               );
-              for (const task of refreshedCompleted) {
-                console.log(formatTaskStatus(task));
-              }
             }
-            const failedOrCancelled = refreshedTerminal.filter(
-              (task) => task.status === 'failed' || task.status === 'cancelled',
-            );
-            if (failedOrCancelled.length > 0) {
-              console.log(
-                `\nTerminal async tasks (${failedOrCancelled.length}):\n`,
+          } finally {
+            if (spinner.isSpinning) spinner.stop();
+          }
+        } else if (opts.retrieve) {
+          const spinner = ora(
+            'Reconciling and retrieving async tasks...',
+          ).start();
+          try {
+            const pass = await reconcileRuns(runtime, runDirs, true);
+            withSpinnerStopped(spinner, () => record(pass), false);
+            tasks = persistedTasks(runtime, runDirs);
+            if (pass.errors.length > 0 || pass.regenerationErrors.length > 0) {
+              spinner.warn('Async reconciliation finished with errors.');
+            } else {
+              spinner.succeed(
+                pass.retrieved > 0
+                  ? `Retrieved ${pass.retrieved} results.`
+                  : 'No completed tasks to retrieve.',
               );
-              for (const task of failedOrCancelled)
-                console.log(formatTaskStatus(task));
             }
+          } finally {
+            if (spinner.isSpinning) spinner.stop();
+          }
+        } else {
+          const pass = await reconcileRuns(runtime, runDirs, false);
+          record(pass);
+          tasks = persistedTasks(runtime, runDirs);
+          if (errors.length > 0 || regenerationErrors.length > 0)
+            process.exitCode = 1;
+          if (opts.json) {
             console.log(
-              '\nUse --wait to poll and auto-retrieve, --retrieve to fetch completed results.',
+              JSON.stringify(
+                jsonPayload(tasks, errors, regenerationErrors),
+                null,
+                2,
+              ),
             );
             return;
           }
+          printTasks(tasks, print);
+          return;
         }
 
-        // Wait mode: poll until done, then auto-retrieve
-        if (opts.wait) {
-          const spinner = ora(
-            `Polling ${pendingTasks.length} async tasks...`,
-          ).start();
-          const pollInterval = config.defaults.asyncPollInterval * 1000;
-          let remaining = [...pendingTasks];
-          const justCompleted: Array<{
-            task: AsyncTaskHandle;
-            dir: string;
-          }> = terminalTasks
-            .filter(
-              (task): task is AsyncTaskHandle & { outputDir: string } =>
-                task.status === 'completed' && Boolean(task.outputDir),
-            )
-            .map((task) => ({ task, dir: task.outputDir }));
-          const completedTaskKeys = new Set(
-            justCompleted.map(
-              ({ task, dir }) => `${dir}\0${task.provider}\0${task.taskId}`,
+        if (errors.length > 0 || regenerationErrors.length > 0)
+          process.exitCode = 1;
+        if (opts.json)
+          console.log(
+            JSON.stringify(
+              jsonPayload(tasks, errors, regenerationErrors),
+              null,
+              2,
             ),
           );
-
-          while (remaining.length > 0) {
-            for (const task of remaining) {
-              const provider = getExactProvider(task.provider);
-              if (provider?.execution !== 'background') {
-                spinner.text = `Provider ${task.provider} does not support polling`;
-                if (task.outputDir) {
-                  updateAsyncTask(
-                    task.outputDir,
-                    task.provider,
-                    task.taskId,
-                    asyncPollUpdates({
-                      status: 'failed',
-                      rawStatus: 'unsupported_provider',
-                      message: `Provider ${task.provider} does not support polling after this upgrade`,
-                    }),
-                  );
-                }
-                task.status = 'failed';
-                continue;
-              }
-
-              try {
-                const result = await provider.poll(task);
-                if (
-                  result.status === 'completed' ||
-                  result.status === 'failed' ||
-                  result.status === 'cancelled'
-                ) {
-                  if (task.outputDir)
-                    updateAsyncTask(
-                      task.outputDir,
-                      task.provider,
-                      task.taskId,
-                      asyncPollUpdates(result),
-                    );
-                  task.status = result.status;
-                  if (
-                    result.status === 'completed' &&
-                    task.outputDir &&
-                    !completedTaskKeys.has(
-                      `${task.outputDir}\0${task.provider}\0${task.taskId}`,
-                    )
-                  ) {
-                    justCompleted.push({ task, dir: task.outputDir });
-                    completedTaskKeys.add(
-                      `${task.outputDir}\0${task.provider}\0${task.taskId}`,
-                    );
-                  }
-                  if (
-                    result.status === 'failed' ||
-                    result.status === 'cancelled'
-                  ) {
-                    const failureReport: ProviderReport = {
-                      id: task.provider,
-                      tier: getProvider(task.provider)?.tier ?? 'deep-research',
-                      status: 'error',
-                      durationMs: 0,
-                      wordCount: 0,
-                      citationCount: 0,
-                      outputFile: '',
-                      metaFile: '',
-                      metering: buildProviderMetering(task.provider),
-                      error: result.message ?? 'task failed',
-                    };
-                    spinner.stop();
-                    pretty(
-                      formatProviderLine(
-                        failureReport,
-                        widthsForTasks(pendingTasks),
-                        color,
-                      ),
-                    );
-                    spinner.start();
-                  }
-                  spinner.text = `${task.provider}: ${result.status}${result.message ? `: ${result.message}` : ''}`;
-                } else {
-                  const progress = result.progress
-                    ? ` (${result.progress}%)`
-                    : '';
-                  spinner.text = `${task.provider}: ${result.status}${progress}`;
-                  if (task.outputDir)
-                    updateAsyncTask(
-                      task.outputDir,
-                      task.provider,
-                      task.taskId,
-                      asyncPollUpdates(result),
-                    );
-                }
-              } catch (e) {
-                if (task.outputDir)
-                  updateAsyncTask(
-                    task.outputDir,
-                    task.provider,
-                    task.taskId,
-                    asyncPollFailureUpdates(
-                      e instanceof Error ? e.message : String(e),
-                    ),
-                  );
-                spinner.text = `Error polling ${task.provider}: ${e instanceof Error ? e.message : String(e)}`;
-              }
-            }
-
-            remaining = remaining.filter(
-              (t) => t.status === 'pending' || t.status === 'running',
-            );
-
-            if (remaining.length > 0) {
-              await new Promise((r) => setTimeout(r, pollInterval));
-            }
-          }
-
-          spinner.succeed('All async tasks completed.');
-
-          // Auto-retrieve completed results
-          if (justCompleted.length > 0) {
-            const retrieveSpinner = ora(
-              `Retrieving ${justCompleted.length} results...`,
-            ).start();
-            const widths = widthsForTasks(justCompleted.map((c) => c.task));
-            let retrieved = 0;
-            for (const { task, dir } of justCompleted) {
-              const ok = await retrieveTask(
-                task,
-                dir,
-                retrieveSpinner,
-                widths,
-                color,
-                pretty,
-                config.providers[task.provider],
-              );
-              if (ok) retrieved++;
-            }
-            retrieveSpinner.succeed(
-              `Retrieved ${retrieved}/${justCompleted.length} results.`,
-            );
-          }
-        }
-
-        // Retrieve mode (standalone or after wait for previously completed)
-        if (opts.retrieve && !opts.wait) {
-          const spinner = ora('Retrieving completed results...').start();
-          const entries = readdirSync(baseDir);
-          let retrieved = 0;
-
-          // Collect all completed tasks first so table columns align.
-          const toRetrieve: Array<{ task: AsyncTaskHandle; dir: string }> = [];
-          for (const entry of entries) {
-            const dir = join(baseDir, entry);
-            try {
-              if (!statSync(dir).isDirectory()) continue;
-            } catch {
-              continue;
-            }
-
-            const tasks = loadAsyncTasks(dir);
-            for (const task of tasks) {
-              if (task.status === 'completed') toRetrieve.push({ task, dir });
-            }
-          }
-
-          const widths = widthsForTasks(toRetrieve.map((c) => c.task));
-          for (const { task, dir } of toRetrieve) {
-            const ok = await retrieveTask(
-              task,
-              dir,
-              spinner,
-              widths,
-              color,
-              pretty,
-              config.providers[task.provider],
-            );
-            if (ok) retrieved++;
-          }
-
-          if (retrieved > 0) {
-            spinner.succeed(`Retrieved ${retrieved} results.`);
-          } else {
-            spinner.info('No completed tasks to retrieve.');
-          }
-        }
-
-        if (opts.json) {
-          const updatedTasks = [
-            ...getPendingTasks(baseDir),
-            ...getTerminalTasks(baseDir),
-          ];
-          console.log(JSON.stringify({ tasks: updatedTasks }, null, 2));
-        }
-      } catch (e) {
-        console.error(e instanceof Error ? e.message : String(e));
+        else if (tasks.length > 0) printTasks(tasks, print);
+      } catch {
+        process.stderr.write(`[librarium] warning: ${RECONCILIATION_FAILED}\n`);
         process.exitCode = 1;
       }
     });
-}
-
-function getTerminalTasks(baseOutputDir: string): AsyncTaskHandle[] {
-  if (!existsSync(baseOutputDir)) return [];
-  const tasks: AsyncTaskHandle[] = [];
-  for (const entry of readdirSync(baseOutputDir)) {
-    const dir = join(baseOutputDir, entry);
-    try {
-      if (!statSync(dir).isDirectory()) continue;
-      for (const task of loadAsyncTasks(dir)) {
-        if (
-          task.status === 'completed' ||
-          task.status === 'failed' ||
-          task.status === 'cancelled'
-        ) {
-          if (!task.outputDir) task.outputDir = dir;
-          tasks.push(task);
-        }
-      }
-    } catch {}
-  }
-  return tasks;
 }
