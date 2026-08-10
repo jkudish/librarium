@@ -244,7 +244,15 @@ export async function executeRun(
             },
           },
         },
-        (message) => process.stderr.write(`${message}\n`),
+        (message) => {
+          const wasSpinning = spinner.isSpinning;
+          if (wasSpinning) spinner.stop();
+          try {
+            process.stderr.write(`${message}\n`);
+          } finally {
+            if (wasSpinning) spinner.start();
+          }
+        },
       );
       const credentials = createNodeCredentialContext();
       const initResult = await initializeProviders({

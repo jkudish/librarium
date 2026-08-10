@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { emitProductionShadowDiagnostic } from '../src/node-shadow-diagnostics.js';
+import {
+  emitProductionShadowDiagnostic,
+  formatShadowDiagnosticCodes,
+} from '../src/node-shadow-diagnostics.js';
 import type { Config } from '../src/types.js';
 
 function config(overrides: Partial<Config> = {}): Config {
@@ -120,24 +123,38 @@ describe('Node production shadow diagnostic', () => {
     ).not.toThrow();
   });
 
-  it('deduplicates codes and caps the number and length of emitted codes', () => {
-    const providers = Object.fromEntries(
-      Array.from({ length: 80 }, (_, index) => [
-        `unknown-provider-${index}`,
-        { enabled: true },
+  it('deduplicates diagnostic codes while retaining the occurrence count', () => {
+    expect(
+      formatShadowDiagnosticCodes('issues', [
+        { code: 'duplicate_code' },
+        { code: 'duplicate_code' },
+        { code: 'other_code' },
       ]),
+    ).toBe('issues=3 issues_codes=duplicate_code,other_code');
+  });
+
+  it('caps sorted diagnostic codes at twelve', () => {
+    const values = Array.from({ length: 15 }, (_, index) => ({
+      code: `code_${String(index).padStart(2, '0')}`,
+    }));
+    expect(formatShadowDiagnosticCodes('notices', values)).toBe(
+      `notices=15 notices_codes=${values
+        .slice(0, 12)
+        .map(({ code }) => code)
+        .join(',')}`,
     );
-    const warnings: string[] = [];
-    emitProductionShadowDiagnostic(
-      {
-        config: config({ providers }),
-        env: {},
-        transport: { kind: 'cli', input: { query: 'q' } },
-      },
-      (message) => warnings.push(message),
+  });
+
+  it('replaces invalid diagnostic codes without exposing their contents', () => {
+    const summary = formatShadowDiagnosticCodes('issues', [
+      { code: 'safe_code' },
+      { code: 'SECRET/path\nvalue' },
+      { code: 'also-invalid!' },
+    ]);
+    expect(summary).toBe(
+      'issues=3 issues_codes=invalid_diagnostic_code,safe_code',
     );
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]!.length).toBeLessThan(2_100);
-    expect(warnings[0]).not.toContain('unknown-provider');
+    expect(summary).not.toContain('SECRET');
+    expect(summary).not.toContain('path');
   });
 });

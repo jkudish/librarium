@@ -1,9 +1,5 @@
 import { configGroupProvenance } from './core/config.js';
 import type { PreparationDependencies } from './core/execution-plan.js';
-import type {
-  PreparationIssue,
-  PreparationNotice,
-} from './core/research-request.js';
 import {
   compileShadowRequest,
   type ShadowCompilationInput,
@@ -16,7 +12,9 @@ type ProductionShadowDiagnosticInput = Omit<
   readonly env?: Readonly<Record<string, string | undefined>>;
 };
 
-type Diagnostic = PreparationIssue | PreparationNotice;
+interface DiagnosticCode {
+  readonly code: string;
+}
 type DiagnosticSink = (message: string) => void;
 
 const MAX_CODES_PER_KIND = 12;
@@ -36,7 +34,7 @@ function diagnosticPreparation(): PreparationDependencies {
   };
 }
 
-function boundedCodes(diagnostics: readonly Diagnostic[]): {
+function boundedCodes(diagnostics: readonly DiagnosticCode[]): {
   readonly codes: readonly string[];
   readonly total: number;
 } {
@@ -50,10 +48,10 @@ function boundedCodes(diagnostics: readonly Diagnostic[]): {
   return { codes: all.slice(0, MAX_CODES_PER_KIND), total: diagnostics.length };
 }
 
-function codeSummary(
+export function formatShadowDiagnosticCodes(
   kind: 'issues' | 'notices',
-  values: readonly Diagnostic[],
-) {
+  values: readonly DiagnosticCode[],
+): string {
   const { codes, total } = boundedCodes(values);
   return `${kind}=${total} ${kind}_codes=${codes.join(',') || 'none'}`;
 }
@@ -85,14 +83,14 @@ export function emitProductionShadowDiagnostic(
       if (result.notices.length > 0) {
         emitSafely(
           onWarn,
-          `[librarium] shadow: ${codeSummary('notices', result.notices)}`,
+          `[librarium] shadow: ${formatShadowDiagnosticCodes('notices', result.notices)}`,
         );
       }
       return;
     }
     emitSafely(
       onWarn,
-      `[librarium] shadow: ${codeSummary('issues', result.issues)}; ${codeSummary('notices', result.notices)}`,
+      `[librarium] shadow: ${formatShadowDiagnosticCodes('issues', result.issues)}; ${formatShadowDiagnosticCodes('notices', result.notices)}`,
     );
   } catch {
     emitSafely(onWarn, '[librarium] shadow: diagnostic_failed');

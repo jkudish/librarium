@@ -6,6 +6,12 @@ const state = vi.hoisted(() => ({
   shadowInput: undefined as unknown,
   selectionError: true,
   dispatchInput: undefined as unknown,
+  spinner: {
+    isSpinning: false,
+    start: undefined as unknown,
+    stop: undefined as unknown,
+    fail: undefined as unknown,
+  },
 }));
 
 const fixtureConfig: Config = {
@@ -42,6 +48,10 @@ vi.mock('../src/core/config.js', () => ({
     global: { authored: ['legacy-provider'] },
     project: {},
   }),
+}));
+
+vi.mock('ora', () => ({
+  default: () => state.spinner,
 }));
 
 vi.mock('../src/node-shadow-diagnostics.js', () => ({
@@ -139,13 +149,30 @@ describe('CLI production shadow diagnostic', () => {
     state.shadowInput = undefined;
     state.selectionError = true;
     state.dispatchInput = undefined;
+    state.spinner.isSpinning = false;
+    state.spinner.start = vi.fn(() => {
+      state.events.push('spinner-start');
+      state.spinner.isSpinning = true;
+      return state.spinner;
+    });
+    state.spinner.stop = vi.fn(() => {
+      state.events.push('spinner-stop');
+      state.spinner.isSpinning = false;
+      return state.spinner;
+    });
+    state.spinner.fail = vi.fn(() => {
+      state.events.push('spinner-fail');
+      state.spinner.isSpinning = false;
+      return state.spinner;
+    });
     process.exitCode = undefined;
   });
 
   it('runs exactly once after merge and before credentials/initialization without polluting JSON stdout', async () => {
-    const stderr = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => {
+      state.events.push('stderr-write');
+      return true;
+    });
     const stdout = vi
       .spyOn(process.stdout, 'write')
       .mockImplementation(() => true);
@@ -165,13 +192,18 @@ describe('CLI production shadow diagnostic', () => {
 
       expect(outcome).toEqual({ exitCode: 2 });
       expect(state.events).toEqual([
+        'spinner-start',
         'load-global',
         'load-project',
         'merge',
         'shadow',
+        'spinner-stop',
+        'stderr-write',
+        'spinner-start',
         'keychain-credentials',
         'initialize',
         'legacy-selection',
+        'spinner-fail',
       ]);
       expect(state.events.filter((event) => event === 'shadow')).toHaveLength(
         1,
@@ -198,6 +230,8 @@ describe('CLI production shadow diagnostic', () => {
         '[librarium] shadow: issues=1 issues_codes=fixture\n',
       );
       expect(stdout).not.toHaveBeenCalled();
+      expect(state.spinner.stop).toHaveBeenCalledTimes(1);
+      expect(state.spinner.start).toHaveBeenCalledTimes(2);
     } finally {
       stderr.mockRestore();
       stdout.mockRestore();
