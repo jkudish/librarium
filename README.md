@@ -1442,11 +1442,12 @@ canonical runner is integrated.
 
 The package root is side-effect-free and Worker-safe. It exposes the canonical
 request and terminal-response schemas/types, the built-in provider capability
-catalog, and `VERSION`.
+catalog, pure v1-to-v2 configuration migration/validation, and `VERSION`.
 
 ```ts
 import {
   BUILTIN_PROVIDER_CATALOG,
+  migrateConfig,
   ResearchRequestSchema,
   ResearchResponseSchema,
   type ResearchRequest,
@@ -1472,6 +1473,10 @@ console.log(BUILTIN_PROVIDER_CATALOG.length, request.query);
 // implementation. This does not execute the request.
 const response = ResearchResponseSchema.parse(receivedPayload);
 console.log(response.status, response.results.length);
+
+// Configuration migration is pure: no files, code loading, or network.
+const migrated = migrateConfig({ global: parsedJson });
+if (!migrated.ok) console.error(migrated.issues);
 ```
 
 Importing the root does not parse CLI arguments, write files, initialize
@@ -1542,7 +1547,7 @@ coordination primitive that requires an injected `AttemptExecutionPort` and
 
 ### Node-only API (`librarium/node`)
 
-`librarium/node` re-exports the Worker-safe API and adds two deliberate
+`librarium/node` re-exports the Worker-safe API and adds deliberate
 Node services:
 
 - `createNodeCredentialContext()` resolves environment and supported OS
@@ -1550,6 +1555,10 @@ Node services:
 - `loadCustomProviders(config, options?)` trust-checks and loads npm/script
   providers, returning provider instances and diagnostics without registering
   global state.
+- `loadConfigV2({ global_path, project_path? })` reads and migrates without
+  rewriting either file.
+- `saveConfigV2(config, { path })` is the explicit atomic, owner-only v2 write
+  boundary. It validates before touching disk.
 
 ```ts
 import {
@@ -1586,8 +1595,9 @@ const result = await providers[0]?.execute('Research question', {
 > code you explicitly trust.
 
 The Node entry does not expose `executeResearchRun`, writable configuration
-migration, run-manifest mutation, or a registration convenience. Those service
-shapes remain private until their v2 contracts are finalized.
+mutation during ordinary loading, run-manifest mutation, or a registration
+convenience. Configuration is rewritten only when an application explicitly
+calls `saveConfigV2`; the CLI/MCP runtime cutover remains separate.
 
 ## Using with AI Agents
 

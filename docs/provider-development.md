@@ -50,14 +50,17 @@ Usage"). The boundary matters for provider development:
   CI suite imports these modules directly even though their constructors are
   not public package exports.
 - **`librarium`** exposes canonical request/terminal-result schemas and the
-  static provider capability catalog. It never initializes adapters.
+  static provider capability catalog, plus pure strict v2 configuration
+  validation/migration. It never initializes adapters.
 - **`librarium/core`** exposes Worker-safe provider interfaces and injected
   catalog/planning/transport/execution ports. It has no concrete adapter
   classes, dispatcher convenience, or global provider registry.
 - **`librarium/node`** exposes `loadCustomProviders()` for explicitly trusted
   npm modules and scripts. It returns provider instances without registering
-  them. Complete configured runs still go through the `librarium` CLI while
-  the v2 high-level library runner is finalized.
+  them. It also owns explicit config-file load/save: loads never rewrite and
+  `saveConfigV2()` validates before an atomic owner-only write. Complete
+  configured runs still go through the `librarium` CLI while the v2 high-level
+  library runner is finalized.
 
 > **Security:** an allowed npm module or script executes arbitrary code with
 > the Librarium process's permissions and inherited environment.

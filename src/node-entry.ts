@@ -1,8 +1,8 @@
 /**
  * Deliberate Node-only services layered on the Worker-safe core API.
  *
- * Filesystem configuration, durable artifacts, and writable migration
- * services remain private until their v2 service shapes land.
+ * This entry exposes explicit v2 config-file load/save services while durable
+ * run artifacts remain private until their v2 service shapes land.
  */
 import {
   type CustomProviderLoadResult,
@@ -34,6 +34,11 @@ export type {
   CatalogProfileTarget,
   CatalogProviderConfig,
   Citation,
+  ConfigMigrationInput,
+  ConfigMigrationResult,
+  ConfigProviderV2,
+  ConfigSourceVersion,
+  ConfigValidationResult,
   CoordinationCompareAndSwapResult,
   CoordinationStateStore,
   CoordinatorAttemptState,
@@ -52,10 +57,12 @@ export type {
   CostConfidence,
   CredentialContext,
   CustomCatalogProfile,
+  CustomProviderSourceV2,
   DeclarableWorkflowId,
   DurableHandle,
   EvidenceRequirements,
   ExecutableProfileDeclaration,
+  ExecutionDefaultsV2,
   ExecutionProfile,
   ExecutionRuntimeDependencies,
   ExecutionRuntimeResult,
@@ -69,7 +76,10 @@ export type {
   HttpStreamResponse,
   InlineProvider,
   InterchangeRequest,
+  JsonValue,
   LegacyProviderTier,
+  LibrariumConfigV2,
+  LibrariumProjectConfigV2,
   LifecycleEvent,
   MeteringActual,
   MeteringEstimate,
@@ -112,6 +122,7 @@ export type {
   ResearchResult,
   ResolvedCatalogProfile,
   ResultProvenance,
+  RuntimeConfigV2,
   Source,
   StructuredError,
   UnresolvedAcceptance,
@@ -126,7 +137,11 @@ export {
   buildPrompt,
   buildProviderCatalog,
   CitationSchema,
+  ConfigProviderV2Schema,
+  CustomProviderExecutionProfileV2Schema,
+  CustomProviderSourceV2Schema,
   createProviderAttemptBridge,
+  ExecutionDefaultsV2Schema,
   generateSlug,
   HttpRequestAbortedError,
   HttpRequestTimeoutError,
@@ -134,7 +149,12 @@ export {
   httpRequest,
   httpStreamRequest,
   InMemoryCoordinationStateStore,
+  JsonValueSchema,
+  LibrariumConfigV2Schema,
+  LibrariumProjectConfigV2Schema,
   materializeResearchExecution,
+  migrateConfig,
+  NpmCustomProviderSourceV2Schema,
   ProviderCatalogError,
   prepareResearchExecution,
   ResearchErrorSchema,
@@ -142,13 +162,26 @@ export {
   ResearchResponseSchema,
   ResearchResultSchema,
   ResultProvenanceSchema,
+  RuntimeConfigV2Schema,
   resolveOutputDir,
   runPreparedExecution,
+  ScriptCustomProviderSourceV2Schema,
   SourceSchema,
   UsageSchema,
   updateCoordinationState,
   VERSION,
+  validateConfigV2,
 } from './core-entry.js';
+export type {
+  LoadConfigV2Options,
+  SaveConfigV2Options,
+} from './node-config-v2.js';
+export {
+  ConfigV2FileError,
+  loadConfigV2,
+  projectConfigV2Path,
+  saveConfigV2,
+} from './node-config-v2.js';
 export { createNodeCredentialContext } from './node-credentials.js';
 
 export interface LoadCustomProvidersOptions {
