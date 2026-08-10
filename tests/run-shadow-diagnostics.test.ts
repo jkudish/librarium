@@ -61,7 +61,11 @@ vi.mock('../src/node-shadow-diagnostics.js', () => ({
   ) => {
     state.events.push('shadow');
     state.shadowInput = input;
-    onWarn('[librarium] shadow: issues=1 issues_codes=fixture');
+    try {
+      onWarn('[librarium] shadow: issues=1 issues_codes=fixture');
+    } catch {
+      // Mirrors the production observer's fail-open sink boundary.
+    }
   },
 }));
 
@@ -313,6 +317,44 @@ describe('CLI production shadow diagnostic', () => {
       expect(stdout).not.toHaveBeenCalled();
       expect(state.events).not.toContain('keychain-credentials');
     } finally {
+      stdout.mockRestore();
+    }
+  });
+
+  it('restarts the spinner and continues legacy execution when diagnostic stderr throws', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => {
+      state.events.push('stderr-write');
+      throw new Error('stderr unavailable');
+    });
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    try {
+      const outcome = await executeRun('private query', {
+        providers: ['legacy-provider'],
+        json: true,
+      });
+
+      expect(outcome).toEqual({ exitCode: 2 });
+      expect(state.events).toEqual([
+        'spinner-start',
+        'load-global',
+        'load-project',
+        'merge',
+        'shadow',
+        'spinner-stop',
+        'stderr-write',
+        'spinner-start',
+        'keychain-credentials',
+        'initialize',
+        'legacy-selection',
+        'spinner-fail',
+      ]);
+      expect(state.spinner.stop).toHaveBeenCalledTimes(1);
+      expect(state.spinner.start).toHaveBeenCalledTimes(2);
+      expect(stdout).not.toHaveBeenCalled();
+    } finally {
+      stderr.mockRestore();
       stdout.mockRestore();
     }
   });
