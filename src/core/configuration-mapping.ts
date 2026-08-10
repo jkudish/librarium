@@ -7,6 +7,7 @@ import {
 import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Config, ProviderConfig } from '../types.js';
 import { customWorkflowId } from './builtin-workflows.js';
+import { compareCanonicalStrings } from './catalog-fingerprint.js';
 import type { CredentialContext } from './credentials.js';
 import {
   type AdapterProfileBinding,
@@ -189,7 +190,9 @@ export function resolveConfigurationProfileToken(
     ...customProfiles.map(customProfileBinding),
   ]
     .filter((binding) => binding.provider_id === trimmed)
-    .sort((left, right) => profileKey(left).localeCompare(profileKey(right)));
+    .sort((left, right) =>
+      compareCanonicalStrings(profileKey(left), profileKey(right)),
+    );
   if (catalogMatches.length === 1)
     return exactToken(trimmed, catalogMatches[0]);
   if (catalogMatches.length > 1) {
@@ -242,7 +245,9 @@ export function resolveConfigurationProfileToken(
     ...customProfiles.map(customProfileBinding),
   ]
     .filter((binding) => binding.provider_id === provider.id)
-    .sort((left, right) => profileKey(left).localeCompare(profileKey(right)));
+    .sort((left, right) =>
+      compareCanonicalStrings(profileKey(left), profileKey(right)),
+    );
   if (matches.length === 1) {
     return exactToken(
       trimmed,
@@ -290,7 +295,8 @@ function exactTargetsForProviderEntries(
       ]),
     ).values(),
   ].sort((left, right) =>
-    `${left.provider_id}/${left.profile_id}`.localeCompare(
+    compareCanonicalStrings(
+      `${left.provider_id}/${left.profile_id}`,
       `${right.provider_id}/${right.profile_id}`,
     ),
   );

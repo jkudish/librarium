@@ -3,13 +3,11 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
 
-const PLANNED_PROVIDER_IDS = [
-  'grok-x-only',
-  'grok-combined',
-  'parallel',
-  'valyu',
-] as const;
+const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
+  entry.profiles.some((profile) => profile.status === 'planned'),
+).map((entry) => entry.provider_id);
 
 // The `librarium/node` entry point is the documented Node-only bridge that lets
 // library consumers (not just the CLI) load npm/script custom providers and

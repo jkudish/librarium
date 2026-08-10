@@ -13,7 +13,10 @@ import {
   migrateUserWorkflowNames,
   RESERVED_WORKFLOW_IDS,
 } from './builtin-workflows.js';
-import { catalogFingerprint } from './catalog-fingerprint.js';
+import {
+  catalogFingerprint,
+  compareCanonicalStrings,
+} from './catalog-fingerprint.js';
 import { type CredentialContext, hasCredential } from './credentials.js';
 import type {
   FrozenPlanningCatalog,
@@ -256,7 +259,7 @@ function customDeclaration(
     target: identity.target,
     selection_order: selectionOrder,
     status: 'implemented',
-    workflows: [],
+    workflows: profile.result_kind === 'research_report' ? ['deep'] : [],
   };
 }
 
@@ -345,7 +348,7 @@ export function buildProviderCatalog(
         right.adapter_id,
         right.binding_id,
       ]);
-      return leftKey.localeCompare(rightKey);
+      return compareCanonicalStrings(leftKey, rightKey);
     }),
   );
   const customProfiles = declaredCustomProfiles.filter((custom) => {

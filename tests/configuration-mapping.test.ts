@@ -117,12 +117,9 @@ function customProviderConfig(
   });
 }
 
-const PLANNED_PROVIDER_IDS = [
-  'grok-x-only',
-  'grok-combined',
-  'parallel',
-  'valyu',
-] as const;
+const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
+  entry.profiles.some((profile) => profile.status === 'planned'),
+).map((entry) => entry.provider_id);
 
 function customIdentityConfig(
   adapterId: string,
@@ -246,6 +243,11 @@ describe('configuration mapping', () => {
       source: customIdentityConfig('acme/adapter', 'acme-provider'),
       code: 'custom_provider_adapter_id_unaddressable',
       path: '/customProviders/acme~1adapter',
+    },
+    {
+      source: customIdentityConfig('acme~adapter', 'acme/provider'),
+      code: 'custom_provider_profile_id_unaddressable',
+      path: '/customProviders/acme~0adapter/executionProfile/profile/identity/provider_id',
     },
     {
       source: customIdentityConfig('acme-adapter', 'acme/provider'),

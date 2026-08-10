@@ -529,6 +529,26 @@ describe('provider catalog -- trusted custom planning profiles', () => {
     expect(keychain.get('acme', 'search')?.availability.selectable).toBe(true);
   });
 
+  it('does not treat inherited environment properties as custom credentials', () => {
+    const inheritedName = customProfile({
+      credential_env_var: 'hasOwnProperty',
+    });
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [inheritedName],
+      credentials: { env: process.env },
+    });
+
+    expect(Object.hasOwn(process.env, 'hasOwnProperty')).toBe(false);
+    expect(built.get('acme', 'search')?.availability).toEqual(
+      expect.objectContaining({
+        credential_valid: false,
+        selectable: false,
+        reasons: expect.arrayContaining(['credential_missing']),
+      }),
+    );
+  });
+
   it('keeps custom bindings closure-free, immutable, and in the digest', () => {
     const input = customProfile();
     const built = buildProviderCatalog({
@@ -578,6 +598,93 @@ describe('provider catalog -- trusted custom planning profiles', () => {
         result.prepared.request.slots.map((slot) => slot.primary.identity),
       ),
     ).toEqual(['acme/search']);
+  });
+
+  it('derives deep workflow membership for custom research profiles', () => {
+    const research = customProfile({
+      binding_id: 'acme.research.v1',
+      profile: {
+        identity: {
+          provider_id: 'acme',
+          profile_id: 'research',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+        result_kind: 'research_report',
+        grounding_policy: 'required',
+        retrieval_method: 'research_agent',
+        invocation: 'background',
+        resumability: 'durable',
+      },
+    });
+    const built = buildProviderCatalog({
+      providerConfigs: { 'acme-adapter': { enabled: true } },
+      customProfiles: [research],
+    });
+
+    expect(keysOf(built.workflow('deep').members)).toContain('acme/research');
+    expect(built.get('acme', 'research')?.declaration.workflows).toEqual([
+      'deep',
+    ]);
+  });
+
+  it('orders custom profiles with locale-independent canonical strings', () => {
+    const mixedCase = customProfile({
+      adapter_id: 'adapter-Beta',
+      binding_id: 'binding-Beta',
+      profile: {
+        identity: {
+          provider_id: 'Beta',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    });
+    const nonAscii = customProfile({
+      adapter_id: 'adapter-éclair',
+      binding_id: 'binding-éclair',
+      profile: {
+        identity: {
+          provider_id: 'éclair',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    });
+    const lowerCase = customProfile({
+      adapter_id: 'adapter-alpha',
+      binding_id: 'binding-alpha',
+      profile: {
+        identity: {
+          provider_id: 'alpha',
+          profile_id: 'search',
+          target: { primary: { model_selection: 'not_applicable' } },
+        },
+      },
+    });
+    const inputs = [nonAscii, lowerCase, mixedCase];
+    const options = {
+      providerConfigs: Object.fromEntries(
+        inputs.map((item) => [item.adapter_id, { enabled: true }]),
+      ),
+      customProfiles: inputs,
+    };
+
+    const built = buildProviderCatalog(options);
+    expect(
+      keysOf(
+        built
+          .workflow('all')
+          .members.filter(({ provider_id }) =>
+            ['Beta', 'alpha', 'éclair'].includes(provider_id),
+          ),
+      ),
+    ).toEqual(['Beta/search', 'alpha/search', 'éclair/search']);
+    expect(
+      buildProviderCatalog({
+        ...options,
+        customProfiles: [...inputs].reverse(),
+      }).digest,
+    ).toBe(built.digest);
   });
 
   it('rejects reserved ids, duplicate identities/bindings, and process-local profiles', () => {

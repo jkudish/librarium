@@ -95,12 +95,9 @@ function customSource(
   });
 }
 
-const PLANNED_PROVIDER_IDS = [
-  'grok-x-only',
-  'grok-combined',
-  'parallel',
-  'valyu',
-] as const;
+const PLANNED_PROVIDER_IDS = BUILTIN_PROVIDER_CATALOG.filter((entry) =>
+  entry.profiles.some((profile) => profile.status === 'planned'),
+).map((entry) => entry.provider_id);
 
 function preparation() {
   const counts = new Map<string, number>();
