@@ -517,6 +517,34 @@ describe('research execution preparation', () => {
     );
   });
 
+  it('rejects zero-budget admission before observing the clock or allocating ids', () => {
+    const clock = vi.fn(() => Date.parse('2026-08-08T12:00:00Z'));
+    const next = vi.fn(
+      (scope: 'request' | 'slot' | 'fallback_candidate') =>
+        `unexpected-${scope}`,
+    );
+    const result = prepareResearchExecution(
+      {
+        ...targetRequest(),
+        budgets: { max_estimated_cost_microusd: '0' },
+      },
+      new FixtureCatalog([planningProfile(groundedProfile('alpha'))]),
+      { clock: { now: clock }, ids: { next } },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues).toEqual([
+        expect.objectContaining({
+          code: 'primary_plan_budget_exceeded',
+          path: '/budgets/max_estimated_cost_microusd',
+        }),
+      ]);
+    }
+    expect(clock).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('bounds billable unit arrays and addresses duplicate catalog profiles by index', () => {
     const alpha = planningProfile(groundedProfile('alpha'));
     const duplicated = prepareResearchExecution(

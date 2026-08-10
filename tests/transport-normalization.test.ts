@@ -220,6 +220,25 @@ describe('shadow transport golden equality', () => {
 });
 
 describe('selector conflicts', () => {
+  it('rejects raw provider tokens plus private exact targets deterministically', () => {
+    const result = normalizeMcpRequest(
+      {
+        query: 'q',
+        providers: ['alpha'],
+        exactTargets: [{ provider_id: 'alpha', profile_id: 'grounded-web' }],
+      },
+      FIXTURE_DEFAULTS,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toEqual([
+      expect.objectContaining({
+        code: 'transport_raw_and_exact_targets_conflict',
+        path: '/providers',
+      }),
+    ]);
+  });
+
   it('lets explicit providers override a group for CLI and MCP ingress with a notice', () => {
     const input = { query: 'q', providers: ['alpha'], group: 'quick' };
     for (const normalize of [
