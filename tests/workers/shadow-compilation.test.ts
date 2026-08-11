@@ -111,6 +111,55 @@ describe('private shadow compiler in workerd', () => {
     });
   });
 
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])(
+    'rejects retired transport id %s before plan preparation',
+    (token, replacement) => {
+      const counts = { clock: 0, ids: 0 };
+      const result = compileShadowRequest({
+        config,
+        authoredGroups: { global: {}, project: {} },
+        credentials: {},
+        transport: {
+          kind: 'silent_mcp',
+          input: { query: `worker retired ${token}`, providers: [token] },
+        },
+        preparation: {
+          clock: {
+            now: () => {
+              counts.clock += 1;
+              return Date.parse('2026-08-09T12:00:00Z');
+            },
+          },
+          ids: {
+            next: (scope) => {
+              counts.ids += 1;
+              return `retired-${scope}`;
+            },
+          },
+        },
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        issues: [
+          {
+            code: 'shadow_provider_token_retired',
+            phase: 'transport',
+            path: '/providers/0',
+            message: `Provider "${token}" was removed; use "${replacement}".`,
+          },
+        ],
+        notices: [],
+      });
+      expect(counts).toEqual({ clock: 0, ids: 0 });
+    },
+  );
+
   it('injects the reachable maximum selected background attempt allowance', () => {
     const background: Config = {
       ...config,

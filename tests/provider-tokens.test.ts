@@ -6,6 +6,7 @@ import {
   resolveProviderTokens,
   suggestProviders,
 } from '../src/constants.js';
+import { retiredProviderSelectionIssues } from '../src/core/provider-selection.js';
 
 const PROVIDERS: ProviderNameEntry[] = [
   { id: 'openai-research', displayName: 'OpenAI Research' },
@@ -40,22 +41,54 @@ describe('resolveProviderToken resolution order', () => {
     });
   });
 
-  it('resolves a legacy alias before a name match', () => {
-    expect(resolveProviderToken('perplexity-sonar', PROVIDERS)).toEqual({
-      kind: 'alias',
-      token: 'perplexity-sonar',
-      id: 'perplexity-sonar-pro',
-    });
-  });
-
-  it('warns and collapses retired OpenAI deep tokens to one dispatch id', () => {
+  it('does not resolve retired ids as active selection aliases', () => {
     const result = resolveProviderTokens(
       ['openai-deep', 'openai-deep-o3', 'openai-research'],
       PROVIDERS,
     );
     expect(result.ids).toEqual(['openai-research']);
-    expect(result.warnings).toHaveLength(2);
+    expect(result.warnings).toEqual([]);
+    expect(result.errors).toHaveLength(2);
   });
+
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])('returns exact retirement guidance for %s', (retired, replacement) => {
+    expect(resolveProviderToken(retired, PROVIDERS)).toEqual({
+      kind: 'retired',
+      token: retired,
+      replacement,
+    });
+    const result = resolveProviderTokens([retired], PROVIDERS);
+    expect(result.ids).toEqual([]);
+    expect(result.warnings).toEqual([]);
+    expect(result.errors).toEqual([
+      `Provider "${retired}" was removed; use "${replacement}".`,
+    ]);
+    if (retired === 'perplexity-deep') {
+      expect(result.errors[0]).not.toContain('perplexity-deep-research');
+    }
+  });
+
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])(
+    'rejects %s even when a provider index claims it is active',
+    (retired, replacement) => {
+      expect(
+        resolveProviderToken(retired, [
+          ...PROVIDERS,
+          { id: retired, displayName: 'Compromised registry entry' },
+        ]),
+      ).toEqual({ kind: 'retired', token: retired, replacement });
+    },
+  );
 
   it('resolves a display name (exact form)', () => {
     expect(resolveProviderToken('Perplexity Sonar Pro', PROVIDERS)).toEqual({
@@ -142,15 +175,16 @@ describe('resolveProviderTokens aggregation', () => {
     expect(result.errors).toEqual([]);
   });
 
-  it('warns on legacy aliases but not on display-name matches', () => {
+  it('rejects retired ids while retaining display-name matches', () => {
     const result = resolveProviderTokens(
       ['perplexity-sonar', 'Exa Search'],
       PROVIDERS,
     );
-    expect(result.ids).toEqual(['perplexity-sonar-pro', 'exa']);
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toContain('deprecated');
-    expect(result.warnings[0]).toContain('perplexity-sonar');
+    expect(result.ids).toEqual(['exa']);
+    expect(result.warnings).toEqual([]);
+    expect(result.errors).toEqual([
+      'Provider "perplexity-sonar" was removed; use "perplexity-sonar-pro".',
+    ]);
   });
 
   it('deduplicates while preserving order', () => {
@@ -192,5 +226,28 @@ describe('resolveProviderTokens aggregation', () => {
     expect(result.ids).toEqual(['my-custom']);
     expect(result.warnings).toEqual([]);
     expect(result.errors).toEqual([]);
+  });
+});
+
+describe('retired provider transport preflight', () => {
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])('reports stable transport guidance for %s', (retired, replacement) => {
+    expect(retiredProviderSelectionIssues(['exa', ` ${retired} `])).toEqual([
+      {
+        code: 'provider_token_retired',
+        path: '/providers/1',
+        message: `Provider "${retired}" was removed; use "${replacement}".`,
+      },
+    ]);
+  });
+
+  it('leaves canonical ids and display names untouched', () => {
+    expect(
+      retiredProviderSelectionIssues(['openai-research', 'Exa Search']),
+    ).toEqual([]);
   });
 });

@@ -16,6 +16,7 @@ import {
 import type { HttpStreamClient } from '../src/core/http-client.js';
 import { getMeteringKind } from '../src/core/metering.js';
 import { PROVIDER_CATALOG } from '../src/core/provider-catalog.js';
+import { RETIRED_PROVIDER_REPLACEMENTS } from '../src/core/retired-provider-ids.js';
 import { searchApiOptionsSchema } from '../src/core/searchapi.js';
 import {
   completeProSearchEvents,
@@ -59,6 +60,17 @@ describe('built-in provider descriptors', () => {
       if (descriptor.defaultModel && provider && 'model' in provider) {
         expect(provider.model).toBe(descriptor.defaultModel);
       }
+    }
+  });
+
+  it('keeps retired ids out of the active registry and alias map', async () => {
+    await initializeProviders();
+    for (const id of Object.keys(RETIRED_PROVIDER_REPLACEMENTS)) {
+      expect(getProvider(id)).toBeUndefined();
+      expect(PROVIDER_ID_ALIASES[id]).toBeUndefined();
+      expect(getAllProviders().map((provider) => provider.id)).not.toContain(
+        id,
+      );
     }
   });
 

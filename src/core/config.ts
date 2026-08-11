@@ -13,6 +13,7 @@ import { ConfigSchema, ProjectConfigSchema } from '../types.js';
 import type { EnvRecord } from './credentials.js';
 import { hasCredential, resolveCredential } from './credentials.js';
 import { safeWriteFile } from './fs-utils.js';
+import { migrateRetiredProviderId } from './retired-provider-ids.js';
 
 export const CONFIG_DIR = resolve(homedir(), '.config', 'librarium');
 export const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json');
@@ -368,25 +369,16 @@ function migrateLegacyProviderIds(config: Config): string[] {
   // Both retired OpenAI deep-research entries map to one canonical provider.
   // A canonical entry wins over either alias; when only aliases exist, the
   // former o3 entry wins deterministically regardless of JSON key order.
-  const openAiResearchConfigs = [
-    'openai-deep',
+  const selectedOpenAiResearchId = [
+    'openai-research',
     'openai-deep-o3',
-    'openai-research',
-  ].filter((id) => config.providers[id] !== undefined);
-  const selectedOpenAiResearchId = openAiResearchConfigs.includes(
-    'openai-research',
-  )
-    ? 'openai-research'
-    : openAiResearchConfigs.includes('openai-deep-o3')
-      ? 'openai-deep-o3'
-      : openAiResearchConfigs.includes('openai-deep')
-        ? 'openai-deep'
-        : undefined;
+    'openai-deep',
+  ].find((id) => config.providers[id] !== undefined);
 
   for (const [id, providerConfig] of Object.entries(config.providers)) {
-    const canonicalId = resolveProviderId(id);
+    const canonicalId = migrateRetiredProviderId(resolveProviderId(id));
     const normalizedFallback = providerConfig.fallback
-      ? resolveProviderId(providerConfig.fallback)
+      ? migrateRetiredProviderId(resolveProviderId(providerConfig.fallback))
       : undefined;
 
     if (canonicalId !== id) {
@@ -432,14 +424,18 @@ function migrateLegacyProviderIds(config: Config): string[] {
 
   for (const [groupName, members] of Object.entries(config.groups)) {
     for (const member of members) {
-      const canonicalMember = resolveProviderId(member);
+      const canonicalMember = migrateRetiredProviderId(
+        resolveProviderId(member),
+      );
       if (canonicalMember !== member) {
         warnings.push(
           `Group "${groupName}" member "${member}" is deprecated; using "${canonicalMember}"`,
         );
       }
     }
-    config.groups[groupName] = resolveProviderIds(members);
+    config.groups[groupName] = resolveProviderIds(
+      members.map(migrateRetiredProviderId),
+    );
   }
 
   return warnings;
@@ -509,7 +505,9 @@ function captureStoredDefaultGroupRosters(
     if (storedMembers) {
       // Canonicalize aliases without deduplication so additions and duplicate
       // members cannot accidentally collapse into a recognized snapshot.
-      captured[groupName] = storedMembers.map(resolveProviderId);
+      captured[groupName] = storedMembers.map((id) =>
+        migrateRetiredProviderId(resolveProviderId(id)),
+      );
     }
   }
   return captured;

@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking retired provider IDs:** `perplexity-sonar` now requires
+  `perplexity-sonar-pro`; `perplexity-deep` now requires
+  `perplexity-sonar-deep`; and `openai-deep` and `openai-deep-o3` now require
+  `openai-research`. Current CLI, MCP, and native v2 configuration reject the
+  retired IDs. The v1 migrator still converts them without rewriting source
+  files. Completed historical artifacts retain their recorded IDs and
+  filenames, while pending retired handles cannot poll or retrieve through a
+  replacement provider.
 - **Breaking v2 configuration boundary:** strict versioned v1/v2 inputs now
   normalize through one pure snake-case v2 representation before code loading
   or network work. Legacy mixed mode becomes async with a notice; authored

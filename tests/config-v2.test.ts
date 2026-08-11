@@ -614,6 +614,28 @@ describe('public v2 configuration migration', () => {
     }
   });
 
+  it.each([
+    'perplexity-sonar',
+    'perplexity-deep',
+    'openai-deep',
+    'openai-deep-o3',
+  ])('reserves retired custom-provider key %s', (retired) => {
+    const result = validateConfigV2(
+      v2({
+        custom_providers: { [retired]: customSource('acme-provider') },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual({
+      code: 'config_custom_provider_id_reserved',
+      phase: 'migration',
+      path: `/custom_providers/${retired}`,
+      message:
+        'Custom providers cannot claim a current, planned, alias, or retired built-in id.',
+    });
+  });
+
   it('rejects duplicate custom provider/profile identities deterministically', () => {
     const first = customSource('shared-provider');
     const second = customSource('shared-provider');
@@ -857,6 +879,66 @@ describe('public v2 configuration migration', () => {
           expect.objectContaining({ code: 'config_provider_alias_removed' }),
         );
       }
+    }
+  });
+
+  it('rejects retired native provider, fallback, and group ids with replacement guidance', () => {
+    const replacements = {
+      'perplexity-sonar': 'perplexity-sonar-pro',
+      'perplexity-deep': 'perplexity-sonar-deep',
+      'openai-deep': 'openai-research',
+      'openai-deep-o3': 'openai-research',
+    } as const;
+    for (const [alias, replacement] of Object.entries(replacements)) {
+      const result = validateConfigV2(
+        v2({
+          providers: {
+            'openai-research': { enabled: true, fallback: alias },
+            [alias]: { enabled: false },
+          },
+          groups: { 'custom:retired': [alias] },
+        }),
+      );
+      expect(result.ok, alias).toBe(false);
+      if (result.ok) continue;
+      expect(result.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'config_provider_alias_removed',
+            path: `/providers/${alias}`,
+            message: expect.stringContaining(`use "${replacement}"`),
+          }),
+          expect.objectContaining({
+            code: 'config_fallback_alias_removed',
+            path: '/providers/openai-research/fallback',
+            message: expect.stringContaining(`use "${replacement}"`),
+          }),
+          expect.objectContaining({
+            code: 'config_group_member_alias_removed',
+            path: '/groups/custom:retired/0',
+            message: expect.stringContaining(`use "${replacement}"`),
+          }),
+        ]),
+      );
+
+      const migrated = migrateConfig({
+        global: v2({ groups: { 'custom:retired': [alias] } }),
+      });
+      expect(migrated.ok, `${alias} migration`).toBe(false);
+      if (migrated.ok) continue;
+      expect(migrated.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_member_alias_removed',
+          path: '/groups/custom:retired/0',
+          message: expect.stringContaining(`use "${replacement}"`),
+        }),
+      );
+      expect(migrated.issues).not.toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_member_unknown',
+          path: '/groups/custom:retired/0',
+        }),
+      );
     }
   });
 

@@ -76,6 +76,42 @@ describe('explicit Node v2 config files', () => {
     expect(readFileSync(projectPath, 'utf8')).toBe(project);
   });
 
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])(
+    'preserves retired native v2 group guidance for %s',
+    (retired, replacement) => {
+      const globalPath = join(directory, `${retired}.json`);
+      writeFileSync(
+        globalPath,
+        JSON.stringify({
+          ...config(),
+          groups: { 'custom:retired': [retired] },
+        }),
+      );
+
+      const result = loadConfigV2({ global_path: globalPath });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_member_alias_removed',
+          path: '/groups/custom:retired/0',
+          message: expect.stringContaining(`use "${replacement}"`),
+        }),
+      );
+      expect(result.issues).not.toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_member_unknown',
+          path: '/groups/custom:retired/0',
+        }),
+      );
+    },
+  );
+
   it('returns safe path-addressed JSON diagnostics', () => {
     const globalPath = join(directory, 'config.json');
     const secret = 'supersecret-api-key';

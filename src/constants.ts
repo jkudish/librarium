@@ -4,6 +4,7 @@ import {
   BUILTIN_PROVIDER_DEFINITIONS,
   BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER,
 } from './core/provider-descriptor.js';
+import { retiredProviderReplacement } from './core/retired-provider-ids.js';
 
 export const VERSION =
   typeof __VERSION__ !== 'undefined' ? __VERSION__ : '0.1.0';
@@ -174,13 +175,14 @@ export function suggestProviders(
 export type ProviderTokenResolution =
   | { kind: 'id'; token: string; id: string }
   | { kind: 'alias'; token: string; id: string }
+  | { kind: 'retired'; token: string; replacement: string }
   | { kind: 'name'; token: string; id: string }
   | { kind: 'ambiguous'; token: string; candidates: ProviderNameEntry[] }
   | { kind: 'unknown'; token: string; suggestions: ProviderNameEntry[] };
 
 /**
  * Resolve a single token to a canonical provider id, accepting (in order):
- * exact canonical id, legacy alias, then case/punctuation-insensitive display
+ * exact canonical id, a rejected retired id, active alias, then case/punctuation-insensitive display
  * name. Returns a structured outcome so callers can warn (alias), error
  * (ambiguous / unknown), or proceed (id / name).
  *
@@ -193,18 +195,25 @@ export function resolveProviderToken(
   const trimmed = token.trim();
   const knownIds = new Set(providers.map((p) => p.id));
 
-  // 1. Exact canonical id.
+  // 1. Retired ids guide the caller but never resolve to an executable id,
+  // even if a compromised provider index includes the old spelling.
+  const replacement = retiredProviderReplacement(trimmed);
+  if (replacement !== undefined) {
+    return { kind: 'retired', token: trimmed, replacement };
+  }
+
+  // 2. Exact canonical id.
   if (knownIds.has(trimmed)) {
     return { kind: 'id', token: trimmed, id: trimmed };
   }
 
-  // 2. Legacy alias (existing behavior; emits a deprecation warning).
+  // 3. Active alias (emits a deprecation warning).
   const aliased = PROVIDER_ID_ALIASES[trimmed];
   if (aliased !== undefined) {
     return { kind: 'alias', token: trimmed, id: aliased };
   }
 
-  // 3. Case-insensitive display-name match with normalization.
+  // 4. Case-insensitive display-name match with normalization.
   const normalizedToken = normalizeProviderName(trimmed);
   const nameMatches = providers.filter(
     (provider) =>
@@ -217,7 +226,7 @@ export function resolveProviderToken(
     return { kind: 'ambiguous', token: trimmed, candidates: nameMatches };
   }
 
-  // 4. Nothing matched.
+  // 5. Nothing matched.
   return {
     kind: 'unknown',
     token: trimmed,
@@ -237,9 +246,9 @@ export interface ProviderTokensResult {
 
 /**
  * Resolve a list of human-friendly provider tokens (canonical ids, legacy
- * aliases, or display names) to canonical ids. Display-name matches are a
- * supported input form and emit no warning; legacy aliases warn; ambiguous or
- * unknown tokens produce errors. Edge-safe pure string logic.
+ * active aliases, or display names) to canonical ids. Display-name matches are
+ * a supported input form and emit no warning; ambiguous or unknown tokens
+ * produce errors. Edge-safe pure string logic.
  */
 export function resolveProviderTokens(
   tokens: string[],
@@ -269,6 +278,11 @@ export function resolveProviderTokens(
           `Provider ID "${outcome.token}" is deprecated; using "${outcome.id}"`,
         );
         push(outcome.id);
+        break;
+      case 'retired':
+        errors.push(
+          `Provider "${outcome.token}" was removed; use "${outcome.replacement}".`,
+        );
         break;
       case 'ambiguous': {
         const candidateList = outcome.candidates

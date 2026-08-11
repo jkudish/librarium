@@ -1,0 +1,48 @@
+/**
+ * Provider ids that Librarium no longer accepts for current execution.
+ *
+ * This immutable tombstone is deliberately separate from active provider
+ * aliases. It exists only for v1 migration, native-v2 rejection guidance, and
+ * reservation of the old identities for custom providers.
+ */
+export const RETIRED_PROVIDER_REPLACEMENTS = Object.freeze({
+  'perplexity-sonar': 'perplexity-sonar-pro',
+  'perplexity-deep': 'perplexity-sonar-deep',
+  'openai-deep': 'openai-research',
+  'openai-deep-o3': 'openai-research',
+} as const);
+
+export type RetiredProviderId = keyof typeof RETIRED_PROVIDER_REPLACEMENTS;
+
+export function retiredProviderReplacement(id: string): string | undefined {
+  return Object.hasOwn(RETIRED_PROVIDER_REPLACEMENTS, id)
+    ? RETIRED_PROVIDER_REPLACEMENTS[id as RetiredProviderId]
+    : undefined;
+}
+
+export function isRetiredProviderId(id: string): id is RetiredProviderId {
+  return retiredProviderReplacement(id) !== undefined;
+}
+
+/** v1-only canonicalization. Current selectors must not call this helper. */
+export function migrateRetiredProviderId(id: string): string {
+  return retiredProviderReplacement(id) ?? id;
+}
+
+/** Canonical > openai-deep-o3 > openai-deep, independent of input order. */
+export function retiredProviderMigrationPriority(
+  id: string,
+  canonical: string,
+): number {
+  if (id === canonical) return 0;
+  if (id === 'openai-deep-o3') return 1;
+  if (id === 'openai-deep') return 2;
+  return 1;
+}
+
+export function retiredProviderGuidance(id: string): string | undefined {
+  const replacement = retiredProviderReplacement(id);
+  return replacement
+    ? `Provider "${id}" was removed; use "${replacement}".`
+    : undefined;
+}
