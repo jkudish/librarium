@@ -8,12 +8,14 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  copyFileSync,
   writeFileSync,
 } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { build as esbuild } from 'esbuild';
+import { resolveNativeTypeScript7Compiler } from './typescript-toolchain.mjs';
 
 const expectEngineRejection = process.argv.includes(
   '--expect-engine-rejection',
@@ -248,8 +250,37 @@ function verifyImportSideEffects() {
 }
 
 function verifyDeclarations() {
+  const compilers = [
+    {
+      label: 'TypeScript 7',
+      command: resolveNativeTypeScript7Compiler(root),
+      args: (configPath) => ['--project', configPath],
+    },
+    {
+      label: 'TypeScript 6 compatibility',
+      command: process.execPath,
+      path: resolve(root, 'node_modules/@typescript/typescript6/bin/tsc6'),
+      args: (configPath) => ['--project', configPath],
+    },
+  ];
+  const typecheck = (configPath) => {
+    for (const compiler of compilers) {
+      const args = compiler.path
+        ? [compiler.path, ...compiler.args(configPath)]
+        : compiler.args(configPath);
+      execFileSync(compiler.command, args, {
+        cwd: consumerDirectory,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    }
+  };
   const workerSourcePath = join(consumerDirectory, 'worker-consumer.ts');
   const workerConfigPath = join(consumerDirectory, 'worker-tsconfig.json');
+  copyFileSync(
+    join(root, 'tests/fixtures/declarations/worker-public-api.ts'),
+    join(consumerDirectory, 'worker-public-api.ts'),
+  );
   writeFileSync(
     workerSourcePath,
     `
@@ -393,21 +424,17 @@ function verifyDeclarations() {
         types: [],
         lib: ['ES2023', 'DOM', 'DOM.Iterable'],
       },
-      files: ['./worker-consumer.ts'],
+      files: ['./worker-consumer.ts', './worker-public-api.ts'],
     }),
   );
-  execFileSync(
-    process.execPath,
-    [resolve(root, 'node_modules/typescript/bin/tsc'), '-p', workerConfigPath],
-    {
-      cwd: consumerDirectory,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  typecheck(workerConfigPath);
 
   const nodeSourcePath = join(consumerDirectory, 'node-consumer.ts');
   const nodeConfigPath = join(consumerDirectory, 'node-tsconfig.json');
+  copyFileSync(
+    join(root, 'tests/fixtures/declarations/node-public-api.ts'),
+    join(consumerDirectory, 'node-public-api.ts'),
+  );
   writeFileSync(
     nodeSourcePath,
     `
@@ -477,20 +504,15 @@ function verifyDeclarations() {
         typeRoots: [resolve(root, 'node_modules/@types')],
         lib: ['ES2023', 'DOM', 'DOM.Iterable'],
       },
-      files: ['./node-consumer.ts'],
+      files: ['./node-consumer.ts', './node-public-api.ts'],
     }),
   );
-  execFileSync(
-    process.execPath,
-    [resolve(root, 'node_modules/typescript/bin/tsc'), '-p', nodeConfigPath],
-    {
-      cwd: consumerDirectory,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
+  typecheck(nodeConfigPath);
 
-  const nodeDeclaration = readFileSync(join(root, 'dist/node.d.ts'), 'utf8')
+  const nodeDeclaration = readFileSync(
+    join(root, 'dist/node-entry.d.ts'),
+    'utf8',
+  )
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/.*$/gm, '');
   if (/\bConfig\b/.test(nodeDeclaration)) {

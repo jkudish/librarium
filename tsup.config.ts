@@ -8,6 +8,9 @@ const shared: Options = {
   target: 'node22.12',
   outDir: 'dist',
   sourcemap: true,
+  // TS7 owns source checking and declaration output. Keep tsup away from its
+  // removed JS compiler API by disabling declaration generation here.
+  dts: false,
   define: {
     __VERSION__: JSON.stringify(pkg.version),
   },
@@ -27,7 +30,6 @@ export default defineConfig([
     // packed metafile/chunk gate proves root and core cannot reach them.
     platform: 'neutral',
     splitting: true,
-    dts: true,
     clean: false,
   },
   {
@@ -35,7 +37,6 @@ export default defineConfig([
     entry: { cli: 'src/cli.ts' },
     platform: 'node',
     splitting: false,
-    dts: false,
     clean: false,
     banner: {
       js: '#!/usr/bin/env node',

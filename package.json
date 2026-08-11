@@ -11,11 +11,11 @@
       "import": "./dist/index.js"
     },
     "./core": {
-      "types": "./dist/core.d.ts",
+      "types": "./dist/core-entry.d.ts",
       "import": "./dist/core.js"
     },
     "./node": {
-      "types": "./dist/node.d.ts",
+      "types": "./dist/node-entry.d.ts",
       "import": "./dist/node.js"
     }
   },
@@ -26,22 +26,25 @@
     "./dist/cli.js"
   ],
   "scripts": {
-    "build": "node scripts/clean-dist.mjs && tsup",
+    "build": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup",
+    "build:declarations": "node scripts/run-typescript.mjs --project tsconfig.node-declarations.json && node scripts/run-typescript.mjs --project tsconfig.declarations.json",
     "build:sea": "node scripts/build-sea.mjs",
     "contracts:generate": "node scripts/generate-contract-snapshot.mjs",
     "benchmark": "node benchmark/cli.mjs",
     "benchmark:validate": "node benchmark/validate.mjs",
     "benchmark:ci": "node benchmark/ci.mjs",
-    "dev": "node scripts/clean-dist.mjs && tsup --watch",
+    "dev": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup --watch",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
     "test:packed": "npm run build && node scripts/verify-packed-consumer.mjs",
     "test:engine-floor": "node scripts/verify-packed-consumer.mjs --expect-engine-rejection",
+    "test:declarations": "npm run build && node scripts/run-typescript.mjs --project tsconfig.declaration-fixtures.json && node scripts/run-typescript.mjs --project tsconfig.node-declaration-fixtures.json",
     "test:sea": "npm run build:sea && node scripts/verify-sea.mjs",
     "test:workers": "npm run build && vitest run --config vitest.workers.config.ts",
     "test:pty": "npm run build && vitest run --config vitest.pty.config.ts",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "npm run verify:typescript && node scripts/run-typescript.mjs --noEmit --project tsconfig.json",
+    "verify:typescript": "node scripts/verify-typescript-toolchain.mjs",
     "lint": "biome check src/ tests/ benchmark/",
     "lint:fix": "biome check --write src/ tests/ benchmark/"
   },
@@ -60,13 +63,14 @@
     "@biomejs/biome": "^2.5.7",
     "@cloudflare/vitest-pool-workers": "^0.18.7",
     "@types/node": "^22.20.1",
+    "@typescript/typescript6": "6.0.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "esbuild": "^0.28.1",
     "node-pty": "^1.1.0",
     "postject": "^1.0.0-alpha.6",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
+    "typescript": "7.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.113.0"
   },
