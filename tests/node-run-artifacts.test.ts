@@ -165,6 +165,28 @@ describe('RunArtifactRepository', () => {
     expect(mismatched.providerArtifacts['provider-a']?.meta).toBeUndefined();
   });
 
+  it('derives recovered citation counts from validated citations', () => {
+    const dir = makeRun([pending('provider-a')]);
+    writeFileSync(join(dir, 'provider-a.md'), 'recovered content');
+    writeFileSync(
+      join(dir, 'provider-a.meta.json'),
+      JSON.stringify({
+        provider: 'provider-a',
+        citationCount: 99,
+        citations: [citation('provider-a')],
+      }),
+    );
+
+    const snapshot = new RunArtifactRepository().readSnapshot(dir, {
+      view: 'recovery',
+    });
+
+    expect(snapshot.providerArtifacts['provider-a']?.meta?.citationCount).toBe(
+      1,
+    );
+    expect(snapshot.reports[0]?.citationCount).toBe(1);
+  });
+
   it('preserves persisted source accounting and opaque provider keys in recovery', () => {
     const opaque = ['__proto__', 'constructor', 'prototype'];
     const dir = makeRun(

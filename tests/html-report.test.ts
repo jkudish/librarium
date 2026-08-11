@@ -730,7 +730,10 @@ describe('writeHtmlReport', () => {
         provider: providerId,
         durationMs: 95_000,
         citationCount: 14,
-        citations: [],
+        citations: Array.from({ length: 14 }, (_, index) => ({
+          provider: providerId,
+          url: `https://example.test/html-${index}`,
+        })),
       }),
     );
 

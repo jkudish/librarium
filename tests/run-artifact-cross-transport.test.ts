@@ -18,7 +18,10 @@ import {
   shapeRunResultsSnapshot,
 } from '../src/mcp/shaping.js';
 import { projectRunArtifactSnapshot } from '../src/node-run-artifact-presentation.js';
-import { RunArtifactRepository } from '../src/node-run-artifacts.js';
+import {
+  providerArtifactFileNames,
+  RunArtifactRepository,
+} from '../src/node-run-artifacts.js';
 import {
   type DerivedArtifactRegeneratorInput,
   type ReconciliationBackgroundProvider,
@@ -200,6 +203,9 @@ describe('run artifact cross-transport projection', () => {
 
     const report = snapshot.reports[0];
     expect(report).toBeDefined();
+    expect(report).toMatchObject(
+      providerArtifactFileNames(providerId as string),
+    );
     const artifact = snapshot.providerArtifacts[providerId as string];
     expect(artifact?.content).toBe(content);
     const expectedFacts = providerFacts(

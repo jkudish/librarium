@@ -71,16 +71,26 @@ function createRegenerator(
         failed = true;
       }
     }
-    if (refreshHtml) {
+    let presentationSnapshot: RunArtifactSnapshot | undefined;
+    if (refreshHtml || refreshJsonl) {
       try {
-        writeHtmlReportFromSnapshot(snapshot, repository);
+        presentationSnapshot = repository.readSnapshot(runDir, {
+          view: 'recovery',
+        });
       } catch {
         failed = true;
       }
     }
-    if (refreshJsonl) {
+    if (refreshHtml && presentationSnapshot) {
       try {
-        writeJsonlReportFromSnapshot(snapshot, repository);
+        writeHtmlReportFromSnapshot(presentationSnapshot, repository);
+      } catch {
+        failed = true;
+      }
+    }
+    if (refreshJsonl && presentationSnapshot) {
+      try {
+        writeJsonlReportFromSnapshot(presentationSnapshot, repository);
       } catch {
         failed = true;
       }

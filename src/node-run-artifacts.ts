@@ -1380,7 +1380,13 @@ export class RunArtifactRepository {
     const content = this.readTextArtifact(runDir, outputFile);
     if (content === undefined) return null;
     const metaFile = `${safeId}.meta.json`;
-    const meta = parseMeta(this.readJsonArtifact(runDir, metaFile), report.id);
+    const parsedMeta = parseMeta(
+      this.readJsonArtifact(runDir, metaFile),
+      report.id,
+    );
+    const meta = parsedMeta
+      ? { ...parsedMeta, citationCount: parsedMeta.citations.length }
+      : null;
     const recoveredReport: ProviderReport = {
       ...report,
       status: 'success',
@@ -1390,11 +1396,7 @@ export class RunArtifactRepository {
       ...(meta?.durationMs !== undefined
         ? { durationMs: meta.durationMs }
         : {}),
-      ...(meta?.citationCount !== undefined
-        ? { citationCount: meta.citationCount }
-        : meta
-          ? { citationCount: meta.citations.length }
-          : {}),
+      ...(meta ? { citationCount: meta.citations.length } : {}),
       ...(meta?.usage !== undefined ? { usage: meta.usage } : {}),
       ...(meta?.metering !== undefined ? { metering: meta.metering } : {}),
     };
