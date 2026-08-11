@@ -246,7 +246,7 @@ export const ProviderConfigSchema = z.object({
   apiKey: z.string().optional(), // "$ENV_VAR" pattern — resolved at runtime
   enabled: z.boolean().default(true),
   model: z.string().optional(),
-  options: z.record(z.unknown()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
   fallback: z.string().optional(),
 });
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
@@ -255,7 +255,7 @@ export const ProjectProviderConfigSchema = z.object({
   apiKey: z.string().optional(),
   enabled: z.boolean().optional(),
   model: z.string().optional(),
-  options: z.record(z.unknown()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
   fallback: z.string().optional(),
 });
 export type ProjectProviderConfig = z.infer<typeof ProjectProviderConfigSchema>;
@@ -272,9 +272,8 @@ export const CustomProviderExecutionProfileSchema: z.ZodType<CustomProviderExecu
       (value) => OpaqueIdSchema.safeParse(value).success,
       'Custom-provider bindingId must be a canonical opaque identifier',
     ),
-    // The legacy config layer uses Zod 3 while the canonical contract uses
-    // Zod 4. Validate with the canonical schema at this boundary and retain its
-    // exact inferred type without weakening or duplicating the contract.
+    // Validate with the canonical schema at this boundary and retain its exact
+    // inferred type without weakening or duplicating the contract.
     profile: z.custom<ExecutionProfile>(
       (value) => ExecutionProfileSchema.safeParse(value).success,
       'Invalid canonical execution profile',
@@ -296,7 +295,7 @@ export const NpmProviderSourceSchema = z.object({
   type: z.literal('npm'),
   module: z.string().min(1),
   export: z.string().optional(),
-  options: z.record(z.unknown()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
   executionProfile: CustomProviderExecutionProfileSchema.optional(),
 });
 export type NpmProviderSource = z.infer<typeof NpmProviderSourceSchema>;
@@ -306,8 +305,8 @@ export const ScriptProviderSourceSchema = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).optional(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).optional(),
-  options: z.record(z.unknown()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
   executionProfile: CustomProviderExecutionProfileSchema.optional(),
 });
 export type ScriptProviderSource = z.infer<typeof ScriptProviderSourceSchema>;
@@ -358,10 +357,10 @@ export type AnswerConfig = z.infer<typeof AnswerConfigSchema>;
 export const ConfigSchema = z.object({
   version: z.literal(1),
   defaults: DefaultsSchema,
-  providers: z.record(ProviderConfigSchema).default({}),
-  customProviders: z.record(CustomProviderSourceSchema).default({}),
+  providers: z.record(z.string(), ProviderConfigSchema).default({}),
+  customProviders: z.record(z.string(), CustomProviderSourceSchema).default({}),
   trustedProviderIds: z.array(z.string()).default([]),
-  groups: z.record(z.array(z.string())).default({}),
+  groups: z.record(z.string(), z.array(z.string())).default({}),
   refine: RefineConfigSchema.optional(),
   answer: AnswerConfigSchema.optional(),
 });
@@ -382,10 +381,10 @@ export const ProjectConfigSchema = z.object({
       maxEstimatedCostUsd: z.number().optional(),
     })
     .optional(),
-  providers: z.record(ProjectProviderConfigSchema).optional(),
-  customProviders: z.record(CustomProviderSourceSchema).optional(),
+  providers: z.record(z.string(), ProjectProviderConfigSchema).optional(),
+  customProviders: z.record(z.string(), CustomProviderSourceSchema).optional(),
   trustedProviderIds: z.array(z.string()).optional(),
-  groups: z.record(z.array(z.string())).optional(),
+  groups: z.record(z.string(), z.array(z.string())).optional(),
   refine: RefineConfigSchema.optional(),
   answer: AnswerConfigSchema.optional(),
 });
