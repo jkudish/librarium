@@ -1,4 +1,11 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, parse } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -87,6 +94,19 @@ describe('getDirSize', () => {
   it('returns 0 for a missing directory', () => {
     expect(getDirSize(join(baseDir, 'does-not-exist'))).toBe(0);
   });
+
+  it('does not follow symlinks while measuring a directory', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'librarium-cleanup-outside-'));
+    try {
+      writeFileSync(join(outside, 'secret.md'), 'x'.repeat(500));
+      const dir = makeRun('100-linked');
+      symlinkSync(outside, join(dir, 'outside'));
+
+      expect(getDirSize(dir)).toBe(0);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('discoverCandidates', () => {
@@ -146,6 +166,18 @@ describe('discoverCandidates', () => {
     const out = discoverCandidates(baseDir, { all: true });
     expect(out).toHaveLength(1);
     expect(out[0].query).toBe('postgres pooling best practices');
+  });
+
+  it('skips symlinked run directories that escape the output base', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'librarium-cleanup-outside-'));
+    try {
+      writeFileSync(join(outside, 'run.json'), JSON.stringify(makeManifest()));
+      symlinkSync(outside, join(baseDir, '100-linked'));
+
+      expect(discoverCandidates(baseDir, { all: true })).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 
@@ -208,6 +240,50 @@ describe('hasPendingAsync', () => {
   it('conservatively protects a corrupt authoritative manifest', () => {
     const dir = makeRun('100-corrupt', { 'run.json': '{not-json' });
     expect(hasPendingAsync(dir)).toBe(true);
+  });
+
+  it('keeps a pending manifest protected when a recovery output exists', () => {
+    const dir = makeRun('100-recovered-pending', {
+      'run.json': JSON.stringify(
+        makeManifest({
+          status: 'awaiting_async',
+          exitCode: null,
+          providers: [
+            {
+              id: 'provider-a',
+              tier: 'deep-research',
+              status: 'async-pending',
+              durationMs: 0,
+              wordCount: 0,
+              citationCount: 0,
+              outputFile: '',
+              metaFile: '',
+              task: { taskId: 'task-a', submittedAt: 1, status: 'completed' },
+            },
+          ],
+        }),
+      ),
+      'provider-a.md': 'recovered output',
+    });
+
+    expect(hasPendingAsync(dir)).toBe(true);
+    expect(discoverCandidates(baseDir, { all: true })[0]).toMatchObject({
+      pendingAsync: true,
+      query: 'postgres pooling best practices',
+    });
+  });
+
+  it('protects corrupt manifests and leaves their query unknown', () => {
+    const dir = makeRun('100-corrupt-candidate', {
+      'run.json': '{not-json',
+      'provider-a.md': 'untrusted recovery output',
+    });
+
+    expect(hasPendingAsync(dir)).toBe(true);
+    expect(discoverCandidates(baseDir, { all: true })[0]).toMatchObject({
+      pendingAsync: true,
+      query: null,
+    });
   });
 
   it('is false for a run dir with no async indicators', () => {
@@ -282,6 +358,26 @@ describe('unsafeBaseDirReason', () => {
 
   it('allows a normal output dir', () => {
     expect(unsafeBaseDirReason(baseDir)).toBeNull();
+  });
+
+  it('rejects a symbolic-link base before discovery or deletion', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'librarium-cleanup-target-'));
+    const linkedBase = `${baseDir}-link`;
+    try {
+      mkdirSync(join(outside, '100-run'));
+      symlinkSync(outside, linkedBase);
+
+      expect(unsafeBaseDirReason(linkedBase)).toMatch(/symbolic-link/);
+      expect(discoverCandidates(linkedBase, { all: true })).toEqual([]);
+      expect(isInsideBaseDir(linkedBase, join(linkedBase, '100-run'))).toBe(
+        false,
+      );
+    } finally {
+      try {
+        unlinkSync(linkedBase);
+      } catch {}
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

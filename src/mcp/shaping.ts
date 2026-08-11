@@ -1,7 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { discoverRuns, readRunEntry } from '../commands/browse-data.js';
-import { loadRunTasks } from '../core/run-manifest.js';
+import type { RunArtifactSnapshot } from '../node-run-artifact-codecs.js';
+import { presentationSourceSummary } from '../node-run-artifact-presentation.js';
+import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type {
   AsyncTaskHandle,
   DeduplicatedSource,
@@ -67,6 +67,17 @@ export const MAX_SOURCES = 25;
 /** Per-provider character cap for `get_results` markdown. */
 export const MAX_PROVIDER_CHARS = 40_000;
 
+/**
+ * The artifact operations that the MCP shaping layer needs. Keeping this as
+ * a small structural type lets callers inject a repository without exposing
+ * any filesystem details to the MCP protocol adapter.
+ */
+export type McpArtifactRepository = Pick<
+  RunArtifactRepository,
+  'discoverRuns' | 'readSnapshot' | 'resolveRunDirectory'
+> &
+  Partial<Pick<RunArtifactRepository, 'readManifest' | 'readProviderContent'>>;
+
 export interface ShapedProvider {
   id: string;
   tier: string;
@@ -110,7 +121,9 @@ export interface ResearchToolResult {
   summaryFile: string;
 }
 
-function shapeProviders(reports: ProviderReport[]): ShapedProvider[] {
+function shapeProviders(
+  reports: readonly Readonly<ProviderReport>[],
+): ShapedProvider[] {
   return reports.map((r) => ({
     id: r.id,
     tier: r.tier,
@@ -123,6 +136,24 @@ function shapeProviders(reports: ProviderReport[]): ShapedProvider[] {
     ...(r.error ? { error: r.error } : {}),
     ...(r.fallbackFor ? { fallbackFor: r.fallbackFor } : {}),
   }));
+}
+
+function shapeProviderContent(
+  report: Readonly<ProviderReport>,
+  raw: string,
+  error?: string,
+): ProviderContent {
+  const capped = truncateProviderContent(raw);
+  return {
+    id: report.id,
+    tier: report.tier,
+    status: report.status,
+    content: wrapUntrustedContent(capped.content),
+    truncated: capped.truncated,
+    fullChars: capped.fullChars,
+    ...(report.error ? { error: report.error } : {}),
+    ...(error ? { error } : {}),
+  };
 }
 
 function shapeSources(sources: DeduplicatedSource[]): {
@@ -238,6 +269,99 @@ export interface GetResultsToolResult {
   results: ProviderContent[];
 }
 
+/** Shape one immutable recovery snapshot for the MCP get_results transport. */
+export function shapeRunResultsSnapshot(
+  snapshot: RunArtifactSnapshot,
+  provider?: string,
+  runDir = snapshot.runDir,
+): GetResultsToolResult {
+  const sources = presentationSourceSummary(snapshot);
+  const reports = provider
+    ? snapshot.reports.filter((report) => report.id === provider)
+    : snapshot.reports;
+  const results = reports.map((report) => {
+    const artifact = Object.hasOwn(snapshot.providerArtifacts, report.id)
+      ? snapshot.providerArtifacts[report.id]
+      : undefined;
+    return shapeProviderContent(report, artifact?.content ?? '');
+  });
+
+  return {
+    runDir,
+    query: snapshot.manifest.query,
+    contentWarning: UNTRUSTED_CONTENT_WARNING,
+    summary: {
+      mode: snapshot.manifest.mode,
+      providers: shapeProviders(snapshot.reports),
+      sources,
+    },
+    results,
+  };
+}
+
+function isRejectedArtifactError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith('Unsafe run artifact path: ') ||
+      error.message.startsWith('Symlinked run artifact path is not allowed: '))
+  );
+}
+
+function legacyArtifactContainmentMessage(fileName: string): string {
+  if (isAbsolute(fileName)) {
+    return `Refusing to read absolute path "${fileName}" from a run manifest.`;
+  }
+  return `Refusing to read "${fileName}": resolves outside the run directory.`;
+}
+
+/**
+ * Preserve the old per-provider error payload for a malformed declared output
+ * while the repository remains the only component that performs filesystem
+ * reads and containment checks. This branch runs only when the repository
+ * rejects one declared artifact before it can build a complete snapshot.
+ */
+function readRejectedArtifactResults(
+  runDir: string,
+  provider: string | undefined,
+  repository: McpArtifactRepository,
+): GetResultsToolResult | null {
+  const manifest = repository.readManifest?.(runDir);
+  if (!manifest) return null;
+  const reports = provider
+    ? manifest.providers.filter((r) => r.id === provider)
+    : manifest.providers;
+  const results = reports.map((report) => {
+    let raw = '';
+    let containmentError: string | undefined;
+    if (repository.readProviderContent) {
+      try {
+        raw = repository.readProviderContent(runDir, report) ?? '';
+      } catch (error) {
+        if (isRejectedArtifactError(error)) {
+          containmentError = legacyArtifactContainmentMessage(
+            report.outputFile,
+          );
+        }
+      }
+    }
+    return shapeProviderContent(report, raw, containmentError);
+  });
+  return {
+    runDir,
+    query: manifest.query,
+    contentWarning: UNTRUSTED_CONTENT_WARNING,
+    summary: {
+      mode: manifest.mode,
+      providers: shapeProviders(manifest.providers),
+      sources: {
+        total: manifest.sources.total,
+        unique: manifest.sources.unique,
+      },
+    },
+    results,
+  };
+}
+
 /**
  * Resolve the run directory to read from: explicit `runDir`, else the most
  * recent run under the configured output base. Returns null when none exists.
@@ -247,18 +371,35 @@ export interface GetResultsToolResult {
  * a PathContainmentError so a caller cannot point the read tools at arbitrary
  * filesystem locations.
  */
-export function resolveRunDir(baseDir: string, runDir?: string): string | null {
+export function resolveRunDir(
+  baseDir: string,
+  runDir?: string,
+  repository: McpArtifactRepository = new RunArtifactRepository(),
+): string | null {
   if (runDir) {
     if (!isStrictDescendant(baseDir, runDir)) {
       throw new PathContainmentError(
         `runDir "${runDir}" must be inside the configured output base "${baseDir}".`,
       );
     }
-    const resolved = resolve(runDir);
-    return existsSync(join(resolved, 'run.json')) ? resolved : null;
+    // The repository returns its canonical real path after validation. Keep
+    // the caller's resolved spelling in the protocol payload for compatibility
+    // with the existing MCP surface (for example, macOS `/var` aliases).
+    return repository.resolveRunDirectory(baseDir, runDir)
+      ? resolve(runDir)
+      : null;
   }
-  const recent = discoverRuns(baseDir, 1);
-  return recent[0]?.dir ?? null;
+  const recent = repository.discoverRuns(baseDir, 1);
+  const latest = recent[0];
+  if (!latest) return null;
+  // Discovery returns the repository's canonical path. Re-express it under
+  // the configured base spelling without trusting manifest.outputDir, which
+  // is untrusted data and may contain an unrelated absolute path.
+  const canonicalBase = repository.resolveRunDirectory(baseDir);
+  if (canonicalBase && isStrictDescendant(canonicalBase, latest.runDir)) {
+    return join(baseDir, relative(canonicalBase, latest.runDir));
+  }
+  return latest.runDir;
 }
 
 /**
@@ -275,93 +416,64 @@ export function resolveRunDir(baseDir: string, runDir?: string): string | null {
 export function readRunResults(
   runDir: string,
   provider?: string,
+  repository: McpArtifactRepository = new RunArtifactRepository(),
 ): GetResultsToolResult | null {
-  const entry = readRunEntry(runDir);
-  if (!entry) return null;
-  const manifest = entry.manifest;
-
-  const reports = provider
-    ? manifest.providers.filter((r) => r.id === provider)
-    : manifest.providers;
-
-  const results: ProviderContent[] = [];
-  for (const report of reports) {
-    if (!report.outputFile) {
-      results.push({
-        id: report.id,
-        tier: report.tier,
-        status: report.status,
-        content: '',
-        truncated: false,
-        fullChars: 0,
-        ...(report.error ? { error: report.error } : {}),
-      });
-      continue;
+  let snapshot: ReturnType<RunArtifactRepository['readSnapshot']>;
+  try {
+    snapshot = repository.readSnapshot(runDir, { view: 'recovery' });
+  } catch (error) {
+    // Preserve the helper's historical null result when the directory exists
+    // but has no supported run manifest. The repository still owns all path
+    // and symlink validation, so other errors remain visible to the caller.
+    if (
+      error instanceof Error &&
+      error.message.startsWith('Run manifest does not exist:')
+    ) {
+      return null;
     }
-    let path: string;
-    try {
-      path = resolveContainedFile(runDir, report.outputFile);
-    } catch (e) {
-      results.push({
-        id: report.id,
-        tier: report.tier,
-        status: report.status,
-        content: '',
-        truncated: false,
-        fullChars: 0,
-        error:
-          e instanceof PathContainmentError
-            ? e.message
-            : `Invalid outputFile in manifest: ${report.outputFile}`,
-      });
-      continue;
+    if (isRejectedArtifactError(error)) {
+      const rejected = readRejectedArtifactResults(
+        runDir,
+        provider,
+        repository,
+      );
+      if (rejected) return rejected;
     }
-    let raw = '';
-    try {
-      raw = existsSync(path) ? readFileSync(path, 'utf-8') : '';
-    } catch {
-      raw = '';
-    }
-    const capped = truncateProviderContent(raw);
-    results.push({
-      id: report.id,
-      tier: report.tier,
-      status: report.status,
-      content: wrapUntrustedContent(capped.content),
-      truncated: capped.truncated,
-      fullChars: capped.fullChars,
-      ...(report.error ? { error: report.error } : {}),
-    });
+    throw error;
   }
 
-  return {
-    runDir,
-    query: manifest.query,
-    contentWarning: UNTRUSTED_CONTENT_WARNING,
-    summary: {
-      mode: manifest.mode,
-      providers: manifest.providers.map((r) => ({
-        id: r.id,
-        tier: r.tier,
-        status: r.status,
-        durationMs: r.durationMs,
-        citationCount: r.citationCount,
-        wordCount: r.wordCount,
-        ...(r.usage ? { usage: r.usage } : {}),
-        ...(r.metering ? { metering: r.metering } : {}),
-        ...(r.error ? { error: r.error } : {}),
-        ...(r.fallbackFor ? { fallbackFor: r.fallbackFor } : {}),
-      })),
-      sources: {
-        total: manifest.sources.total,
-        unique: manifest.sources.unique,
-      },
-    },
-    results,
-  };
+  return shapeRunResultsSnapshot(snapshot, provider, runDir);
 }
 
 /** Load async task handles for a run directory. */
-export function loadRunAsyncTasks(runDir: string): AsyncTaskHandle[] {
-  return loadRunTasks(runDir);
+export function loadRunAsyncTasks(
+  runDir: string,
+  repository: McpArtifactRepository = new RunArtifactRepository(),
+): AsyncTaskHandle[] {
+  const snapshot = repository.readSnapshot(runDir, { view: 'authoritative' });
+  return snapshot.manifest.providers.flatMap((provider) => {
+    if (!provider.task || provider.task.retrievedAt !== undefined) return [];
+    return [
+      {
+        provider: provider.id,
+        taskId: provider.task.taskId,
+        query: snapshot.manifest.query,
+        submittedAt: provider.task.submittedAt,
+        status: provider.task.status,
+        outputDir: snapshot.runDir,
+        ...(provider.task.lastPolledAt !== undefined
+          ? { lastPolledAt: provider.task.lastPolledAt }
+          : {}),
+        ...(provider.task.completedAt !== undefined
+          ? { completedAt: provider.task.completedAt }
+          : {}),
+        ...(provider.task.providerStatus !== undefined
+          ? { providerStatus: provider.task.providerStatus }
+          : {}),
+        ...(provider.task.lastPollError !== undefined
+          ? { lastPollError: provider.task.lastPollError }
+          : {}),
+      },
+    ];
+  });
 }

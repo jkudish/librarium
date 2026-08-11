@@ -1,7 +1,7 @@
 /** Node runtime wiring for the internal reconciliation service. */
 import { getExactProvider } from './adapters/node-registry.js';
-import { writeHtmlReport } from './commands/html-report.js';
-import { writeJsonlReport } from './commands/jsonl-report.js';
+import { writeHtmlReportFromSnapshot } from './commands/html-report.js';
+import { writeJsonlReportFromSnapshot } from './commands/jsonl-report.js';
 import { generateSummary } from './core/synthesis.js';
 import {
   RunArtifactRepository,
@@ -73,14 +73,14 @@ function createRegenerator(
     }
     if (refreshHtml) {
       try {
-        writeHtmlReport(runDir);
+        writeHtmlReportFromSnapshot(snapshot, repository);
       } catch {
         failed = true;
       }
     }
     if (refreshJsonl) {
       try {
-        writeJsonlReport(runDir);
+        writeJsonlReportFromSnapshot(snapshot, repository);
       } catch {
         failed = true;
       }

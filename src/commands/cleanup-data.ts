@@ -1,8 +1,7 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, parse, resolve, sep } from 'node:path';
-import type { RunManifest } from '../types.js';
-import { isRunManifest } from './browse-data.js';
+import { RunArtifactRepository } from '../node-run-artifacts.js';
 
 /**
  * Pure helpers for `librarium cleanup` / `librarium clear`: candidate
@@ -37,7 +36,7 @@ export function getDirSize(dirPath: string): number {
     for (const entry of readdirSync(dirPath)) {
       const fullPath = join(dirPath, entry);
       try {
-        const stat = statSync(fullPath);
+        const stat = lstatSync(fullPath);
         if (stat.isFile()) {
           size += stat.size;
         } else if (stat.isDirectory()) {
@@ -66,45 +65,32 @@ export function formatSize(bytes: number): string {
 /**
  * Detect whether the authoritative run manifest has pending/running tasks.
  */
-export function hasPendingAsync(dir: string): boolean {
+export function hasPendingAsync(
+  dir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): boolean {
   const manifestPath = join(dir, 'run.json');
-  if (existsSync(manifestPath)) {
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-      if (isRunManifest(parsed)) {
-        const manifest = parsed as RunManifest;
-        return (
-          manifest.status === 'awaiting_async' ||
-          manifest.providers.some(
-            (provider) =>
-              provider.task !== undefined &&
-              provider.task.retrievedAt === undefined &&
-              ['pending', 'running', 'completed'].includes(
-                provider.task.status,
-              ),
-          )
-        );
-      }
-    } catch {
-      // A corrupt authoritative manifest may contain the only remote handle.
-      return true;
-    }
-    // Unsupported/invalid manifests are conservatively protected.
-    return true;
-  }
-  return false;
+  if (!existsSync(manifestPath)) return false;
+  const manifest = repository.tryReadManifest(dir);
+  // A corrupt, unreadable, or unsupported authoritative manifest may contain
+  // the only remote handle, so never infer terminal state from recovered files.
+  if (!manifest) return true;
+  return (
+    manifest.status === 'awaiting_async' ||
+    manifest.providers.some(
+      (provider) =>
+        provider.task !== undefined &&
+        provider.task.retrievedAt === undefined &&
+        ['pending', 'running', 'completed'].includes(provider.task.status),
+    )
+  );
 }
 
-function readQuery(dir: string): string | null {
-  const manifestPath = join(dir, 'run.json');
-  if (!existsSync(manifestPath)) return null;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    if (isRunManifest(parsed)) return (parsed as RunManifest).query;
-  } catch {
-    // Ignore corrupt manifest.
-  }
-  return null;
+function readQuery(
+  dir: string,
+  repository: RunArtifactRepository,
+): string | null {
+  return repository.tryReadManifest(dir)?.query ?? null;
 }
 
 export interface DiscoverOptions {
@@ -124,8 +110,15 @@ export interface DiscoverOptions {
 export function discoverCandidates(
   baseDir: string,
   opts: DiscoverOptions = {},
+  repository: RunArtifactRepository = new RunArtifactRepository(),
 ): CleanupCandidate[] {
   if (!existsSync(baseDir)) return [];
+  try {
+    const baseStat = lstatSync(baseDir);
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) return [];
+  } catch {
+    return [];
+  }
   const now = opts.now ?? Date.now();
   const all = opts.all ?? false;
   const days = opts.days ?? 30;
@@ -134,9 +127,9 @@ export function discoverCandidates(
   const candidates: CleanupCandidate[] = [];
   for (const name of readdirSync(baseDir)) {
     const dir = join(baseDir, name);
-    let stat: ReturnType<typeof statSync>;
+    let stat: ReturnType<typeof lstatSync>;
     try {
-      stat = statSync(dir);
+      stat = lstatSync(dir);
     } catch {
       continue;
     }
@@ -154,8 +147,8 @@ export function discoverCandidates(
       timeMs,
       ageDays: Math.floor((now - timeMs) / (24 * 60 * 60 * 1000)),
       size: getDirSize(dir),
-      query: readQuery(dir),
-      pendingAsync: hasPendingAsync(dir),
+      query: readQuery(dir, repository),
+      pendingAsync: hasPendingAsync(dir, repository),
     });
   }
 
@@ -222,6 +215,13 @@ export function unsafeBaseDirReason(baseDir: string): string | null {
   if (normalized === resolve(homedir())) {
     return `Refusing to operate on the home directory (${resolved}).`;
   }
+  try {
+    if (lstatSync(resolved).isSymbolicLink()) {
+      return `Refusing to operate through a symbolic-link base directory (${resolved}).`;
+    }
+  } catch {
+    // A missing output directory has nothing to clean.
+  }
   return null;
 }
 
@@ -236,5 +236,20 @@ export function isInsideBaseDir(baseDir: string, candidate: string): boolean {
   const target = resolve(candidate);
   if (target === base) return false; // never delete the base dir itself
   const prefix = base.endsWith(sep) ? base : base + sep;
-  return target.startsWith(prefix);
+  if (!target.startsWith(prefix)) return false;
+
+  try {
+    const baseStat = lstatSync(base);
+    if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) return false;
+    const targetStat = lstatSync(target);
+    if (targetStat.isSymbolicLink()) return false;
+    const realBase = realpathSync(base);
+    const realTarget = realpathSync(target);
+    const realPrefix = realBase.endsWith(sep) ? realBase : realBase + sep;
+    return realTarget !== realBase && realTarget.startsWith(realPrefix);
+  } catch {
+    // Preserve the pure lexical predicate for a not-yet-created descendant.
+    // Deletion candidates exist and therefore always take the realpath branch.
+    return true;
+  }
 }

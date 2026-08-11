@@ -1,7 +1,4 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import type { RunManifest } from '../types.js';
-import { isRunManifest } from './browse-data.js';
+import { RunArtifactRepository } from '../node-run-artifacts.js';
 
 /**
  * Pure aggregation for `librarium usage`: walk the run.json manifests under the
@@ -57,18 +54,8 @@ export interface UsageScanOptions {
 export function aggregateUsage(
   baseDir: string,
   opts: UsageScanOptions = {},
+  repository: RunArtifactRepository = new RunArtifactRepository(),
 ): UsageAggregate {
-  const empty: UsageAggregate = {
-    runCount: 0,
-    runsWithoutUsage: 0,
-    totalCostUsd: 0,
-    runsWithCost: 0,
-    totalEstimatedCostUsd: 0,
-    providers: [],
-    range: null,
-  };
-  if (!existsSync(baseDir)) return empty;
-
   const now = opts.now ?? Date.now();
   const cutoffSeconds =
     opts.days !== undefined
@@ -84,16 +71,10 @@ export function aggregateUsage(
   let fromSeconds = Number.POSITIVE_INFINITY;
   let toSeconds = Number.NEGATIVE_INFINITY;
 
-  for (const name of readdirSync(baseDir)) {
-    const dir = join(baseDir, name);
-    try {
-      if (!statSync(dir).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-
-    const manifest = readManifest(dir);
-    if (!manifest) continue;
+  for (const { manifest } of repository.discoverRuns(
+    baseDir,
+    Number.MAX_SAFE_INTEGER,
+  )) {
     if (cutoffSeconds !== undefined && manifest.timestamp < cutoffSeconds) {
       continue;
     }
@@ -175,16 +156,4 @@ export function aggregateUsage(
     providers,
     range: runCount > 0 ? { fromSeconds, toSeconds } : null,
   };
-}
-
-function readManifest(dir: string): RunManifest | null {
-  const manifestPath = join(dir, 'run.json');
-  if (!existsSync(manifestPath)) return null;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    if (!isRunManifest(parsed)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
 }

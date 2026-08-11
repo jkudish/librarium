@@ -9,6 +9,7 @@ import {
 import { VERSION } from '../constants.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type { Config } from '../types.js';
 import { checkAsyncTasks } from './async.js';
 import {
@@ -17,6 +18,7 @@ import {
   type SilentRunDeps,
 } from './research.js';
 import {
+  type McpArtifactRepository,
   readRunResults,
   resolveRunDir,
   shapeResearchResult,
@@ -37,6 +39,8 @@ export interface McpServerDeps {
   checkAsync?: typeof checkAsyncTasks;
   /** Provider init (registry). Injectable for tests. */
   initialize?: typeof initializeProviders;
+  /** Run artifact store used by get_results and async run selection. */
+  repository?: McpArtifactRepository;
 }
 
 function defaultLoadMergedConfig(): Config {
@@ -70,6 +74,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   const loadMergedConfig = deps.loadMergedConfig ?? defaultLoadMergedConfig;
   const checkAsync = deps.checkAsync ?? checkAsyncTasks;
   const initialize = deps.initialize ?? initializeProviders;
+  const repository = deps.repository ?? new RunArtifactRepository();
 
   const server = new McpServer({
     name: 'librarium',
@@ -158,7 +163,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
       try {
         const config = loadMergedConfig();
         const baseDir = resolve(config.defaults.outputDir);
-        const runDir = resolveRunDir(baseDir, args.runDir);
+        const runDir = resolveRunDir(baseDir, args.runDir, repository);
         if (!runDir) {
           return errorResult(
             args.runDir
@@ -166,7 +171,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
               : `No runs found under ${baseDir}. Run a research query first.`,
           );
         }
-        const results = readRunResults(runDir, args.provider);
+        const results = readRunResults(runDir, args.provider, repository);
         if (!results) {
           return errorResult(`Could not read run manifest in ${runDir}`);
         }
@@ -203,7 +208,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         const credentials = createNodeCredentialContext();
         await initialize({ ...config, credentials });
         const baseDir = resolve(config.defaults.outputDir);
-        const runDir = resolveRunDir(baseDir, args.runDir);
+        const runDir = resolveRunDir(baseDir, args.runDir, repository);
         if (!runDir) {
           return errorResult(
             args.runDir

@@ -1,14 +1,16 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { safeWriteFile } from '../core/fs-utils.js';
+import type { RunArtifactPresentationSourceSummary } from '../node-run-artifact-presentation.js';
+import { projectRunArtifactSnapshot } from '../node-run-artifact-presentation.js';
+import {
+  RunArtifactRepository,
+  type RunArtifactSnapshot,
+} from '../node-run-artifacts.js';
 import type {
   DeduplicatedSource,
+  ProviderReport,
   RunManifest,
   VerificationMetadata,
 } from '../types.js';
-import { readAnswerArtifact } from './answer-synthesis.js';
-import { readRunEntry } from './browse-data.js';
-import { enrichRetrievedReports } from './html-report.js';
 
 /**
  * Self-contained JSONL report generator for a run directory.
@@ -20,10 +22,14 @@ import { enrichRetrievedReports } from './html-report.js';
  */
 
 export interface JsonlReportInput {
-  manifest: RunManifest;
+  manifest: Readonly<RunManifest>;
+  /** Recovery-view reports used for presentation. Defaults to manifest providers. */
+  reports?: readonly Readonly<ProviderReport>[];
   /** Provider markdown contents keyed by report outputFile. */
-  providerContents: Record<string, string>;
-  sources: DeduplicatedSource[];
+  providerContents: Readonly<Record<string, string>>;
+  sources: readonly Readonly<DeduplicatedSource>[];
+  /** Counts aligned with the presented source rows. Defaults to manifest facts. */
+  sourceSummary?: RunArtifactPresentationSourceSummary;
   /**
    * The synthesized grounded answer (answer.md body) when the run produced one.
    * provider/model come from the manifest's additive `answer` metadata.
@@ -103,7 +109,8 @@ function serializeLine(
 /** Pure generator: manifest plus file contents in, full JSONL string out. */
 export function generateJsonlReport(input: JsonlReportInput): string {
   const { manifest, providerContents, sources, answer } = input;
-  const reports = manifest.providers;
+  const reports = input.reports ?? manifest.providers;
+  const sourceSummary = input.sourceSummary ?? manifest.sources;
 
   const succeeded = reports.filter((r) => r.status === 'success').length;
   const failed = reports.filter((r) => r.status === 'error').length;
@@ -119,8 +126,8 @@ export function generateJsonlReport(input: JsonlReportInput): string {
     succeeded,
     failed,
     pending,
-    uniqueSources: manifest.sources.unique,
-    totalCitations: manifest.sources.total,
+    uniqueSources: sourceSummary.unique,
+    totalCitations: sourceSummary.total,
     ...(manifest.refinedQueries !== undefined
       ? { refinedQueries: manifest.refinedQueries }
       : {}),
@@ -143,7 +150,7 @@ export function generateJsonlReport(input: JsonlReportInput): string {
 
   const resultLines: ResultLine[] = reports.map((report) => {
     const content =
-      report.outputFile && providerContents[report.outputFile] !== undefined
+      report.outputFile && Object.hasOwn(providerContents, report.outputFile)
         ? providerContents[report.outputFile]
         : null;
 
@@ -190,49 +197,34 @@ export function generateJsonlReport(input: JsonlReportInput): string {
 }
 
 /**
+ * Write results.jsonl from one immutable repository snapshot.
+ */
+export function writeJsonlReportFromSnapshot(
+  snapshot: RunArtifactSnapshot,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): string {
+  const jsonl = generateJsonlReport(projectRunArtifactSnapshot(snapshot));
+  const reportPath = repository.resolveContainedPath(
+    snapshot.runDir,
+    'results.jsonl',
+  );
+  safeWriteFile(reportPath, jsonl);
+  return reportPath;
+}
+
+/**
  * Build and write results.jsonl for an existing run directory.
  * Returns the report path, or null when the directory has no run manifest.
  */
-export function writeJsonlReport(runDir: string): string | null {
-  const entry = readRunEntry(runDir);
-  if (!entry) return null;
-  entry.manifest.providers = enrichRetrievedReports(
-    runDir,
-    entry.manifest.providers,
-  );
-
-  const providerContents: Record<string, string> = {};
-  for (const report of entry.manifest.providers) {
-    if (!report.outputFile) continue;
-    const filePath = join(runDir, report.outputFile);
-    if (!existsSync(filePath)) continue;
-    try {
-      providerContents[report.outputFile] = readFileSync(filePath, 'utf-8');
-    } catch {
-      // Missing/unreadable provider files render as null content instead.
-    }
+export function writeJsonlReport(
+  runDir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): string | null {
+  let snapshot: RunArtifactSnapshot;
+  try {
+    snapshot = repository.readSnapshot(runDir, { view: 'recovery' });
+  } catch {
+    return null;
   }
-
-  let sources: DeduplicatedSource[] = [];
-  const sourcesPath = join(runDir, 'sources.json');
-  if (existsSync(sourcesPath)) {
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(sourcesPath, 'utf-8'));
-      if (Array.isArray(parsed)) sources = parsed as DeduplicatedSource[];
-    } catch {
-      // Corrupt sources.json degrades to an empty sources section.
-    }
-  }
-
-  const answer = readAnswerArtifact(runDir, entry.manifest);
-
-  const jsonl = generateJsonlReport({
-    manifest: entry.manifest,
-    providerContents,
-    sources,
-    ...(answer ? { answer } : {}),
-  });
-  const reportPath = join(runDir, 'results.jsonl');
-  safeWriteFile(reportPath, jsonl);
-  return reportPath;
+  return writeJsonlReportFromSnapshot(snapshot, repository);
 }
