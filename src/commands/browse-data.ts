@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { isRunManifest } from '../core/run-manifest.js';
-import type { RunManifest } from '../types.js';
+import type { RunArtifactSnapshot } from '../node-run-artifact-codecs.js';
+import { presentationSourceSummary } from '../node-run-artifact-presentation.js';
+import { RunArtifactRepository } from '../node-run-artifacts.js';
+import type { ProviderReport, RunManifest } from '../types.js';
 
 /**
  * Pure(ish) helpers for `librarium browse`: run manifest discovery and
@@ -17,36 +17,68 @@ export interface RunEntry {
 export { isRunManifest } from '../core/run-manifest.js';
 
 /** Parse a single run directory; returns null when there is no valid run.json. */
-export function readRunEntry(dir: string): RunEntry | null {
-  const manifestPath = join(dir, 'run.json');
-  if (!existsSync(manifestPath)) return null;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-    if (!isRunManifest(parsed)) return null;
-    return { dir, manifest: parsed };
-  } catch {
-    return null;
-  }
+export function readRunEntry(
+  dir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): RunEntry | null {
+  const manifest = repository.tryReadManifest(dir);
+  return manifest ? { dir, manifest } : null;
+}
+
+/** Read one selected run with non-mutating recovery projection for browsing. */
+export function readRunSnapshot(
+  dir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): RunArtifactSnapshot | null {
+  return repository.tryReadSnapshot(dir, { view: 'recovery' });
+}
+
+export interface BrowseProviderPresentation {
+  readonly report: Readonly<ProviderReport>;
+  readonly content?: string;
+}
+
+export interface BrowseRunPresentation {
+  readonly query: string;
+  readonly mode: RunManifest['mode'];
+  readonly providers: readonly BrowseProviderPresentation[];
+  readonly sources: { readonly total: number; readonly unique: number };
+}
+
+/** Project one immutable artifact snapshot into the browse view model. */
+export function shapeBrowseRunSnapshot(
+  snapshot: RunArtifactSnapshot,
+): BrowseRunPresentation {
+  const sources = presentationSourceSummary(snapshot);
+  return {
+    query: snapshot.manifest.query,
+    mode: snapshot.manifest.mode,
+    providers: snapshot.reports.map((report) => {
+      const artifact = Object.hasOwn(snapshot.providerArtifacts, report.id)
+        ? snapshot.providerArtifacts[report.id]
+        : undefined;
+      return {
+        report,
+        ...(artifact?.content === undefined
+          ? {}
+          : { content: artifact.content }),
+      };
+    }),
+    sources,
+  };
 }
 
 /**
  * Discover recent runs under the output base directory (newest first).
  */
-export function discoverRuns(baseDir: string, limit = 20): RunEntry[] {
-  if (!existsSync(baseDir)) return [];
-  const entries: RunEntry[] = [];
-  for (const name of readdirSync(baseDir)) {
-    const dir = join(baseDir, name);
-    try {
-      if (!statSync(dir).isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    const entry = readRunEntry(dir);
-    if (entry) entries.push(entry);
-  }
-  entries.sort((a, b) => b.manifest.timestamp - a.manifest.timestamp);
-  return entries.slice(0, limit);
+export function discoverRuns(
+  baseDir: string,
+  limit = 20,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): RunEntry[] {
+  return repository
+    .discoverRuns(baseDir, limit)
+    .map(({ runDir, manifest }) => ({ dir: runDir, manifest }));
 }
 
 /** Format a manifest timestamp (seconds) as a local date-time label. */

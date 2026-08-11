@@ -1,8 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { Marked } from 'marked';
-import { sanitizeId } from '../constants.js';
 import { safeWriteFile } from '../core/fs-utils.js';
+import type { RunArtifactPresentationSourceSummary } from '../node-run-artifact-presentation.js';
+import { projectRunArtifactSnapshot } from '../node-run-artifact-presentation.js';
+import {
+  RunArtifactRepository,
+  type RunArtifactSnapshot,
+} from '../node-run-artifacts.js';
 import type {
   ClaimSupport,
   DeduplicatedSource,
@@ -13,8 +16,6 @@ import type {
   VerificationMetadata,
   VerificationUsageSummary,
 } from '../types.js';
-import { readAnswerArtifact } from './answer-synthesis.js';
-import { readRunEntry } from './browse-data.js';
 import { formatDuration, usageLabel } from './run-format.js';
 
 /**
@@ -27,10 +28,14 @@ import { formatDuration, usageLabel } from './run-format.js';
  */
 
 export interface HtmlReportInput {
-  manifest: RunManifest;
+  manifest: Readonly<RunManifest>;
+  /** Recovery-view reports used for presentation. Defaults to manifest providers. */
+  reports?: readonly Readonly<ProviderReport>[];
   /** Provider markdown contents keyed by report outputFile. */
-  providerContents: Record<string, string>;
-  sources: DeduplicatedSource[];
+  providerContents: Readonly<Record<string, string>>;
+  sources: readonly Readonly<DeduplicatedSource>[];
+  /** Counts aligned with the presented source rows. Defaults to manifest facts. */
+  sourceSummary?: RunArtifactPresentationSourceSummary;
   /**
    * The synthesized grounded answer (answer.md body) when the run produced one.
    * Leads the report as an "Answer" section before the provider tabs.
@@ -139,12 +144,10 @@ function formatReportDate(timestampSeconds: number): string {
   });
 }
 
-function talliesLine(manifest: RunManifest): string {
-  const ok = manifest.providers.filter((p) => p.status === 'success').length;
-  const failed = manifest.providers.filter((p) => p.status === 'error').length;
-  const pending = manifest.providers.filter(
-    (p) => p.status === 'async-pending',
-  ).length;
+function talliesLine(reports: readonly Readonly<ProviderReport>[]): string {
+  const ok = reports.filter((p) => p.status === 'success').length;
+  const failed = reports.filter((p) => p.status === 'error').length;
+  const pending = reports.filter((p) => p.status === 'async-pending').length;
   return `${ok} succeeded, ${failed} failed, ${pending} async pending`;
 }
 
@@ -449,7 +452,9 @@ ${followUps}
 </section>`;
 }
 
-function sourcesSection(sources: DeduplicatedSource[]): string {
+function sourcesSection(
+  sources: readonly Readonly<DeduplicatedSource>[],
+): string {
   if (sources.length === 0) {
     return '<p class="pending-note">No sources recorded.</p>';
   }
@@ -633,7 +638,11 @@ const SCRIPT = `(function () {
 /** Pure generator: manifest plus file contents in, full HTML document out. */
 export function generateHtmlReport(input: HtmlReportInput): string {
   const { manifest, providerContents, sources, answer } = input;
-  const reports = manifest.providers;
+  const reports = input.reports ?? manifest.providers;
+  const sourceSummary = input.sourceSummary ?? {
+    total: manifest.sources.total,
+    unique: sources.length,
+  };
 
   const answerHtml =
     answer && answer.content.trim().length > 0 ? answerSection(answer) : '';
@@ -662,7 +671,9 @@ export function generateHtmlReport(input: HtmlReportInput): string {
       const hidden = index === activeIndex ? '' : ' hidden';
       const body = providerPanelBody(
         report,
-        report.outputFile ? providerContents[report.outputFile] : undefined,
+        report.outputFile && Object.hasOwn(providerContents, report.outputFile)
+          ? providerContents[report.outputFile]
+          : undefined,
       );
       return `<div class="panel" role="tabpanel" id="panel-${index}" aria-labelledby="tab-${index}"${hidden}>${body}</div>`;
     })
@@ -690,7 +701,7 @@ ${sourcesSection(sources)}
 <main>
 <p class="eyebrow">query</p>
 <h1>${escapeHtml(manifest.query)}</h1>
-<p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(manifest))} &middot; ${sources.length} unique sources after dedupe (${manifest.sources.total} total citations)</p>
+<p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(reports))} &middot; ${sourceSummary.unique} unique sources after dedupe (${sourceSummary.total} total citations)</p>
 ${answerHtml}
 ${verificationHtml}
 <section>
@@ -712,85 +723,34 @@ ${sourcesPanel}
 }
 
 /**
- * Async-pending reports whose results have since been retrieved (via
- * `status --wait`/`--retrieve`) have their .md and .meta.json on disk but
- * run.json still says pending. Overlay those so regenerated reports fill in.
+ * Write report.html from one immutable repository snapshot.
  */
-export function enrichRetrievedReports(
-  runDir: string,
-  reports: ProviderReport[],
-): ProviderReport[] {
-  return reports.map((report) => {
-    if (report.status !== 'async-pending') return report;
-    const safeId = sanitizeId(report.id);
-    const outputFile = `${safeId}.md`;
-    if (!existsSync(join(runDir, outputFile))) return report;
-    let durationMs = 0;
-    let citationCount = 0;
-    try {
-      const meta = JSON.parse(
-        readFileSync(join(runDir, `${safeId}.meta.json`), 'utf-8'),
-      ) as { durationMs?: number; citationCount?: number };
-      durationMs = meta.durationMs ?? 0;
-      citationCount = meta.citationCount ?? 0;
-    } catch {
-      // Meta is optional; the content alone is enough to render.
-    }
-    return {
-      ...report,
-      status: 'success' as const,
-      outputFile,
-      metaFile: `${safeId}.meta.json`,
-      durationMs,
-      citationCount,
-    };
-  });
+export function writeHtmlReportFromSnapshot(
+  snapshot: RunArtifactSnapshot,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): string {
+  const html = generateHtmlReport(projectRunArtifactSnapshot(snapshot));
+  const reportPath = repository.resolveContainedPath(
+    snapshot.runDir,
+    'report.html',
+  );
+  safeWriteFile(reportPath, html);
+  return reportPath;
 }
 
 /**
  * Build and write report.html for an existing run directory.
  * Returns the report path, or null when the directory has no run manifest.
  */
-export function writeHtmlReport(runDir: string): string | null {
-  const entry = readRunEntry(runDir);
-  if (!entry) return null;
-  entry.manifest.providers = enrichRetrievedReports(
-    runDir,
-    entry.manifest.providers,
-  );
-
-  const providerContents: Record<string, string> = {};
-  for (const report of entry.manifest.providers) {
-    if (!report.outputFile) continue;
-    const filePath = join(runDir, report.outputFile);
-    if (!existsSync(filePath)) continue;
-    try {
-      providerContents[report.outputFile] = readFileSync(filePath, 'utf-8');
-    } catch {
-      // Missing/unreadable provider files render as a note instead.
-    }
+export function writeHtmlReport(
+  runDir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): string | null {
+  let snapshot: RunArtifactSnapshot;
+  try {
+    snapshot = repository.readSnapshot(runDir, { view: 'recovery' });
+  } catch {
+    return null;
   }
-
-  let sources: DeduplicatedSource[] = [];
-  const sourcesPath = join(runDir, 'sources.json');
-  if (existsSync(sourcesPath)) {
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(sourcesPath, 'utf-8'));
-      if (Array.isArray(parsed)) sources = parsed as DeduplicatedSource[];
-    } catch {
-      // Corrupt sources.json degrades to an empty sources section.
-    }
-  }
-
-  const answer = readAnswerArtifact(runDir, entry.manifest);
-
-  const html = generateHtmlReport({
-    manifest: entry.manifest,
-    providerContents,
-    sources,
-    ...(answer ? { answer } : {}),
-  });
-  const reportPath = join(runDir, 'report.html');
-  safeWriteFile(reportPath, html);
-  return reportPath;
+  return writeHtmlReportFromSnapshot(snapshot, repository);
 }

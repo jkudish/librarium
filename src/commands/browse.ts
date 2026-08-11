@@ -1,14 +1,17 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type { ProviderReport } from '../types.js';
 import {
+  type BrowseProviderPresentation,
   describeRun,
   discoverRuns,
   type RunEntry,
   readRunEntry,
+  readRunSnapshot,
+  shapeBrowseRunSnapshot,
 } from './browse-data.js';
 import { writeHtmlReport } from './html-report.js';
 import { writeJsonlReport } from './jsonl-report.js';
@@ -46,8 +49,11 @@ export function registerBrowseCommand(program: Command): void {
 }
 
 /** Top-level loop: pick a run, drill in, repeat until quit. */
-export async function browseRuns(baseDir: string): Promise<void> {
-  const runs = discoverRuns(baseDir);
+export async function browseRuns(
+  baseDir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): Promise<void> {
+  const runs = discoverRuns(baseDir, 20, repository);
   if (runs.length === 0) {
     console.log(`No runs found in ${baseDir}`);
     return;
@@ -66,25 +72,37 @@ export async function browseRuns(baseDir: string): Promise<void> {
       ],
     });
     if (p.isCancel(choice) || choice === 'quit') break;
-    const nav = await browseRun(choice);
+    const nav = await browseRun(choice, repository);
     if (nav === 'quit') break;
   }
   p.outro('done');
 }
 
 /** Browse a single run directory directly (used by the wizard post-run offer). */
-export async function browseRunDir(dir: string): Promise<void> {
-  const entry = readRunEntry(dir);
+export async function browseRunDir(
+  dir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): Promise<void> {
+  const entry = readRunEntry(dir, repository);
   if (!entry) {
     console.log(`No run manifest found in ${dir}`);
     return;
   }
-  await browseRun(entry);
+  await browseRun(entry, repository);
 }
 
 /** Run view: provider list rendered with the run table line format. */
-async function browseRun(entry: RunEntry): Promise<NavResult> {
-  const reports = entry.manifest.providers;
+async function browseRun(
+  entry: RunEntry,
+  repository: RunArtifactRepository,
+): Promise<NavResult> {
+  const snapshot = readRunSnapshot(entry.dir, repository);
+  if (!snapshot) {
+    p.log.warn(`Could not read run artifacts in ${entry.dir}`);
+    return 'back';
+  }
+  const presentation = shapeBrowseRunSnapshot(snapshot);
+  const reports = presentation.providers.map(({ report }) => report);
   const widths = computeLineWidths(
     reports.map((r) => r.id),
     reports.map((r) => r.tier),
@@ -99,7 +117,7 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
       | 'back'
       | 'quit';
     const choice = await p.select<Choice>({
-      message: entry.manifest.query,
+      message: snapshot.manifest.query,
       options: [
         ...reports.map((report) => ({
           value: report as Choice,
@@ -116,16 +134,21 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
     if (p.isCancel(choice) || choice === 'quit') return 'quit';
     if (choice === 'back') return 'back';
     if (choice === 'summary') {
-      const summaryPath = join(entry.dir, 'summary.md');
-      if (!existsSync(summaryPath)) {
-        p.log.warn(`File not found: ${summaryPath}`);
+      if (snapshot.summary === undefined) {
+        p.log.warn(
+          `File not found: ${repository.resolveContainedPath(snapshot.runDir, 'summary.md')}`,
+        );
         continue;
       }
-      await viewMarkdownInPager(summaryPath, 'summary.md');
+      await viewMarkdownInPager(
+        snapshot.summary,
+        'summary.md',
+        repository.resolveContainedPath(snapshot.runDir, 'summary.md'),
+      );
       continue;
     }
     if (choice === 'html') {
-      const reportPath = writeHtmlReport(entry.dir);
+      const reportPath = writeHtmlReport(entry.dir, repository);
       if (reportPath) {
         p.log.success(
           `Wrote ${hyperlink(reportPath, fileUrl(reportPath), isColorEnabled(process.stdout))}`,
@@ -141,7 +164,7 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
       continue;
     }
     if (choice === 'jsonl') {
-      const jsonlPath = writeJsonlReport(entry.dir);
+      const jsonlPath = writeJsonlReport(entry.dir, repository);
       if (jsonlPath) {
         p.log.success(
           `Wrote ${hyperlink(jsonlPath, fileUrl(jsonlPath), isColorEnabled(process.stdout))}`,
@@ -151,21 +174,24 @@ async function browseRun(entry: RunEntry): Promise<NavResult> {
       }
       continue;
     }
-    const nav = await providerView(entry, choice);
+    const provider = presentation.providers.find(
+      ({ report }) => report.id === choice.id,
+    );
+    if (!provider) continue;
+    const nav = await providerView(snapshot.runDir, provider, repository);
     if (nav === 'quit') return 'quit';
   }
 }
 
 /** Provider view: fullscreen pager over the ANSI-rendered markdown. */
 async function providerView(
-  entry: RunEntry,
-  report: ProviderReport,
+  runDir: string,
+  presentation: BrowseProviderPresentation,
+  repository: RunArtifactRepository,
 ): Promise<NavResult> {
-  const filePath = report.outputFile
-    ? join(entry.dir, report.outputFile)
-    : null;
+  const { report, content } = presentation;
 
-  if (!filePath || !existsSync(filePath)) {
+  if (content === undefined || !report.outputFile) {
     const note =
       report.status === 'async-pending'
         ? 'Result not retrieved yet: run `librarium status --wait` to poll and retrieve.'
@@ -174,7 +200,11 @@ async function providerView(
     return 'back';
   }
 
-  await viewMarkdownInPager(filePath, report.id);
+  await viewMarkdownInPager(
+    content,
+    report.id,
+    repository.resolveContainedPath(runDir, report.outputFile),
+  );
   return 'back';
 }
 
@@ -183,10 +213,10 @@ const MAX_READING_WIDTH = 100;
 
 /** Open a markdown file in the fullscreen pager (o opens the raw file in $PAGER). */
 async function viewMarkdownInPager(
-  filePath: string,
+  content: string,
   title: string,
+  filePath?: string,
 ): Promise<void> {
-  const content = readFileSync(filePath, 'utf-8');
   const color = isColorEnabled(process.stdout);
   await runPager({
     title,

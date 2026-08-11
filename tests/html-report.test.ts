@@ -1,16 +1,23 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   answerBody,
-  enrichRetrievedReports,
   escapeHtml,
   generateHtmlReport,
   renderMarkdown,
   safeUrl,
   writeHtmlReport,
+  writeHtmlReportFromSnapshot,
 } from '../src/commands/html-report.js';
+import { RunArtifactRepository } from '../src/node-run-artifacts.js';
 import type {
   DeduplicatedSource,
   ProviderReport,
@@ -675,7 +682,7 @@ describe('writeHtmlReport', () => {
     writeFileSync(join(dir, 'sources.json'), JSON.stringify(SOURCES));
 
     const reportPath = writeHtmlReport(dir);
-    expect(reportPath).toBe(join(dir, 'report.html'));
+    expect(reportPath).toBe(join(realpathSync(dir), 'report.html'));
     const html = readFileSync(reportPath as string, 'utf-8');
     expect(html).toContain('Exa findings');
     expect(html).toContain('PgBouncer docs');
@@ -699,45 +706,50 @@ describe('writeHtmlReport', () => {
     expect(html).toContain('synthesized by openai / gpt-5-mini');
   });
 
-  it('fills in retrieved results for reports still marked async-pending', () => {
+  it('writes a recovery snapshot without changing durable pending state', () => {
+    const providerId = '__proto__';
     const manifest = makeManifest({
       providers: [
         makeReport({
-          id: 'openai-deep',
+          id: providerId,
           tier: 'deep-research',
           status: 'async-pending',
           outputFile: '',
           metaFile: '',
           durationMs: 0,
           citationCount: 0,
+          task: { taskId: 'opaque-task', submittedAt: 1, status: 'completed' },
         }),
       ],
     });
     writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
-    writeFileSync(join(dir, 'openai-deep.md'), '# Deep findings\n\nretrieved');
+    writeFileSync(join(dir, '__proto__.md'), '# Deep findings\n\nretrieved');
     writeFileSync(
-      join(dir, 'openai-deep.meta.json'),
-      JSON.stringify({ durationMs: 95_000, citationCount: 14 }),
+      join(dir, '__proto__.meta.json'),
+      JSON.stringify({
+        provider: providerId,
+        durationMs: 95_000,
+        citationCount: 14,
+        citations: Array.from({ length: 14 }, (_, index) => ({
+          provider: providerId,
+          url: `https://example.test/html-${index}`,
+        })),
+      }),
     );
 
-    const reportPath = writeHtmlReport(dir) as string;
+    const before = readFileSync(join(dir, 'run.json'), 'utf-8');
+    const repository = new RunArtifactRepository();
+    const snapshot = repository.readSnapshot(dir, { view: 'recovery' });
+    expect(snapshot.manifest.providers[0]?.status).toBe('async-pending');
+    expect(snapshot.reports[0]?.status).toBe('success');
+    expect(Object.hasOwn(snapshot.providerArtifacts, providerId)).toBe(true);
+
+    const reportPath = writeHtmlReportFromSnapshot(snapshot, repository);
     const html = readFileSync(reportPath, 'utf-8');
     expect(html).toContain('Deep findings');
+    expect(html).toContain('<span class="pid">__proto__</span>');
     expect(html).toContain('14 sources');
     expect(html).not.toContain('Result not retrieved yet');
-  });
-});
-
-describe('enrichRetrievedReports', () => {
-  it('leaves pending reports untouched when no file exists', () => {
-    const reports = [
-      makeReport({
-        status: 'async-pending',
-        id: 'openai-deep',
-        outputFile: '',
-      }),
-    ];
-    const enriched = enrichRetrievedReports('/nonexistent-dir', reports);
-    expect(enriched[0]?.status).toBe('async-pending');
+    expect(readFileSync(join(dir, 'run.json'), 'utf-8')).toBe(before);
   });
 });

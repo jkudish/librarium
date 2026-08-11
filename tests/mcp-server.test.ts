@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -32,6 +38,7 @@ import {
   truncateProviderContent,
   UNTRUSTED_CONTENT_WARNING,
 } from '../src/mcp/shaping.js';
+import { RunArtifactRepository } from '../src/node-run-artifacts.js';
 import { createRunDir } from '../src/node-run-directory.js';
 import type {
   Config,
@@ -169,6 +176,40 @@ describe('mcp tool surface', () => {
       { name: 'quick', members: ['exa'] },
       { name: 'deep', members: ['openai-research'] },
     ]);
+    await server.close();
+  });
+
+  it('passes the merged config to check_async', async () => {
+    const config = makeConfig();
+    const runDir = join(baseDir, 'check-async');
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      join(runDir, 'run.json'),
+      JSON.stringify(makeManifest({ outputDir: runDir })),
+    );
+    const checkAsync = vi.fn().mockResolvedValue({
+      runDir,
+      polled: 0,
+      retrieved: 0,
+      tasks: [],
+    });
+    const { client, server } = await connect({
+      loadMergedConfig: () => config,
+      checkAsync,
+      initialize: vi.fn().mockResolvedValue({
+        warnings: [],
+        loadedCustomProviders: [],
+        skippedCustomProviders: [],
+      }),
+    });
+
+    const result = await client.callTool({
+      name: 'check_async',
+      arguments: { runDir },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(checkAsync).toHaveBeenCalledWith(runDir, false, config);
     await server.close();
   });
 });
@@ -405,6 +446,112 @@ describe('review fixes: path containment', () => {
     const result = readRunResults(dir);
     expect(result.results[0].error).toMatch(/outside the run directory/);
     expect(result.results[0].content).toBe('');
+  });
+
+  it('keeps safe provider content when only metadata is rejected', () => {
+    const dir = join(baseDir, 'unsafe-meta');
+    mkdirSync(dir, { recursive: true });
+    const manifest = makeManifest({
+      providers: [
+        report({
+          id: 'exa',
+          outputFile: 'exa.md',
+          metaFile: '../secret.json',
+        }),
+      ],
+    });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+    writeFileSync(join(dir, 'exa.md'), '# Safe provider content');
+
+    const result = readRunResults(dir);
+
+    expect(result?.results[0]?.content).toContain('# Safe provider content');
+    expect(result?.results[0]?.error).toBeUndefined();
+  });
+
+  it('reports every rejected provider output in one run', () => {
+    const dir = join(baseDir, 'multiple-unsafe-outputs');
+    mkdirSync(dir, { recursive: true });
+    const manifest = makeManifest({
+      providers: [
+        report({ id: 'exa', outputFile: '../exa.md', metaFile: '' }),
+        report({ id: 'brave', outputFile: '../brave.md', metaFile: '' }),
+      ],
+    });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+
+    const result = readRunResults(dir);
+
+    expect(result?.results).toHaveLength(2);
+    expect(result?.results.every((entry) => entry.error !== undefined)).toBe(
+      true,
+    );
+  });
+
+  it('projects a pending historical artifact as recovered MCP content', () => {
+    const dir = join(baseDir, 'recovered');
+    mkdirSync(dir, { recursive: true });
+    const manifest = makeManifest({
+      status: 'awaiting_async',
+      providers: [
+        report({
+          id: 'historical-provider',
+          status: 'async-pending',
+          outputFile: '',
+          metaFile: '',
+          task: {
+            taskId: 'task-1',
+            submittedAt: 1,
+            status: 'pending',
+          },
+        }),
+      ],
+    });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+    writeFileSync(join(dir, 'historical-provider.md'), '# Recovered');
+    const before = readFileSync(join(dir, 'run.json'), 'utf8');
+
+    const result = readRunResults(dir);
+
+    expect(result?.summary.providers[0]?.status).toBe('success');
+    expect(result?.results[0]?.status).toBe('success');
+    expect(result?.results[0]?.content).toContain('# Recovered');
+    expect(readFileSync(join(dir, 'run.json'), 'utf8')).toBe(before);
+  });
+
+  it('reads opaque provider ids without prototype lookup', () => {
+    const ids = ['__proto__', 'constructor', 'prototype'];
+    const dir = join(baseDir, 'opaque');
+    mkdirSync(dir, { recursive: true });
+    const manifest = makeManifest({
+      providers: ids.map((id) =>
+        report({ id, outputFile: `${id}.md`, metaFile: '' }),
+      ),
+    });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+    for (const id of ids) writeFileSync(join(dir, `${id}.md`), id);
+
+    const result = readRunResults(dir);
+
+    expect(result?.results.map((entry) => entry.content)).toEqual(
+      ids.map((id) => expect.stringContaining(id)),
+    );
+    expect(Object.prototype.polluted).toBeUndefined();
+  });
+
+  it('uses an injected artifact repository for run selection and snapshots', () => {
+    const dir = join(baseDir, 'injected');
+    mkdirSync(dir, { recursive: true });
+    const manifest = makeManifest({ outputDir: dir });
+    writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+    const repository = new RunArtifactRepository();
+    const resolveSpy = vi.spyOn(repository, 'resolveRunDirectory');
+    const snapshotSpy = vi.spyOn(repository, 'readSnapshot');
+
+    expect(resolveRunDir(baseDir, dir, repository)).toBe(dir);
+    expect(readRunResults(dir, undefined, repository)).not.toBeNull();
+    expect(resolveSpy).toHaveBeenCalledWith(baseDir, dir);
+    expect(snapshotSpy).toHaveBeenCalledWith(dir, { view: 'recovery' });
   });
 });
 

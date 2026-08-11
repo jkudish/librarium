@@ -1,11 +1,19 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   generateJsonlReport,
   writeJsonlReport,
+  writeJsonlReportFromSnapshot,
 } from '../src/commands/jsonl-report.js';
+import { RunArtifactRepository } from '../src/node-run-artifacts.js';
 import type {
   DeduplicatedSource,
   ProviderReport,
@@ -558,7 +566,7 @@ describe('writeJsonlReport', () => {
     writeFileSync(join(dir, 'sources.json'), JSON.stringify(SOURCES));
 
     const reportPath = writeJsonlReport(dir);
-    expect(reportPath).toBe(join(dir, 'results.jsonl'));
+    expect(reportPath).toBe(join(realpathSync(dir), 'results.jsonl'));
 
     const text = readFileSync(reportPath as string, 'utf-8');
     const lines = parseLines(text) as Array<Record<string, unknown>>;
@@ -597,31 +605,48 @@ describe('writeJsonlReport', () => {
     expect(answerLine?.content).toContain('Use PgBouncer');
   });
 
-  it('fills in retrieved results for reports still marked async-pending', () => {
+  it('writes a recovery snapshot without changing durable pending state', () => {
+    const providerId = 'constructor';
     const manifest = makeManifest({
       providers: [
         makeReport({
-          id: 'openai-deep',
+          id: providerId,
           tier: 'deep-research',
           status: 'async-pending',
           outputFile: '',
           metaFile: '',
           durationMs: 0,
           citationCount: 0,
+          task: { taskId: 'opaque-task', submittedAt: 1, status: 'completed' },
         }),
       ],
     });
     writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
     writeFileSync(
-      join(dir, 'openai-deep.md'),
+      join(dir, 'constructor.md'),
       '# Deep findings\n\nretrieved content',
     );
     writeFileSync(
-      join(dir, 'openai-deep.meta.json'),
-      JSON.stringify({ durationMs: 95_000, citationCount: 14 }),
+      join(dir, 'constructor.meta.json'),
+      JSON.stringify({
+        provider: providerId,
+        durationMs: 95_000,
+        citationCount: 14,
+        citations: Array.from({ length: 14 }, (_, index) => ({
+          provider: providerId,
+          url: `https://example.test/jsonl-${index}`,
+        })),
+      }),
     );
 
-    const reportPath = writeJsonlReport(dir) as string;
+    const before = readFileSync(join(dir, 'run.json'), 'utf-8');
+    const repository = new RunArtifactRepository();
+    const snapshot = repository.readSnapshot(dir, { view: 'recovery' });
+    expect(snapshot.manifest.providers[0]?.status).toBe('async-pending');
+    expect(snapshot.reports[0]?.status).toBe('success');
+    expect(Object.hasOwn(snapshot.providerArtifacts, providerId)).toBe(true);
+
+    const reportPath = writeJsonlReportFromSnapshot(snapshot, repository);
     const text = readFileSync(reportPath, 'utf-8');
     const lines = parseLines(text) as Array<Record<string, unknown>>;
     const resultLine = lines.find((l) => l.type === 'result') as Record<
@@ -629,8 +654,9 @@ describe('writeJsonlReport', () => {
       unknown
     >;
 
-    // The enriched report should show success and the content should be present
     expect(resultLine?.status).toBe('success');
+    expect(resultLine?.id).toBe(providerId);
     expect(resultLine?.content).toContain('Deep findings');
+    expect(readFileSync(join(dir, 'run.json'), 'utf-8')).toBe(before);
   });
 });

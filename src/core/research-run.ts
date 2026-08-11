@@ -1,7 +1,10 @@
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { ProviderBase } from '../adapters/base.js';
 import { getAllProviders, getProvider } from '../adapters/index.js';
+import {
+  providerArtifactFileNames,
+  RunArtifactRepository,
+} from '../node-run-artifacts.js';
 import type {
   Citation,
   Config,
@@ -20,7 +23,6 @@ import {
   dispatch,
   type ProviderLookup,
 } from './dispatcher.js';
-import { safeWriteFile } from './fs-utils.js';
 import type { HttpClient, HttpStreamClient } from './http-client.js';
 import { deduplicateSources } from './normalizer.js';
 import { buildPrompt } from './prompt-builder.js';
@@ -100,6 +102,7 @@ export interface ExecuteResearchRunRequest {
 export interface ExecuteResearchRunDependencies {
   providerRegistry?: ProviderRegistry;
   taskStore?: RunManifestStore;
+  repository?: RunArtifactRepository;
   httpClient?: HttpClient;
   httpStreamClient?: HttpStreamClient;
   dispatch?: (options: DispatchOptions) => Promise<DispatchResult>;
@@ -130,7 +133,8 @@ export async function executeResearchRun(
 ): Promise<ResearchRunResult> {
   const providerRegistry =
     dependencies.providerRegistry ?? defaultProviderRegistry;
-  const taskStore = dependencies.taskStore ?? defaultRunManifestStore;
+  const repository = dependencies.repository ?? new RunArtifactRepository();
+  const taskStore = dependencies.taskStore ?? repository;
   const dispatchRun = dependencies.dispatch ?? dispatch;
   const now = dependencies.now ?? Date.now;
   const emit = (event: ResearchRunEvent): void => {
@@ -173,7 +177,7 @@ export async function executeResearchRun(
   emit({ type: 'manifest-created', manifest: created });
 
   try {
-    safeWriteFile(join(request.outputDir, 'prompt.md'), prompt);
+    repository.writePrompt(request.outputDir, prompt);
     const runRegistry =
       dependencies.httpClient || dependencies.httpStreamClient
         ? registryWithHttpClients(
@@ -184,7 +188,11 @@ export async function executeResearchRun(
         : providerRegistry;
 
     const dispatchStartedAt = now();
-    const { reports, results, asyncTasks } = await dispatchRun({
+    const {
+      reports: dispatchReports,
+      results,
+      asyncTasks,
+    } = await dispatchRun({
       config: request.config,
       providerIds: request.providerIds,
       query: request.query,
@@ -196,28 +204,32 @@ export async function executeResearchRun(
       allowFallbacks: request.allowFallbacks,
       providerRegistry: runRegistry,
       onProgress: (progress) => {
-        if (progress.report) {
+        const persistedProgress = progress.report
+          ? {
+              ...progress,
+              report: withCanonicalArtifactFiles(progress.report),
+            }
+          : progress;
+        if (persistedProgress.report) {
           taskStore.upsertProviderReport(
             request.outputDir,
-            progress.report,
-            progress.task,
+            persistedProgress.report,
+            persistedProgress.task,
           );
         }
-        emit({ type: 'dispatch-progress', progress });
+        emit({ type: 'dispatch-progress', progress: persistedProgress });
       },
     });
+    const reports = dispatchReports.map(withCanonicalArtifactFiles);
     const totalDurationMs = now() - dispatchStartedAt;
     emit({ type: 'dispatch-completed', reports });
 
-    writeProviderOutputs(request.outputDir, reports, results);
+    writeProviderOutputs(repository, request.outputDir, reports, results);
     const allCitations: Citation[] = results.flatMap((result) =>
       result.status === 'success' ? result.citations : [],
     );
     const sources = deduplicateSources(allCitations);
-    safeWriteFile(
-      join(request.outputDir, 'sources.json'),
-      JSON.stringify(sources, null, 2),
-    );
+    repository.writeSources(request.outputDir, sources);
 
     let manifestExtra: ResearchRunPostDispatchResult['manifestExtra'] = {};
     if (request.postDispatch) {
@@ -272,8 +284,8 @@ export async function executeResearchRun(
       applyRunLifecycle(current, now());
     });
 
-    safeWriteFile(
-      join(request.outputDir, 'summary.md'),
+    repository.writeSummary(
+      request.outputDir,
       generateSummary({
         query: request.query,
         reports,
@@ -349,7 +361,18 @@ function registryWithHttpClients(
   };
 }
 
+function withCanonicalArtifactFiles(report: ProviderReport): ProviderReport {
+  if (!report.outputFile && !report.metaFile) return report;
+  const names = providerArtifactFileNames(report.id);
+  return {
+    ...report,
+    outputFile: report.outputFile ? names.outputFile : '',
+    metaFile: report.metaFile ? names.metaFile : '',
+  };
+}
+
 function writeProviderOutputs(
+  repository: RunArtifactRepository,
   outputDir: string,
   reports: ProviderReport[],
   results: ProviderDispatchResult[],
@@ -362,24 +385,18 @@ function writeProviderOutputs(
     );
     if (!report?.outputFile || !report.metaFile) continue;
 
-    safeWriteFile(join(outputDir, report.outputFile), result.text);
-    safeWriteFile(
-      join(outputDir, report.metaFile),
-      JSON.stringify(
-        {
-          provider: result.provider,
-          tier: result.tier,
-          model: result.model,
-          durationMs: result.durationMs,
-          citationCount: result.citations.length,
-          tokenUsage: result.tokenUsage,
-          usage: result.usage,
-          metering: result.metering,
-          citations: result.citations,
-        },
-        null,
-        2,
-      ),
-    );
+    repository.writeProviderContent(outputDir, result.provider, result.text);
+    repository.writeProviderMeta(outputDir, result.provider, {
+      tier: result.tier,
+      ...(result.model === undefined ? {} : { model: result.model }),
+      durationMs: result.durationMs,
+      citationCount: result.citations.length,
+      ...(result.tokenUsage === undefined
+        ? {}
+        : { tokenUsage: result.tokenUsage }),
+      ...(result.usage === undefined ? {} : { usage: result.usage }),
+      ...(result.metering === undefined ? {} : { metering: result.metering }),
+      citations: result.citations,
+    });
   }
 }

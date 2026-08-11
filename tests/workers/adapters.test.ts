@@ -92,6 +92,12 @@ describe('internal adapters in workerd', () => {
 
     expect(result.asyncTasks).toEqual([]);
     expect(result.reports).toHaveLength(1);
+    expect(result.reports[0]).toMatchObject({
+      outputFile:
+        'provider-worker-mock--d31b38595ef057e4742a7edf5bdb8342f5070092f6c5739eaab6d5f54d9687ed.md',
+      metaFile:
+        'provider-worker-mock--d31b38595ef057e4742a7edf5bdb8342f5070092f6c5739eaab6d5f54d9687ed.meta.json',
+    });
     expect(result.results[0]).toMatchObject({
       provider: 'worker-mock',
       status: 'success',

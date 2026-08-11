@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { providerArtifactFileNames } from '../src/node-run-artifacts.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -119,7 +120,10 @@ describe('MCP check_async retrieval persists metering', () => {
 
     // .meta.json carries metering.
     const meta = JSON.parse(
-      readFileSync(join(dir, 'perplexity-sonar-deep.meta.json'), 'utf-8'),
+      readFileSync(
+        join(dir, providerArtifactFileNames('perplexity-sonar-deep').metaFile),
+        'utf-8',
+      ),
     );
     expect(meta.metering.kind).toBe('native_cost');
     expect(meta.metering.actual).toEqual({
@@ -142,6 +146,17 @@ describe('MCP check_async retrieval persists metering', () => {
       status: 'completed',
       retrievedAt: expect.any(Number),
     });
+
+    // A later inspection must not present the durable historical retrieval as
+    // an ordinary completed-and-unretrieved task.
+    const secondPass = await checkAsyncTasks(dir, false);
+    expect(secondPass.tasks).toEqual([
+      expect.objectContaining({
+        taskId: 'task-1',
+        status: 'completed',
+        retrieved: true,
+      }),
+    ]);
   });
 
   it('does not recover tasks from a corrupt run.json', async () => {
@@ -259,13 +274,13 @@ describe('MCP check_async poll state persistence', () => {
     expect(result.tasks[0]).toMatchObject({
       status: 'cancelled',
       providerStatus: 'CANCELLED',
-      error: 'cancelled by provider',
+      error: 'provider.poll_failed',
     });
     const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
     expect(persisted.providers[0].task).toMatchObject({
       status: 'cancelled',
       providerStatus: 'CANCELLED',
-      lastPollError: 'cancelled by provider',
+      lastPollError: 'provider.poll_failed',
     });
     expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
     expect(persisted.providers[0].task.lastPolledAt).toEqual(
@@ -322,13 +337,11 @@ describe('MCP check_async poll state persistence', () => {
     expect(result.tasks[0]).toMatchObject({
       status: 'running',
       providerStatus: 'MIGRATING',
-      error: 'Unknown remote status: MIGRATING',
     });
     const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
     expect(persisted.providers[0].task).toMatchObject({
       status: 'running',
       providerStatus: 'MIGRATING',
-      lastPollError: 'Unknown remote status: MIGRATING',
     });
     expect(persisted.providers[0].task.completedAt).toBeUndefined();
   });
@@ -348,14 +361,13 @@ describe('MCP check_async poll state persistence', () => {
     expect(result.tasks[0]).toMatchObject({
       status: 'failed',
       providerStatus: 'unsupported_provider',
-      error: 'Provider openai-deep does not support polling after this upgrade',
+      error: 'provider.unavailable',
     });
     const persisted = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
     expect(persisted.providers[0].task).toMatchObject({
       status: 'failed',
       providerStatus: 'unsupported_provider',
-      lastPollError:
-        'Provider openai-deep does not support polling after this upgrade',
+      lastPollError: 'provider.unavailable',
     });
     expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
   });

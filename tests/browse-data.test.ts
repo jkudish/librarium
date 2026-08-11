@@ -1,4 +1,10 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,6 +14,7 @@ import {
   extractPreview,
   isRunManifest,
   readRunEntry,
+  readRunSnapshot,
   runTallies,
 } from '../src/commands/browse-data.js';
 import type { RunManifest } from '../src/types.js';
@@ -122,6 +129,55 @@ describe('readRunEntry / discoverRuns', () => {
       'oldest',
     ]);
     expect(discoverRuns(baseDir, 2)).toHaveLength(2);
+  });
+
+  it('uses authoritative discovery and rejects symlinked run directories', () => {
+    const target = writeRun('target', makeManifest({ query: 'target' }));
+    symlinkSync(target, join(baseDir, 'linked-run'));
+
+    expect(discoverRuns(baseDir).map((entry) => entry.manifest.query)).toEqual([
+      'target',
+    ]);
+  });
+
+  it('keeps discovery authoritative while recovery remains read-only', () => {
+    const dir = writeRun(
+      'pending',
+      makeManifest({
+        status: 'awaiting_async',
+        exitCode: null,
+        providers: [
+          {
+            id: 'provider-a',
+            tier: 'deep-research',
+            status: 'async-pending',
+            durationMs: 0,
+            wordCount: 0,
+            citationCount: 0,
+            outputFile: '',
+            metaFile: '',
+            task: { taskId: 'task-a', submittedAt: 1, status: 'completed' },
+          },
+        ],
+      }),
+    );
+    writeFileSync(join(dir, 'provider-a.md'), 'recovered output');
+    const before = readFileSync(join(dir, 'run.json'), 'utf8');
+
+    const entry = readRunEntry(dir);
+    expect(entry?.manifest.providers[0]?.status).toBe('async-pending');
+    expect(entry?.manifest.providers[0]?.outputFile).toBe('');
+    const snapshot = readRunSnapshot(dir);
+    expect(snapshot?.reports[0]).toMatchObject({
+      id: 'provider-a',
+      status: 'success',
+      outputFile: 'provider-a.md',
+    });
+    expect(snapshot?.providerArtifacts['provider-a']).toMatchObject({
+      content: 'recovered output',
+      recovered: true,
+    });
+    expect(readFileSync(join(dir, 'run.json'), 'utf8')).toBe(before);
   });
 
   it('returns empty for a missing base dir', () => {

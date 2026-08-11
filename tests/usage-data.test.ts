@@ -26,7 +26,7 @@ function writeManifest(
   baseDir: string,
   timestampSeconds: number,
   providers: ProviderReport[],
-): void {
+): string {
   const dir = join(
     baseDir,
     `${timestampSeconds}-slug-${randomUUID().slice(0, 6)}`,
@@ -46,6 +46,7 @@ function writeManifest(
     exitCode: 0,
   };
   writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
+  return dir;
 }
 
 describe('aggregateUsage', () => {
@@ -143,6 +144,27 @@ describe('aggregateUsage', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'run.json'), '{ not valid json');
     expect(aggregateUsage(baseDir).runCount).toBe(0);
+  });
+
+  it('uses only authoritative manifest usage, never recovered metadata', () => {
+    const dir = writeManifest(baseDir, nowSec, [
+      report('exa', { costUsd: 0.01, totalTokens: 10 }),
+    ]);
+    writeFileSync(
+      join(dir, 'exa.meta.json'),
+      JSON.stringify({
+        provider: 'exa',
+        usage: { costUsd: 999, totalTokens: 999_999 },
+        citations: [],
+      }),
+    );
+
+    const aggregate = aggregateUsage(baseDir);
+    expect(aggregate.totalCostUsd).toBeCloseTo(0.01);
+    expect(aggregate.providers[0]).toMatchObject({
+      provider: 'exa',
+      totalTokens: 10,
+    });
   });
 
   it('aggregates estimated cost separately from reported cost', () => {

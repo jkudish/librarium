@@ -15,6 +15,10 @@ import {
   type RunManifestStore,
 } from '../src/core/research-run.js';
 import { readRunManifest } from '../src/core/run-manifest.js';
+import {
+  providerArtifactFileNames,
+  RunArtifactRepository,
+} from '../src/node-run-artifacts.js';
 import type {
   AsyncTaskHandle,
   Config,
@@ -162,10 +166,24 @@ describe('executeResearchRun', () => {
       status: 'completed',
       exitCode: 0,
     });
-    expect(readFileSync(join(outputDir, 'embedded.md'), 'utf8')).toBe(
-      'Embedded result',
-    );
-    expect(existsSync(join(outputDir, 'embedded.meta.json'))).toBe(true);
+    const artifactNames = providerArtifactFileNames(provider.id);
+    expect(
+      readFileSync(join(outputDir, artifactNames.outputFile), 'utf8'),
+    ).toBe('Embedded result');
+    expect(existsSync(join(outputDir, artifactNames.metaFile))).toBe(true);
+    expect(result.manifest.providers[0]).toMatchObject(artifactNames);
+    expect(
+      events
+        .filter(
+          (
+            event,
+          ): event is Extract<
+            ResearchRunEvent,
+            { type: 'dispatch-progress' }
+          > => event.type === 'dispatch-progress',
+        )
+        .find((event) => event.progress.report)?.progress.report,
+    ).toMatchObject(artifactNames);
     expect(existsSync(join(outputDir, 'sources.json'))).toBe(true);
     expect(existsSync(join(outputDir, 'summary.md'))).toBe(true);
     expect(existsSync(join(outputDir, 'prompt.md'))).toBe(true);
@@ -216,6 +234,63 @@ describe('executeResearchRun', () => {
       type: 'post-dispatch-warning',
       message: 'hook exploded',
     });
+  });
+
+  it('persists initial execution through one repository in write-ahead order', async () => {
+    const outputDir = join(
+      tmpdir(),
+      `librarium-repository-${crypto.randomUUID()}`,
+    );
+    dirs.push(outputDir);
+    const provider = new EmbeddedProvider();
+    const repository = new RunArtifactRepository();
+    const create = vi.spyOn(repository, 'create');
+    const prompt = vi.spyOn(repository, 'writePrompt');
+    const upsert = vi.spyOn(repository, 'upsertProviderReport');
+    const content = vi.spyOn(repository, 'writeProviderContent');
+    const meta = vi.spyOn(repository, 'writeProviderMeta');
+    const sources = vi.spyOn(repository, 'writeSources');
+    const mutate = vi.spyOn(repository, 'mutate');
+    const summary = vi.spyOn(repository, 'writeSummary');
+
+    await executeResearchRun(
+      {
+        query: 'repository ordering',
+        config: { ...config, defaults: { ...config.defaults, outputDir } },
+        providerIds: [provider.id],
+        outputDir,
+        slug: 'repository-ordering',
+      },
+      {
+        repository,
+        providerRegistry: {
+          getProvider: () => provider,
+          getAllProviders: () => [provider],
+        },
+        httpClient: async () => ({
+          status: 200,
+          statusText: 'OK',
+          data: { answer: 'Persisted once' },
+          headers: {},
+          durationMs: 1,
+        }),
+      },
+    );
+
+    const calledBefore = (
+      earlier: ReturnType<typeof vi.spyOn>,
+      later: ReturnType<typeof vi.spyOn>,
+    ) =>
+      expect(earlier.mock.invocationCallOrder[0]).toBeLessThan(
+        later.mock.invocationCallOrder[0] ?? 0,
+      );
+    calledBefore(create, prompt);
+    calledBefore(prompt, upsert);
+    calledBefore(upsert, content);
+    calledBefore(content, meta);
+    calledBefore(meta, sources);
+    calledBefore(sources, mutate);
+    calledBefore(mutate, summary);
   });
 
   it('isolates rejecting async observers', async () => {
