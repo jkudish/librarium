@@ -12,9 +12,12 @@ import { safeWriteFile as defaultSafeWriteFile } from './core/fs-utils.js';
 import { deduplicateSources } from './core/normalizer.js';
 import {
   applyRunLifecycle,
+  createRunManifest,
+  markRunFailed,
   mutateRunManifest,
   RunManifestError,
   readRunManifest,
+  upsertProviderReport,
 } from './core/run-manifest.js';
 import type {
   RunArtifactDiscovery,
@@ -39,6 +42,7 @@ import {
   wordCount,
 } from './node-run-artifact-codecs.js';
 import type {
+  AsyncTaskHandle,
   Citation,
   DeduplicatedSource,
   ProviderMetering,
@@ -229,7 +233,10 @@ export interface RunArtifactRepositoryOptions {
   readonly fs?: Partial<RunArtifactRepositoryFs>;
   readonly writeFile?: (path: string, content: string) => void;
   readonly readManifest?: typeof readRunManifest;
+  readonly createManifest?: typeof createRunManifest;
   readonly mutateManifest?: typeof mutateRunManifest;
+  readonly upsertProviderReport?: typeof upsertProviderReport;
+  readonly markFailed?: typeof markRunFailed;
   readonly now?: () => number;
 }
 
@@ -248,14 +255,21 @@ export class RunArtifactRepository {
   private readonly fs: RunArtifactRepositoryFs;
   private readonly writeFile: (path: string, content: string) => void;
   private readonly readManifestImpl: typeof readRunManifest;
+  private readonly createManifestImpl: typeof createRunManifest;
   private readonly mutateManifestImpl: typeof mutateRunManifest;
+  private readonly upsertProviderReportImpl: typeof upsertProviderReport;
+  private readonly markFailedImpl: typeof markRunFailed;
   private readonly now: () => number;
 
   constructor(options: RunArtifactRepositoryOptions = {}) {
     this.fs = { ...DEFAULT_FS, ...(options.fs ?? {}) };
     this.writeFile = options.writeFile ?? defaultSafeWriteFile;
     this.readManifestImpl = options.readManifest ?? readRunManifest;
+    this.createManifestImpl = options.createManifest ?? createRunManifest;
     this.mutateManifestImpl = options.mutateManifest ?? mutateRunManifest;
+    this.upsertProviderReportImpl =
+      options.upsertProviderReport ?? upsertProviderReport;
+    this.markFailedImpl = options.markFailed ?? markRunFailed;
     this.now = options.now ?? Date.now;
   }
 
@@ -265,6 +279,41 @@ export class RunArtifactRepository {
 
   resolveContainedPath(runDir: string, fileName: string): string {
     return resolveContainedPathWithFs(this.fs, runDir, fileName);
+  }
+
+  create(
+    runDir: string,
+    manifest: Omit<RunManifest, 'schemaVersion' | 'revision'>,
+  ): RunManifest {
+    const safeRunDir = this.assertRunDirectory(runDir);
+    this.resolveContainedPath(safeRunDir, fixedFile('manifest'));
+    return this.createManifestImpl(safeRunDir, manifest);
+  }
+
+  mutate(
+    runDir: string,
+    mutate: (manifest: RunManifest) => void,
+    expectedRevision?: number,
+  ): RunManifest {
+    const safeRunDir = this.assertRunDirectory(runDir);
+    this.resolveContainedPath(safeRunDir, fixedFile('manifest'));
+    return this.mutateManifestImpl(safeRunDir, mutate, expectedRevision);
+  }
+
+  upsertProviderReport(
+    runDir: string,
+    report: ProviderReport,
+    task?: AsyncTaskHandle,
+  ): RunManifest {
+    const safeRunDir = this.assertRunDirectory(runDir);
+    this.resolveContainedPath(safeRunDir, fixedFile('manifest'));
+    return this.upsertProviderReportImpl(safeRunDir, report, task);
+  }
+
+  markFailed(runDir: string, error: string, now = Date.now()): RunManifest {
+    const safeRunDir = this.assertRunDirectory(runDir);
+    this.resolveContainedPath(safeRunDir, fixedFile('manifest'));
+    return this.markFailedImpl(safeRunDir, error, now);
   }
 
   readManifest(runDir: string): RunManifest {

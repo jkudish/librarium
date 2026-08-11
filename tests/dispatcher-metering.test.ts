@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ESTIMATE_BUDGET_SKIP_REASON } from '../src/core/budget.js';
+import { providerArtifactFileNames } from '../src/node-run-artifacts.js';
 import type {
   Config,
   Provider,
@@ -114,6 +115,37 @@ describe('dispatcher: metering attachment', () => {
     const est = reports.find((r) => r.id === 'serpapi')?.metering?.estimate;
     expect(est?.estimatedCostUsd).toBe(0.03);
     expect(est?.costConfidence).toBe('configured');
+  });
+
+  it('matches Node artifact names for sanitized-ID collisions', async () => {
+    const providerIds = ['a:b', 'a?b'];
+    for (const id of providerIds) registerProvider(searchProvider(id));
+
+    const { reports } = await dispatch({
+      config: makeConfig({
+        'a:b': { apiKey: '', enabled: true },
+        'a?b': { apiKey: '', enabled: true },
+      }),
+      providerIds,
+      query: 'q',
+      mode: 'sync',
+      credentials: { env: {} },
+    });
+
+    const names = providerIds.map((id) => {
+      const report = reports.find((candidate) => candidate.id === id);
+      return {
+        id,
+        outputFile: report?.outputFile,
+        metaFile: report?.metaFile,
+      };
+    });
+
+    for (const name of names) {
+      expect(name).toMatchObject(providerArtifactFileNames(name.id));
+    }
+    expect(names[0]?.outputFile).not.toBe(names[1]?.outputFile);
+    expect(names[0]?.metaFile).not.toBe(names[1]?.metaFile);
   });
 });
 

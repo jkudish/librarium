@@ -144,7 +144,12 @@ export async function dispatch(
       );
       results.push(structured);
 
-      return createReport(fallbackId, fallbackProvider.tier, structured);
+      const report = await createReport(
+        fallbackId,
+        fallbackProvider.tier,
+        structured,
+      );
+      return report;
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       const metering = meteringFor(fallbackId);
@@ -434,7 +439,7 @@ export async function dispatch(
               providerConfig,
             );
             results.push(structured);
-            const report = createReport(id, provider.tier, structured);
+            const report = await createReport(id, provider.tier, structured);
             report.task = {
               taskId: handle.taskId,
               submittedAt: handle.submittedAt,
@@ -478,7 +483,7 @@ export async function dispatch(
               providerConfig,
             );
             results.push(structured);
-            const report = createReport(id, provider.tier, structured);
+            const report = await createReport(id, provider.tier, structured);
             const retrievedAt = result.error ? undefined : Date.now();
             report.task = {
               taskId: handle.taskId,
@@ -568,7 +573,7 @@ export async function dispatch(
             providerConfig,
           );
           results.push(structured);
-          const report = createReport(id, provider.tier, structured);
+          const report = await createReport(id, provider.tier, structured);
           reports.push(report);
           recordBudget(report);
           onProgress?.({ providerId: id, event: 'error', report });
@@ -593,7 +598,7 @@ export async function dispatch(
           providerConfig,
         );
         results.push(structured);
-        const report = createReport(id, provider.tier, structured);
+        const report = await createReport(id, provider.tier, structured);
 
         reports.push(report);
         recordBudget(report);
@@ -746,12 +751,12 @@ function createDispatchResult(
   };
 }
 
-function createReport(
+async function createReport(
   providerId: string,
   tier: Provider['tier'],
   result: ProviderDispatchResult,
-): ProviderReport {
-  const safeId = sanitizeId(providerId);
+): Promise<ProviderReport> {
+  const artifactNames = await providerArtifactFileNames(providerId);
   return {
     id: providerId,
     tier,
@@ -761,16 +766,32 @@ function createReport(
     citationCount: result.citations.length,
     outputFile:
       result.status === 'success' || result.status === 'error'
-        ? `${safeId}.md`
+        ? artifactNames.outputFile
         : '',
     metaFile:
       result.status === 'success' || result.status === 'error'
-        ? `${safeId}.meta.json`
+        ? artifactNames.metaFile
         : '',
     usage: result.usage,
     metering: result.metering,
     error: result.error,
     fallbackFor: result.fallbackFor,
     preventFallback: result.preventFallback,
+  };
+}
+
+async function providerArtifactFileNames(providerId: string): Promise<{
+  outputFile: string;
+  metaFile: string;
+}> {
+  const stem = sanitizeId(providerId).slice(0, 64) || 'provider';
+  const bytes = new TextEncoder().encode(providerId);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  const hash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return {
+    outputFile: `provider-${stem}--${hash}.md`,
+    metaFile: `provider-${stem}--${hash}.meta.json`,
   };
 }
