@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSync } from 'esbuild';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyRunLifecycle,
   createRunManifest,
@@ -19,6 +19,33 @@ import {
 import type { ProviderReport } from '../src/types.js';
 
 let dir: string;
+
+const fsFault = vi.hoisted(() => ({
+  code: undefined as string | undefined,
+  remaining: 0,
+  syscall: 'open',
+}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    openSync: (...args: Parameters<typeof actual.openSync>) => {
+      if (
+        fsFault.remaining > 0 &&
+        args[1] === 'wx' &&
+        String(args[0]).endsWith('run.json.lock')
+      ) {
+        fsFault.remaining -= 1;
+        throw Object.assign(new Error(`injected ${fsFault.code}`), {
+          code: fsFault.code,
+          syscall: fsFault.syscall,
+        });
+      }
+      return actual.openSync(...args);
+    },
+  };
+});
 
 const pendingReport: ProviderReport = {
   id: 'openai-research',
@@ -36,7 +63,13 @@ beforeEach(() => {
   mkdirSync(dir, { recursive: true });
 });
 
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => {
+  fsFault.code = undefined;
+  fsFault.remaining = 0;
+  fsFault.syscall = 'open';
+  vi.restoreAllMocks();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 function create(): void {
   createRunManifest(dir, {
@@ -72,6 +105,41 @@ describe('run manifest v2 store', () => {
       RunManifestRevisionError,
     );
   });
+
+  it.each([1, 5])(
+    'retries %i transient Windows lock permission errors',
+    (failures) => {
+      create();
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+      fsFault.code = 'EPERM';
+      fsFault.remaining = failures;
+
+      expect(
+        mutateRunManifest(dir, (manifest) => (manifest.query = 'updated')),
+      ).toMatchObject({ revision: 1, query: 'updated' });
+      expect(existsSync(join(dir, 'run.json.lock'))).toBe(false);
+    },
+  );
+
+  it.each([
+    ['darwin', 'EPERM', 'open', 1],
+    ['win32', 'EPERM', 'write', 1],
+    ['win32', 'EPERM', 'open', 6],
+    ['win32', 'ENOENT', 'open', 1],
+  ] as const)(
+    'does not retry %s lock errors with code %s from %s after %i failures',
+    (platform, code, syscall, failures) => {
+      create();
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
+      fsFault.code = code;
+      fsFault.remaining = failures;
+      fsFault.syscall = syscall;
+
+      expect(() => mutateRunManifest(dir, () => {})).toThrow(
+        `injected ${code}`,
+      );
+    },
+  );
 
   it('serializes mutations across processes without losing revisions', async () => {
     create();
