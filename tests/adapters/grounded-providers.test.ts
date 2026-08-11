@@ -1,6 +1,8 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { GeminiGroundedProvider } from '../../src/adapters/gemini-grounded.js';
 import { OpenRouterOnlineProvider } from '../../src/adapters/openrouter-online.js';
+import { PerplexityAdvancedDeepProvider } from '../../src/adapters/perplexity-advanced-deep.js';
+import { PerplexityDeepResearchProvider } from '../../src/adapters/perplexity-deep-research.js';
 
 function jsonResponse(status: number, data: unknown): Response {
   return {
@@ -182,5 +184,95 @@ describe('grounded providers', () => {
     expect(result.content).toBe('');
     expect(result.citations).toEqual([]);
     expect(result.error).toContain('annotations');
+  });
+
+  it.each([
+    [
+      'Gemini grounded',
+      new GeminiGroundedProvider({
+        credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+        model: 'gemini-2.5-pro',
+      }),
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=gemini-key',
+    ],
+    [
+      'OpenRouter online',
+      new OpenRouterOnlineProvider({
+        credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+        model: 'openai/gpt-4o',
+      }),
+      'https://openrouter.ai/api/v1/chat/completions',
+    ],
+  ] as const)(
+    'threads a configured compatible model through %s',
+    async (_name, provider, expectedUrl) => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(
+        jsonResponse(200, {
+          candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+          choices: [
+            {
+              message: {
+                content: 'ok',
+                annotations: [],
+              },
+            },
+          ],
+        }),
+      );
+      globalThis.fetch = fetchMock;
+
+      await provider.execute('configured target', { timeout: 10 });
+      const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(expectedUrl);
+      const body = JSON.parse(options.body as string) as { model?: string };
+      expect(body.model).toBe(
+        provider.id === 'gemini-grounded' ? undefined : 'openai/gpt-4o',
+      );
+    },
+  );
+
+  it.each([
+    [PerplexityDeepResearchProvider, 'deep-research'],
+    [PerplexityAdvancedDeepProvider, 'advanced-deep-research'],
+  ] as const)(
+    'keeps the %s preset separate from an optional model and omits an unreported model',
+    async (Provider, preset) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse(200, { id: 'agent-1', status: 'completed', output: [] }),
+        );
+      globalThis.fetch = fetchMock;
+      const provider = new Provider({
+        credentials: { env: { PERPLEXITY_API_KEY: 'perplexity-key' } },
+        model: 'sonar-pro',
+      });
+
+      const result = await provider.execute('deep query', { timeout: 10 });
+      expect(result).not.toHaveProperty('model');
+      const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(options.body as string)).toEqual({
+        preset,
+        model: 'sonar-pro',
+        input: 'deep query',
+      });
+    },
+  );
+
+  it('threads the configured Perplexity model through its credential check request', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(200, {}));
+    globalThis.fetch = fetchMock;
+    const provider = new PerplexityDeepResearchProvider({
+      credentials: { env: { PERPLEXITY_API_KEY: 'perplexity-key' } },
+      model: 'sonar-pro',
+    });
+
+    await expect(provider.test()).resolves.toEqual({ ok: true });
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      preset: 'deep-research',
+      model: 'sonar-pro',
+      input: 'ping',
+    });
   });
 });

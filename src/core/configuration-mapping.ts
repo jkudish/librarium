@@ -13,6 +13,8 @@ import {
   type AdapterProfileBinding,
   adapterProfileBinding,
   adapterProfileBindings,
+  buildProfileBindings,
+  TargetSelectionError,
 } from './profile-bindings.js';
 import {
   buildProviderCatalog,
@@ -820,6 +822,53 @@ function fallbackReserve(
   return { reserve, reserveOnlyAdapterIds, notices, issues };
 }
 
+/**
+ * v1 keeps retired aliases until #2439, but model selection itself follows the
+ * same exact binding policy as native v2 before any factory can run.
+ */
+function modelSelectionIssues(
+  providerConfigs: Readonly<Record<string, ProviderConfig>>,
+  catalog: readonly ProviderCatalogEntry[],
+): PreparationIssue[] {
+  const declarations = new Map(
+    catalog.flatMap((entry) =>
+      entry.profiles.map(
+        (profile) =>
+          [`${entry.provider_id}/${profile.profile_id}`, profile] as const,
+      ),
+    ),
+  );
+  const bindings = buildProfileBindings(declarations);
+  const adapterBindings = adapterProfileBindings();
+  const issues: PreparationIssue[] = [];
+
+  for (const [adapterId, provider] of Object.entries(providerConfigs)) {
+    const identity = adapterBindings.get(adapterId);
+    if (!identity) continue;
+    const binding = bindings.get(
+      `${identity.provider_id}/${identity.profile_id}`,
+    );
+    try {
+      binding?.validateModel(provider.model);
+    } catch (error) {
+      const diagnostic =
+        error instanceof TargetSelectionError
+          ? error
+          : new TargetSelectionError(
+              'config_model_invalid',
+              error instanceof Error ? error.message : 'Invalid model.',
+            );
+      issues.push({
+        code: diagnostic.code,
+        phase: 'migration',
+        path: `/providers/${escapePointerSegment(adapterId)}/model`,
+        message: diagnostic.message,
+      });
+    }
+  }
+  return issues;
+}
+
 function sameProfile(
   left: Pick<AdapterProfileBinding, 'provider_id' | 'profile_id'>,
   right: Pick<AdapterProfileBinding, 'provider_id' | 'profile_id'>,
@@ -1088,6 +1137,10 @@ export function mapConfiguration(
     ...custom.issues,
     ...canonicalGroups.issues,
     ...fallback.issues,
+    ...modelSelectionIssues(
+      providerConfigs,
+      options.catalog ?? BUILTIN_PROVIDER_CATALOG,
+    ),
   ];
   const deadlineMigration = deadlineMigrationContext(
     config,

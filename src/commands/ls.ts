@@ -66,6 +66,10 @@ export function registerLsCommand(program: Command): void {
           'Config file'.length,
           'Missing'.length,
         );
+        const targetWidth = Math.max(
+          'Target'.length,
+          ...meta.map((p) => targetLabel(p.target).length),
+        );
         const color = isColorEnabled(process.stdout);
 
         // Table header
@@ -78,6 +82,7 @@ export function registerLsCommand(program: Command): void {
           'Enabled'.padEnd(enabledWidth),
           'API Key'.padEnd(apiKeyWidth),
           'Credential'.padEnd(credentialSourceWidth),
+          'Target'.padEnd(targetWidth),
         ].join('  ');
 
         console.log(`\n${header}`);
@@ -110,6 +115,7 @@ export function registerLsCommand(program: Command): void {
             enabled.padEnd(enabledWidth),
             apiKey.padEnd(apiKeyWidth),
             credentialSource.padEnd(credentialSourceWidth),
+            targetLabel(p.target).padEnd(targetWidth),
           ].join('  ');
           console.log(configured ? row : dimText(row, color));
         }
@@ -133,4 +139,26 @@ export function registerLsCommand(program: Command): void {
         process.exitCode = 1;
       }
     });
+}
+
+function targetLabel(
+  target:
+    | {
+        primary: { model_selection: string; kind?: string; target_id?: string };
+        underlying?: {
+          model_selection: string;
+          kind?: string;
+          target_id?: string;
+        };
+      }
+    | undefined,
+): string {
+  if (!target) return 'Custom';
+  const slotLabel = (slot: typeof target.primary): string =>
+    slot.target_id ?? slot.kind ?? slot.model_selection;
+  const primary = slotLabel(target.primary);
+  const underlying = target.underlying
+    ? slotLabel(target.underlying)
+    : undefined;
+  return underlying ? `${primary} + ${underlying}` : primary;
 }

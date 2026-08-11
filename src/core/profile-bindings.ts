@@ -43,6 +43,8 @@ export interface ProfileBinding {
   readonly adapter_id: string;
   readonly binding_id: string;
   readonly options_schema: z.ZodTypeAny;
+  /** Validates a top-level v1/v2 model override before adapter construction. */
+  validateModel(model?: string): void;
   resolve(config?: ProfileBindingConfig): {
     readonly profile: ExecutionProfile;
     readonly estimate?: NetworkFreeEstimate;
@@ -50,6 +52,84 @@ export interface ProfileBinding {
 }
 
 export class ProfileBindingError extends Error {}
+
+/** A stable, path-independent diagnostic from the shared target policy. */
+export class TargetSelectionError extends ProfileBindingError {
+  constructor(
+    readonly code:
+      | 'config_model_not_configurable'
+      | 'config_model_not_allowed'
+      | 'config_model_invalid',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Exact reviewed models which preserve each provider's dedicated tool contract.
+ *
+ * These lists are intentionally small. A provider may add a model only after a
+ * reviewed compatibility change; a prefix or family match would silently turn
+ * an unsupported configuration into a paid request.
+ */
+const MODEL_OVERRIDE_ALLOWLISTS: Readonly<Record<string, ReadonlySet<string>>> =
+  {
+    'gemini-grounded': new Set(['gemini-2.5-flash', 'gemini-2.5-pro']),
+    'openrouter-online': new Set(['openai/gpt-4o-mini', 'openai/gpt-4o']),
+  };
+
+function normalizedConfiguredModel(
+  model: string | undefined,
+): string | undefined {
+  const normalized = model?.trim();
+  return normalized || undefined;
+}
+
+/**
+ * Apply the one model-selection policy shared by catalog resolution and both
+ * configuration ingress paths. It deliberately validates only a selected
+ * model. Omission and whitespace preserve the declared/provider-owned target.
+ */
+function validateConfiguredModel(
+  profile: ExecutionProfile,
+  adapterId: string,
+  model: string | undefined,
+): void {
+  const configured = normalizedConfiguredModel(model);
+  if (!configured) return;
+
+  const target = profile.identity.target;
+  const slot =
+    target.primary.model_selection === 'configurable'
+      ? target.primary
+      : target.primary.kind !== 'model' &&
+          target.underlying?.model_selection === 'provider_managed'
+        ? target.underlying
+        : undefined;
+  if (!slot) {
+    throw new TargetSelectionError(
+      'config_model_not_configurable',
+      'This provider profile does not support selecting a different model.',
+    );
+  }
+
+  const parsed = OpaqueIdSchema.safeParse(configured);
+  if (!parsed.success) {
+    throw new TargetSelectionError(
+      'config_model_invalid',
+      parsed.error.issues[0]?.message ?? 'Invalid model identifier.',
+    );
+  }
+
+  const allowlist = MODEL_OVERRIDE_ALLOWLISTS[adapterId];
+  if (allowlist && !allowlist.has(parsed.data)) {
+    throw new TargetSelectionError(
+      'config_model_not_allowed',
+      `The configured model is not supported by ${adapterId}; choose a reviewed compatible model.`,
+    );
+  }
+}
 
 /**
  * Only exact, plan-priced metering yields a cost estimate.
@@ -138,19 +218,35 @@ function bindingEstimate(adapterId: string): NetworkFreeEstimate | undefined {
  */
 function configuredTargetProjection(
   profile: ExecutionProfile,
+  adapterId: string,
   configuredModel: string | undefined,
 ): ExecutionProfile {
-  const primary = profile.identity.target.primary;
-  if (primary.model_selection !== 'configurable') return profile;
+  validateConfiguredModel(profile, adapterId, configuredModel);
+  const targetId = normalizedConfiguredModel(configuredModel);
+  if (!targetId) return profile;
 
-  const targetId = configuredModel?.trim();
-  if (!targetId || targetId === primary.target_id) return profile;
+  const target = profile.identity.target;
+  const primary = target.primary;
+  if (primary.model_selection === 'configurable') {
+    if (targetId === primary.target_id) return profile;
+    return {
+      ...profile,
+      identity: {
+        ...profile.identity,
+        target: {
+          ...target,
+          primary: { ...primary, target_id: targetId },
+        },
+      },
+    };
+  }
 
-  const validated = OpaqueIdSchema.safeParse(targetId);
-  if (!validated.success) {
-    throw new ProfileBindingError(
-      `model: ${validated.error.issues[0]?.message ?? 'Invalid target identifier'}`,
-    );
+  const underlying = target.underlying;
+  if (
+    primary.kind === 'model' ||
+    underlying?.model_selection !== 'provider_managed'
+  ) {
+    return profile;
   }
 
   return {
@@ -158,8 +254,12 @@ function configuredTargetProjection(
     identity: {
       ...profile.identity,
       target: {
-        ...profile.identity.target,
-        primary: { ...primary, target_id: validated.data },
+        ...target,
+        underlying: {
+          model_selection: 'configurable',
+          kind: 'model',
+          target_id: targetId,
+        },
       },
     },
   };
@@ -180,6 +280,9 @@ function bind(input: BindingInput): ProfileBinding {
       input.binding_id ??
       `${input.provider_id}.${input.declaration.profile_id}.${input.adapter_id}`,
     options_schema: optionsSchema,
+    validateModel(model?: string) {
+      validateConfiguredModel(declared, input.adapter_id, model);
+    },
     resolve(config?: ProfileBindingConfig) {
       const parsed = optionsSchema.safeParse(config?.options ?? {});
       if (!parsed.success) {
@@ -198,7 +301,11 @@ function bind(input: BindingInput): ProfileBinding {
         : declared;
       // The configured identifier is applied last so an options-driven strategy
       // change (web search off, widened corpora) never discards it.
-      const profile = configuredTargetProjection(projected, config?.model);
+      const profile = configuredTargetProjection(
+        projected,
+        input.adapter_id,
+        config?.model,
+      );
       return { profile, ...(estimate && { estimate }) };
     },
   });

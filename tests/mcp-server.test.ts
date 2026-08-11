@@ -179,6 +179,49 @@ describe('mcp tool surface', () => {
     await server.close();
   });
 
+  it('lists configured targets without claiming provider-observed models', async () => {
+    await initializeProviders({
+      providers: { 'perplexity-deep-research': { model: 'sonar-pro' } },
+    });
+    const { client, server } = await connect({
+      loadMergedConfig: () => ({
+        ...makeConfig(),
+        providers: {
+          'perplexity-deep-research': { enabled: true, model: 'sonar-pro' },
+        },
+      }),
+      initialize: vi.fn().mockResolvedValue({
+        warnings: [],
+        loadedCustomProviders: [],
+        skippedCustomProviders: [],
+      }),
+    });
+    const response = await client.callTool({
+      name: 'list_providers',
+      arguments: {},
+    });
+    const payload = JSON.parse(
+      (response.content as { text: string }[])[0].text,
+    );
+    const provider = payload.providers.find(
+      (entry: { id: string }) => entry.id === 'perplexity-deep-research',
+    );
+    expect(provider.target).toEqual({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: {
+        model_selection: 'configurable',
+        kind: 'model',
+        target_id: 'sonar-pro',
+      },
+    });
+    expect(provider).not.toHaveProperty('model');
+    await server.close();
+  });
+
   it('passes the merged config to check_async', async () => {
     const config = makeConfig();
     const runDir = join(baseDir, 'check-async');

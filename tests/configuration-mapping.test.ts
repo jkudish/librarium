@@ -1241,4 +1241,32 @@ describe('configuration mapping', () => {
       ['configuration_fallback_unknown_adapter', '/providers/exa/fallback'],
     ]);
   });
+
+  it('uses the shared model selection diagnostics before v1 factory construction', () => {
+    const mapped = map(
+      config({
+        providers: {
+          exa: { enabled: true, model: 'not-supported' },
+          'gemini-grounded': { enabled: true, model: 'gemini-3.6-flash' },
+          'openrouter-online': { enabled: true, model: 'openai/gpt-4o' },
+        },
+      }),
+      { requestDeadlineMs: 2_000_000 },
+    );
+    expect(mapped.preflight.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'config_model_not_configurable',
+          path: '/providers/exa/model',
+        }),
+        expect.objectContaining({
+          code: 'config_model_not_allowed',
+          path: '/providers/gemini-grounded/model',
+        }),
+      ]),
+    );
+    expect(mapped.preflight.issues).not.toContainEqual(
+      expect.objectContaining({ path: '/providers/openrouter-online/model' }),
+    );
+  });
 });

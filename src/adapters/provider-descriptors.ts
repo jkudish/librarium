@@ -62,9 +62,15 @@ function model(
   context: BuiltInProviderFactoryContext,
 ): string | undefined {
   return (
-    context.providerConfig?.model ??
-    getBuiltinProviderDefinition(id)?.defaultModel
+    configuredModel(context) ?? getBuiltinProviderDefinition(id)?.defaultModel
   );
+}
+
+/** Blank legacy values mean no override, matching binding resolution. */
+function configuredModel(
+  context: BuiltInProviderFactoryContext,
+): string | undefined {
+  return context.providerConfig?.model?.trim() || undefined;
 }
 
 function webSearch(context: BuiltInProviderFactoryContext): boolean {
@@ -109,12 +115,14 @@ function perplexitySearchOptions(
 
 const factories: Record<string, ProviderFactory> = {
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
-  'perplexity-deep-research': () => new PerplexityDeepResearchProvider(),
-  'perplexity-advanced-deep': () => new PerplexityAdvancedDeepProvider(),
+  'perplexity-deep-research': (context) =>
+    new PerplexityDeepResearchProvider({ model: configuredModel(context) }),
+  'perplexity-advanced-deep': (context) =>
+    new PerplexityAdvancedDeepProvider({ model: configuredModel(context) }),
   'openai-research': ({ providerConfig }) =>
     new OpenAIResearchProvider({
       model:
-        providerConfig?.model ??
+        configuredModel({ providerConfig }) ??
         getBuiltinProviderDefinition('openai-research')?.defaultModel,
       maxToolCalls: option(providerConfig, 'maxToolCalls'),
       reasoningEffort: option(providerConfig, 'reasoningEffort'),
@@ -123,9 +131,13 @@ const factories: Record<string, ProviderFactory> = {
   'gemini-deep': (context) =>
     new GeminiDeepProvider({ model: model('gemini-deep', context) }),
   'perplexity-sonar-pro': () => new PerplexitySonarProProvider(),
-  'gemini-grounded': () => new GeminiGroundedProvider(),
+  'gemini-grounded': (context) =>
+    new GeminiGroundedProvider({ model: model('gemini-grounded', context) }),
   grok: (context) => new GrokProvider({ model: model('grok', context) }),
-  'openrouter-online': () => new OpenRouterOnlineProvider(),
+  'openrouter-online': (context) =>
+    new OpenRouterOnlineProvider({
+      model: model('openrouter-online', context),
+    }),
   'brave-answers': () => new BraveAnswersProvider(),
   exa: () => new ExaProvider(),
   'you-research': () => new YouResearchProvider(),

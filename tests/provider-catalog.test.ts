@@ -3,6 +3,7 @@ import {
   type ExecutionProfile,
   ExecutionProfileSchema,
 } from '../src/contracts/domain/index.js';
+import { perplexityPresetResearchProfile } from '../src/contracts/examples.js';
 import { fallbackCompatibilityIssues } from '../src/contracts/interchange/compatibility.js';
 import type { CredentialContext } from '../src/core/credentials.js';
 import {
@@ -1132,14 +1133,19 @@ describe('provider catalog -- target selection', () => {
       },
     });
     expect(
-      built.get('perplexity-deep-research', 'research')?.profile.identity
-        .target,
+      built.get('perplexity-deep-research', 'research')?.profile.identity.target
+        .primary,
     ).toEqual({
-      primary: {
-        model_selection: 'fixed',
-        kind: 'preset',
-        target_id: 'deep-research',
-      },
+      model_selection: 'fixed',
+      kind: 'preset',
+      target_id: 'deep-research',
+    });
+    expect(
+      built.get('perplexity-deep-research', 'research')?.profile.identity.target
+        .underlying,
+    ).toEqual({
+      model_selection: 'provider_managed',
+      kind: 'model',
     });
   });
 
@@ -1147,7 +1153,9 @@ describe('provider catalog -- target selection', () => {
     for (const [providerId, profileId] of [
       ['openai-research', 'research'],
       ['gemini-deep', 'research'],
+      ['gemini-grounded', 'grounded'],
       ['grok', 'web'],
+      ['openrouter', 'grounded'],
       ['claude', 'chat'],
       ['openai-chat', 'chat'],
       ['gemini-chat', 'chat'],
@@ -1805,7 +1813,21 @@ const CONFIGURABLE_TARGET_MATRIX = [
 ] as const;
 
 describe('provider catalog -- configured target fidelity', () => {
-  it('exposes exactly the seven adapter-backed configurable targets', () => {
+  it('keeps a real contract fixture for a provider-managed underlying model', () => {
+    expect(
+      ExecutionProfileSchema.safeParse(perplexityPresetResearchProfile).success,
+    ).toBe(true);
+    expect(perplexityPresetResearchProfile.identity.target).toEqual({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: { model_selection: 'provider_managed', kind: 'model' },
+    });
+  });
+
+  it('preserves the seven existing configurable primary targets', () => {
     const configurable = catalog()
       .resolved.filter(
         (item) =>
@@ -1817,12 +1839,19 @@ describe('provider catalog -- configured target fidelity', () => {
           `${item.profile.identity.provider_id}/${item.declaration.profile_id}`,
       );
 
-    expect(configurable).toEqual(
-      CONFIGURABLE_TARGET_MATRIX.map(
-        ([providerId, profileId]) => `${providerId}/${profileId}`,
-      ),
+    const existing = CONFIGURABLE_TARGET_MATRIX.map(
+      ([providerId, profileId]) => `${providerId}/${profileId}`,
     );
-    expect(configurable).toHaveLength(7);
+    expect(configurable.filter((key) => existing.includes(key))).toEqual(
+      existing,
+    );
+    expect(configurable).toHaveLength(9);
+    expect(configurable).toEqual(
+      expect.arrayContaining([
+        'gemini-grounded/grounded',
+        'openrouter/grounded',
+      ]),
+    );
   });
 
   it('resolves every configurable target to the configured identifier', () => {
@@ -1897,11 +1926,11 @@ describe('provider catalog -- configured target fidelity', () => {
     );
   });
 
-  it('never makes a fixed, provider-managed, or not-applicable target configurable', () => {
+  it('keeps dedicated, provider-managed, and raw targets truthful', () => {
     const built = buildProviderCatalog({
       providerConfigs: enabledConfigs({
         'brave-answers': { model: 'ignored-model' },
-        'openrouter-online': { model: 'ignored-model' },
+        'openrouter-online': { model: 'not-reviewed' },
         'kagi-fastgpt': { model: 'ignored-preset' },
         'you-research': { model: 'ignored-model' },
         'searchapi-chatgpt': { model: 'ignored-model' },
@@ -1914,12 +1943,8 @@ describe('provider catalog -- configured target fidelity', () => {
       built.get('brave-answers', 'grounded')?.profile.identity.target.primary,
     ).toEqual({ model_selection: 'fixed', kind: 'model', target_id: 'brave' });
     expect(
-      built.get('openrouter', 'grounded')?.profile.identity.target.primary,
-    ).toEqual({
-      model_selection: 'fixed',
-      kind: 'model',
-      target_id: 'openai/gpt-4o-mini',
-    });
+      built.get('openrouter', 'grounded')?.availability.configuration_valid,
+    ).toBe(false);
     expect(
       built.get('kagi-fastgpt', 'grounded')?.profile.identity.target.primary,
     ).toEqual({
@@ -1937,6 +1962,53 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(built.get('exa', 'search')?.profile.identity.target.primary).toEqual(
       { model_selection: 'not_applicable' },
     );
+  });
+
+  it('resolves configured models for Gemini and OpenRouter only from exact reviewed allowlists', () => {
+    for (const [adapterId, providerId, profileId, model] of [
+      ['gemini-grounded', 'gemini-grounded', 'grounded', 'gemini-2.5-pro'],
+      ['openrouter-online', 'openrouter', 'grounded', 'openai/gpt-4o'],
+    ] as const) {
+      const resolved = buildProviderCatalog({
+        providerConfigs: enabledConfigs({ [adapterId]: { model } }),
+        credentials: allCredentials(),
+      }).get(providerId, profileId);
+      expect(resolved?.profile.identity.target.primary).toMatchObject({
+        model_selection: 'configurable',
+        target_id: model,
+      });
+      expect(resolved?.availability.configuration_valid).toBe(true);
+    }
+  });
+
+  it('keeps a fixed Perplexity preset with provider-managed or configured underlying model', () => {
+    const unresolved = catalog().get('perplexity-deep-research', 'research');
+    expect(unresolved?.profile.identity.target).toEqual({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: { model_selection: 'provider_managed', kind: 'model' },
+    });
+    const configured = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        'perplexity-deep-research': { model: 'sonar-pro' },
+      }),
+      credentials: allCredentials(),
+    }).get('perplexity-deep-research', 'research');
+    expect(configured?.profile.identity.target).toEqual({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: {
+        model_selection: 'configurable',
+        kind: 'model',
+        target_id: 'sonar-pro',
+      },
+    });
   });
 
   it('rejects a configured identifier the contract cannot carry', () => {

@@ -6,6 +6,7 @@ import type {
   ProviderTier,
   ProviderUsage,
 } from '../types.js';
+import type { BaseProviderOptions } from './base.js';
 import { BaseProvider } from './base.js';
 
 interface GeminiGroundedPart {
@@ -51,6 +52,12 @@ const GEMINI_GROUNDED_MODEL = getBuiltinProviderDefaultModel('gemini-grounded');
 export class GeminiGroundedProvider extends BaseProvider {
   readonly id = 'gemini-grounded';
   readonly tier: ProviderTier = 'ai-grounded';
+  private readonly model: string;
+
+  constructor(options: BaseProviderOptions & { model?: string } = {}) {
+    super(options);
+    this.model = options.model?.trim() || GEMINI_GROUNDED_MODEL;
+  }
 
   async execute(
     query: string,
@@ -61,7 +68,7 @@ export class GeminiGroundedProvider extends BaseProvider {
 
     try {
       const response = await this.request<GeminiGroundedResponse>(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_GROUNDED_MODEL}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           body: {
@@ -113,7 +120,7 @@ export class GeminiGroundedProvider extends BaseProvider {
         content,
         citations,
         durationMs,
-        model: GEMINI_GROUNDED_MODEL,
+        model: this.model,
         tokenUsage: {
           input: data.usageMetadata?.promptTokenCount,
           output: data.usageMetadata?.candidatesTokenCount,

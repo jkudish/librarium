@@ -252,6 +252,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
             keyConfigured: p.hasApiKey,
             credentialSource: p.credentialSource,
             configured: p.configured !== false,
+            target: p.target,
           })),
         });
       } catch (e) {

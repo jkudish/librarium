@@ -887,6 +887,35 @@ describe('public v2 configuration migration', () => {
     ]);
   });
 
+  it('uses model diagnostics at the exact model path for fixed and allowlisted targets', () => {
+    const result = validateConfigV2(
+      v2({
+        providers: {
+          exa: { enabled: true, model: 'not-supported' },
+          'gemini-grounded': { enabled: true, model: 'gemini-3.6-flash' },
+          'openrouter-online': { enabled: true, model: 'openai/gpt-4o' },
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'config_model_not_configurable',
+          path: '/providers/exa/model',
+        }),
+        expect.objectContaining({
+          code: 'config_model_not_allowed',
+          path: '/providers/gemini-grounded/model',
+        }),
+      ]),
+    );
+    expect(result.issues).not.toContainEqual(
+      expect.objectContaining({ path: '/providers/openrouter-online/model' }),
+    );
+  });
+
   it('rejects non-JSON options and invalid explicit request deadlines', () => {
     const badJson = validateConfigV2(
       v2({
