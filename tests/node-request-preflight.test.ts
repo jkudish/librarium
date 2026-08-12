@@ -4,7 +4,6 @@ import {
   emitRequestPreflightNotices,
   formatRequestDiagnosticCodes,
   preflightProductionRequest,
-  projectLegacyExecutionConfig,
   RequestPreflightError,
 } from '../src/node-request-preflight.js';
 import type { Config } from '../src/types.js';
@@ -278,46 +277,6 @@ describe('Node production request preflight', () => {
     expect(() =>
       assertAdmittedAdaptersRegistered(result.prepared, ['exa']),
     ).toThrow(/brave-search/);
-  });
-
-  it('projects only admitted compatible fallbacks to legacy dispatch', () => {
-    const compatible = config({
-      providers: {
-        exa: { enabled: true, fallback: 'brave-search' },
-        'brave-search': { enabled: true },
-      },
-    });
-    const compatiblePreflight = preflightProductionRequest(
-      request(compatible),
-      {
-        createCredentials: () => ({
-          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
-        }),
-      },
-    );
-    expect(
-      projectLegacyExecutionConfig(compatible, compatiblePreflight.prepared)
-        .providers.exa?.fallback,
-    ).toBe('brave-search');
-
-    const incompatible = config({
-      providers: {
-        exa: { enabled: true, fallback: 'brave-answers' },
-        'brave-answers': { enabled: false },
-      },
-    });
-    const incompatiblePreflight = preflightProductionRequest(
-      request(incompatible),
-      {
-        createCredentials: () => ({
-          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
-        }),
-      },
-    );
-    expect(
-      projectLegacyExecutionConfig(incompatible, incompatiblePreflight.prepared)
-        .providers.exa?.fallback,
-    ).toBeUndefined();
   });
 
   it('keeps emitted notices bounded and free of request content', () => {

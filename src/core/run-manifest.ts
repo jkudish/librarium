@@ -1,15 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  existsSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  RUN_JSON_FILE,
+  RunJsonLockError,
+  withRunJsonLock,
+} from '../node-run-json-lock.js';
 import type {
   AsyncTaskHandle,
   AsyncTaskStatus,
@@ -20,11 +15,7 @@ import type {
 } from '../types.js';
 import { safeWriteFile } from './fs-utils.js';
 
-export const RUN_MANIFEST_FILE = 'run.json';
-const LOCK_TIMEOUT_MS = 30_000;
-const LOCK_POLL_MS = 20;
-const WINDOWS_LOCK_TRANSIENT_RETRIES = 5;
-const lockWaitArray = new Int32Array(new SharedArrayBuffer(4));
+export const RUN_MANIFEST_FILE = RUN_JSON_FILE;
 
 export class RunManifestError extends Error {
   constructor(
@@ -210,58 +201,13 @@ export function withRunManifestLock<T>(
   manifestPath: string,
   action: () => T,
 ): T {
-  const lockPath = `${manifestPath}.lock`;
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  const token = randomUUID();
-  let descriptor: number | undefined;
-  let windowsTransientRetries = 0;
-  while (descriptor === undefined) {
-    try {
-      const candidate = openSync(lockPath, 'wx', 0o600);
-      try {
-        writeFileSync(
-          candidate,
-          JSON.stringify({ token, pid: process.pid, createdAt: Date.now() }),
-        );
-        descriptor = candidate;
-      } catch (error) {
-        closeSync(candidate);
-        try {
-          unlinkSync(lockPath);
-        } catch {}
-        throw error;
-      }
-    } catch (error) {
-      const lockError = error as NodeJS.ErrnoException;
-      const code = lockError.code;
-      const windowsTransient =
-        process.platform === 'win32' &&
-        code === 'EPERM' &&
-        lockError.syscall === 'open' &&
-        windowsTransientRetries < WINDOWS_LOCK_TRANSIENT_RETRIES;
-      if (code !== 'EEXIST' && !windowsTransient) throw error;
-      if (windowsTransient) windowsTransientRetries += 1;
-      if (Date.now() >= deadline) {
-        throw new RunManifestError(
-          'Timed out waiting for the run manifest mutation lock; if the recorded owner crashed, remove this lock file manually after confirming no Librarium process is using the run',
-          manifestPath,
-        );
-      }
-      Atomics.wait(lockWaitArray, 0, 0, LOCK_POLL_MS);
-    }
-  }
   try {
-    return action();
-  } finally {
-    closeSync(descriptor);
-    try {
-      const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
-        token?: string;
-      };
-      if (owner.token === token) unlinkSync(lockPath);
-    } catch {
-      // A dead-owner recovery or manual cleanup may already have removed it.
+    return withRunJsonLock(manifestPath, action);
+  } catch (error) {
+    if (error instanceof RunJsonLockError) {
+      throw new RunManifestError(error.message, manifestPath);
     }
+    throw error;
   }
 }
 

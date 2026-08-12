@@ -5,8 +5,6 @@ const state = vi.hoisted(() => ({
   events: [] as string[],
   rejectPreflight: false,
   rejectRegistration: false,
-  stripProjectedFallback: false,
-  dispatchedConfig: undefined as Config | undefined,
   canonicalDeps: undefined as unknown,
   initializeArgs: undefined as unknown,
   spinner: {
@@ -95,17 +93,6 @@ vi.mock('../src/node-request-preflight.js', () => {
       };
     },
     emitRequestPreflightNotices: () => state.events.push('notices'),
-    legacyPrimaryAdapterIds: () => ['legacy-provider'],
-    projectLegacyExecutionConfig: (config: Config) =>
-      state.stripProjectedFallback
-        ? {
-            ...config,
-            providers: {
-              ...config.providers,
-              'legacy-provider': { enabled: true },
-            },
-          }
-        : config,
     assertAdmittedAdaptersRegistered: () => {
       state.events.push('registered');
       if (state.rejectRegistration)
@@ -147,25 +134,6 @@ vi.mock('../src/node-run-directory.js', () => ({
   createRunDir: () => {
     state.events.push('run-dir');
     return '/tmp/unused-mcp-output';
-  },
-}));
-
-vi.mock('../src/core/research-run.js', () => ({
-  executeResearchRun: async (request: { config: Config }) => {
-    state.events.push('dispatch');
-    state.dispatchedConfig = request.config;
-    return {
-      manifest: {
-        providers: [],
-        sources: { total: 0, unique: 0, file: 'sources.json' },
-        exitCode: 0,
-      },
-      reports: [],
-      results: [],
-      sources: [],
-      totalCitations: 0,
-      totalDurationMs: 0,
-    };
   },
 }));
 
@@ -212,8 +180,6 @@ describe('production request preflight transport ordering', () => {
     state.events.length = 0;
     state.rejectPreflight = false;
     state.rejectRegistration = false;
-    state.stripProjectedFallback = false;
-    state.dispatchedConfig = undefined;
     state.canonicalDeps = undefined;
     state.initializeArgs = undefined;
     state.spinner.isSpinning = false;
@@ -300,15 +266,12 @@ describe('production request preflight transport ordering', () => {
   });
 
   it('passes the frozen canonical plan rather than legacy dispatcher config', async () => {
-    state.stripProjectedFallback = true;
-
     const outcome = await executeRun('private query', { json: true });
 
     expect(outcome.exitCode).toBe(0);
     expect(fixtureConfig.providers['legacy-provider']?.fallback).toBe(
       'incompatible-fallback',
     );
-    expect(state.dispatchedConfig).toBeUndefined();
     expect(state.canonicalDeps).toEqual(
       expect.objectContaining({
         run_directory: '/tmp/unused-mcp-output',

@@ -400,3 +400,8 @@ function writeProviderOutputs(
     });
   }
 }
+/**
+ * Retired v2 artifact execution engine. It is intentionally unreachable from
+ * production transports; strict schemaVersion 2 reconciliation lives in the
+ * Node compatibility services instead.
+ */

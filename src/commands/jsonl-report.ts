@@ -1,10 +1,4 @@
-import { safeWriteFile } from '../core/fs-utils.js';
 import type { RunArtifactPresentationSourceSummary } from '../node-run-artifact-presentation.js';
-import { projectRunArtifactSnapshot } from '../node-run-artifact-presentation.js';
-import {
-  RunArtifactRepository,
-  type RunArtifactSnapshot,
-} from '../node-run-artifacts.js';
 import type {
   DeduplicatedSource,
   ProviderReport,
@@ -194,37 +188,4 @@ export function generateJsonlReport(input: JsonlReportInput): string {
   ];
 
   return lines.join('\n');
-}
-
-/**
- * Write results.jsonl from one immutable repository snapshot.
- */
-export function writeJsonlReportFromSnapshot(
-  snapshot: RunArtifactSnapshot,
-  repository: RunArtifactRepository = new RunArtifactRepository(),
-): string {
-  const jsonl = generateJsonlReport(projectRunArtifactSnapshot(snapshot));
-  const reportPath = repository.resolveContainedPath(
-    snapshot.runDir,
-    'results.jsonl',
-  );
-  safeWriteFile(reportPath, jsonl);
-  return reportPath;
-}
-
-/**
- * Build and write results.jsonl for an existing run directory.
- * Returns the report path, or null when the directory has no run manifest.
- */
-export function writeJsonlReport(
-  runDir: string,
-  repository: RunArtifactRepository = new RunArtifactRepository(),
-): string | null {
-  let snapshot: RunArtifactSnapshot;
-  try {
-    snapshot = repository.readSnapshot(runDir, { view: 'recovery' });
-  } catch {
-    return null;
-  }
-  return writeJsonlReportFromSnapshot(snapshot, repository);
 }

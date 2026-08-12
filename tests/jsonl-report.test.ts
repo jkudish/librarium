@@ -8,11 +8,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { generateJsonlReport } from '../src/commands/jsonl-report.js';
 import {
-  generateJsonlReport,
   writeJsonlReport,
   writeJsonlReportFromSnapshot,
-} from '../src/commands/jsonl-report.js';
+} from '../src/commands/jsonl-report-v2.js';
 import { RunArtifactRepository } from '../src/node-run-artifacts.js';
 import type {
   DeduplicatedSource,

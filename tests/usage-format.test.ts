@@ -7,7 +7,7 @@ import {
   formatTokens,
   usageLabel,
 } from '../src/commands/run-format.js';
-import { normalizeUsage } from '../src/core/dispatcher.js';
+import { normalizeUsage } from '../src/core/usage-normalization.js';
 import type { ProviderReport } from '../src/types.js';
 
 describe('formatTokens / formatCost', () => {

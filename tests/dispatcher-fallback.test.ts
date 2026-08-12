@@ -13,8 +13,6 @@ import type {
 // We re-import the adapter registry fresh for each test to avoid shared state.
 let registerProvider: typeof import('../src/adapters/index.js').registerProvider;
 let dispatch: typeof import('../src/core/dispatcher.js').dispatch;
-let preflightProductionRequest: typeof import('../src/node-request-preflight.js').preflightProductionRequest;
-let projectLegacyExecutionConfig: typeof import('../src/node-request-preflight.js').projectLegacyExecutionConfig;
 
 /** Create a minimal Config object with the given provider entries. */
 function makeConfig(
@@ -97,10 +95,6 @@ describe('dispatcher fallback', () => {
 
     const dispatcherMod = await import('../src/core/dispatcher.js');
     dispatch = dispatcherMod.dispatch;
-
-    const preflight = await import('../src/node-request-preflight.js');
-    preflightProductionRequest = preflight.preflightProductionRequest;
-    projectLegacyExecutionConfig = preflight.projectLegacyExecutionConfig;
 
     // Create a temp output directory for file writes.
     tmpDir = join(
@@ -186,28 +180,8 @@ describe('dispatcher fallback', () => {
       },
       'brave-answers': { apiKey: '$BRAVE_API_KEY', enabled: false },
     });
-    const preflight = preflightProductionRequest(
-      {
-        config,
-        transport: {
-          kind: 'cli',
-          input: {
-            query: 'fallback safety',
-            providers: ['exa'],
-            mode: 'sync',
-          },
-        },
-      },
-      {
-        createCredentials: () => ({
-          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
-        }),
-      },
-    );
-    const projected = projectLegacyExecutionConfig(config, preflight.prepared);
-
     const { reports } = await dispatch({
-      config: projected,
+      config,
       providerIds: ['exa'],
       query: 'fallback safety',
       outputDir: tmpDir,
@@ -215,9 +189,9 @@ describe('dispatcher fallback', () => {
       credentials: {
         env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
       },
+      allowFallbacks: false,
     });
 
-    expect(projected.providers.exa?.fallback).toBeUndefined();
     expect(reports).toHaveLength(1);
     expect(fallbackExecute).not.toHaveBeenCalled();
   });
@@ -237,28 +211,8 @@ describe('dispatcher fallback', () => {
       },
       'brave-search': { apiKey: '$BRAVE_API_KEY', enabled: true },
     });
-    const preflight = preflightProductionRequest(
-      {
-        config,
-        transport: {
-          kind: 'cli',
-          input: {
-            query: 'fallback safety',
-            providers: ['exa'],
-            mode: 'sync',
-          },
-        },
-      },
-      {
-        createCredentials: () => ({
-          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
-        }),
-      },
-    );
-    const projected = projectLegacyExecutionConfig(config, preflight.prepared);
-
     const { reports } = await dispatch({
-      config: projected,
+      config,
       providerIds: ['exa'],
       query: 'fallback safety',
       outputDir: tmpDir,
@@ -268,7 +222,7 @@ describe('dispatcher fallback', () => {
       },
     });
 
-    expect(projected.providers.exa?.fallback).toBe('brave-search');
+    expect(config.providers.exa?.fallback).toBe('brave-search');
     expect(reports).toHaveLength(2);
     expect(fallbackExecute).toHaveBeenCalledTimes(1);
   });

@@ -62,7 +62,7 @@ export interface RequestCompilationInput {
   readonly credentials?: CredentialContext;
   /**
    * Admit against opaque credential references without reading their values.
-   * Node transports still verify credentials before legacy dispatch.
+   * Node transports still verify credentials before canonical execution.
    */
   readonly assumeCredentialAvailability?: boolean;
   /**

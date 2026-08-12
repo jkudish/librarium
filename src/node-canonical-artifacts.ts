@@ -6,13 +6,16 @@ import {
   projectCanonicalRunPresentation,
 } from './node-canonical-presentation.js';
 import type { CanonicalRunManifestV3 } from './node-canonical-run.js';
-import { RunArtifactRepository } from './node-run-artifacts.js';
+import {
+  type CanonicalDerivedArtifactWriter,
+  NodeCanonicalDerivedArtifactWriter,
+} from './node-derived-artifacts.js';
 
 export function writeCanonicalPresentationArtifacts(
   manifest: CanonicalRunManifestV3,
   outputDir: string,
   slug: string,
-  repository = new RunArtifactRepository(),
+  repository: CanonicalDerivedArtifactWriter = new NodeCanonicalDerivedArtifactWriter(),
 ): CanonicalRunPresentation {
   const presentation = projectCanonicalRunPresentation(
     manifest,

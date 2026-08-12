@@ -1,9 +1,8 @@
 import { configGroupProvenance } from './core/config.js';
 import type { CredentialContext } from './core/credentials.js';
-import {
-  type PreparationDependencies,
-  type PreparedResearchExecution,
-  profileIdentityKey,
+import type {
+  PreparationDependencies,
+  PreparedResearchExecution,
 } from './core/execution-plan.js';
 import {
   compileRequest,
@@ -14,7 +13,6 @@ import type {
   PreparationNotice,
 } from './core/research-request.js';
 import { createNodeCredentialContext } from './node-credentials.js';
-import type { Config } from './types.js';
 
 type ProductionRequestInput = Omit<
   RequestCompilationInput,
@@ -118,106 +116,14 @@ export interface ProductionRequestPreflightResult {
   readonly prepared: PreparedResearchExecution;
   readonly credentials: CredentialContext;
   readonly notices: readonly PreparationNotice[];
-  /** Exact legacy adapter ids that may require trusted custom-code loading. */
+  /** Exact admitted adapter ids that may require trusted custom-code loading. */
   readonly admittedAdapterIds: readonly string[];
-}
-
-export function legacyPrimaryAdapterIds(
-  prepared: PreparedResearchExecution,
-): readonly string[] {
-  const seen = new Set<string>();
-  const adapterIds: string[] = [];
-  for (const slot of prepared.request.slots) {
-    const identity = slot.primary.identity;
-    const key = profileIdentityKey(identity);
-    const plan = prepared.profile_plans_by_identity[key];
-    if (!plan) {
-      throw new RequestPreflightError(
-        [
-          {
-            code: 'request_plan_binding_missing',
-            phase: 'compilation',
-            path: '/slots',
-            message: 'The admitted request is missing an executable binding.',
-          },
-        ],
-        prepared.notices,
-      );
-    }
-    if (!seen.has(plan.binding.adapter_id)) {
-      seen.add(plan.binding.adapter_id);
-      adapterIds.push(plan.binding.adapter_id);
-    }
-  }
-  return adapterIds;
-}
-
-/**
- * Project the canonical fallback reserve onto the v1 dispatcher surface. The
- * legacy dispatcher reads config fallback edges directly, so retaining raw
- * configuration here could execute an omitted or incompatible fallback. A
- * legacy adapter can represent only one edge, therefore retain the first
- * reserve candidate that is eligible for every slot dispatched by that
- * adapter. Ambiguous multi-profile edges are intentionally disabled.
- */
-export function projectLegacyExecutionConfig(
-  config: Config,
-  prepared: PreparedResearchExecution,
-): Config {
-  const slotIdsByAdapter = new Map<string, string[]>();
-  for (const slot of prepared.request.slots) {
-    const plan =
-      prepared.profile_plans_by_identity[
-        profileIdentityKey(slot.primary.identity)
-      ];
-    if (!plan) continue;
-    const slotIds = slotIdsByAdapter.get(plan.binding.adapter_id) ?? [];
-    slotIds.push(slot.slot_id);
-    slotIdsByAdapter.set(plan.binding.adapter_id, slotIds);
-  }
-
-  const primaryAdapterIds = new Set(slotIdsByAdapter.keys());
-  const fallbackByPrimaryAdapter = new Map<string, string>();
-  for (const [primaryAdapterId, slotIds] of slotIdsByAdapter) {
-    for (const candidate of prepared.request.fallback_reserve) {
-      if (
-        !slotIds.every((slotId) => candidate.eligible_slot_ids.includes(slotId))
-      ) {
-        continue;
-      }
-      const plan =
-        prepared.profile_plans_by_identity[
-          profileIdentityKey(candidate.profile.identity)
-        ];
-      const fallbackAdapterId = plan?.binding.adapter_id;
-      if (
-        fallbackAdapterId === undefined ||
-        fallbackAdapterId === primaryAdapterId ||
-        primaryAdapterIds.has(fallbackAdapterId)
-      ) {
-        continue;
-      }
-      fallbackByPrimaryAdapter.set(primaryAdapterId, fallbackAdapterId);
-      break;
-    }
-  }
-
-  const providers: Config['providers'] = {};
-  for (const [adapterId, provider] of Object.entries(config.providers)) {
-    const { fallback: _rawFallback, ...withoutFallback } = provider;
-    const fallback = fallbackByPrimaryAdapter.get(adapterId);
-    providers[adapterId] =
-      fallback === undefined
-        ? withoutFallback
-        : { ...withoutFallback, fallback };
-  }
-  return { ...config, providers };
 }
 
 /**
  * Return every adapter admitted by the canonical plan, including reserve-only
  * fallbacks. Initialization must make all of these available before any
- * refinement, artifact creation, or legacy dispatch can begin.
+ * refinement, artifact creation, or canonical execution can begin.
  */
 export function admittedAdapterIds(
   prepared: PreparedResearchExecution,
@@ -232,37 +138,7 @@ export function admittedAdapterIds(
 }
 
 /**
- * The legacy engine remains active during this slice. Its provider-id dispatch
- * receives the canonical plan's stable, unique primary adapter projection.
- */
-export function assertLegacySelectionMatchesAdmission(
-  prepared: PreparedResearchExecution,
-  legacyProviderIds: readonly string[],
-): void {
-  const expected = new Set(legacyPrimaryAdapterIds(prepared));
-  const actual = new Set(legacyProviderIds);
-  if (
-    expected.size === actual.size &&
-    [...expected].every((id) => actual.has(id))
-  ) {
-    return;
-  }
-  throw new RequestPreflightError(
-    [
-      {
-        code: 'legacy_selection_drift',
-        phase: 'compilation',
-        path: '/selector',
-        message:
-          'Legacy provider selection did not match the admitted exact request.',
-      },
-    ],
-    prepared.notices,
-  );
-}
-
-/**
- * Factories can still reject a malformed legacy adapter during initialization.
+ * Factories can still reject a malformed adapter during initialization.
  * Check that every admitted adapter was actually registered before refinement,
  * output creation, or dispatch, while preserving canonical plan selection.
  */

@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { discoverRuns } from './browse-data.js';
-import { writeJsonlReport } from './jsonl-report.js';
+import { writeJsonlReport } from './jsonl-report-v2.js';
 import { fileUrl, hyperlink, isColorEnabled } from './run-format.js';
 
 export function registerJsonlCommand(program: Command): void {

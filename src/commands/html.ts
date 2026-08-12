@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { discoverRuns } from './browse-data.js';
-import { writeHtmlReport } from './html-report.js';
+import { writeHtmlReport } from './html-report-v2.js';
 import { openPath } from './run.js';
 import { fileUrl, hyperlink, isColorEnabled } from './run-format.js';
 

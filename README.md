@@ -1593,10 +1593,12 @@ const result = await providers[0]?.execute('Research question', {
 > `trustedProviderIds` is an execution allowlist, not a sandbox. Load only
 > code you explicitly trust.
 
-The Node entry does not expose `executeResearchRun`, writable configuration
-mutation during ordinary loading, run-manifest mutation, or a registration
-convenience. Configuration is rewritten only when an application explicitly
-calls `saveConfigV2`; the CLI/MCP runtime cutover remains separate.
+The Node entry does not expose legacy `executeResearchRun`, writable
+configuration mutation during ordinary loading, run-manifest mutation, or a
+registration convenience. Configuration is rewritten only when an application
+explicitly calls `saveConfigV2`. New CLI and MCP research runs use one canonical
+schemaVersion 3 `run.json`; schemaVersion 2 remains a historical reconciliation
+format and is never selected for new execution.
 
 ## Using with AI Agents
 

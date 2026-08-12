@@ -6,7 +6,7 @@ import { providerIdentityKey } from './contracts/domain/index.js';
 import type { ResearchResult } from './contracts/interchange/research-result.js';
 import { deduplicateSources } from './core/normalizer.js';
 import type { CanonicalRunManifestV3 } from './node-canonical-run.js';
-import { providerArtifactFileNames } from './node-run-artifacts.js';
+import { providerArtifactFileNames } from './node-provider-artifact-names.js';
 import type {
   Citation,
   DeduplicatedSource,

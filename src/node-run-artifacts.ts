@@ -5,7 +5,6 @@
  * worker-safe core owns the manifest shape and mutation primitives; this
  * service owns the filesystem boundary around those primitives.
  */
-import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { sanitizeId } from './constants.js';
 import { safeWriteFile as defaultSafeWriteFile } from './core/fs-utils.js';
@@ -19,6 +18,10 @@ import {
   readRunManifest,
   upsertProviderReport,
 } from './core/run-manifest.js';
+import {
+  type ProviderArtifactFileNames,
+  providerArtifactFileNames,
+} from './node-provider-artifact-names.js';
 import type {
   RunArtifactDiscovery,
   RunArtifactMeta,
@@ -51,6 +54,11 @@ import type {
   RunManifest,
   RunTaskState,
 } from './types.js';
+
+export {
+  type ProviderArtifactFileNames,
+  providerArtifactFileNames,
+} from './node-provider-artifact-names.js';
 
 export type {
   RunArtifactAnswer,
@@ -204,23 +212,6 @@ function assertUniqueManifestIdentities(
       taskIds.add(key);
     }
   }
-}
-
-export interface ProviderArtifactFileNames {
-  readonly outputFile: string;
-  readonly metaFile: string;
-}
-
-/** Collision-resistant names for all newly written provider artifacts. */
-export function providerArtifactFileNames(
-  providerId: string,
-): ProviderArtifactFileNames {
-  const stem = sanitizeId(providerId).slice(0, 64) || 'provider';
-  const digest = createHash('sha256').update(providerId, 'utf8').digest('hex');
-  return {
-    outputFile: `provider-${stem}--${digest}.md`,
-    metaFile: `provider-${stem}--${digest}.meta.json`,
-  };
 }
 
 function legacyStemKey(providerId: string): string {

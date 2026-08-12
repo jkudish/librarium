@@ -23,6 +23,12 @@ import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
 import { UnsafeToRetrySubmissionError } from './errors.js';
 import { buildProviderMetering } from './metering.js';
+import { normalizeUsage } from './usage-normalization.js';
+
+/**
+ * Retired v1 execution engine retained as a direct compatibility test harness.
+ * Production CLI and MCP graphs must never import this module.
+ */
 
 export interface DispatchOptions {
   config: Config;
@@ -692,37 +698,6 @@ export async function dispatch(
  * (totals, direct cost) set result.usage themselves; otherwise the legacy
  * tokenUsage pair is lifted into the normalized shape.
  */
-export function normalizeUsage(
-  result: Pick<ProviderResult, 'usage' | 'tokenUsage'>,
-): ProviderUsage | undefined {
-  if (result.usage) return stripUndefinedUsage(result.usage);
-  const tokens = result.tokenUsage;
-  if (!tokens || (tokens.input === undefined && tokens.output === undefined)) {
-    return undefined;
-  }
-  const usage: ProviderUsage = {};
-  if (tokens.input !== undefined) usage.inputTokens = tokens.input;
-  if (tokens.output !== undefined) usage.outputTokens = tokens.output;
-  if (tokens.input !== undefined && tokens.output !== undefined) {
-    usage.totalTokens = tokens.input + tokens.output;
-  }
-  return usage;
-}
-
-/**
- * Drop keys an adapter set to undefined (e.g. a missing total_tokens field)
- * so serialized usage in run.json and .meta.json stays clean.
- */
-function stripUndefinedUsage(usage: ProviderUsage): ProviderUsage {
-  const clean: ProviderUsage = {};
-  for (const [key, value] of Object.entries(usage)) {
-    if (value !== undefined) {
-      (clean as Record<string, unknown>)[key] = value;
-    }
-  }
-  return clean;
-}
-
 function createDispatchResult(
   providerId: string,
   tier: Provider['tier'],

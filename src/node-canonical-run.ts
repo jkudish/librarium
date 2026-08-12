@@ -49,12 +49,12 @@ import {
   projectResearchResponse,
   type ResearchResponseProjectionOptions,
 } from './core/research-response-projector.js';
-import { RUN_MANIFEST_FILE, withRunManifestLock } from './core/run-manifest.js';
 import {
   DEFAULT_FS,
   resolveContainedPathWithFs,
   resolveRunDirectoryWithFs,
 } from './node-run-artifact-codecs.js';
+import { RUN_JSON_FILE, withRunJsonLock } from './node-run-json-lock.js';
 import type { Provider } from './types.js';
 
 const CANONICAL_RUN_KIND = 'canonical-research-run' as const;
@@ -579,11 +579,7 @@ export function readRunJsonSchemaVersion(
   runDirectory: string,
 ): number | undefined {
   const directory = containedRunDirectory(runsRoot, runDirectory);
-  const path = resolveContainedPathWithFs(
-    DEFAULT_FS,
-    directory,
-    RUN_MANIFEST_FILE,
-  );
+  const path = resolveContainedPathWithFs(DEFAULT_FS, directory, RUN_JSON_FILE);
   if (!existsSync(path)) return undefined;
   const metadata = lstatSync(path);
   if (!metadata.isFile() || metadata.isSymbolicLink()) {
@@ -726,7 +722,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
     return resolveContainedPathWithFs(
       DEFAULT_FS,
       containedRunDirectory(this.#runsRoot, this.#runDirectory),
-      RUN_MANIFEST_FILE,
+      RUN_JSON_FILE,
     );
   }
 
@@ -754,7 +750,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
       );
     }
     const manifestPath = this.manifest_path;
-    const created = withRunManifestLock(manifestPath, () => {
+    const created = withRunJsonLock(manifestPath, () => {
       if (existsSync(manifestPath)) {
         throw new CanonicalRunManifestError(
           'Refusing to overwrite an existing canonical run manifest',
@@ -787,7 +783,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
       throw new Error('Coordination state request id cannot change.');
     }
     const manifestPath = this.manifest_path;
-    return withRunManifestLock(manifestPath, () => {
+    return withRunJsonLock(manifestPath, () => {
       const current = parseManifest(manifestPath);
       if (
         current.request.request_id !== requestId ||
@@ -916,7 +912,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
           input.coordinator,
         );
       }
-      const swapped = withRunManifestLock(manifestPath, () => {
+      const swapped = withRunJsonLock(manifestPath, () => {
         const latestPath = this.manifest_path;
         if (latestPath !== manifestPath) {
           throw new CanonicalRunManifestError(
@@ -958,7 +954,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
     handle: Parameters<typeof recordDurableCustodyObservation>[2],
   ): Promise<VersionedCoordinationState> {
     const manifestPath = this.manifest_path;
-    return withRunManifestLock(manifestPath, () => {
+    return withRunJsonLock(manifestPath, () => {
       const current = parseManifest(manifestPath);
       if (current.request.request_id !== requestId) {
         throw new CanonicalRunManifestError(
@@ -984,7 +980,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
     options: ResearchResponseProjectionOptions,
   ): ResearchResponse {
     const manifestPath = this.manifest_path;
-    return withRunManifestLock(manifestPath, () => {
+    return withRunJsonLock(manifestPath, () => {
       const current = parseManifest(manifestPath);
       if (
         options.generator !== current.producer.id ||

@@ -13,8 +13,8 @@ import {
   readRunSnapshot,
   shapeBrowseRunSnapshot,
 } from './browse-data.js';
-import { writeHtmlReport } from './html-report.js';
-import { writeJsonlReport } from './jsonl-report.js';
+import { writeHtmlReport } from './html-report-v2.js';
+import { writeJsonlReport } from './jsonl-report-v2.js';
 import { renderMarkdownAnsi } from './markdown-ansi.js';
 import { runPager } from './pager.js';
 import { openPath } from './run.js';

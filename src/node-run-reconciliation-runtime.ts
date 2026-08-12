@@ -1,7 +1,7 @@
 /** Node runtime wiring for the internal reconciliation service. */
 import { getExactProvider } from './adapters/node-registry.js';
-import { writeHtmlReportFromSnapshot } from './commands/html-report.js';
-import { writeJsonlReportFromSnapshot } from './commands/jsonl-report.js';
+import { writeHtmlReportFromSnapshot } from './commands/html-report-v2.js';
+import { writeJsonlReportFromSnapshot } from './commands/jsonl-report-v2.js';
 import { generateSummary } from './core/synthesis.js';
 import {
   RunArtifactRepository,
