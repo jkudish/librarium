@@ -48,6 +48,13 @@ export function buildMockConfig(spec: MockConfigSpec): Record<string, unknown> {
   const trustedProviderIds: string[] = [];
 
   for (const p of spec.providers) {
+    const tier = p.tier ?? 'ai-grounded';
+    const resultKind =
+      tier === 'deep-research'
+        ? 'research_report'
+        : tier === 'ai-grounded'
+          ? 'grounded_answer'
+          : 'search_results';
     trustedProviderIds.push(p.id);
     providers[p.id] = {
       enabled: p.enabled ?? true,
@@ -63,12 +70,36 @@ export function buildMockConfig(spec: MockConfigSpec): Record<string, unknown> {
       args: [MOCK_PROVIDER_SCRIPT],
       options: {
         displayName: p.displayName ?? p.id,
-        tier: p.tier ?? 'ai-grounded',
+        tier,
         ...(p.fail ? { fail: true } : {}),
         ...(p.error ? { error: p.error } : {}),
         ...(p.citations !== undefined ? { citations: p.citations } : {}),
         ...(p.delayMs !== undefined ? { delayMs: p.delayMs } : {}),
         ...(p.content !== undefined ? { content: p.content } : {}),
+      },
+      executionProfile: {
+        bindingId: `${p.id}.mock.v1`,
+        profile: {
+          identity: {
+            provider_id: p.id,
+            profile_id: 'mock',
+            target: { primary: { model_selection: 'not_applicable' } },
+          },
+          result_kind: resultKind,
+          ...(resultKind !== 'search_results' && {
+            grounding_policy: 'required',
+          }),
+          observation_mode: 'api_output',
+          corpora: ['web'],
+          retrieval_method:
+            resultKind === 'research_report'
+              ? 'research_agent'
+              : 'search_endpoint',
+          access_mode: 'direct',
+          operator_id: p.id,
+          invocation: 'inline',
+          resumability: 'none',
+        },
       },
     };
   }

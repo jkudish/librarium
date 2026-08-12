@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,14 +39,23 @@ import {
   truncateProviderContent,
   UNTRUSTED_CONTENT_WARNING,
 } from '../src/mcp/shaping.js';
+import { runCanonicalPreparedExecution } from '../src/node-canonical-run.js';
 import { RunArtifactRepository } from '../src/node-run-artifacts.js';
 import { createRunDir } from '../src/node-run-directory.js';
 import type {
   Config,
   DeduplicatedSource,
+  Provider,
   ProviderReport,
   RunManifest,
 } from '../src/types.js';
+import {
+  canonicalFixtureBridge,
+  canonicalFixtureCoordinator,
+  canonicalFixturePrepared,
+  canonicalFixtureProfile,
+  canonicalFixtureResult,
+} from './fixtures/canonical-run.js';
 
 let baseDir: string;
 
@@ -163,6 +173,12 @@ describe('mcp tool surface', () => {
       'list_providers',
       'research',
     ]);
+    expect(
+      tools.find((tool) => tool.name === 'check_async')?.description,
+    ).toContain('retrieve only gates retrieval for historical schemaVersion 2');
+    expect(
+      tools.find((tool) => tool.name === 'research')?.description,
+    ).toContain('full provider content');
     await server.close();
   });
 
@@ -378,6 +394,65 @@ describe('get_results tool', () => {
     });
     const res = await client.callTool({ name: 'get_results', arguments: {} });
     expect(res.isError).toBe(true);
+    await server.close();
+  });
+
+  it('serves capped private-safe v3 content and rejects a symlinked derived file', async () => {
+    const runDir = join(baseDir, 'canonical-v3');
+    mkdirSync(runDir);
+    const profile = canonicalFixtureProfile('mcp');
+    const canonicalContent = `# Canonical MCP\n\n${'x'.repeat(
+      MAX_PROVIDER_CHARS + 5_000,
+    )}`;
+    const provider: Provider = {
+      id: 'adapter-mcp',
+      displayName: 'MCP',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () =>
+        canonicalFixtureResult('adapter-mcp', canonicalContent),
+    };
+    await runCanonicalPreparedExecution(canonicalFixturePrepared([profile]), {
+      runs_root: baseDir,
+      run_directory: runDir,
+      coordinator: canonicalFixtureCoordinator(),
+      attempt_bridge: canonicalFixtureBridge([profile], {
+        'adapter-mcp': provider,
+      }),
+    });
+    const outside = join(baseDir, 'outside-secret.md');
+    writeFileSync(outside, 'Bearer should-never-leak');
+    symlinkSync(outside, join(runDir, 'adapter-mcp.md'));
+    const { client, server } = await connect({
+      loadMergedConfig: () => makeConfig(),
+    });
+
+    const latest = await client.callTool({
+      name: 'get_results',
+      arguments: {},
+    });
+    const explicit = await client.callTool({
+      name: 'get_results',
+      arguments: { runDir, provider: 'adapter-mcp' },
+    });
+
+    for (const response of [latest, explicit]) {
+      expect(response.isError).toBeFalsy();
+      const payload = JSON.parse(
+        (response.content as { text: string }[])[0].text,
+      );
+      expect(payload.results[0]).toMatchObject({
+        id: 'adapter-mcp',
+        truncated: true,
+        fullChars: canonicalContent.length,
+      });
+      expect(payload.results[0].content).toContain(CONTENT_DELIMITER_BEGIN);
+      expect(payload.results[0].content).toContain('truncated');
+      expect(JSON.stringify(payload)).not.toMatch(
+        /Bearer should-never-leak|coordination_state|durable_handle|provider_task_id/,
+      );
+    }
     await server.close();
   });
 });

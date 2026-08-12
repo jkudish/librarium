@@ -9,10 +9,6 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as p from '@clack/prompts';
-import {
-  getAllProviders,
-  initializeProviders,
-} from '../adapters/node-registry.js';
 import { computeInitProviderChoices, PROVIDER_ENV_VARS } from '../constants.js';
 import {
   loadConfig,
@@ -31,18 +27,25 @@ import {
   recommendedProviderCatalogEntries,
   sortedProviderCatalogEntries,
 } from '../core/provider-catalog.js';
-import { usableProviderIds } from '../core/provider-selection.js';
 import {
   createNodeCredentialContext,
   isKeychainAvailable,
   writeKeychainCredential,
 } from '../node-credentials.js';
-import type { Config, Provider } from '../types.js';
+import type { Config, ProviderTier } from '../types.js';
 import { synthesizeAnswer } from './answer.js';
 import { preferenceFromConfig, resolveLlmClients } from './llm-client.js';
 import { executeRun } from './run.js';
 
 type CredentialStorage = 'keychain' | 'env' | 'config';
+
+/** Safe catalog facts used before a query is admitted. No provider code loads. */
+interface OnboardingProvider {
+  readonly id: string;
+  readonly displayName: string;
+  readonly tier: ProviderTier;
+  readonly envVar: string;
+}
 
 interface KeyPrompt {
   envVar: string;
@@ -70,7 +73,7 @@ function loadMergedConfig(): Config {
   return mergeConfigs(loadConfig(), loadProjectConfig(process.cwd()));
 }
 
-function providerHint(provider: Provider): string {
+function providerHint(provider: OnboardingProvider): string {
   const catalog = getProviderCatalogEntry(provider.id);
   const parts = [
     providerTierLabel(provider.tier),
@@ -79,14 +82,14 @@ function providerHint(provider: Provider): string {
   return parts.join(' · ');
 }
 
-function providerLabel(provider: Provider): string {
+function providerLabel(provider: OnboardingProvider): string {
   const catalog = getProviderCatalogEntry(provider.id);
   return catalog
     ? `${catalog.family}: ${catalog.displayName}`
     : provider.displayName;
 }
 
-function optionForProvider(provider: Provider) {
+function optionForProvider(provider: OnboardingProvider) {
   return {
     value: provider.id,
     label: providerLabel(provider),
@@ -94,14 +97,17 @@ function optionForProvider(provider: Provider) {
   };
 }
 
-function providersByIds(ids: string[], providers: Provider[]): Provider[] {
+function providersByIds(
+  ids: string[],
+  providers: readonly OnboardingProvider[],
+): OnboardingProvider[] {
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
   return ids
     .map((id) => byId.get(id))
-    .filter((provider): provider is Provider => Boolean(provider));
+    .filter((provider): provider is OnboardingProvider => Boolean(provider));
 }
 
-function selectedKeyPrompts(selected: Provider[]): KeyPrompt[] {
+function selectedKeyPrompts(selected: OnboardingProvider[]): KeyPrompt[] {
   const byEnvVar = new Map<string, KeyPrompt>();
   for (const provider of selected) {
     const envVar = PROVIDER_ENV_VARS[provider.id] ?? provider.envVar;
@@ -122,7 +128,7 @@ function selectedKeyPrompts(selected: Provider[]): KeyPrompt[] {
   return [...byEnvVar.values()];
 }
 
-function providerEnvVar(provider: Provider): string {
+function providerEnvVar(provider: OnboardingProvider): string {
   return PROVIDER_ENV_VARS[provider.id] ?? provider.envVar;
 }
 
@@ -229,8 +235,17 @@ async function maybeAppendEnvExports(
   return true;
 }
 
+function catalogProviders(): readonly OnboardingProvider[] {
+  return sortedProviderCatalogEntries().map((entry) => ({
+    id: entry.id,
+    displayName: entry.displayName,
+    tier: entry.tier,
+    envVar: entry.envVar,
+  }));
+}
+
 async function selectProviders(
-  providers: Provider[],
+  providers: readonly OnboardingProvider[],
 ): Promise<string[] | null> {
   const selectionMode = await p.select<string>({
     message: 'Choose providers to configure',
@@ -339,7 +354,7 @@ async function promptForKeys(
 
 function enableSelectedProviders(
   config: Config,
-  selected: Provider[],
+  selected: readonly OnboardingProvider[],
   storage: CredentialStorage,
   keys: Map<string, string>,
   credentials: CredentialContext,
@@ -372,7 +387,7 @@ function enableSelectedProviders(
 
 export function reusableCredentialRef(
   config: Config,
-  selected: Provider[],
+  selected: readonly OnboardingProvider[],
   envVar: string,
   credentials: CredentialContext,
 ): string | undefined {
@@ -386,6 +401,21 @@ export function reusableCredentialRef(
 
   const envRef = `$${envVar}`;
   return hasCredential(envRef, credentials) ? envRef : undefined;
+}
+
+function usableSelectedProviderIds(
+  config: Config,
+  selected: readonly OnboardingProvider[],
+  credentials: CredentialContext,
+): string[] {
+  return selected
+    .filter((provider) => {
+      const configured = config.providers[provider.id];
+      if (!configured?.enabled) return false;
+      const reference = configured.apiKey ?? `$${providerEnvVar(provider)}`;
+      return hasCredential(reference, credentials);
+    })
+    .map((provider) => provider.id);
 }
 
 export function firstQueryGuidance(
@@ -506,14 +536,8 @@ export async function runOnboardingWizard(
   }
 
   const globalConfig = loadConfig();
-  const config = loadMergedConfig();
   const credentials = createNodeCredentialContext();
-  const initResult = await initializeProviders({ ...config, credentials });
-  for (const warning of initResult.warnings) {
-    console.error(`[librarium] warning: ${warning}`);
-  }
-
-  const providers = getAllProviders();
+  const providers = catalogProviders();
   const selectedIds = await selectProviders(providers);
   if (!selectedIds) return cancel();
 
@@ -547,18 +571,11 @@ export async function runOnboardingWizard(
     p.log.success('Selected providers were already configured.');
     const updatedConfig = loadMergedConfig();
     const updatedCredentials = createNodeCredentialContext();
-    await initializeProviders({
-      ...updatedConfig,
-      credentials: updatedCredentials,
-    });
-    const usable = usableProviderIds(
+    const usableSelected = usableSelectedProviderIds(
       updatedConfig,
-      getAllProviders(),
+      selected,
       updatedCredentials,
     );
-    const usableSelected = selected
-      .map((provider) => provider.id)
-      .filter((id) => usable.includes(id));
     if (usableSelected.length > 0) {
       await offerFirstQuery(
         usableSelected,
@@ -598,18 +615,11 @@ export async function runOnboardingWizard(
 
   const updatedConfig = loadMergedConfig();
   const updatedCredentials = createNodeCredentialContext();
-  await initializeProviders({
-    ...updatedConfig,
-    credentials: updatedCredentials,
-  });
-  const usable = usableProviderIds(
+  const usableSelected = usableSelectedProviderIds(
     updatedConfig,
-    getAllProviders(),
+    selected,
     updatedCredentials,
   );
-  const usableSelected = selected
-    .map((provider) => provider.id)
-    .filter((id) => usable.includes(id));
 
   if (usableSelected.length === 0) {
     p.log.warn(

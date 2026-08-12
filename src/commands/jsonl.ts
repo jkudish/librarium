@@ -1,8 +1,8 @@
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { writeJsonlReportForRun } from '../node-canonical-reporting.js';
 import { discoverRuns } from './browse-data.js';
-import { writeJsonlReport } from './jsonl-report.js';
 import { fileUrl, hyperlink, isColorEnabled } from './run-format.js';
 
 export function registerJsonlCommand(program: Command): void {
@@ -26,9 +26,9 @@ export function registerJsonlCommand(program: Command): void {
         process.exitCode = 2;
         return;
       }
-      const reportPath = writeJsonlReport(dir);
+      const reportPath = writeJsonlReportForRun(dir);
       if (!reportPath) {
-        console.error(`No run manifest (run.json) found in ${dir}`);
+        console.error(`No valid supported run manifest found in ${dir}`);
         process.exitCode = 2;
         return;
       }

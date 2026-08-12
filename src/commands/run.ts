@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { rmdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import ora from 'ora';
 import {
   getAllProviders,
+  getExactProvider,
   initializeProviders,
 } from '../adapters/node-registry.js';
 import {
@@ -16,34 +17,35 @@ import {
   parseTimeoutSeconds,
   parseUsdBudget,
 } from '../cli-parsers.js';
-import {
-  BUDGET_SKIP_REASON,
-  createBudgetTracker,
-  createEstimateBudgetTracker,
-  ESTIMATE_BUDGET_SKIP_REASON,
-} from '../core/budget.js';
+import { providerIdentityKey } from '../contracts/domain/index.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
-import { generateSlug, resolveOutputDir } from '../core/prompt-builder.js';
+import { safeWriteFile } from '../core/fs-utils.js';
+import { generateSlug } from '../core/prompt-builder.js';
+import { retiredProviderSelectionIssues } from '../core/provider-selection.js';
+import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
-  ProviderSelectionError,
-  resolveProviderSelection,
-  retiredProviderSelectionIssues,
-} from '../core/provider-selection.js';
-import { executeResearchRun } from '../core/research-run.js';
-import { createNodeCredentialContext } from '../node-credentials.js';
-import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
+  cancelCanonicalRun,
+  createNodeCoordinatorDependencies,
+  createRegisteredProviderAttemptBridge,
+  runCanonicalPreparedExecution,
+} from '../node-canonical-run.js';
+import {
+  assertAdmittedAdaptersRegistered,
+  emitRequestPreflightNotices,
+  preflightProductionRequest,
+} from '../node-request-preflight.js';
+import { createRunDir } from '../node-run-directory.js';
 import type {
   Config,
   DeduplicatedSource,
   Defaults,
   ProviderDispatchResult,
   ProviderReport,
-  ProviderTier,
   RunManifest,
 } from '../types.js';
-import { writeHtmlReport } from './html-report.js';
-import { writeJsonlReport } from './jsonl-report.js';
-import { LiveRunTable } from './live-table.js';
+import { generateHtmlReport } from './html-report.js';
+import { generateJsonlReport } from './jsonl-report.js';
+import type { LiveRunTable } from './live-table.js';
 import {
   countDeepResearch,
   deepResearchWarning,
@@ -131,6 +133,20 @@ export interface ExecuteRunHooks {
   ) => Promise<PostDispatchResult | undefined>;
 }
 
+export interface ExecuteRunDeps {
+  /** Test/embedding seam for provider initialization. */
+  initialize?: typeof initializeProviders;
+  /**
+   * Exact adapter ids registered by the injected initializer. Production reads
+   * the client-scoped Node registry after initialization.
+   */
+  registeredAdapterIds?: () => Iterable<string>;
+  /** Test seam for exact frozen adapter lookup. */
+  resolveExactProvider?: typeof getExactProvider;
+  /** Test seam for the canonical application service. */
+  runCanonical?: typeof runCanonicalPreparedExecution;
+}
+
 /**
  * Strict parser for the shared --max-cost flag. Rejects anything that is not a
  * finite, positive USD amount so a typo never silently disables the budget
@@ -208,466 +224,391 @@ export async function executeRun(
   query: string,
   opts: RunOptions,
   hooks?: ExecuteRunHooks,
+  deps: ExecuteRunDeps = {},
 ): Promise<RunOutcome> {
-  {
-    // In --json mode stdout must stay pure JSON (the run manifest), so all
-    // pretty output is routed to stderr. The ora spinner already writes to
-    // stderr and no-ops in non-TTY environments.
-    const prettyStream = opts.json ? process.stderr : process.stdout;
-    const color = isColorEnabled(prettyStream);
-    const spinner = ora('Initializing providers...').start();
-    const printLine = (line: string): void => {
-      const wasSpinning = spinner.isSpinning;
-      if (wasSpinning) spinner.stop();
-      prettyStream.write(`${line}\n`);
-      if (wasSpinning) spinner.start();
-    };
-    const retiredProviderIssues = retiredProviderSelectionIssues(
-      opts.providers,
-    );
-    if (retiredProviderIssues.length > 0) {
-      spinner.fail(
-        retiredProviderIssues.map((issue) => issue.message).join(' '),
-      );
-      process.exitCode = 2;
-      return { exitCode: 2 };
+  const prettyStream = opts.json ? process.stderr : process.stdout;
+  const color = isColorEnabled(prettyStream);
+  const spinner = ora('Initializing providers...').start();
+  const printLine = (line: string): void => {
+    spinner.stop();
+    prettyStream.write(`${line}\n`);
+  };
+  const retired = retiredProviderSelectionIssues(opts.providers);
+  if (retired.length > 0) {
+    spinner.fail(retired.map((issue) => issue.message).join(' '));
+    process.exitCode = 2;
+    return { exitCode: 2 };
+  }
+  try {
+    const cliFlags: Partial<Defaults> = {};
+    if (opts.output) cliFlags.outputDir = opts.output;
+    if (opts.parallel) cliFlags.maxParallel = opts.parallel;
+    if (opts.timeout) cliFlags.timeout = opts.timeout;
+    if (opts.mode) cliFlags.mode = opts.mode;
+    if (opts.maxCost !== undefined) cliFlags.maxCostUsd = opts.maxCost;
+    if (opts.maxEstimatedCost !== undefined) {
+      cliFlags.maxEstimatedCostUsd = opts.maxEstimatedCost;
     }
-    try {
-      const globalConfig = loadConfig();
-      const projectConfig = loadProjectConfig(process.cwd());
-      const cliFlags: Partial<Defaults> = {};
-      if (opts.output) cliFlags.outputDir = opts.output;
-      if (opts.parallel) cliFlags.maxParallel = opts.parallel;
-      if (opts.timeout) cliFlags.timeout = opts.timeout;
-      if (opts.mode) cliFlags.mode = opts.mode;
-      // Flag wins over defaults.maxCostUsd from config.
-      if (opts.maxCost !== undefined) cliFlags.maxCostUsd = opts.maxCost;
-      if (opts.maxEstimatedCost !== undefined) {
-        cliFlags.maxEstimatedCostUsd = opts.maxEstimatedCost;
-      }
-
-      const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
-      emitProductionShadowDiagnostic(
-        {
-          config,
-          env: process.env,
-          transport: {
-            kind: 'cli',
-            input: {
-              query,
-              providers: opts.providers,
-              group: opts.group,
-              mode: opts.mode,
-              parallel: opts.parallel,
-              timeoutSeconds: opts.timeout,
-              maxCostUsd: opts.maxCost,
-              maxEstimatedCostUsd: opts.maxEstimatedCost,
-              fallback: opts.fallback,
-              refine: opts.refine,
-            },
-          },
+    const config = mergeConfigs(
+      loadConfig(),
+      loadProjectConfig(process.cwd()),
+      cliFlags,
+    );
+    const preflight = preflightProductionRequest({
+      config,
+      transport: {
+        kind: 'cli',
+        input: {
+          query,
+          providers: opts.providers,
+          group: opts.group,
+          mode: opts.mode,
+          parallel: opts.parallel,
+          timeoutSeconds: opts.timeout,
+          maxCostUsd: opts.maxCost,
+          maxEstimatedCostUsd: opts.maxEstimatedCost,
+          fallback: opts.fallback,
+          refine: opts.refine,
         },
-        (message) => {
-          const wasSpinning = spinner.isSpinning;
-          if (wasSpinning) spinner.stop();
-          try {
-            process.stderr.write(`${message}\n`);
-          } finally {
-            if (wasSpinning) spinner.start();
-          }
-        },
-      );
-      const credentials = createNodeCredentialContext();
-      const initResult = await initializeProviders({
-        ...config,
-        credentials,
-      });
-      for (const warning of initResult.warnings) {
-        console.error(`[librarium] warning: ${warning}`);
-      }
-
-      let providerIds: string[];
-
-      try {
-        providerIds = resolveProviderSelection(
-          config,
-          { providers: opts.providers, group: opts.group },
-          getAllProviders(),
-          {
-            includeConfiguredOnly: true,
-            requireUsable: true,
-            strictExplicitCredentials: true,
-            credentials,
-            onWarn: (warning) => console.error(warning),
-          },
-        );
-      } catch (e) {
-        if (!(e instanceof ProviderSelectionError)) throw e;
-        spinner.fail(e.message);
-        process.exitCode = 2;
-        return { exitCode: 2 };
-      }
-
-      // Deep-research pre-flight confirm (TTY only). When a run would dispatch
-      // several deep-research providers, warn that they take minutes and bill
-      // per call before committing. Non-TTY runs never prompt and are never
-      // refused (pipes/CI never hang); --yes and the wizard's own confirm skip
-      // it.
-      {
-        const tierLookup = new Map(
-          getAllProviders().map((provider) => [provider.id, provider.tier]),
-        );
-        const deepResearchIds = providerIds.filter(
-          (id) => tierLookup.get(id) === 'deep-research',
-        );
-        const isTTY = Boolean(process.stdout.isTTY && process.stdin.isTTY);
-        // In --json mode stdout must stay pure JSON: clack prompts write to
-        // stdout, so the preflight confirm is disabled entirely.
-        if (
-          !opts.json &&
-          shouldConfirmDeepResearch({
-            deepResearchCount: countDeepResearch(providerIds, tierLookup),
-            isTTY,
-            yes: Boolean(opts.yes),
-            fromWizard: Boolean(opts.skipPreflightConfirm),
-          })
-        ) {
-          spinner.stop();
-          p.log.warn(deepResearchWarning(deepResearchIds));
-          const proceed = await p.confirm({
-            message: 'Proceed with this deep-research run?',
-            initialValue: false,
-          });
-          if (p.isCancel(proceed) || !proceed) {
-            process.stdout.write('Cancelled.\n');
-            process.exitCode = 130;
-            return { exitCode: 130 };
-          }
-        }
-      }
-
-      // Optional one-shot LLM refine: never allowed to break the run.
-      let refined: RefinedQueries | null = null;
-      if (opts.refine) {
-        spinner.start('Refining query...');
-        const warn = (message: string): void => {
-          const wasSpinning = spinner.isSpinning;
-          if (wasSpinning) spinner.stop();
-          process.stderr.write(
-            `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
-          );
-          if (wasSpinning) spinner.start();
-        };
-        try {
-          refined = await refineQuery(
-            query,
-            config,
-            process.env,
-            warn,
-            credentials,
-          );
-          spinner.stop();
-        } catch (e) {
-          spinner.stop();
-          console.error(
-            `[librarium] warning: refine failed (${e instanceof Error ? e.message : String(e)}); dispatching the original query`,
-          );
-        }
-      }
-
-      // Create output directory
-      const slug = generateSlug(query);
-      const baseDir = resolve(config.defaults.outputDir);
-      const outputDir = resolveOutputDir(baseDir, slug);
-      mkdirSync(outputDir, { recursive: true });
-
-      // Column widths cover both primaries and any configured fallbacks so
-      // lines stay aligned if a fallback fires mid-run.
-      const tierById = new Map<string, ProviderTier>(
-        getAllProviders().map((provider) => [provider.id, provider.tier]),
-      );
-      const fallbackIds = providerIds
-        .map((id) => config.providers[id]?.fallback)
-        .filter((id): id is string => Boolean(id && tierById.has(id)));
-      const tableIds = [...new Set([...providerIds, ...fallbackIds])];
-      const widths = computeLineWidths(
-        tableIds,
-        tableIds.map((id) => tierById.get(id) ?? 'raw-search'),
-      );
-
-      // Live (resolve-in-place) rendering needs a real TTY for the cursor
-      // math; NO_COLOR and non-TTY environments keep append-on-completion.
-      const liveMode = color && Boolean(prettyStream.isTTY);
-      const live = liveMode
-        ? new LiveRunTable(prettyStream, widths, color)
-        : null;
-
-      const running = new Set<string>();
-      const spinnerText = (): string => {
-        if (running.size === 0) return 'Waiting for providers...';
-        const names = [...running].join(', ');
-        return `running: ${names.length > 60 ? `${names.slice(0, 59)}…` : names}`;
-      };
-
+      },
+    });
+    emitRequestPreflightNotices(preflight.notices, (message) =>
+      process.stderr.write(`${message}\n`),
+    );
+    const initialize = deps.initialize ?? initializeProviders;
+    const init = await initialize(
+      { ...config, credentials: preflight.credentials },
+      { customProviderIds: preflight.admittedAdapterIds },
+    );
+    for (const warning of init.warnings) {
+      process.stderr.write(`[librarium] warning: ${warning}\n`);
+    }
+    assertAdmittedAdaptersRegistered(
+      preflight.prepared,
+      deps.registeredAdapterIds?.() ??
+        getAllProviders().map((provider) => provider.id),
+    );
+    const providerIds = preflight.prepared.request.slots.map((slot) => {
+      const plan =
+        preflight.prepared.profile_plans_by_identity[
+          providerIdentityKey(slot.primary.identity)
+        ];
+      if (!plan)
+        throw new Error('Admitted slot is missing its frozen binding.');
+      return plan.binding.adapter_id;
+    });
+    const tierLookup = new Map(
+      getAllProviders().map((provider) => [provider.id, provider.tier]),
+    );
+    const deepResearchIds = providerIds.filter(
+      (id) => tierLookup.get(id) === 'deep-research',
+    );
+    if (
+      !opts.json &&
+      shouldConfirmDeepResearch({
+        deepResearchCount: countDeepResearch(providerIds, tierLookup),
+        isTTY: Boolean(process.stdout.isTTY && process.stdin.isTTY),
+        yes: Boolean(opts.yes),
+        fromWizard: Boolean(opts.skipPreflightConfirm),
+      })
+    ) {
       spinner.stop();
-      printLine('');
-      printLine(`  fanning out to ${providerIds.length} providers`);
-      if (refined) {
-        for (const tier of [
-          'deep-research',
-          'ai-grounded',
-          'raw-search',
-        ] as const) {
-          const variant = refined.tierQueries[tier];
-          if (!variant) continue;
-          const shown =
-            variant.length > 90 ? `${variant.slice(0, 89)}\u2026` : variant;
-          printLine(dimText(`    ${tier}: ${shown}`, color));
-        }
+      p.log.warn(deepResearchWarning(deepResearchIds));
+      const proceed = await p.confirm({
+        message: 'Proceed with this deep-research run?',
+        initialValue: false,
+      });
+      if (p.isCancel(proceed) || !proceed) {
+        process.stdout.write('Cancelled.\n');
+        process.exitCode = 130;
+        return { exitCode: 130 };
       }
-      printLine('');
-      if (live) {
-        for (const id of providerIds) {
-          live.addProvider(id, tierById.get(id) ?? 'raw-search');
-        }
-        live.start();
-      } else {
-        spinner.start(spinnerText());
-      }
+    }
 
-      // Honest runtime spend circuit breaker. Only API-reported costs count;
-      // providers that report nothing contribute 0. Undefined budget means no
-      // limit, in which case the tracker never trips.
-      const budget = createBudgetTracker(config.defaults.maxCostUsd);
-      // Separate pre-dispatch reservation ceiling (estimated cost). Kept fully
-      // independent of the reported-cost budget above; the two never reconcile.
-      const estimatedBudget = createEstimateBudgetTracker(
-        config.defaults.maxEstimatedCostUsd,
-      );
-
-      const { reports, sources, totalCitations, totalDurationMs, manifest } =
-        await executeResearchRun({
+    let refined: RefinedQueries | null = null;
+    if (opts.refine) {
+      spinner.start('Refining query...');
+      try {
+        refined = await refineQuery(
           query,
           config,
-          providerIds,
-          outputDir,
-          slug,
-          tierQueries: refined?.tierQueries,
-          credentials,
-          budget,
-          estimatedBudget,
-          allowFallbacks: opts.fallback !== false,
-          onEvent: (event) => {
-            if (event.type === 'post-dispatch-warning') {
-              console.error(
-                `[librarium] warning: post-dispatch hook failed (${event.message})`,
-              );
-              return;
-            }
-            if (event.type === 'dispatch-completed') {
-              finalizeDispatchPresentation(event.reports, {
-                spinner,
-                live,
-                printLine,
-                widths,
-                color,
-              });
-              return;
-            }
-            if (event.type !== 'dispatch-progress') return;
-            const { progress } = event;
-            if (live) {
-              switch (progress.event) {
-                case 'started':
-                  live.markStarted(progress.providerId);
-                  break;
-                case 'fallback-started':
-                  live.addFallback(
-                    progress.report?.id ?? progress.providerId,
-                    progress.providerId,
-                    tierById.get(progress.providerId) ?? 'raw-search',
-                  );
-                  break;
-                case 'completed':
-                case 'error':
-                case 'async-submitted':
-                  if (progress.report) live.resolve(progress.report);
-                  break;
-              }
-              return;
-            }
-            switch (progress.event) {
-              case 'started':
-                running.add(progress.providerId);
-                break;
-              case 'fallback-started':
-                printLine(formatFallbackNotice(progress.providerId, color));
-                running.add(progress.providerId);
-                break;
-              case 'completed':
-              case 'error':
-              case 'async-submitted':
-                running.delete(progress.providerId);
-                if (progress.report) {
-                  printLine(formatProviderLine(progress.report, widths, color));
-                }
-                break;
-            }
-            spinner.text = spinnerText();
-          },
-          postDispatch: hooks?.postDispatch
-            ? async (context) =>
-                hooks.postDispatch?.({
-                  ...context,
-                  color,
-                  printLine,
-                })
-            : undefined,
-        });
-
-      // Determine exit code. When a primary fails but its fallback succeeds,
-      // the user's intent was fully satisfied — exclude the recovered primary's
-      // error report so it doesn't inflate the failure count.
-      const recoveredPrimaries = new Set(
-        reports
-          .filter((r) => r.fallbackFor && r.status === 'success')
-          .map((r) => r.fallbackFor as string),
-      );
-      const effectiveReports = reports.filter(
-        (r) => !recoveredPrimaries.has(r.id),
-      );
-      // Awaiting background work is intentionally non-terminal.
-      const exitCode = manifest.exitCode ?? 0;
-
-      // Print summary (exclude recovered primaries so they don't show as failures)
-      const successful = effectiveReports.filter((r) => r.status === 'success');
-      const failed = effectiveReports.filter((r) => r.status === 'error');
-      const pending = effectiveReports.filter(
-        (r) => r.status === 'async-pending',
-      );
-      // Total API-reported cost across providers that reported one. Uses ALL
-      // reports (not effectiveReports): a paid primary recovered by a fallback
-      // still spent real money and must count toward reported spend.
-      const costReports = reports.filter(
-        (r) =>
-          typeof r.usage?.costUsd === 'number' &&
-          Number.isFinite(r.usage.costUsd) &&
-          r.usage.costUsd >= 0,
-      );
-      const reportedCost =
-        costReports.length > 0
-          ? {
-              totalUsd: costReports.reduce(
-                (sum, r) => sum + (r.usage?.costUsd ?? 0),
-                0,
-              ),
-              reporting: costReports.length,
-              providers: reports.length,
-            }
-          : undefined;
-
-      // Surface the budget circuit breaker when it tripped: count the
-      // providers it skipped and report the accumulated spend against the
-      // budget ceiling.
-      const budgetSkipped = effectiveReports.filter(
-        (r) => r.status === 'skipped' && r.error === BUDGET_SKIP_REASON,
-      ).length;
-      const budgetReached =
-        budget.limitUsd !== undefined && budgetSkipped > 0
-          ? {
-              reportedUsd: budget.spentUsd,
-              budgetUsd: budget.limitUsd,
-              skipped: budgetSkipped,
-            }
-          : undefined;
-
-      // Pre-dispatch estimated cost across providers that actually launched and
-      // produced a USD estimate (separate lane from reported cost; never mixed).
-      // Skipped providers never ran, so their estimate is not counted.
-      const estimateReports = reports.filter(
-        (r) =>
-          r.status !== 'skipped' &&
-          typeof r.metering?.estimate?.estimatedCostUsd === 'number' &&
-          Number.isFinite(r.metering.estimate.estimatedCostUsd),
-      );
-      const estimatedCost =
-        estimateReports.length > 0
-          ? {
-              totalUsd: estimateReports.reduce(
-                (sum, r) => sum + (r.metering?.estimate?.estimatedCostUsd ?? 0),
-                0,
-              ),
-              estimating: estimateReports.length,
-              providers: reports.length,
-            }
-          : undefined;
-
-      // Surface the estimated-cost reservation breaker when it tripped.
-      const estimateSkipped = effectiveReports.filter(
-        (r) =>
-          r.status === 'skipped' && r.error === ESTIMATE_BUDGET_SKIP_REASON,
-      ).length;
-      const estimatedBudgetReached =
-        estimatedBudget.limitUsd !== undefined && estimateSkipped > 0
-          ? {
-              reservedUsd: estimatedBudget.reservedUsd,
-              budgetUsd: estimatedBudget.limitUsd,
-              skipped: estimateSkipped,
-            }
-          : undefined;
-
-      for (const line of formatRunSummary({
-        succeeded: successful.length,
-        failed: failed.length,
-        pending: pending.length,
-        uniqueSources: sources.length,
-        totalCitations,
-        outputDir,
-        color,
-        totalDurationMs,
-        reportedCost,
-        budgetReached,
-        estimatedCost,
-        estimatedBudgetReached,
-      })) {
-        printLine(line);
+          process.env,
+          (message) =>
+            process.stderr.write(
+              `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
+            ),
+          preflight.credentials,
+        );
+      } catch (error) {
+        process.stderr.write(
+          `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
+        );
       }
-
-      let reportPath: string | null = null;
-      if (opts.html) {
-        reportPath = writeHtmlReport(outputDir);
-        if (reportPath) {
-          printLine(
-            `  \u25b8 ${hyperlink(shortenHomePath(reportPath), fileUrl(reportPath), color)}`,
-          );
-        }
-      }
-
-      if (opts.jsonl) {
-        const jsonlPath = writeJsonlReport(outputDir);
-        if (jsonlPath) {
-          printLine(
-            `  \u25b8 ${hyperlink(shortenHomePath(jsonlPath), fileUrl(jsonlPath), color)}`,
-          );
-        }
-      }
-
-      if (opts.json) {
-        console.log(JSON.stringify(manifest, null, 2));
-      }
-
-      if (opts.open && exitCode !== 2) {
-        openPath(reportPath ?? outputDir);
-      }
-
-      process.exitCode = exitCode;
-      return { exitCode, outputDir };
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      spinner.fail(message);
-      process.exitCode = 2;
-      return { exitCode: 2 };
     }
+
+    const slug = generateSlug(query);
+    const baseDir = resolve(config.defaults.outputDir);
+    let outputDir: string | undefined;
+    let stateCreated = false;
+    let interrupted = false;
+    let cancellation: Promise<void> | undefined;
+    const coordinator = createNodeCoordinatorDependencies();
+    const scheduleCancellation = (): void => {
+      if (!stateCreated || !outputDir || cancellation) return;
+      cancellation = cancelCanonicalRun({
+        runs_root: baseDir,
+        run_directory: outputDir,
+        coordinator,
+      })
+        .then(() => undefined)
+        .catch(() => undefined);
+    };
+    const onInterrupt = (): void => {
+      if (interrupted) return;
+      interrupted = true;
+      scheduleCancellation();
+    };
+    process.once('SIGINT', onInterrupt);
+    if (interrupted) {
+      process.off('SIGINT', onInterrupt);
+      spinner.stop();
+      process.exitCode = 130;
+      return { exitCode: 130 };
+    }
+    outputDir = createRunDir(baseDir, slug);
+    const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
+    const refinedQueriesBySlot = Object.fromEntries(
+      preflight.prepared.request.slots.flatMap((slot) => {
+        const plan =
+          preflight.prepared.profile_plans_by_identity[
+            providerIdentityKey(slot.primary.identity)
+          ];
+        const tier = plan
+          ? resolveExactProvider(plan.binding.adapter_id)?.tier
+          : undefined;
+        const variant = tier ? refined?.tierQueries[tier] : undefined;
+        return variant ? [[slot.slot_id, variant]] : [];
+      }),
+    );
+    spinner.stop();
+    printLine('');
+    printLine(`  fanning out to ${providerIds.length} providers`);
+    for (const providerId of providerIds) {
+      printLine(dimText(`    ${providerId}`, color));
+    }
+    printLine('');
+    spinner.start('Running canonical research...');
+    const runCanonical = deps.runCanonical ?? runCanonicalPreparedExecution;
+    let canonical;
+    try {
+      canonical = await runCanonical(preflight.prepared, {
+        runs_root: baseDir,
+        run_directory: outputDir,
+        coordinator,
+        attempt_bridge: createRegisteredProviderAttemptBridge(
+          preflight.prepared,
+          resolveExactProvider,
+        ),
+        refined_queries_by_slot: refinedQueriesBySlot,
+        is_cancelled: () => interrupted,
+        on_state_created: () => {
+          stateCreated = true;
+          if (interrupted) scheduleCancellation();
+        },
+      });
+    } catch (error) {
+      if (!interrupted) throw error;
+      await cancellation;
+      const cancelled = stateCreated
+        ? await cancelCanonicalRun({
+            runs_root: baseDir,
+            run_directory: outputDir,
+            coordinator,
+          })
+        : undefined;
+      if (!cancelled) {
+        try {
+          // createRunDir created this exact directory for this request. rmdir
+          // succeeds only when it is still empty; never delete recursively.
+          rmdirSync(outputDir);
+        } catch {
+          // Preserve any unexpected artifact for diagnosis.
+        }
+        process.exitCode = 130;
+        return { exitCode: 130 };
+      }
+      canonical = {
+        manifest: cancelled,
+        response: cancelled.terminal_response,
+        runtime: {
+          state: cancelled.coordination_state,
+          outputs_by_attempt: {},
+        },
+      };
+    } finally {
+      process.off('SIGINT', onInterrupt);
+    }
+    await cancellation;
+    if (interrupted && stateCreated) {
+      const cancelled = await cancelCanonicalRun({
+        runs_root: baseDir,
+        run_directory: outputDir,
+        coordinator,
+      });
+      canonical = {
+        ...canonical,
+        manifest: cancelled,
+        response: cancelled.terminal_response,
+      };
+    }
+    spinner.stop();
+    const presentation = writeCanonicalPresentationArtifacts(
+      canonical.manifest,
+      outputDir,
+      slug,
+    );
+    const widths = computeLineWidths(
+      presentation.reports.map((report) => report.id),
+      presentation.reports.map((report) => report.tier),
+    );
+    printLine('');
+    for (const report of presentation.reports) {
+      if (report.fallbackFor) {
+        printLine(formatFallbackNotice(report.id, color));
+      }
+      printLine(formatProviderLine(report, widths, color));
+    }
+    let postResult: PostDispatchResult | undefined;
+    if (hooks?.postDispatch) {
+      try {
+        postResult = await hooks.postDispatch({
+          query,
+          config,
+          results: presentation.results,
+          reports: presentation.reports,
+          sources: presentation.sources,
+          outputDir,
+          color,
+          printLine,
+        });
+      } catch (error) {
+        process.stderr.write(
+          `[librarium] warning: post-dispatch hook failed (${error instanceof Error ? error.message : String(error)})\n`,
+        );
+      }
+    }
+    const successful = presentation.reports.filter(
+      (report) => report.status === 'success',
+    );
+    const recovered = new Set(
+      successful.flatMap((report) =>
+        report.fallbackFor ? [report.fallbackFor] : [],
+      ),
+    );
+    const failed = presentation.reports
+      .filter(
+        (report) => report.status === 'error' || report.status === 'timeout',
+      )
+      .filter((report) => !recovered.has(report.id)).length;
+    const pending = presentation.reports.filter(
+      (report) => report.status === 'async-pending',
+    ).length;
+    for (const line of formatRunSummary({
+      succeeded: successful.length,
+      failed,
+      pending,
+      uniqueSources: presentation.sources.length,
+      totalCitations: presentation.totalCitations,
+      outputDir,
+      color,
+      totalDurationMs: presentation.totalDurationMs,
+    })) {
+      printLine(line);
+    }
+
+    const answer = postResult?.answerText
+      ? {
+          content: postResult.answerText,
+          ...(postResult.manifestExtra?.answer?.provider && {
+            provider: postResult.manifestExtra.answer.provider,
+          }),
+          ...(postResult.manifestExtra?.answer?.model && {
+            model: postResult.manifestExtra.answer.model,
+          }),
+        }
+      : undefined;
+    let reportPath: string | null = null;
+    if (opts.html) {
+      reportPath = resolve(outputDir, 'report.html');
+      safeWriteFile(
+        reportPath,
+        generateHtmlReport({
+          manifest: {
+            ...presentation.generatorManifest,
+            ...(postResult?.manifestExtra ?? {}),
+          },
+          providerContents: presentation.providerContents,
+          sources: presentation.sources,
+          ...(answer && { answer }),
+        }),
+      );
+      printLine(
+        `  \u25b8 ${hyperlink(shortenHomePath(reportPath), fileUrl(reportPath), color)}`,
+      );
+    }
+    if (opts.jsonl) {
+      const jsonlPath = resolve(outputDir, 'results.jsonl');
+      safeWriteFile(
+        jsonlPath,
+        generateJsonlReport({
+          manifest: {
+            ...presentation.generatorManifest,
+            ...(postResult?.manifestExtra ?? {}),
+          },
+          providerContents: presentation.providerContents,
+          sources: presentation.sources,
+          ...(answer && { answer }),
+        }),
+      );
+      printLine(
+        `  \u25b8 ${hyperlink(shortenHomePath(jsonlPath), fileUrl(jsonlPath), color)}`,
+      );
+    }
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          canonical.response
+            ? {
+                outputDir,
+                state: 'terminal',
+                response: canonical.response,
+                ...(answer && { answer }),
+                ...(postResult?.manifestExtra?.verification && {
+                  verification: postResult.manifestExtra.verification,
+                }),
+              }
+            : { outputDir, state: 'pending' },
+          null,
+          2,
+        ),
+      );
+    }
+    const exitCode = interrupted
+      ? 130
+      : canonical.response
+        ? canonical.response.status === 'succeeded'
+          ? 0
+          : canonical.response.status === 'partial'
+            ? 1
+            : 2
+        : 0;
+    if (opts.open && exitCode !== 2) openPath(reportPath ?? outputDir);
+    process.exitCode = exitCode;
+    return { exitCode, outputDir };
+  } catch (error) {
+    spinner.fail(error instanceof Error ? error.message : String(error));
+    process.exitCode = 2;
+    return { exitCode: 2 };
   }
 }
 

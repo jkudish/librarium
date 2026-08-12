@@ -2,6 +2,10 @@ import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import {
+  writeHtmlReportForRun,
+  writeJsonlReportForRun,
+} from '../node-canonical-reporting.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type { ProviderReport } from '../types.js';
 import {
@@ -9,12 +13,9 @@ import {
   describeRun,
   discoverRuns,
   type RunEntry,
+  readBrowseRunView,
   readRunEntry,
-  readRunSnapshot,
-  shapeBrowseRunSnapshot,
 } from './browse-data.js';
-import { writeHtmlReport } from './html-report.js';
-import { writeJsonlReport } from './jsonl-report.js';
 import { renderMarkdownAnsi } from './markdown-ansi.js';
 import { runPager } from './pager.js';
 import { openPath } from './run.js';
@@ -96,12 +97,12 @@ async function browseRun(
   entry: RunEntry,
   repository: RunArtifactRepository,
 ): Promise<NavResult> {
-  const snapshot = readRunSnapshot(entry.dir, repository);
-  if (!snapshot) {
+  const view = readBrowseRunView(entry.dir, repository);
+  if (!view) {
     p.log.warn(`Could not read run artifacts in ${entry.dir}`);
     return 'back';
   }
-  const presentation = shapeBrowseRunSnapshot(snapshot);
+  const presentation = view.presentation;
   const reports = presentation.providers.map(({ report }) => report);
   const widths = computeLineWidths(
     reports.map((r) => r.id),
@@ -117,7 +118,7 @@ async function browseRun(
       | 'back'
       | 'quit';
     const choice = await p.select<Choice>({
-      message: snapshot.manifest.query,
+      message: view.manifest.query,
       options: [
         ...reports.map((report) => ({
           value: report as Choice,
@@ -134,21 +135,21 @@ async function browseRun(
     if (p.isCancel(choice) || choice === 'quit') return 'quit';
     if (choice === 'back') return 'back';
     if (choice === 'summary') {
-      if (snapshot.summary === undefined) {
+      if (view.summary === undefined) {
         p.log.warn(
-          `File not found: ${repository.resolveContainedPath(snapshot.runDir, 'summary.md')}`,
+          `File not found: ${repository.resolveContainedPath(view.runDir, 'summary.md')}`,
         );
         continue;
       }
       await viewMarkdownInPager(
-        snapshot.summary,
+        view.summary,
         'summary.md',
-        repository.resolveContainedPath(snapshot.runDir, 'summary.md'),
+        repository.resolveContainedPath(view.runDir, 'summary.md'),
       );
       continue;
     }
     if (choice === 'html') {
-      const reportPath = writeHtmlReport(entry.dir, repository);
+      const reportPath = writeHtmlReportForRun(entry.dir, repository);
       if (reportPath) {
         p.log.success(
           `Wrote ${hyperlink(reportPath, fileUrl(reportPath), isColorEnabled(process.stdout))}`,
@@ -164,7 +165,7 @@ async function browseRun(
       continue;
     }
     if (choice === 'jsonl') {
-      const jsonlPath = writeJsonlReport(entry.dir, repository);
+      const jsonlPath = writeJsonlReportForRun(entry.dir, repository);
       if (jsonlPath) {
         p.log.success(
           `Wrote ${hyperlink(jsonlPath, fileUrl(jsonlPath), isColorEnabled(process.stdout))}`,
@@ -178,7 +179,7 @@ async function browseRun(
       ({ report }) => report.id === choice.id,
     );
     if (!provider) continue;
-    const nav = await providerView(snapshot.runDir, provider, repository);
+    const nav = await providerView(view.runDir, provider, repository);
     if (nav === 'quit') return 'quit';
   }
 }

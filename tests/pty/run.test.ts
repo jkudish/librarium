@@ -70,7 +70,7 @@ describeMaybe(
       // The failing primary surfaces an ✗ row with its error.
       expect(plain).toContain('mock-flaky');
       expect(plain).toContain('✗');
-      expect(plain).toContain('HTTP 401 Unauthorized');
+      expect(plain).toContain('The provider returned an error.');
 
       // The fallback notice and the recovered fallback row both appear.
       expect(plain).toContain('↳ falling back to mock-backup');

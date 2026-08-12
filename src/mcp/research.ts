@@ -1,9 +1,11 @@
 import { resolve } from 'node:path';
 import {
   getAllProviders,
+  getExactProvider,
   initializeProviders,
 } from '../adapters/node-registry.js';
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
+import { providerIdentityKey } from '../contracts/domain/index.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
 import { generateSlug } from '../core/prompt-builder.js';
@@ -12,14 +14,22 @@ import {
   ProviderSelectionError,
   resolveProviderSelection as resolveProviderSelectionCore,
 } from '../core/provider-selection.js';
+import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
-  type ExecuteResearchRunDependencies,
-  executeResearchRun,
-} from '../core/research-run.js';
-import { createNodeCredentialContext } from '../node-credentials.js';
+  type CanonicalPreparedExecutionResult,
+  createNodeCoordinatorDependencies,
+  createRegisteredProviderAttemptBridge,
+  runCanonicalPreparedExecution,
+} from '../node-canonical-run.js';
+import {
+  assertAdmittedAdaptersRegistered,
+  emitRequestPreflightNotices,
+  type ProductionRequestPreflightResult,
+  preflightProductionRequest,
+  RequestPreflightError,
+} from '../node-request-preflight.js';
 import { type CreateRunDirDeps, createRunDir } from '../node-run-directory.js';
-import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
-import type { Config, Defaults } from '../types.js';
+import type { Config, Defaults, Provider } from '../types.js';
 
 /**
  * Silent, file-writing research pipeline used by the MCP server. This mirrors
@@ -41,10 +51,14 @@ export interface SilentRunArgs {
 export interface SilentRunDeps {
   /** Load + merge config (global + project + CLI flags). Injectable for tests. */
   loadMergedConfig?: () => Config;
-  /** Core dispatch. Injectable so tests can stub network. */
-  dispatch?: ExecuteResearchRunDependencies['dispatch'];
+  /** Canonical application service. Injectable so tests never call providers. */
+  runCanonical?: typeof runCanonicalPreparedExecution;
+  /** Exact registry lookup. Aliases are not accepted after admission. */
+  resolveExactProvider?: (adapterId: string) => Provider | undefined;
   /** Initialize providers (registry side effect). Injectable for tests. */
   initialize?: typeof initializeProviders;
+  /** Exact adapter ids registered by an injected initializer. */
+  registeredAdapterIds?: () => Iterable<string>;
   /** Credentials (env). Defaults to process.env. */
   credentials?: CredentialContext;
   /** Diagnostic sink. Defaults to stderr. Never stdout. */
@@ -57,7 +71,17 @@ export interface SilentRunDeps {
   runDirDeps?: CreateRunDirDeps;
 }
 
-export type SilentRunResult = Awaited<ReturnType<typeof executeResearchRun>>;
+export interface SilentRunResult extends CanonicalPreparedExecutionResult {
+  readonly outputDir: string;
+  readonly reports: ReturnType<
+    typeof writeCanonicalPresentationArtifacts
+  >['reports'];
+  readonly sources: ReturnType<
+    typeof writeCanonicalPresentationArtifacts
+  >['sources'];
+  readonly totalCitations: number;
+  readonly totalDurationMs: number;
+}
 
 export { ProviderSelectionError as ResearchInputError };
 
@@ -109,43 +133,57 @@ export async function runResearchSilent(
     ? deps.loadMergedConfig()
     : defaultLoadMergedConfig(cliFlags);
 
-  emitProductionShadowDiagnostic(
-    {
-      config,
-      env: process.env,
-      transport: {
-        kind: 'silent_mcp',
-        input: {
-          query: args.query,
-          providers: args.providers,
-          group: args.group,
-          mode: args.mode,
-          refine: args.refine,
+  const preflightDeps = deps.credentials
+    ? { createCredentials: () => deps.credentials as CredentialContext }
+    : undefined;
+  let preflight: ProductionRequestPreflightResult;
+  try {
+    preflight = preflightProductionRequest(
+      {
+        config,
+        transport: {
+          kind: 'silent_mcp',
+          input: {
+            query: args.query,
+            providers: args.providers,
+            group: args.group,
+            mode: args.mode,
+            refine: args.refine,
+          },
         },
       },
-    },
-    onWarn,
-  );
-
-  const credentials = deps.credentials ?? createNodeCredentialContext();
+      preflightDeps,
+    );
+  } catch (error) {
+    if (error instanceof RequestPreflightError) {
+      throw new ProviderSelectionError(error.message);
+    }
+    throw error;
+  }
+  emitRequestPreflightNotices(preflight.notices, onWarn);
+  const credentials = preflight.credentials;
 
   const initialize = deps.initialize ?? initializeProviders;
-  const initResult = await initialize({ ...config, credentials });
+  const initResult = await initialize(
+    { ...config, credentials },
+    { customProviderIds: preflight.admittedAdapterIds },
+  );
   for (const warning of initResult.warnings) {
     onWarn(`[librarium] warning: ${warning}`);
   }
 
-  const providerIds = resolveProviderSelectionCore(
-    config,
-    args,
-    getAllProviders(),
-    {
-      credentials,
-      requireUsable: true,
-      strictExplicitCredentials: true,
-      onWarn,
-    },
-  );
+  try {
+    assertAdmittedAdaptersRegistered(
+      preflight.prepared,
+      deps.registeredAdapterIds?.() ??
+        getAllProviders().map((provider) => provider.id),
+    );
+  } catch (error) {
+    if (error instanceof RequestPreflightError) {
+      throw new ProviderSelectionError(error.message);
+    }
+    throw error;
+  }
 
   // Optional one-shot LLM refine. Never allowed to break the run.
   let refined: RefinedQueries | null = null;
@@ -171,22 +209,42 @@ export async function runResearchSilent(
   // two same-second runs of the same query never share a directory. The actual
   // created directory is what gets recorded in the manifest below.
   const outputDir = createRunDir(baseDir, slug, deps.runDirDeps);
-
-  return executeResearchRun(
-    {
-      query: args.query,
-      config,
-      providerIds,
-      outputDir,
-      slug,
-      tierQueries: refined?.tierQueries,
-      credentials,
-      onEvent: (event) => {
-        if (event.type === 'post-dispatch-warning') {
-          onWarn(`[librarium] warning: ${event.message}`);
-        }
-      },
-    },
-    { dispatch: deps.dispatch },
+  const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
+  const refinedQueriesBySlot = Object.fromEntries(
+    preflight.prepared.request.slots.flatMap((slot) => {
+      const plan =
+        preflight.prepared.profile_plans_by_identity[
+          providerIdentityKey(slot.primary.identity)
+        ];
+      const tier = plan
+        ? resolveExactProvider(plan.binding.adapter_id)?.tier
+        : undefined;
+      const variant = tier ? refined?.tierQueries[tier] : undefined;
+      return variant ? [[slot.slot_id, variant]] : [];
+    }),
   );
+  const runCanonical = deps.runCanonical ?? runCanonicalPreparedExecution;
+  const canonical = await runCanonical(preflight.prepared, {
+    runs_root: baseDir,
+    run_directory: outputDir,
+    coordinator: createNodeCoordinatorDependencies(),
+    attempt_bridge: createRegisteredProviderAttemptBridge(
+      preflight.prepared,
+      resolveExactProvider,
+    ),
+    refined_queries_by_slot: refinedQueriesBySlot,
+  });
+  const presentation = writeCanonicalPresentationArtifacts(
+    canonical.manifest,
+    outputDir,
+    slug,
+  );
+  return {
+    ...canonical,
+    outputDir,
+    reports: presentation.reports,
+    sources: presentation.sources,
+    totalCitations: presentation.totalCitations,
+    totalDurationMs: presentation.totalDurationMs,
+  };
 }

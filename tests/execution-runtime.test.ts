@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
-import type { CoordinatorState } from '../src/core/coordinator.js';
+import {
+  advanceCoordination,
+  type CoordinatorState,
+  createCoordinatorState,
+  recordLaunchDispatched,
+} from '../src/core/coordinator.js';
+import { CoordinatorStateSchema } from '../src/core/coordinator-state-schema.js';
 import {
   type CoordinationCompareAndSwapResult,
   type CoordinationStateStore,
@@ -435,6 +441,64 @@ describe('private prepared execution runtime', () => {
     expect(result.state.unresolved_acceptances[0]).toMatchObject({
       reason: 'submission_response_uncertain',
     });
+  });
+
+  it('rechecks concurrent orphan submissions after the request expires', async () => {
+    const plan = prepared(
+      [profile('durable-a', 'background'), profile('durable-b', 'background')],
+      [],
+      'sync',
+    );
+    const store = new InMemoryCoordinationStateStore();
+    const initialDependencies = coordinatorDependencies();
+    const started = advanceCoordination(
+      createCoordinatorState(plan, initialDependencies),
+      initialDependencies,
+    );
+    let state = started.state;
+    for (const launch of started.launches) {
+      state = recordLaunchDispatched(
+        state,
+        launch.attempt_id,
+        launch.delivery_lease_id,
+        initialDependencies,
+      );
+    }
+    expect(state.attempts.map((attempt) => attempt.status)).toEqual([
+      'submitting',
+      'submitting',
+    ]);
+    await store.create(state);
+    const resumedDependencies = mutableCoordinatorDependencies();
+    resumedDependencies.setNow(start + 60_000);
+    const attempts: AttemptExecutionPort = { execute: vi.fn() };
+
+    const result = await runPreparedExecution(plan, {
+      store,
+      coordinator: resumedDependencies,
+      attempts,
+      resume_existing: true,
+    });
+
+    expect(attempts.execute).not.toHaveBeenCalled();
+    expect(result.state.status).toBe('unsuccessful');
+    expect(result.state.attempts.map((attempt) => attempt.status)).toEqual([
+      'timed_out',
+      'timed_out',
+    ]);
+  });
+
+  it('rejects a latest attempt reference from a different slot', () => {
+    const plan = prepared([profile('first'), profile('second')]);
+    const dependencies = coordinatorDependencies();
+    const advanced = advanceCoordination(
+      createCoordinatorState(plan, dependencies),
+      dependencies,
+    );
+    const state = structuredClone(advanced.state);
+    state.slots[0]!.latest_attempt_id = state.slots[1]!.latest_attempt_id;
+
+    expect(CoordinatorStateSchema.safeParse(state).success).toBe(false);
   });
 
   it('drops a late primary output and retains the successful fallback output', async () => {

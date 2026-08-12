@@ -3,11 +3,11 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
-import { comparePreparationDiagnostics } from '../src/core/research-request.js';
 import {
-  compileShadowRequest,
-  type ShadowCompilationTransport,
-} from '../src/core/shadow-compilation.js';
+  compileRequest,
+  type RequestCompilationTransport,
+} from '../src/core/request-compilation.js';
+import { comparePreparationDiagnostics } from '../src/core/research-request.js';
 import type { Config } from '../src/types.js';
 
 function config(
@@ -136,10 +136,10 @@ function countedPreparation() {
 
 function compile(
   source: Config,
-  transport: ShadowCompilationTransport,
+  transport: RequestCompilationTransport,
   requestDeadlineMs = 1_000_000,
 ) {
-  return compileShadowRequest({
+  return compileRequest({
     config: source,
     authoredGroups: { global: source.groups, project: {} },
     credentials: credentials(),
@@ -157,7 +157,7 @@ function profileKeys(result: ReturnType<typeof compile>) {
   );
 }
 
-describe('private shadow compilation', () => {
+describe('private request compilation', () => {
   it('resolves exact adapter ids, display names, qualified profiles, and split OpenRouter targets', () => {
     const result = compile(
       config({
@@ -223,7 +223,7 @@ describe('private shadow compilation', () => {
         expect(result).not.toHaveProperty('prepared');
         expect(result.issues).toEqual([
           {
-            code: 'shadow_provider_token_retired',
+            code: 'request_provider_token_retired',
             phase: 'transport',
             path: '/providers/0',
             message: `Provider "${token}" was removed; use "${replacement}".`,
@@ -257,7 +257,7 @@ describe('private shadow compilation', () => {
       if (result.ok) return;
       expect(result.issues).toEqual([
         {
-          code: 'shadow_provider_token_retired',
+          code: 'request_provider_token_retired',
           phase: 'transport',
           path: '/providers/0',
           message: `Provider "${token}" was removed; use "${replacement}".`,
@@ -278,8 +278,8 @@ describe('private shadow compilation', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.issues.map(({ code, path }) => [code, path])).toEqual([
-      ['shadow_provider_token_unknown', '/providers/0'],
-      ['shadow_provider_token_ambiguous', '/providers/1'],
+      ['request_provider_token_unknown', '/providers/0'],
+      ['request_provider_token_ambiguous', '/providers/1'],
     ]);
 
     const filtered = compile(
@@ -320,7 +320,7 @@ describe('private shadow compilation', () => {
       },
     ]) {
       const counted = countedPreparation();
-      const result = compileShadowRequest({
+      const result = compileRequest({
         config: source,
         authoredGroups: { global: {}, project: {} },
         credentials: credentials(),
@@ -328,14 +328,14 @@ describe('private shadow compilation', () => {
         transport: {
           kind: 'mcp',
           input,
-        } as unknown as ShadowCompilationTransport,
+        } as unknown as RequestCompilationTransport,
         preparation: counted.dependencies,
       });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.issues).toEqual([
           expect.objectContaining({
-            code: 'shadow_exact_targets_not_allowed',
+            code: 'request_exact_targets_not_allowed',
             path: '/providers',
           }),
         ]);
@@ -361,7 +361,7 @@ describe('private shadow compilation', () => {
     if (!result.ok) {
       expect(result.issues).toContainEqual(
         expect.objectContaining({
-          code: 'shadow_provider_token_ambiguous',
+          code: 'request_provider_token_ambiguous',
           path: '/providers/0',
         }),
       );
@@ -435,9 +435,9 @@ describe('private shadow compilation', () => {
   it('reports blank, removed, and unknown effective group selectors at /group', () => {
     const source = config({ providers: { exa: { enabled: true } } });
     for (const [group, code] of [
-      [' ', 'shadow_group_blank'],
-      ['raw', 'shadow_group_removed'],
-      ['missing', 'shadow_group_unknown'],
+      [' ', 'request_group_blank'],
+      ['raw', 'request_group_removed'],
+      ['missing', 'request_group_unknown'],
     ] as const) {
       const result = compile(source, {
         kind: 'mcp',
@@ -484,7 +484,7 @@ describe('private shadow compilation', () => {
       if (!unknown.ok) {
         expect(unknown.issues).toContainEqual(
           expect.objectContaining({
-            code: 'shadow_provider_token_unknown',
+            code: 'request_provider_token_unknown',
             path: '/providers/0',
           }),
         );
@@ -530,7 +530,7 @@ describe('private shadow compilation', () => {
     expect(explicitResult.ok).toBe(false);
     if (!explicitResult.ok) {
       expect(explicitResult.issues).not.toContainEqual(
-        expect.objectContaining({ code: 'shadow_provider_token_unknown' }),
+        expect.objectContaining({ code: 'request_provider_token_unknown' }),
       );
     }
     expect(groupResult.ok).toBe(false);
@@ -641,7 +641,7 @@ describe('private shadow compilation', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.issues).toContainEqual(
-          expect.objectContaining({ code: 'shadow_provider_token_unknown' }),
+          expect.objectContaining({ code: 'request_provider_token_unknown' }),
         );
       }
     }
@@ -676,7 +676,7 @@ describe('private shadow compilation', () => {
   });
 
   it.each(PLANNED_PROVIDER_IDS)(
-    'keeps planned built-in adapter id %s reserved in shadow compilation',
+    'keeps planned built-in adapter id %s reserved in request compilation',
     (providerId) => {
       const result = compile(
         config({
@@ -701,7 +701,7 @@ describe('private shadow compilation', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.issues).toContainEqual(
-          expect.objectContaining({ code: 'shadow_provider_token_unknown' }),
+          expect.objectContaining({ code: 'request_provider_token_unknown' }),
         );
         expect(result.issues).not.toContainEqual(
           expect.objectContaining({ code: 'custom_provider_profile_missing' }),
@@ -891,7 +891,7 @@ describe('private shadow compilation', () => {
       if (!result.ok) {
         expect(result.issues).toContainEqual(
           expect.objectContaining({
-            code: 'shadow_group_unknown',
+            code: 'request_group_unknown',
             path: '/group',
           }),
         );
@@ -905,7 +905,7 @@ describe('private shadow compilation', () => {
       groups: { quick: ['exa'], 'custom:quick': ['exa'] },
     });
     const collisionDependencies = countedPreparation();
-    const collision = compileShadowRequest({
+    const collision = compileRequest({
       config: source,
       authoredGroups: { global: source.groups, project: {} },
       credentials: credentials(),
@@ -916,7 +916,7 @@ describe('private shadow compilation', () => {
     expect(collision.ok).toBe(false);
     if (!collision.ok) {
       expect(collision.issues).toEqual([
-        expect.objectContaining({ code: 'shadow_group_collision' }),
+        expect.objectContaining({ code: 'request_group_collision' }),
         expect.objectContaining({ code: 'reserved_workflow_name_collision' }),
       ]);
     }
@@ -927,7 +927,7 @@ describe('private shadow compilation', () => {
       defaults: { maxEstimatedCostUsd: 0.0000001 },
     });
     const inexactDependencies = countedPreparation();
-    const inexact = compileShadowRequest({
+    const inexact = compileRequest({
       config: inexactSource,
       authoredGroups: { global: inexactSource.groups, project: {} },
       credentials: credentials(),
@@ -944,10 +944,10 @@ describe('private shadow compilation', () => {
     expect(inexactDependencies.calls()).toBe(0);
   });
 
-  it('derives a bounded shadow deadline before materialization effects', () => {
+  it('derives a bounded request deadline before materialization effects', () => {
     const source = config({ providers: { exa: { enabled: true } } });
     const dependencies = countedPreparation();
-    const result = compileShadowRequest({
+    const result = compileRequest({
       config: source,
       authoredGroups: { global: source.groups, project: {} },
       credentials: credentials(),
@@ -986,7 +986,7 @@ describe('private shadow compilation', () => {
         'openrouter-chat': { enabled: true },
       },
     });
-    const transports: ShadowCompilationTransport[] = [
+    const transports: RequestCompilationTransport[] = [
       {
         kind: 'cli',
         input: {
@@ -1140,7 +1140,7 @@ describe('private shadow compilation', () => {
     const result = await build({
       entryPoints: [
         fileURLToPath(
-          new URL('../src/core/shadow-compilation.ts', import.meta.url),
+          new URL('../src/core/request-compilation.ts', import.meta.url),
         ),
       ],
       bundle: true,
@@ -1184,21 +1184,22 @@ describe('private shadow compilation', () => {
     const diagnosticImporters = Object.entries(production.metafile.inputs)
       .filter(([, input]) =>
         input.imports.some(({ path }) =>
-          path.includes('node-shadow-diagnostics'),
+          path.includes('node-request-preflight'),
         ),
       )
       .map(([path]) => path)
       .sort();
     expect(diagnosticImporters).toEqual([
       'src/commands/run.ts',
+      'src/commands/wizard.ts',
       'src/mcp/research.ts',
     ]);
-    const shadowImporters = Object.entries(production.metafile.inputs)
+    const compilationImporters = Object.entries(production.metafile.inputs)
       .filter(([, input]) =>
-        input.imports.some(({ path }) => path.includes('shadow-compilation')),
+        input.imports.some(({ path }) => path.includes('request-compilation')),
       )
       .map(([path]) => path)
       .sort();
-    expect(shadowImporters).toEqual(['src/node-shadow-diagnostics.ts']);
+    expect(compilationImporters).toEqual(['src/node-request-preflight.ts']);
   });
 });

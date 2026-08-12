@@ -34,6 +34,8 @@ function makeConfig(
     },
     providers,
     groups: {},
+    customProviders: {},
+    trustedProviderIds: [],
   };
 }
 
@@ -161,6 +163,68 @@ describe('dispatcher fallback', () => {
     expect(fallbackReport!.fallbackFor).toBe('primary');
     expect(fallbackReport!.wordCount).toBeGreaterThan(0);
     expect(fallbackReport!.citationCount).toBe(1);
+  });
+
+  it('does not execute an unadmitted incompatible fallback after a primary failure', async () => {
+    const primary = createFailingProvider('exa', 'primary boom', 'raw-search');
+    const fallback = createSuccessProvider('brave-answers', 'ai-grounded');
+    const fallbackExecute = vi.spyOn(fallback, 'execute');
+    registerProvider(primary);
+    registerProvider(fallback);
+
+    const config = makeConfig({
+      exa: {
+        apiKey: '$EXA_API_KEY',
+        enabled: true,
+        fallback: 'brave-answers',
+      },
+      'brave-answers': { apiKey: '$BRAVE_API_KEY', enabled: false },
+    });
+    const { reports } = await dispatch({
+      config,
+      providerIds: ['exa'],
+      query: 'fallback safety',
+      outputDir: tmpDir,
+      mode: 'sync',
+      credentials: {
+        env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+      },
+      allowFallbacks: false,
+    });
+
+    expect(reports).toHaveLength(1);
+    expect(fallbackExecute).not.toHaveBeenCalled();
+  });
+
+  it('preserves an admitted compatible fallback after a primary failure', async () => {
+    const primary = createFailingProvider('exa', 'primary boom', 'raw-search');
+    const fallback = createSuccessProvider('brave-search', 'raw-search');
+    const fallbackExecute = vi.spyOn(fallback, 'execute');
+    registerProvider(primary);
+    registerProvider(fallback);
+
+    const config = makeConfig({
+      exa: {
+        apiKey: '$EXA_API_KEY',
+        enabled: true,
+        fallback: 'brave-search',
+      },
+      'brave-search': { apiKey: '$BRAVE_API_KEY', enabled: true },
+    });
+    const { reports } = await dispatch({
+      config,
+      providerIds: ['exa'],
+      query: 'fallback safety',
+      outputDir: tmpDir,
+      mode: 'sync',
+      credentials: {
+        env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+      },
+    });
+
+    expect(config.providers.exa?.fallback).toBe('brave-search');
+    expect(reports).toHaveLength(2);
+    expect(fallbackExecute).toHaveBeenCalledTimes(1);
   });
 
   it('does not trigger a configured fallback when the caller disables it', async () => {

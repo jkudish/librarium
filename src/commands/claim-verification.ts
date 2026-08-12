@@ -4,8 +4,8 @@ import {
   createEstimateBudgetTracker,
 } from '../core/budget.js';
 import { hasCredential } from '../core/credentials.js';
-import { normalizeUsage } from '../core/dispatcher.js';
 import { buildProviderMetering } from '../core/metering.js';
+import { normalizeUsage } from '../core/usage-normalization.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import type {
   ClaimSupport,

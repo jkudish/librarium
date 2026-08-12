@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { registerProvider } from '../src/adapters/index.js';
-import { writeHtmlReportFromSnapshot } from '../src/commands/html-report.js';
-import { writeJsonlReportFromSnapshot } from '../src/commands/jsonl-report.js';
+import { writeHtmlReportFromSnapshot } from '../src/commands/html-report-v2.js';
+import { writeJsonlReportFromSnapshot } from '../src/commands/jsonl-report-v2.js';
 import { createRunManifest } from '../src/core/run-manifest.js';
 import {
   providerArtifactFileNames,

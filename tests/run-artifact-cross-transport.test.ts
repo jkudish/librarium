@@ -10,8 +10,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { shapeBrowseRunSnapshot } from '../src/commands/browse-data.js';
-import { writeHtmlReportFromSnapshot } from '../src/commands/html-report.js';
-import { writeJsonlReportFromSnapshot } from '../src/commands/jsonl-report.js';
+import { writeHtmlReportFromSnapshot } from '../src/commands/html-report-v2.js';
+import { writeJsonlReportFromSnapshot } from '../src/commands/jsonl-report-v2.js';
 import {
   CONTENT_DELIMITER_BEGIN,
   CONTENT_DELIMITER_END,

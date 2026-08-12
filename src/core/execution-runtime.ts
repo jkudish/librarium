@@ -11,6 +11,7 @@ import {
   recordAcceptanceUnknown,
   recordAttemptFinished,
   recordAttemptRunning,
+  recordDurableCustodyObservation,
   recordLaunchDispatched,
   recordSubmissionAccepted,
   recordTransientPollFailure,
@@ -20,8 +21,10 @@ import {
 import {
   type CoordinationStateStore,
   updateCoordinationState,
+  type VersionedCoordinationState,
 } from './coordinator-store.js';
 import type { PreparedResearchExecution } from './execution-plan.js';
+import { profileIdentityKey } from './execution-plan.js';
 
 /**
  * The Worker-safe execution port. It receives a launch that was already
@@ -31,6 +34,12 @@ import type { PreparedResearchExecution } from './execution-plan.js';
 export interface AttemptExecutionPort {
   execute(
     launch: AttemptLaunch,
+    context: AttemptExecutionContext,
+  ): Promise<AttemptExecutionResult>;
+  /** Resume an already accepted durable attempt without submitting it again. */
+  resume?(
+    launch: AttemptLaunch,
+    handle: DurableHandle,
     context: AttemptExecutionContext,
   ): Promise<AttemptExecutionResult>;
 }
@@ -58,7 +67,7 @@ export type AttemptExecutionResult =
       readonly output?: unknown;
     }
   | { readonly kind: 'acceptance_unknown' }
-  | { readonly kind: 'accepted' };
+  | { readonly kind: 'accepted'; readonly durable_handle?: DurableHandle };
 
 export interface ExecutionRuntimeDependencies {
   readonly store: CoordinationStateStore;
@@ -66,6 +75,37 @@ export interface ExecutionRuntimeDependencies {
   readonly attempts: AttemptExecutionPort;
   /** A bounded CAS retry budget for each persisted state transition. */
   readonly max_compare_and_swap_attempts?: number;
+  /**
+   * Optional durable success hook. Node persistence uses this to commit the
+   * normalized output and succeeded coordinator state in one run.json CAS.
+   * The Worker-safe runtime stays storage-neutral.
+   */
+  readonly persist_success?: (
+    input: PersistExecutionSuccessInput,
+  ) => Promise<VersionedExecutionSuccess>;
+  /** Load and resume an existing durable request instead of creating it. */
+  readonly resume_existing?: boolean;
+  /** One bounded custody observation for already terminal local requests. */
+  readonly reconcile_terminal_custody?: boolean;
+  readonly persist_custody_observation?: (
+    requestId: string,
+    attemptId: string,
+    handle: DurableHandle,
+  ) => Promise<VersionedCoordinationState>;
+}
+
+export interface PersistExecutionSuccessInput {
+  readonly request_id: string;
+  readonly attempt_id: string;
+  readonly finished: Extract<AttemptFinishedInput, { outcome: 'succeeded' }>;
+  readonly output: unknown;
+  readonly coordinator: CoordinatorDependencies;
+  readonly max_compare_and_swap_attempts: number;
+}
+
+export interface VersionedExecutionSuccess {
+  readonly version: number;
+  readonly state: CoordinatorState;
 }
 
 export interface ExecutionRuntimeResult {
@@ -117,13 +157,18 @@ export async function runPreparedExecution(
       // wave, so one updater may observe roughly two transitions per slot.
       Math.max(16, prepared.policy.limits.max_concurrency * 2 + 2),
   };
-  const initial = createCoordinatorState(
-    prepared,
-    effectiveDependencies.coordinator,
-  );
-  await effectiveDependencies.store.create(initial);
+  const initial = effectiveDependencies.resume_existing
+    ? undefined
+    : createCoordinatorState(prepared, effectiveDependencies.coordinator);
+  const requestId = prepared.request.request_id;
+  const existing = effectiveDependencies.resume_existing
+    ? await effectiveDependencies.store.load(requestId)
+    : undefined;
+  if (effectiveDependencies.resume_existing && !existing) {
+    throw new Error(`Coordination state not found: ${requestId}`);
+  }
+  if (initial) await effectiveDependencies.store.create(initial);
   const outputs = new Map<string, unknown>();
-  const requestId = initial.request_id;
 
   const persistLaunchDispatch = async (
     launch: AttemptLaunch,
@@ -176,10 +221,20 @@ export async function runPreparedExecution(
     );
   };
 
-  const executeLaunch = async (launch: AttemptLaunch): Promise<void> => {
-    if (!(await persistLaunchDispatch(launch))) return;
+  const executeLaunch = async (
+    launch: AttemptLaunch,
+    acceptedHandle?: DurableHandle,
+  ): Promise<void> => {
+    if (!acceptedHandle && !(await persistLaunchDispatch(launch))) return;
+    const observedBeforeExecution = acceptedHandle
+      ? await effectiveDependencies.store.load(requestId)
+      : undefined;
+    const custodyOnly =
+      acceptedHandle !== undefined &&
+      effectiveDependencies.reconcile_terminal_custody === true &&
+      observedBeforeExecution?.state.status !== 'running';
     const context: AttemptExecutionContext = {
-      mode: prepared.request.mode,
+      mode: custodyOnly ? 'async' : prepared.request.mode,
       poll_interval_ms: prepared.policy.limits.poll_interval_ms,
       submissionAccepted: async (handle, adapterStateRef) => {
         const persisted = await transition(
@@ -215,21 +270,32 @@ export async function runPreparedExecution(
         );
       },
       transientPollFailure: async (error) => {
-        await transition(effectiveDependencies, requestId, (state) =>
-          recordTransientPollFailure(
+        await transition(effectiveDependencies, requestId, (state) => {
+          const attempt = state.attempts.find(
+            (candidate) => candidate.attempt_id === launch.attempt_id,
+          );
+          if (
+            state.status !== 'running' ||
+            (attempt?.status !== 'submitted' && attempt?.status !== 'running')
+          ) {
+            return undefined;
+          }
+          return recordTransientPollFailure(
             state,
             launch.attempt_id,
             error,
             effectiveDependencies.coordinator,
-          ),
-        );
+          );
+        });
       },
       running: async () => {
         await transition(effectiveDependencies, requestId, (state) => {
           const attempt = state.attempts.find(
             (candidate) => candidate.attempt_id === launch.attempt_id,
           );
-          if (attempt?.status === 'running') return undefined;
+          if (state.status !== 'running' || attempt?.status === 'running') {
+            return undefined;
+          }
           return recordAttemptRunning(
             state,
             launch.attempt_id,
@@ -240,19 +306,62 @@ export async function runPreparedExecution(
     };
 
     try {
-      const result = await dependencies.attempts.execute(launch, context);
-      if (result.kind === 'finished') {
-        const persisted = await transition(
-          effectiveDependencies,
-          requestId,
-          (state) =>
-            recordAttemptFinished(
-              state,
-              launch.attempt_id,
-              result.finished,
-              effectiveDependencies.coordinator,
-            ),
+      const result = acceptedHandle
+        ? await dependencies.attempts.resume?.(launch, acceptedHandle, context)
+        : await dependencies.attempts.execute(launch, context);
+      if (!result) {
+        throw new Error(
+          'The attempt port cannot resume an accepted durable attempt.',
         );
+      }
+      if (custodyOnly) {
+        const observedHandle =
+          result.kind === 'finished'
+            ? result.finished.durable_handle
+            : result.kind === 'accepted'
+              ? result.durable_handle
+              : undefined;
+        if (observedHandle) {
+          if (effectiveDependencies.persist_custody_observation) {
+            await effectiveDependencies.persist_custody_observation(
+              requestId,
+              launch.attempt_id,
+              observedHandle,
+            );
+          } else {
+            await transition(effectiveDependencies, requestId, (state) =>
+              recordDurableCustodyObservation(
+                state,
+                launch.attempt_id,
+                observedHandle,
+              ),
+            );
+          }
+        }
+        return;
+      }
+      if (result.kind === 'finished') {
+        const persisted =
+          result.finished.outcome === 'succeeded' &&
+          result.output !== undefined &&
+          effectiveDependencies.persist_success
+            ? await effectiveDependencies.persist_success({
+                request_id: requestId,
+                attempt_id: launch.attempt_id,
+                finished: result.finished,
+                output: result.output,
+                coordinator: effectiveDependencies.coordinator,
+                max_compare_and_swap_attempts:
+                  effectiveDependencies.max_compare_and_swap_attempts ?? 16,
+              })
+            : await transition(effectiveDependencies, requestId, (state) =>
+                recordAttemptFinished(
+                  state,
+                  launch.attempt_id,
+                  result.finished,
+                  effectiveDependencies.coordinator,
+                ),
+              );
         const persistedAttempt = persisted.state.attempts.find(
           (attempt) => attempt.attempt_id === launch.attempt_id,
         );
@@ -265,6 +374,15 @@ export async function runPreparedExecution(
           outputs.set(launch.attempt_id, result.output);
         }
       } else {
+        if (result.kind === 'accepted' && result.durable_handle) {
+          await transition(effectiveDependencies, requestId, (state) =>
+            recordDurableCustodyObservation(
+              state,
+              launch.attempt_id,
+              result.durable_handle as DurableHandle,
+            ),
+          );
+        }
         let persisted = await effectiveDependencies.store.load(requestId);
         let attempt = persisted?.state.attempts.find(
           (candidate) => candidate.attempt_id === launch.attempt_id,
@@ -339,6 +457,35 @@ export async function runPreparedExecution(
     }
   };
 
+  const resumedAttemptIds = new Set<string>();
+  if (effectiveDependencies.resume_existing && existing) {
+    await Promise.all(
+      existing.state.attempts.flatMap((attempt) =>
+        attempt.status === 'submitting' && !attempt.durable_handle
+          ? [
+              transition(effectiveDependencies, requestId, (state) => {
+                const currentAttempt = state.attempts.find(
+                  (candidate) => candidate.attempt_id === attempt.attempt_id,
+                );
+                if (
+                  currentAttempt?.status !== 'submitting' ||
+                  currentAttempt.durable_handle
+                ) {
+                  return undefined;
+                }
+                return recordAcceptanceUnknown(
+                  state,
+                  currentAttempt.attempt_id,
+                  effectiveDependencies.coordinator,
+                  currentAttempt.adapter_state_ref,
+                  'submission_response_uncertain',
+                );
+              }),
+            ]
+          : [],
+      ),
+    );
+  }
   for (;;) {
     const advanced = await resumeCoordination(
       effectiveDependencies.store,
@@ -349,8 +496,100 @@ export async function runPreparedExecution(
     const state = advanced.state;
 
     if (advanced.launches.length > 0) {
-      await Promise.all(advanced.launches.map(executeLaunch));
+      await Promise.all(
+        advanced.launches.map((launch) => executeLaunch(launch)),
+      );
       continue;
+    }
+
+    if (effectiveDependencies.resume_existing) {
+      const resumptions = state.attempts.flatMap((attempt) => {
+        if (
+          resumedAttemptIds.has(attempt.attempt_id) ||
+          !attempt.durable_handle ||
+          (attempt.status !== 'submitted' &&
+            attempt.status !== 'running' &&
+            !(
+              effectiveDependencies.reconcile_terminal_custody &&
+              (attempt.status === 'cancelled' ||
+                attempt.status === 'timed_out') &&
+              attempt.durable_handle.status !== 'failed' &&
+              attempt.durable_handle.status !== 'cancelled' &&
+              attempt.durable_handle.status !== 'succeeded'
+            ))
+        ) {
+          return [];
+        }
+        const plan = Object.values(state.profile_plans_by_identity).find(
+          (candidate) =>
+            candidate.profile_key ===
+            profileIdentityKey(attempt.profile.identity),
+        );
+        if (!plan) {
+          throw new Error(
+            `Accepted attempt ${attempt.attempt_id} is missing its frozen binding.`,
+          );
+        }
+        resumedAttemptIds.add(attempt.attempt_id);
+        return [
+          {
+            launch: {
+              attempt_id: attempt.attempt_id,
+              slot_id: attempt.slot_id,
+              profile: attempt.profile,
+              binding: plan.binding,
+              catalog_digest: state.catalog_digest,
+              query: attempt.query,
+              deadline_at: attempt.deadline_at,
+              // Resume never re-enters delivery claiming. This stable private
+              // value satisfies AttemptLaunch's execution-port shape only.
+              delivery_lease_id: 'durable-resume',
+              idempotency_key: `${state.request_id}:${attempt.attempt_id}`,
+            },
+            handle: attempt.durable_handle,
+          },
+        ];
+      });
+      if (resumptions.length > 0) {
+        await Promise.all(
+          resumptions.map(({ launch, handle }) =>
+            executeLaunch(launch, handle),
+          ),
+        );
+        continue;
+      }
+
+      const interrupted = state.attempts.filter(
+        (attempt) =>
+          !resumedAttemptIds.has(attempt.attempt_id) &&
+          !attempt.durable_handle &&
+          (attempt.status === 'running' || attempt.status === 'submitting'),
+      );
+      if (interrupted.length > 0) {
+        await Promise.all(
+          interrupted.map((attempt) =>
+            transition(effectiveDependencies, requestId, (current) =>
+              recordAttemptFinished(
+                current,
+                attempt.attempt_id,
+                {
+                  outcome: 'failed',
+                  error: {
+                    code: 'non_durable_execution_interrupted',
+                    message:
+                      'The local non-durable execution was interrupted and cannot be resumed.',
+                    category: 'internal',
+                    retryable: false,
+                    fallback_allowed: false,
+                  },
+                },
+                effectiveDependencies.coordinator,
+              ),
+            ),
+          ),
+        );
+        continue;
+      }
     }
 
     // Async acceptance, acceptance uncertainty, local interruption after

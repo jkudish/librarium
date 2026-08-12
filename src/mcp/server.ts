@@ -87,7 +87,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Run a multi-provider research query',
       description:
-        'Fan out a research query across multiple search and deep-research providers in parallel. Writes a full run directory (run.json manifest, per-provider markdown, deduped sources.json, summary.md) and returns a compact structured result: the output directory, per-provider status and tallies, and the top deduped sources. Full provider text is NOT inlined; fetch it with get_results. Deep-research providers in async or mixed mode may return pending task ids to poll with check_async.',
+        'Fan out a research query across multiple search and deep-research providers in parallel. Writes a full run directory and returns a public response. A terminal schemaVersion 3 response inlines the canonical ResearchResponse, including full provider content; a pending response stays compact. Use get_results for capped, explicitly untrusted presentation content. Deep-research providers in async or mixed mode may return pending work to poll with check_async.',
       inputSchema: {
         query: z.string().min(1).describe('The research query or question.'),
         group: z
@@ -188,7 +188,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Poll async deep-research tasks',
       description:
-        'Run one poll pass over the pending async deep-research tasks in a run directory (no blocking wait). Defaults to the most recent run. With retrieve=true, completed tasks are fetched and folded back into run.json and sources.json. Returns the per-task states.',
+        'Run one bounded resume pass over pending async work in a run directory (no blocking wait). Defaults to the most recent run. schemaVersion 3 always retrieves and commits a result immediately when remote completion is observed; retrieve only gates retrieval for historical schemaVersion 2 runs. A terminal v3 result may include the full canonical ResearchResponse provider content.',
       inputSchema: {
         runDir: z
           .string()
@@ -199,14 +199,14 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
         retrieve: z
           .boolean()
           .optional()
-          .describe('Retrieve completed tasks through the normal path.'),
+          .describe(
+            'Retrieve completed historical schemaVersion 2 tasks. schemaVersion 3 always retrieves observed remote completion.',
+          ),
       },
     },
     async (args): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
-        const credentials = createNodeCredentialContext();
-        await initialize({ ...config, credentials });
         const baseDir = resolve(config.defaults.outputDir);
         const runDir = resolveRunDir(baseDir, args.runDir, repository);
         if (!runDir) {

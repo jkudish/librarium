@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileShadowRequest } from '../../src/core/shadow-compilation.js';
+import { compileRequest } from '../../src/core/request-compilation.js';
 import type { Config } from '../../src/types.js';
 
 const config: Config = {
@@ -19,16 +19,16 @@ const config: Config = {
   groups: {},
 };
 
-describe('private shadow compiler in workerd', () => {
+describe('private request compiler in workerd', () => {
   it('imports and prepares a plan without Node runtime dependencies', () => {
     const counts = new Map<string, number>();
-    const result = compileShadowRequest({
+    const result = compileRequest({
       config,
       authoredGroups: { global: {}, project: {} },
       credentials: { env: { EXA_API_KEY: 'worker-test-key' } },
       transport: {
         kind: 'silent_mcp',
-        input: { query: 'worker-safe shadow plan', providers: ['Exa Search'] },
+        input: { query: 'worker-safe request plan', providers: ['Exa Search'] },
       },
       preparation: {
         clock: { now: () => Date.parse('2026-08-09T12:00:00Z') },
@@ -90,7 +90,7 @@ describe('private shadow compiler in workerd', () => {
       },
       trustedProviderIds: ['edge-custom'],
     };
-    const result = compileShadowRequest({
+    const result = compileRequest({
       config: custom,
       authoredGroups: { global: {}, project: {} },
       credentials: {},
@@ -120,7 +120,7 @@ describe('private shadow compiler in workerd', () => {
     'rejects retired transport id %s before plan preparation',
     (token, replacement) => {
       const counts = { clock: 0, ids: 0 };
-      const result = compileShadowRequest({
+      const result = compileRequest({
         config,
         authoredGroups: { global: {}, project: {} },
         credentials: {},
@@ -148,7 +148,7 @@ describe('private shadow compiler in workerd', () => {
         ok: false,
         issues: [
           {
-            code: 'shadow_provider_token_retired',
+            code: 'request_provider_token_retired',
             phase: 'transport',
             path: '/providers/0',
             message: `Provider "${token}" was removed; use "${replacement}".`,
@@ -169,7 +169,7 @@ describe('private shadow compiler in workerd', () => {
       },
     };
     const ids = new Map<string, number>();
-    const result = compileShadowRequest({
+    const result = compileRequest({
       config: background,
       authoredGroups: { global: {}, project: {} },
       credentials: {
@@ -206,7 +206,7 @@ describe('private shadow compiler in workerd', () => {
 
   it('keeps an explicit total authoritative and propagates truncation notice', () => {
     const ids = new Map<string, number>();
-    const result = compileShadowRequest({
+    const result = compileRequest({
       config: {
         ...config,
         defaults: { ...config.defaults, maxParallel: 1 },
@@ -297,7 +297,7 @@ describe('private shadow compiler in workerd', () => {
       credentials: { env: {} },
       providers: ['not-a-provider'],
       requestDeadlineMs: undefined,
-      code: 'shadow_provider_token_unknown',
+      code: 'request_provider_token_unknown',
     },
     {
       name: 'async mode with an inline profile',
@@ -323,7 +323,7 @@ describe('private shadow compiler in workerd', () => {
     },
   ])('keeps clock and IDs untouched when $name is rejected', (fixture) => {
     const counts = { clock: 0, ids: 0 };
-    const result = compileShadowRequest({
+    const result = compileRequest({
       config: fixture.config,
       authoredGroups: { global: {}, project: {} },
       credentials: fixture.credentials,

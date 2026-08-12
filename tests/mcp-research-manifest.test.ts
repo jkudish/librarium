@@ -1,9 +1,14 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerProvider } from '../src/adapters/index.js';
-import { readRunManifest } from '../src/core/run-manifest.js';
 import { runResearchSilent } from '../src/mcp/research.js';
 import type { Config, Provider } from '../src/types.js';
 
@@ -24,13 +29,26 @@ describe('silent research live manifest', () => {
     dirs.push(baseDir);
     mkdirSync(baseDir, { recursive: true });
     const provider: Provider = {
-      id: 'write-ahead-provider',
+      id: 'exa',
       displayName: 'Write ahead provider',
       tier: 'raw-search',
       execution: 'inline',
       envVar: '',
       requiresApiKey: false,
-      execute: vi.fn(),
+      execute: vi.fn(async () => {
+        const runDir = readdirSync(baseDir).map((entry) =>
+          join(baseDir, entry),
+        )[0];
+        expect(runDir).toBeDefined();
+        const persisted = JSON.parse(
+          readFileSync(join(runDir as string, 'run.json'), 'utf8'),
+        );
+        expect(persisted).toMatchObject({
+          schemaVersion: 3,
+          coordination_state: { status: 'running' },
+        });
+        throw new Error('dispatch exploded');
+      }),
     };
     registerProvider(provider);
     const config: Config = {
@@ -49,48 +67,113 @@ describe('silent research live manifest', () => {
       trustedProviderIds: [],
       groups: {},
     };
-    const dispatch = vi.fn(async () => {
-      const runDir = readdirSync(baseDir).map((entry) =>
-        join(baseDir, entry),
-      )[0];
-      expect(runDir).toBeDefined();
-      expect(existsSync(join(runDir as string, 'run.json'))).toBe(true);
-      expect(readRunManifest(runDir as string)).toMatchObject({
-        status: 'running',
-        exitCode: null,
-      });
-      throw new Error('dispatch exploded');
-    });
     const warnings: string[] = [];
 
-    await expect(
-      runResearchSilent(
-        { query: 'write ahead', providers: [provider.id] },
-        {
-          loadMergedConfig: () => config,
-          initialize: async () => ({
-            warnings: [],
-            loadedCustomProviders: [],
-            skippedCustomProviders: [],
-          }),
-          dispatch,
-          credentials: { env: {} },
-          onWarn: (message) => warnings.push(message),
-        },
-      ),
-    ).rejects.toThrow('dispatch exploded');
-
-    expect(warnings).toContainEqual(
-      expect.stringMatching(
-        /^\[librarium\] shadow: issues=\d+ issues_codes=[a-z0-9_,]+; notices=\d+ notices_codes=/,
-      ),
+    const result = await runResearchSilent(
+      { query: 'write ahead', providers: [provider.id], mode: 'sync' },
+      {
+        loadMergedConfig: () => config,
+        initialize: async () => ({
+          warnings: [],
+          loadedCustomProviders: [],
+          skippedCustomProviders: [],
+        }),
+        registeredAdapterIds: () => ['exa'],
+        resolveExactProvider: () => provider,
+        credentials: { env: { EXA_API_KEY: 'test-key' } },
+        onWarn: (message) => warnings.push(message),
+      },
     );
 
+    expect(warnings).toEqual([]);
+
     const runDir = readdirSync(baseDir).map((entry) => join(baseDir, entry))[0];
-    expect(readRunManifest(runDir as string)).toMatchObject({
+    expect(result.response).toMatchObject({
       status: 'failed',
-      exitCode: 2,
-      error: 'dispatch exploded',
+      errors: [{ code: 'librarium.adapter_execute_failed' }],
     });
+    expect(
+      JSON.parse(readFileSync(join(runDir as string, 'run.json'), 'utf8')),
+    ).toMatchObject({
+      schemaVersion: 3,
+      coordination_state: { status: 'unsuccessful' },
+      terminal_response: { status: 'failed' },
+    });
+    expect(existsSync(join(runDir as string, 'coordination.json'))).toBe(false);
+  });
+
+  it('does not launch an unadmitted fallback after an MCP primary failure', async () => {
+    const baseDir = join(
+      tmpdir(),
+      `librarium-mcp-fallback-${crypto.randomUUID()}`,
+    );
+    dirs.push(baseDir);
+    mkdirSync(baseDir, { recursive: true });
+    const primary: Provider = {
+      id: 'exa',
+      displayName: 'Failing primary',
+      tier: 'raw-search',
+      execution: 'inline',
+      envVar: '',
+      requiresApiKey: false,
+      execute: async () => {
+        throw new Error('primary failed');
+      },
+    };
+    const fallback: Provider = {
+      id: 'brave-answers',
+      displayName: 'Forbidden fallback',
+      tier: 'ai-grounded',
+      execution: 'inline',
+      envVar: '',
+      requiresApiKey: false,
+      execute: vi.fn(async () => ({
+        provider: 'brave-answers',
+        tier: 'ai-grounded',
+        content: 'must not run',
+        citations: [],
+        durationMs: 0,
+      })),
+    };
+    registerProvider(primary);
+    registerProvider(fallback);
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: baseDir,
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 1800,
+        asyncPollInterval: 10,
+        mode: 'sync',
+        llmWebSearch: true,
+      },
+      providers: {
+        exa: { enabled: true, fallback: 'brave-answers' },
+        'brave-answers': { enabled: false },
+      },
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+
+    const result = await runResearchSilent(
+      { query: 'forced primary failure', providers: ['exa'], mode: 'sync' },
+      {
+        loadMergedConfig: () => config,
+        initialize: async () => ({
+          warnings: [],
+          loadedCustomProviders: [],
+          skippedCustomProviders: [],
+        }),
+        registeredAdapterIds: () => ['exa'],
+        credentials: { env: { EXA_API_KEY: 'test-key' } },
+        onWarn: () => {},
+      },
+    );
+
+    expect(result.reports).toHaveLength(1);
+    expect(result.reports[0]).toMatchObject({ id: 'exa', status: 'error' });
+    expect(fallback.execute).not.toHaveBeenCalled();
   });
 });

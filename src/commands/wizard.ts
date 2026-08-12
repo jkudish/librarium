@@ -1,14 +1,12 @@
 import * as p from '@clack/prompts';
-import {
-  getAllProviders,
-  initializeProviders,
-} from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import type { CredentialContext } from '../core/credentials.js';
+import { BUILTIN_PROVIDER_DEFINITIONS } from '../core/provider-descriptor.js';
 import {
-  providerHasCredential,
-  usableProviderIds,
-} from '../core/provider-selection.js';
-import { createNodeCredentialContext } from '../node-credentials.js';
+  preflightProductionRequest,
+  preflightProductionRequestStructure,
+  RequestPreflightError,
+} from '../node-request-preflight.js';
 import type { Config, ProviderTier } from '../types.js';
 import { synthesizeAnswer } from './answer.js';
 import { browseRunDir } from './browse.js';
@@ -28,6 +26,12 @@ const TIER_ORDER: ProviderTier[] = [
   'raw-search',
   'llm',
 ];
+
+interface WizardProvider {
+  readonly id: string;
+  readonly displayName: string;
+  readonly tier: ProviderTier;
+}
 
 /** Summarize a group's members by tier, e.g. "6 providers: 4 ai-grounded, 2 raw-search". */
 function groupHint(ids: string[], tierById: Map<string, ProviderTier>): string {
@@ -51,22 +55,64 @@ function enabledProviderIds(config: Config): string[] {
     .map(([id]) => id);
 }
 
+function customProviderTier(
+  source: Config['customProviders'][string],
+): ProviderTier {
+  switch (source.executionProfile?.profile.result_kind) {
+    case 'research_report':
+      return 'deep-research';
+    case 'grounded_answer':
+    case 'surface_observation':
+      return 'ai-grounded';
+    case 'model_answer':
+      return 'llm';
+    case 'search_results':
+      return 'raw-search';
+    default:
+      return 'raw-search';
+  }
+}
+
+/**
+ * Build a display-only provider list from configuration declarations. Bare
+ * `librarium` must not initialize providers, load custom modules, spawn custom
+ * scripts, or construct a keychain-aware credential context before executeRun
+ * performs its two-phase admission gate.
+ */
+function wizardProviders(config: Config): readonly WizardProvider[] {
+  const builtins = BUILTIN_PROVIDER_DEFINITIONS.map((definition) => ({
+    id: definition.id,
+    displayName: definition.display.name,
+    tier: definition.tier,
+  }));
+  const builtinIds = new Set(builtins.map(({ id }) => id));
+  const custom = Object.entries(config.customProviders)
+    .filter(([id]) => !builtinIds.has(id))
+    .map(([id, source]) => ({
+      id,
+      displayName: id,
+      tier: customProviderTier(source),
+    }));
+  return [...builtins, ...custom];
+}
+
+/** Safe to call only after structural request admission has completed. */
+export function hasWizardSynthesisClient(
+  config: Config,
+  credentials: CredentialContext,
+): boolean {
+  return resolveRefineClient(config, process.env, credentials) !== null;
+}
+
 export async function runWizard(): Promise<void> {
   const config = mergeConfigs(loadConfig(), loadProjectConfig(process.cwd()));
-  const credentials = createNodeCredentialContext();
-  const initResult = await initializeProviders({
-    ...config,
-    credentials,
-  });
-  for (const warning of initResult.warnings) {
-    console.error(`[librarium] warning: ${warning}`);
-  }
+  const displayProviders = wizardProviders(config);
   const tierById = new Map<string, ProviderTier>(
-    getAllProviders().map((provider) => [provider.id, provider.tier]),
+    displayProviders.map((provider) => [provider.id, provider.tier]),
   );
-  const usable = usableProviderIds(config, getAllProviders(), credentials);
+  const enabled = enabledProviderIds(config);
 
-  if (usable.length === 0) {
+  if (enabled.length === 0) {
     await runOnboardingWizard();
     return;
   }
@@ -82,15 +128,12 @@ export async function runWizard(): Promise<void> {
   if (p.isCancel(query)) return cancel();
 
   // Provider scope: enabled set, a group, or hand-picked providers.
-  const enabled = enabledProviderIds(config).filter((id) =>
-    usable.includes(id),
-  );
   const scope = await p.select<string>({
     message: 'Which providers?',
     options: [
       {
         value: 'enabled',
-        label: 'all usable providers',
+        label: 'all enabled providers',
         hint: groupHint(enabled, tierById),
       },
       ...Object.entries(config.groups).map(([name, ids]) => ({
@@ -112,20 +155,10 @@ export async function runWizard(): Promise<void> {
   if (scope === 'custom') {
     const picked = await p.multiselect<string>({
       message: 'Select providers (space to toggle, enter to confirm)',
-      options: getAllProviders().map((provider) => ({
+      options: displayProviders.map((provider) => ({
         value: provider.id,
         label: provider.id,
-        hint: `${provider.tier}${
-          config.providers[provider.id]?.enabled
-            ? providerHasCredential(
-                provider,
-                config.providers[provider.id],
-                credentials,
-              )
-              ? ''
-              : ', missing API key'
-            : ', not enabled in config'
-        }`,
+        hint: `${provider.tier}${config.providers[provider.id]?.enabled ? '' : ', not enabled in config'}`,
       })),
       required: true,
     });
@@ -158,11 +191,78 @@ export async function runWizard(): Promise<void> {
   });
   if (p.isCancel(mode)) return cancel();
 
-  // Refine and synthesis both need an LLM client key; gate both on the same
-  // check so neither prompt appears when no synthesis-capable key is set.
+  // Validate the request shape before consent without reading environment or
+  // keychain credentials and without importing provider implementations.
+  const preflightInput: RunOptions = { mode, skipPreflightConfirm: true };
+  if (providers) preflightInput.providers = providers;
+  else if (scope === 'enabled') preflightInput.providers = enabled;
+  if (group) preflightInput.group = group;
+  try {
+    preflightProductionRequestStructure({
+      config,
+      transport: {
+        kind: 'cli',
+        input: {
+          query: query.trim(),
+          providers: preflightInput.providers,
+          group: preflightInput.group,
+          mode: preflightInput.mode,
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof RequestPreflightError) {
+      p.log.error(error.message);
+      process.exitCode = 2;
+      return;
+    }
+    throw error;
+  }
+  const scopeLabel = group
+    ? `group "${group}"`
+    : providers
+      ? `${providers.length} hand-picked providers`
+      : 'all enabled providers';
+  const confirmed = await p.confirm({
+    message: `Fan out "${query.trim()}" to ${scopeLabel} in ${mode} mode?`,
+  });
+  if (p.isCancel(confirmed) || !confirmed) return cancel();
+
+  // Consent is explicit. Credential resolution is allowed now, but provider
+  // initialization remains inside executeRun after credential-aware preflight.
   let refine: boolean | symbol = false;
   let synthesize: boolean | symbol = false;
-  if (resolveRefineClient(config, process.env, credentials)) {
+  let wizardCredentials: CredentialContext;
+  try {
+    wizardCredentials = preflightProductionRequest({
+      config,
+      transport: {
+        kind: 'cli',
+        input: {
+          query: query.trim(),
+          providers: preflightInput.providers,
+          group: preflightInput.group,
+          mode: preflightInput.mode,
+        },
+      },
+    }).credentials;
+  } catch (error) {
+    if (
+      error instanceof RequestPreflightError &&
+      error.issues.some((issue) => issue.code === 'profile_uncredentialed')
+    ) {
+      p.log.warn('A selected provider needs credentials. Opening onboarding.');
+      await runOnboardingWizard();
+      return;
+    }
+    if (error instanceof RequestPreflightError) {
+      p.log.error(error.message);
+      process.exitCode = 2;
+      return;
+    }
+    throw error;
+  }
+  if (hasWizardSynthesisClient(config, wizardCredentials)) {
     p.log.message(
       'Refine rewrites your query three ways with one quick LLM call: a research brief for deep research, a focused question for AI answers, keywords for raw search.',
     );
@@ -178,16 +278,6 @@ export async function runWizard(): Promise<void> {
     });
     if (p.isCancel(synthesize)) return cancel();
   }
-
-  const scopeLabel = group
-    ? `group "${group}"`
-    : providers
-      ? `${providers.length} hand-picked providers`
-      : 'all enabled providers';
-  const confirmed = await p.confirm({
-    message: `Fan out "${query.trim()}" to ${scopeLabel} in ${mode} mode?`,
-  });
-  if (p.isCancel(confirmed) || !confirmed) return cancel();
 
   p.outro('starting run');
 

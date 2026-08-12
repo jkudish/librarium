@@ -1,11 +1,5 @@
 import { Marked } from 'marked';
-import { safeWriteFile } from '../core/fs-utils.js';
 import type { RunArtifactPresentationSourceSummary } from '../node-run-artifact-presentation.js';
-import { projectRunArtifactSnapshot } from '../node-run-artifact-presentation.js';
-import {
-  RunArtifactRepository,
-  type RunArtifactSnapshot,
-} from '../node-run-artifacts.js';
 import type {
   ClaimSupport,
   DeduplicatedSource,
@@ -720,37 +714,4 @@ ${sourcesPanel}
 </body>
 </html>
 `;
-}
-
-/**
- * Write report.html from one immutable repository snapshot.
- */
-export function writeHtmlReportFromSnapshot(
-  snapshot: RunArtifactSnapshot,
-  repository: RunArtifactRepository = new RunArtifactRepository(),
-): string {
-  const html = generateHtmlReport(projectRunArtifactSnapshot(snapshot));
-  const reportPath = repository.resolveContainedPath(
-    snapshot.runDir,
-    'report.html',
-  );
-  safeWriteFile(reportPath, html);
-  return reportPath;
-}
-
-/**
- * Build and write report.html for an existing run directory.
- * Returns the report path, or null when the directory has no run manifest.
- */
-export function writeHtmlReport(
-  runDir: string,
-  repository: RunArtifactRepository = new RunArtifactRepository(),
-): string | null {
-  let snapshot: RunArtifactSnapshot;
-  try {
-    snapshot = repository.readSnapshot(runDir, { view: 'recovery' });
-  } catch {
-    return null;
-  }
-  return writeHtmlReportFromSnapshot(snapshot, repository);
 }

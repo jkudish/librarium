@@ -1,4 +1,12 @@
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { lstatSync, readFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { ResearchResponse } from '../contracts/interchange/research-response.js';
+import { projectCanonicalRunPresentation } from '../node-canonical-presentation.js';
+import {
+  discoverCanonicalRunDirectories,
+  readCanonicalRunManifest,
+  readRunJsonSchemaVersion,
+} from '../node-canonical-run.js';
 import type { RunArtifactSnapshot } from '../node-run-artifact-codecs.js';
 import { presentationSourceSummary } from '../node-run-artifact-presentation.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
@@ -119,6 +127,8 @@ export interface ResearchToolResult {
   };
   pendingTaskIds: string[];
   summaryFile: string;
+  state: 'pending' | 'terminal';
+  response?: ResearchResponse;
 }
 
 function shapeProviders(
@@ -176,35 +186,84 @@ function shapeSources(sources: DeduplicatedSource[]): {
  * content is deliberately excluded (token blowup) — callers fetch it via
  * `get_results`.
  */
-export function shapeResearchResult(run: SilentRunResult): ResearchToolResult {
-  const { manifest, sources } = run;
-  const reports = manifest.providers;
+export function shapeResearchResult(
+  run:
+    | SilentRunResult
+    | {
+        readonly manifest: RunManifest;
+        readonly reports: ProviderReport[];
+        readonly sources: DeduplicatedSource[];
+        readonly totalCitations: number;
+        readonly totalDurationMs: number;
+        readonly outputDir?: string;
+      },
+): ResearchToolResult {
+  const { manifest, reports, sources } = run;
+  if (manifest.schemaVersion === 2) {
+    const shapedSources = shapeSources(sources);
+    return {
+      outputDir: manifest.outputDir,
+      query: manifest.query,
+      mode: manifest.mode,
+      tallies: {
+        succeeded: reports.filter((report) => report.status === 'success')
+          .length,
+        failed: reports.filter((report) => report.status === 'error').length,
+        pending: reports.filter((report) => report.status === 'async-pending')
+          .length,
+        skipped: reports.filter((report) => report.status === 'skipped').length,
+      },
+      totalDurationMs: run.totalDurationMs,
+      providers: shapeProviders(reports),
+      sources: {
+        total: manifest.sources.total,
+        unique: manifest.sources.unique,
+        shown: shapedSources.shown,
+        truncated: shapedSources.truncated,
+        items: shapedSources.items,
+      },
+      pendingTaskIds: manifest.providers
+        .flatMap((provider) => (provider.task ? [provider.task] : []))
+        .filter(
+          (task) => task.status === 'pending' || task.status === 'running',
+        )
+        .map((task) => task.taskId),
+      summaryFile: join(manifest.outputDir, 'summary.md'),
+      state:
+        manifest.status === 'running' || manifest.status === 'awaiting_async'
+          ? 'pending'
+          : 'terminal',
+    };
+  }
   const tallies = {
     succeeded: reports.filter((r) => r.status === 'success').length,
     failed: reports.filter((r) => r.status === 'error').length,
     pending: reports.filter((r) => r.status === 'async-pending').length,
     skipped: reports.filter((r) => r.status === 'skipped').length,
   };
+  const canonicalRun = run as SilentRunResult;
   const shapedSources = shapeSources(sources);
   return {
-    outputDir: manifest.outputDir,
-    query: manifest.query,
-    mode: manifest.mode,
+    outputDir: canonicalRun.outputDir,
+    query: manifest.request.query,
+    mode: manifest.request.mode,
     tallies,
     totalDurationMs: run.totalDurationMs,
     providers: shapeProviders(reports),
     sources: {
-      total: manifest.sources.total,
-      unique: manifest.sources.unique,
+      total: run.totalCitations,
+      unique: sources.length,
       shown: shapedSources.shown,
       truncated: shapedSources.truncated,
       items: shapedSources.items,
     },
-    pendingTaskIds: manifest.providers
-      .flatMap((provider) => (provider.task ? [provider.task] : []))
-      .filter((task) => task.status === 'pending' || task.status === 'running')
-      .map((task) => task.taskId),
-    summaryFile: join(manifest.outputDir, 'summary.md'),
+    // Durable provider handles are private canonical state and never cross the
+    // public MCP response boundary. The run directory is the resume handle.
+    pendingTaskIds: [],
+    summaryFile: join(canonicalRun.outputDir, 'summary.md'),
+    state:
+      manifest.coordination_state.status === 'running' ? 'pending' : 'terminal',
+    ...(canonicalRun.response && { response: canonicalRun.response }),
   };
 }
 
@@ -385,12 +444,28 @@ export function resolveRunDir(
     // The repository returns its canonical real path after validation. Keep
     // the caller's resolved spelling in the protocol payload for compatibility
     // with the existing MCP surface (for example, macOS `/var` aliases).
+    try {
+      if (readRunJsonSchemaVersion(baseDir, runDir) === 3) {
+        return resolve(runDir);
+      }
+    } catch {
+      // Preserve the legacy repository error/null behavior below.
+    }
     return repository.resolveRunDirectory(baseDir, runDir)
       ? resolve(runDir)
       : null;
   }
+  const canonical = discoverCanonicalRunDirectories(baseDir, 1)[0];
   const recent = repository.discoverRuns(baseDir, 1);
   const latest = recent[0];
+  if (canonical && latest) {
+    const canonicalManifest = readCanonicalRunManifest(baseDir, canonical);
+    return Date.parse(canonicalManifest.generated_at) >=
+      latest.manifest.timestamp * 1_000
+      ? canonical
+      : latest.runDir;
+  }
+  if (canonical) return canonical;
   if (!latest) return null;
   // Discovery returns the repository's canonical path. Re-express it under
   // the configured base spelling without trusting manifest.outputDir, which
@@ -418,6 +493,43 @@ export function readRunResults(
   provider?: string,
   repository: McpArtifactRepository = new RunArtifactRepository(),
 ): GetResultsToolResult | null {
+  const runsRoot = dirname(resolve(runDir));
+  if (readRunJsonSchemaVersion(runsRoot, runDir) === 3) {
+    const manifest = readCanonicalRunManifest(runsRoot, runDir);
+    const presentation = projectCanonicalRunPresentation(manifest, runDir, '');
+    const reports = provider
+      ? presentation.reports.filter((report) => report.id === provider)
+      : presentation.reports;
+    return {
+      runDir,
+      query: manifest.request.query,
+      contentWarning: UNTRUSTED_CONTENT_WARNING,
+      summary: {
+        mode: manifest.request.mode,
+        providers: shapeProviders(presentation.reports),
+        sources: {
+          total: presentation.totalCitations,
+          unique: presentation.sources.length,
+        },
+      },
+      results: reports.map((report) => {
+        let content = presentation.providerContents[report.outputFile] ?? '';
+        try {
+          const path = resolveContainedFile(runDir, report.outputFile);
+          const metadata = lstatSync(path);
+          if (!metadata.isFile() || metadata.isSymbolicLink()) {
+            throw new PathContainmentError(
+              'Derived canonical provider output must be a regular file.',
+            );
+          }
+          content = readFileSync(path, 'utf8');
+        } catch {
+          // Derived files are optional. Canonical safe output is authoritative.
+        }
+        return shapeProviderContent(report, content);
+      }),
+    };
+  }
   let snapshot: ReturnType<RunArtifactRepository['readSnapshot']>;
   try {
     snapshot = repository.readSnapshot(runDir, { view: 'recovery' });

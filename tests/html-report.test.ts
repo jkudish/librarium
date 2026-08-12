@@ -14,9 +14,11 @@ import {
   generateHtmlReport,
   renderMarkdown,
   safeUrl,
+} from '../src/commands/html-report.js';
+import {
   writeHtmlReport,
   writeHtmlReportFromSnapshot,
-} from '../src/commands/html-report.js';
+} from '../src/commands/html-report-v2.js';
 import { RunArtifactRepository } from '../src/node-run-artifacts.js';
 import type {
   DeduplicatedSource,
