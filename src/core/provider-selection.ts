@@ -6,8 +6,46 @@ import {
 import type { Config, Provider } from '../types.js';
 import type { CredentialContext } from './credentials.js';
 import { hasCredential } from './credentials.js';
+import { retiredProviderGuidance } from './retired-provider-ids.js';
 
 export class ProviderSelectionError extends Error {}
+
+export interface RetiredProviderSelectionIssue {
+  readonly code: 'provider_token_retired';
+  readonly path: string;
+  readonly message: string;
+}
+
+/**
+ * Pure transport preflight for current CLI/MCP provider selections. v1 config
+ * migration uses a separate compatibility path and must not call this helper.
+ */
+export function retiredProviderSelectionIssues(
+  tokens: readonly string[] | undefined,
+): readonly RetiredProviderSelectionIssue[] {
+  if (tokens === undefined) return [];
+  const issues: RetiredProviderSelectionIssue[] = [];
+  for (const [index, token] of tokens.entries()) {
+    const guidance = retiredProviderGuidance(token.trim());
+    if (!guidance) continue;
+    issues.push({
+      code: 'provider_token_retired',
+      path: `/providers/${index}`,
+      message: guidance,
+    });
+  }
+  return issues;
+}
+
+export function assertNoRetiredProviderSelectionTokens(
+  tokens: readonly string[] | undefined,
+): void {
+  const issues = retiredProviderSelectionIssues(tokens);
+  if (issues.length === 0) return;
+  throw new ProviderSelectionError(
+    issues.map((issue) => issue.message).join(' '),
+  );
+}
 
 export interface ProviderSelectionArgs {
   providers?: string[];

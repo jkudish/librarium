@@ -242,23 +242,15 @@ These provider IDs were renamed as their upstream products changed:
 - `openai-deep` -> `openai-research`
 - `openai-deep-o3` -> `openai-research`
 
-For backward compatibility, librarium still accepts legacy IDs in:
+These IDs are retired from current Librarium 2.0 selection. Use their
+replacement IDs in CLI, MCP, and native v2 configuration. The v1 config
+migrator still converts old IDs without rewriting the source file. If more
+than one historical OpenAI key is present, it selects `openai-research` first,
+then `openai-deep-o3`, then `openai-deep`, regardless of JSON key order.
 
-- `run --providers`
-- provider config keys in `~/.config/librarium/config.json`
-- custom group members
-- `fallback` targets
-
-Legacy IDs are normalized to canonical IDs and emit a warning. If both OpenAI
-legacy IDs are configured, they collapse to one `openai-research` request;
-an explicit canonical configuration wins, otherwise the former
-`openai-deep-o3` configuration wins. Config files are not rewritten
-automatically. Output files and `run.json` always use canonical IDs.
-
-Pending OpenAI tasks submitted under the retired providers are not guaranteed
-to remain retrievable after upgrading. Completed report files already written
-to disk are unaffected. The OpenAI legacy aliases are deprecated and will be
-removed in Librarium 2.0.
+Completed historical runs remain readable with their recorded provider IDs and
+filenames. Pending historical handles for retired IDs cannot resume, poll, or
+retrieve through a replacement provider.
 
 You can also add **custom providers** (npm modules or local scripts) via config. See [Custom Providers](#custom-providers).
 
@@ -376,7 +368,12 @@ librarium run "AI agent architectures" --group deep --mode sync
 librarium run "Node.js 22 features" --group fast
 ```
 
-The `--providers` flag accepts canonical IDs, legacy aliases, or display names (case- and punctuation-insensitive, so `"Exa Search"`, `exa-search`, and `EXA SEARCH` all resolve to `exa`). Display names are a CLI input convenience only. If a name is ambiguous or unrecognized, the run stops with the matching candidates or a short list of suggestions. Config files (provider keys, custom groups, fallback targets) still require canonical IDs or legacy aliases.
+The `--providers` flag accepts canonical IDs or display names (case- and
+punctuation-insensitive, so `"Exa Search"`, `exa-search`, and `EXA SEARCH` all
+resolve to `exa`). Display names are a CLI input convenience only. If a name is
+ambiguous or unrecognized, the run stops with matching candidates or a short
+list of suggestions. Current configuration requires canonical IDs; only the v1
+migrator accepts retired IDs.
 
 In an interactive terminal, `run` shows a live per-provider results table. Every row appears at fan-out with a spinner and ticking elapsed time, then resolves in place as results arrive:
 

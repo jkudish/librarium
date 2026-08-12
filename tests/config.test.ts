@@ -205,6 +205,51 @@ describe('loadConfig', () => {
     ]);
   });
 
+  it('normalizes retired v1 fallback ids without restoring active aliases', () => {
+    const configPath = join(tmpDir, 'retired-fallbacks.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        defaults: {
+          outputDir: './agents/librarium',
+          maxParallel: 1,
+          timeout: 30,
+          asyncTimeout: 1800,
+          asyncPollInterval: 10,
+          mode: 'sync',
+        },
+        providers: {
+          'openai-deep': {
+            enabled: true,
+            fallback: 'openai-deep-o3',
+          },
+          'perplexity-sonar': {
+            enabled: true,
+            fallback: 'perplexity-deep',
+          },
+        },
+        groups: {},
+      }),
+    );
+
+    const config = loadConfig(configPath);
+    expect(config.providers['openai-research']?.fallback).toBe(
+      'openai-research',
+    );
+    expect(config.providers['perplexity-sonar-pro']?.fallback).toBe(
+      'perplexity-sonar-deep',
+    );
+    for (const retired of [
+      'perplexity-sonar',
+      'perplexity-deep',
+      'openai-deep',
+      'openai-deep-o3',
+    ]) {
+      expect(config.providers[retired]).toBeUndefined();
+    }
+  });
+
   it('migrates only exact stored prior comprehensive and all rosters', () => {
     const configPath = join(tmpDir, 'config.json');
     writeFileSync(

@@ -34,9 +34,11 @@ describe('metering registry: kinds', () => {
     expect(getMeteringKind('brave-answers')).toBe('api_unit_priced');
   });
 
-  it('resolves legacy aliases to the canonical kind', () => {
-    // perplexity-sonar -> perplexity-sonar-pro (native_cost)
-    expect(getMeteringKind('perplexity-sonar')).toBe('native_cost');
+  it('does not meter retired ids as active aliases', () => {
+    expect(getMeteringKind('perplexity-sonar')).toBe('manual_unmetered');
+    expect(getMeteringKind('perplexity-deep')).toBe('manual_unmetered');
+    expect(getMeteringKind('openai-deep')).toBe('manual_unmetered');
+    expect(getMeteringKind('openai-deep-o3')).toBe('manual_unmetered');
   });
 
   it('defaults unknown/custom providers to manual_unmetered', () => {

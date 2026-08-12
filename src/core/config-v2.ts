@@ -19,6 +19,12 @@ import {
   RESEARCH_REQUEST_LIMITS,
 } from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
+import {
+  isRetiredProviderToken,
+  migrateRetiredProviderToken,
+  retiredProviderGuidance,
+  retiredProviderMigrationPriority,
+} from './retired-provider-ids.js';
 import { exactUsdBudgets } from './transport-normalization.js';
 
 export type JsonValue =
@@ -690,33 +696,8 @@ function unsafeDictionaryIssues(
   return issues;
 }
 
-function canonicalLegacyId(id: string): string {
-  switch (id) {
-    case 'perplexity-sonar':
-      return 'perplexity-sonar-pro';
-    case 'perplexity-deep':
-      return 'perplexity-sonar-deep';
-    case 'openai-deep':
-    case 'openai-deep-o3':
-      return 'openai-research';
-    default:
-      return id;
-  }
-}
-
-const LEGACY_PROVIDER_ALIASES: ReadonlySet<string> = new Set([
-  'perplexity-sonar',
-  'perplexity-deep',
-  'openai-deep',
-  'openai-deep-o3',
-]);
-
-function legacyAliasPriority(id: string, canonical: string): number {
-  if (id === canonical) return 0;
-  if (id === 'openai-deep-o3') return 1;
-  if (id === 'openai-deep') return 2;
-  return 1;
-}
+const canonicalLegacyId = migrateRetiredProviderToken;
+const legacyAliasPriority = retiredProviderMigrationPriority;
 
 function legacySource(
   source: z.infer<typeof LegacySourceSchema>,
@@ -1129,6 +1110,16 @@ function migrateGroups(
     const members: string[] = [];
     const seen = new Set<string>();
     for (const [index, member] of definition.members.entries()) {
+      if (!definition.legacy && isRetiredProviderToken(member)) {
+        issues.push(
+          issue(
+            'config_group_member_alias_removed',
+            pointer(['groups', name, index]),
+            `Native v2 groups do not accept retired provider aliases. ${retiredProviderGuidance(member)}`,
+          ),
+        );
+        continue;
+      }
       const exact = exactGroupMember(
         member,
         definition.legacy,
@@ -1177,6 +1168,16 @@ function nativeGroups(
     const exact: string[] = [];
     const seen = new Set<string>();
     for (const [index, member] of members.entries()) {
+      if (isRetiredProviderToken(member)) {
+        issues.push(
+          issue(
+            'config_group_member_alias_removed',
+            pointer(['groups', name, index]),
+            `Native v2 groups do not accept retired provider aliases. ${retiredProviderGuidance(member)}`,
+          ),
+        );
+        continue;
+      }
       const resolved = exactGroupMember(
         member,
         false,
@@ -1406,12 +1407,12 @@ function semanticIssues(config: LibrariumConfigV2): {
 
   for (const [id, provider] of Object.entries(config.providers)) {
     const bindingIdentity = builtinBindings.get(id);
-    if (LEGACY_PROVIDER_ALIASES.has(id)) {
+    if (isRetiredProviderToken(id)) {
       issues.push(
         issue(
           'config_provider_alias_removed',
           pointer(['providers', id]),
-          'Native v2 config does not accept retired provider aliases; use the canonical adapter id.',
+          `Native v2 config does not accept retired provider aliases. ${retiredProviderGuidance(id)}`,
         ),
       );
       continue;
@@ -1474,6 +1475,16 @@ function semanticIssues(config: LibrariumConfigV2): {
   for (const [id, provider] of Object.entries(config.providers)) {
     const fallback = provider.fallback;
     if (!fallback) continue;
+    if (isRetiredProviderToken(fallback)) {
+      issues.push(
+        issue(
+          'config_fallback_alias_removed',
+          pointer(['providers', id, 'fallback']),
+          `Native v2 config does not accept retired fallback aliases. ${retiredProviderGuidance(fallback)}`,
+        ),
+      );
+      continue;
+    }
     if (!provider.enabled) {
       notices.push(
         notice(

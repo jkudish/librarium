@@ -450,11 +450,11 @@ describe('registry', () => {
     });
   });
 
-  it('getProvider resolves legacy provider ID aliases', async () => {
+  it('getProvider does not resolve retired provider ids', async () => {
     await initializeProviders();
-    expect(getProvider('perplexity-sonar')?.id).toBe('perplexity-sonar-pro');
-    expect(getProvider('perplexity-deep')?.id).toBe('perplexity-sonar-deep');
-    expect(getProvider('openai-deep')?.id).toBe('openai-research');
-    expect(getProvider('openai-deep-o3')?.id).toBe('openai-research');
+    expect(getProvider('perplexity-sonar')).toBeUndefined();
+    expect(getProvider('perplexity-deep')).toBeUndefined();
+    expect(getProvider('openai-deep')).toBeUndefined();
+    expect(getProvider('openai-deep-o3')).toBeUndefined();
   });
 });

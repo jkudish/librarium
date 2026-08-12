@@ -202,29 +202,69 @@ describe('private shadow compilation', () => {
     ).toBe('openrouter-chat');
   });
 
-  it('retains alias notices while deduplicating their canonical target', () => {
-    const result = compile(
-      config({
-        providers: { 'openai-research': { enabled: true } },
-        defaults: { mode: 'async' },
-      }),
-      {
-        kind: 'mcp',
-        input: {
-          query: 'OpenAI aliases',
-          providers: ['openai-deep', 'openai-research', 'openai-deep-o3'],
-          mode: 'async',
-        },
-      },
-    );
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])(
+    'rejects retired transport token %s across every ingress',
+    (token, replacement) => {
+      for (const kind of ['cli', 'mcp', 'silent_mcp'] as const) {
+        const result = compile(
+          config({ providers: { 'openai-research': { enabled: true } } }),
+          {
+            kind,
+            input: { query: `retired ${token}`, providers: [token] },
+          },
+        );
+        expect(result.ok, `${kind}/${token}`).toBe(false);
+        if (result.ok) continue;
+        expect(result).not.toHaveProperty('prepared');
+        expect(result.issues).toEqual([
+          {
+            code: 'shadow_provider_token_retired',
+            phase: 'transport',
+            path: '/providers/0',
+            message: `Provider "${token}" was removed; use "${replacement}".`,
+          },
+        ]);
+        expect(result.notices).not.toContainEqual(
+          expect.objectContaining({
+            code: 'configuration_provider_alias_migrated',
+          }),
+        );
+      }
+    },
+  );
 
-    expect(profileKeys(result)).toEqual(['openai-research/research']);
-    expect(
-      result.notices.filter(
-        (notice) => notice.code === 'configuration_provider_alias_migrated',
-      ),
-    ).toHaveLength(2);
-  });
+  it.each([
+    ['perplexity-sonar/grounded', 'perplexity-sonar-pro/grounded'],
+    ['perplexity-deep/research', 'perplexity-sonar-deep/research'],
+    ['openai-deep/research', 'openai-research/research'],
+    ['openai-deep-o3/research', 'openai-research/research'],
+  ])(
+    'rejects qualified retired transport token %s with its full replacement',
+    (token, replacement) => {
+      const result = compile(
+        config({ providers: { 'openai-research': { enabled: true } } }),
+        {
+          kind: 'silent_mcp',
+          input: { query: `qualified retired ${token}`, providers: [token] },
+        },
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.issues).toEqual([
+        {
+          code: 'shadow_provider_token_retired',
+          phase: 'transport',
+          path: '/providers/0',
+          message: `Provider "${token}" was removed; use "${replacement}".`,
+        },
+      ]);
+    },
+  );
 
   it('filters blank provider entries like v1 and retains stable token diagnostics', () => {
     const result = compile(config({ providers: { exa: { enabled: true } } }), {
@@ -820,7 +860,7 @@ describe('private shadow compilation', () => {
         kind: 'mcp',
         input: {
           query: 'alias collision',
-          providers: ['openai-deep'],
+          providers: ['openai-research'],
           mode: 'async',
         },
       },
@@ -1026,7 +1066,7 @@ describe('private shadow compilation', () => {
     const mixedPrepared = [
       {
         kind: 'cli' as const,
-        input: { query: 'mixed parity', providers: ['openai-deep'] },
+        input: { query: 'mixed parity', providers: ['openai-research'] },
       },
       {
         kind: 'mcp' as const,
@@ -1034,7 +1074,7 @@ describe('private shadow compilation', () => {
       },
       {
         kind: 'silent_mcp' as const,
-        input: { query: 'mixed parity', providers: ['openai-deep-o3'] },
+        input: { query: 'mixed parity', providers: ['openai-research'] },
       },
     ].map((transport) => {
       const result = compile(mixedSource, transport);
@@ -1080,7 +1120,7 @@ describe('private shadow compilation', () => {
       kind: 'cli',
       input: {
         query: 'provider precedence notices',
-        providers: ['openai-deep'],
+        providers: ['openai-research'],
         group: 'ignored-group',
       },
     });
@@ -1089,7 +1129,6 @@ describe('private shadow compilation', () => {
       result.notices,
     );
     for (const code of [
-      'configuration_provider_alias_migrated',
       'transport_explicit_providers_override_group',
       'legacy_mixed_mode_migrated',
     ]) {

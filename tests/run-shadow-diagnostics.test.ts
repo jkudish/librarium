@@ -90,8 +90,37 @@ vi.mock('../src/adapters/node-registry.js', () => ({
 
 vi.mock('../src/core/provider-selection.js', () => {
   class ProviderSelectionError extends Error {}
+  const retired = {
+    'perplexity-sonar': 'perplexity-sonar-pro',
+    'perplexity-deep': 'perplexity-sonar-deep',
+    'openai-deep': 'openai-research',
+    'openai-deep-o3': 'openai-research',
+  } as const;
+  const retiredProviderSelectionIssues = (tokens?: readonly string[]) =>
+    (tokens ?? []).flatMap((token, index) => {
+      const id = token.trim() as keyof typeof retired;
+      const replacement = retired[id];
+      return replacement
+        ? [
+            {
+              code: 'provider_token_retired' as const,
+              path: `/providers/${index}`,
+              message: `Provider "${id}" was removed; use "${replacement}".`,
+            },
+          ]
+        : [];
+    });
   return {
     ProviderSelectionError,
+    retiredProviderSelectionIssues,
+    assertNoRetiredProviderSelectionTokens: (tokens?: readonly string[]) => {
+      const issues = retiredProviderSelectionIssues(tokens);
+      if (issues.length > 0) {
+        throw new ProviderSelectionError(
+          issues.map((issue) => issue.message).join(' '),
+        );
+      }
+    },
     resolveProviderSelection: () => {
       state.events.push('legacy-selection');
       if (state.selectionError) {
@@ -245,6 +274,29 @@ describe('CLI production shadow diagnostic', () => {
     }
   });
 
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])(
+    'stops CLI token %s before config, credentials, or initialization',
+    async (token, replacement) => {
+      const outcome = await executeRun('retired selector', {
+        providers: [token],
+      });
+
+      expect(outcome).toEqual({ exitCode: 2 });
+      expect(state.events).toEqual(['spinner-start', 'spinner-fail']);
+      expect(state.spinner.fail).toHaveBeenCalledWith(
+        `Provider "${token}" was removed; use "${replacement}".`,
+      );
+      expect(state.events).not.toContain('keychain-credentials');
+      expect(state.events).not.toContain('initialize');
+      expect(state.events).not.toContain('dispatch');
+    },
+  );
+
   it('keeps silent MCP results and dispatch inputs unchanged while warning only through onWarn', async () => {
     state.selectionError = false;
     const warnings: string[] = [];
@@ -323,6 +375,37 @@ describe('CLI production shadow diagnostic', () => {
       stdout.mockRestore();
     }
   });
+
+  it.each([
+    ['perplexity-sonar', 'perplexity-sonar-pro'],
+    ['perplexity-deep', 'perplexity-sonar-deep'],
+    ['openai-deep', 'openai-research'],
+    ['openai-deep-o3', 'openai-research'],
+  ])(
+    'stops MCP token %s before config, initialization, or dispatch',
+    async (token, replacement) => {
+      const initialize = vi.fn();
+      const dispatch = vi.fn();
+      await expect(
+        runResearchSilent(
+          { query: 'retired selector', providers: [token] },
+          {
+            loadMergedConfig: () => {
+              state.events.push('load-merged');
+              return fixtureConfig;
+            },
+            initialize,
+            dispatch,
+          },
+        ),
+      ).rejects.toThrow(
+        `Provider "${token}" was removed; use "${replacement}".`,
+      );
+      expect(state.events).toEqual([]);
+      expect(initialize).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+    },
+  );
 
   it('restarts the spinner and continues legacy execution when diagnostic stderr throws', async () => {
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => {

@@ -166,7 +166,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   define({
     id: 'perplexity-sonar-pro',
     registrationOrder: 6,
-    aliases: ['perplexity-sonar'],
+    aliases: [],
     tier: 'ai-grounded',
     envVar: 'PERPLEXITY_API_KEY',
     defaultModel: 'sonar-pro',
@@ -223,7 +223,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   define({
     id: 'openai-research',
     registrationOrder: 4,
-    aliases: ['openai-deep', 'openai-deep-o3'],
+    aliases: [],
     tier: 'deep-research',
     envVar: 'OPENAI_API_KEY',
     defaultModel: 'gpt-5.6-sol',
@@ -277,7 +277,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
   define({
     id: 'perplexity-sonar-deep',
     registrationOrder: 1,
-    aliases: ['perplexity-deep'],
+    aliases: [],
     tier: 'deep-research',
     envVar: 'PERPLEXITY_API_KEY',
     defaultModel: 'sonar-deep-research',

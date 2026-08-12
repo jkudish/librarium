@@ -222,19 +222,26 @@ describe('configuration mapping', () => {
     },
   );
 
-  it.each([...PLANNED_PROVIDER_IDS, 'openai-deep'])(
+  it.each([
+    ...PLANNED_PROVIDER_IDS,
+    'perplexity-sonar',
+    'perplexity-deep',
+    'openai-deep',
+    'openai-deep-o3',
+  ])(
     'rejects custom metadata claiming reserved provider identity %s',
     (providerId) => {
       const mapped = map(customIdentityConfig('acme-adapter', providerId), {
         requestDeadlineMs: 2_000_000,
       });
       expect(mapped.custom_profile_bindings).toEqual([]);
-      expect(mapped.preflight.issues).toContainEqual(
-        expect.objectContaining({
-          code: 'custom_provider_profile_provider_id_reserved',
-          path: '/customProviders/acme-adapter/executionProfile/profile/identity/provider_id',
-        }),
-      );
+      expect(mapped.preflight.issues).toContainEqual({
+        code: 'custom_provider_profile_provider_id_reserved',
+        phase: 'migration',
+        path: '/customProviders/acme-adapter/executionProfile/profile/identity/provider_id',
+        message:
+          'A custom profile cannot claim a current, planned, or retired built-in provider id.',
+      });
     },
   );
 
@@ -409,8 +416,17 @@ describe('configuration mapping', () => {
     });
   });
 
-  it('resolves aliases, display names, and qualified profiles without collapsing OpenRouter', () => {
+  it('keeps retired ids out of current token resolution while preserving private v1 migration', () => {
     expect(resolveConfigurationProfileToken('perplexity-sonar')).toEqual({
+      kind: 'retired',
+      token: 'perplexity-sonar',
+      replacement: 'perplexity-sonar-pro',
+    });
+    expect(
+      resolveConfigurationProfileToken('perplexity-sonar', [], {
+        migrateRetired: true,
+      }),
+    ).toEqual({
       kind: 'exact',
       token: 'perplexity-sonar',
       target: { provider_id: 'perplexity-sonar-pro', profile_id: 'grounded' },
@@ -419,6 +435,33 @@ describe('configuration mapping', () => {
         adapter_id: 'perplexity-sonar-pro',
       },
     });
+  });
+
+  it.each([
+    ['perplexity-sonar/grounded', 'perplexity-sonar-pro/grounded'],
+    ['perplexity-deep/research', 'perplexity-sonar-deep/research'],
+    ['openai-deep/research', 'openai-research/research'],
+    ['openai-deep-o3/research', 'openai-research/research'],
+  ])('preserves qualified retired suffixes for %s', (token, replacement) => {
+    expect(resolveConfigurationProfileToken(token)).toEqual({
+      kind: 'retired',
+      token,
+      replacement,
+    });
+    expect(
+      resolveConfigurationProfileToken(token, [], { migrateRetired: true }),
+    ).toMatchObject({
+      kind: 'exact',
+      token,
+      target: {
+        provider_id: replacement.split('/')[0],
+        profile_id: replacement.split('/')[1],
+      },
+      alias: { from: token },
+    });
+  });
+
+  it('resolves active aliases, display names, and qualified profiles without collapsing OpenRouter', () => {
     expect(
       resolveConfigurationProfileToken('OpenRouter Online Search'),
     ).toEqual({

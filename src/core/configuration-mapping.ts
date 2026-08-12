@@ -37,6 +37,10 @@ import {
   RESEARCH_REQUEST_LIMITS,
 } from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
+import {
+  migrateRetiredProviderId,
+  retiredProviderTokenReplacement,
+} from './retired-provider-ids.js';
 import type {
   CanonicalTransportDefaults,
   ConfigurationTransportInput,
@@ -107,6 +111,11 @@ export type ConfigurationProfileTokenResolution =
       };
     }
   | {
+      readonly kind: 'retired';
+      readonly token: string;
+      readonly replacement: string;
+    }
+  | {
       readonly kind: 'ambiguous';
       readonly token: string;
       readonly candidates: readonly CatalogProfileTarget[];
@@ -116,6 +125,11 @@ export type ConfigurationProfileTokenResolution =
       readonly token: string;
       readonly suggestions: readonly string[];
     };
+
+export interface ConfigurationProfileTokenOptions {
+  /** Only the retained v1 configuration migration may canonicalize tombstones. */
+  readonly migrateRetired?: boolean;
+}
 
 const PROVIDER_NAME_ENTRIES: readonly ProviderNameEntry[] =
   BUILTIN_PROVIDER_DEFINITIONS.map((definition) => ({
@@ -161,19 +175,26 @@ function escapePointerSegment(segment: string): string {
 }
 
 function canonicalProviderId(id: string): string {
-  return Object.hasOwn(PROVIDER_ID_ALIASES, id) ? PROVIDER_ID_ALIASES[id]! : id;
+  return migrateRetiredProviderId(
+    Object.hasOwn(PROVIDER_ID_ALIASES, id) ? PROVIDER_ID_ALIASES[id]! : id,
+  );
 }
 
 /**
- * Purely resolve a legacy provider/display/qualified token to one exact
- * catalog identity. An unqualified provider with more than one profile is
- * deliberately ambiguous; callers must preserve the exact strategy.
+ * Resolve a current provider/display/qualified token to one exact catalog
+ * identity. Only the explicit v1 migration option accepts a retired id.
  */
 export function resolveConfigurationProfileToken(
   token: string,
   customProfiles: readonly CustomCatalogProfile[] = [],
+  options: ConfigurationProfileTokenOptions = {},
 ): ConfigurationProfileTokenResolution {
-  const trimmed = token.trim();
+  const sourceToken = token.trim();
+  const replacement = retiredProviderTokenReplacement(sourceToken);
+  if (replacement !== undefined && !options.migrateRetired) {
+    return { kind: 'retired', token: sourceToken, replacement };
+  }
+  const trimmed = replacement ?? sourceToken;
   const qualified = trimmed.split('/');
   if (qualified.length === 2 && qualified[0] && qualified[1]) {
     const target = {
@@ -183,9 +204,16 @@ export function resolveConfigurationProfileToken(
     const known = [
       ...adapterProfileBindings().values(),
       ...customProfiles.map(customProfileBinding),
-    ].some((binding) => sameProfile(binding, target));
+    ].find((binding) => sameProfile(binding, target));
     return known
-      ? { kind: 'exact', token: trimmed, target }
+      ? {
+          kind: 'exact',
+          token: sourceToken,
+          target,
+          ...(replacement && {
+            alias: { from: sourceToken, adapter_id: known.adapter_id },
+          }),
+        }
       : { kind: 'unknown', token: trimmed, suggestions: [] };
   }
   if (qualified.length !== 1) {
@@ -193,7 +221,14 @@ export function resolveConfigurationProfileToken(
   }
 
   const direct = adapterProfileBinding(trimmed);
-  if (direct) return exactToken(trimmed, direct);
+  if (direct)
+    return exactToken(
+      sourceToken,
+      direct,
+      replacement
+        ? { from: sourceToken, adapter_id: direct.adapter_id }
+        : undefined,
+    );
 
   const directCustom = customProfiles.find(
     (profile) => profile.adapter_id === trimmed,
@@ -254,6 +289,13 @@ export function resolveConfigurationProfileToken(
       kind: 'ambiguous',
       token: trimmed,
       candidates: exactTargetsForProviderEntries(provider.candidates),
+    };
+  }
+  if (provider.kind === 'retired') {
+    return {
+      kind: 'unknown',
+      token: sourceToken,
+      suggestions: [provider.replacement],
     };
   }
   const matches = [
@@ -504,18 +546,11 @@ function canonicalizeProviderConfigs(
 } {
   const providerConfigs = safeRecord<ProviderConfig>();
   const notices: PreparationNotice[] = [];
-  const openAiCandidates = [
-    'openai-deep',
-    'openai-deep-o3',
+  const selectedOpenAi = [
     'openai-research',
-  ].filter((id) => ownValue(providers, id) !== undefined);
-  const selectedOpenAi = openAiCandidates.includes('openai-research')
-    ? 'openai-research'
-    : openAiCandidates.includes('openai-deep-o3')
-      ? 'openai-deep-o3'
-      : openAiCandidates.includes('openai-deep')
-        ? 'openai-deep'
-        : undefined;
+    'openai-deep-o3',
+    'openai-deep',
+  ].find((id) => ownValue(providers, id) !== undefined);
 
   for (const [id, config] of Object.entries(providers)) {
     const adapterId = canonicalProviderId(id);
@@ -628,6 +663,7 @@ function canonicalizeGroups(
       const resolution = resolveConfigurationProfileToken(
         member,
         customProfiles,
+        { migrateRetired: true },
       );
       if (resolution.kind === 'unknown') {
         issues.push({
@@ -646,6 +682,16 @@ function canonicalizeGroups(
           path,
           message:
             'The group member resolves to multiple profiles. Use a qualified "provider/profile" reference.',
+        });
+        continue;
+      }
+      if (resolution.kind === 'retired') {
+        issues.push({
+          code: 'configuration_group_member_unknown',
+          phase: 'migration',
+          path,
+          message:
+            'The group member does not resolve to an implemented exact provider profile.',
         });
         continue;
       }

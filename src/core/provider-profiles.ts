@@ -230,7 +230,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
     provider_id: 'perplexity-sonar-pro',
     order: 20,
-    aliases: ['perplexity-sonar'],
+    aliases: [],
     display: {
       family: 'Perplexity',
       name: 'Perplexity Sonar Pro',
@@ -347,7 +347,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
     provider_id: 'openai-research',
     order: 110,
-    aliases: ['openai-deep', 'openai-deep-o3'],
+    aliases: [],
     display: {
       family: 'OpenAI',
       name: 'OpenAI Research',
@@ -448,7 +448,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
     provider_id: 'perplexity-sonar-deep',
     order: 130,
-    aliases: ['perplexity-deep'],
+    aliases: [],
     display: {
       family: 'Perplexity',
       name: 'Perplexity Sonar Deep Research',

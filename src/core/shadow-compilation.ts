@@ -117,6 +117,15 @@ function resolveProviderTokens(
       continue;
     }
     const resolution = resolveConfigurationProfileToken(token, customProfiles);
+    if (resolution.kind === 'retired') {
+      issues.push({
+        code: 'shadow_provider_token_retired',
+        phase: 'transport',
+        path,
+        message: `Provider "${resolution.token}" was removed; use "${resolution.replacement}".`,
+      });
+      continue;
+    }
     if (resolution.kind === 'unknown') {
       issues.push({
         code: 'shadow_provider_token_unknown',

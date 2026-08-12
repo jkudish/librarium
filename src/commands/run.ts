@@ -27,6 +27,7 @@ import { generateSlug, resolveOutputDir } from '../core/prompt-builder.js';
 import {
   ProviderSelectionError,
   resolveProviderSelection,
+  retiredProviderSelectionIssues,
 } from '../core/provider-selection.js';
 import { executeResearchRun } from '../core/research-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
@@ -221,6 +222,16 @@ export async function executeRun(
       prettyStream.write(`${line}\n`);
       if (wasSpinning) spinner.start();
     };
+    const retiredProviderIssues = retiredProviderSelectionIssues(
+      opts.providers,
+    );
+    if (retiredProviderIssues.length > 0) {
+      spinner.fail(
+        retiredProviderIssues.map((issue) => issue.message).join(' '),
+      );
+      process.exitCode = 2;
+      return { exitCode: 2 };
+    }
     try {
       const globalConfig = loadConfig();
       const projectConfig = loadProjectConfig(process.cwd());

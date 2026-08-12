@@ -8,6 +8,7 @@ import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
 import { generateSlug } from '../core/prompt-builder.js';
 import {
+  assertNoRetiredProviderSelectionTokens,
   ProviderSelectionError,
   resolveProviderSelection as resolveProviderSelectionCore,
 } from '../core/provider-selection.js';
@@ -75,8 +76,8 @@ function defaultLoadMergedConfig(cliFlags: Partial<Defaults>): Config {
  * Distinguishes undefined (use defaults) from provided-but-empty: an
  * explicitly-passed empty `providers` array or an empty/whitespace `group`
  * is a caller mistake, not a fallthrough to the default enabled set. Provider
- * tokens are resolved against the registry (canonical ids, legacy aliases, and
- * display names); ANY unresolved token is a hard error listing the unknowns.
+ * tokens are resolved against the registry (canonical ids and display names);
+ * ANY unresolved token is a hard error listing the unknowns.
  */
 export function resolveProviderSelection(
   config: Config,
@@ -99,6 +100,8 @@ export async function runResearchSilent(
 ): Promise<SilentRunResult> {
   const onWarn =
     deps.onWarn ?? ((message: string) => process.stderr.write(`${message}\n`));
+
+  assertNoRetiredProviderSelectionTokens(args.providers);
 
   const cliFlags: Partial<Defaults> = {};
   if (args.mode) cliFlags.mode = args.mode;

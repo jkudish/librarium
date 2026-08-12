@@ -4,8 +4,6 @@ import {
   initializeProviders,
   registerProvider,
 } from '../../src/adapters/index.js';
-import { OpenAIDeepProvider } from '../../src/adapters/openai-deep.js';
-import { OpenAIDeepO3Provider } from '../../src/adapters/openai-deep-o3.js';
 import { OpenAIResearchProvider } from '../../src/adapters/openai-research.js';
 import {
   type AcceptedTaskPersistenceError,
@@ -57,13 +55,6 @@ describe('OpenAIResearchProvider', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it('keeps deprecated class exports on canonical provider behavior', () => {
-    expect(new OpenAIDeepProvider().id).toBe('openai-research');
-    expect(new OpenAIDeepProvider().model).toBe('gpt-5.6-sol');
-    expect(new OpenAIDeepO3Provider().id).toBe('openai-research');
-    expect(new OpenAIDeepO3Provider().model).toBe('gpt-5.6-sol');
   });
 
   it('submits the canonical async Responses API request', async () => {
