@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { z } from 'zod/v4';
 import { VERSION } from './constants.js';
 import { OpaqueIdSchema, Rfc3339UtcSchema } from './contracts/common.js';
@@ -12,10 +13,13 @@ import type { InterchangeRequest } from './contracts/interchange/request.js';
 import { InterchangeRequestSchema } from './contracts/interchange/request.js';
 import type { ResearchResponse } from './contracts/interchange/research-response.js';
 import { ResearchResponseSchema } from './contracts/interchange/research-response.js';
+import type { CoordinatorDependencies } from './core/coordinator.js';
 import {
   type CoordinatorState,
+  cancelCoordination,
   recordAttemptFinished,
   recordDurableCustodyObservation,
+  setRefinedSlotQuery,
 } from './core/coordinator.js';
 import { CoordinatorStateSchema } from './core/coordinator-state-schema.js';
 import type {
@@ -23,7 +27,11 @@ import type {
   CoordinationStateStore,
   VersionedCoordinationState,
 } from './core/coordinator-store.js';
-import type { PreparedResearchExecution } from './core/execution-plan.js';
+import { updateCoordinationState } from './core/coordinator-store.js';
+import type {
+  AdapterBindingIdentity,
+  PreparedResearchExecution,
+} from './core/execution-plan.js';
 import type {
   ExecutionRuntimeResult,
   PersistExecutionSuccessInput,
@@ -47,6 +55,7 @@ import {
   resolveContainedPathWithFs,
   resolveRunDirectoryWithFs,
 } from './node-run-artifact-codecs.js';
+import type { Provider } from './types.js';
 
 const CANONICAL_RUN_KIND = 'canonical-research-run' as const;
 const CANONICAL_RUN_FORMAT = 'librarium.run-json.v3' as const;
@@ -564,6 +573,110 @@ function parseManifest(path: string): CanonicalRunManifestV3 {
   }
 }
 
+/** Read only the schema discriminator through the canonical containment gate. */
+export function readRunJsonSchemaVersion(
+  runsRoot: string,
+  runDirectory: string,
+): number | undefined {
+  const directory = containedRunDirectory(runsRoot, runDirectory);
+  const path = resolveContainedPathWithFs(
+    DEFAULT_FS,
+    directory,
+    RUN_MANIFEST_FILE,
+  );
+  if (!existsSync(path)) return undefined;
+  const metadata = lstatSync(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new CanonicalRunManifestError(
+      'Run manifest must be a regular file',
+      path,
+    );
+  }
+  const value = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CanonicalRunManifestError('Run manifest is not an object', path);
+  }
+  const schemaVersion = (value as { schemaVersion?: unknown }).schemaVersion;
+  return typeof schemaVersion === 'number' ? schemaVersion : undefined;
+}
+
+export function readCanonicalRunManifest(
+  runsRoot: string,
+  runDirectory: string,
+): CanonicalRunManifestV3 {
+  return new RunJsonCoordinationStateStore({
+    runs_root: runsRoot,
+    run_directory: runDirectory,
+  }).readManifest();
+}
+
+export function discoverCanonicalRunDirectories(
+  runsRoot: string,
+  limit = 20,
+): readonly string[] {
+  let root: string;
+  try {
+    root = DEFAULT_FS.realpathSync(resolve(runsRoot));
+  } catch {
+    return [];
+  }
+  const discovered = readdirSync(root)
+    .flatMap((name) => {
+      const runDirectory = resolve(root, name);
+      try {
+        return readRunJsonSchemaVersion(root, runDirectory) === 3
+          ? [
+              {
+                runDirectory,
+                generatedAt: readCanonicalRunManifest(root, runDirectory)
+                  .generated_at,
+              },
+            ]
+          : [];
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  return discovered
+    .slice(0, Math.max(0, limit))
+    .map(({ runDirectory }) => runDirectory);
+}
+
+export function canonicalRunsRoot(runDirectory: string): string {
+  return dirname(resolve(runDirectory));
+}
+
+export interface CancelCanonicalRunDependencies {
+  readonly runs_root: string;
+  readonly run_directory: string;
+  readonly coordinator: CoordinatorDependencies;
+  readonly max_compare_and_swap_attempts?: number;
+}
+
+/** Persist caller cancellation in the sole v3 run.json authority. */
+export async function cancelCanonicalRun(
+  dependencies: CancelCanonicalRunDependencies,
+): Promise<CanonicalRunManifestV3> {
+  const store = new RunJsonCoordinationStateStore({
+    runs_root: dependencies.runs_root,
+    run_directory: dependencies.run_directory,
+  });
+  const current = store.readManifest();
+  if (current.coordination_state.status !== 'running') return current;
+  await updateCoordinationState(
+    store,
+    current.request.request_id,
+    (state) => cancelCoordination(state, dependencies.coordinator),
+    dependencies.max_compare_and_swap_attempts,
+  );
+  store.persistTerminalResponse({
+    generator: current.producer.id,
+    generator_version: current.producer.version,
+  });
+  return store.readManifest();
+}
+
 function writeManifest(
   path: string,
   manifest: CanonicalRunManifestV3,
@@ -915,8 +1028,86 @@ export interface RunCanonicalPreparedExecutionDependencies {
     typeof runPreparedExecution
   >[1]['coordinator'];
   readonly attempt_bridge: ProviderAttemptBridgeDependencies;
+  /** Optional one-shot refinements, applied before the first launch only. */
+  readonly refined_queries_by_slot?: Readonly<Record<string, string>>;
+  /** CLI cancellation latch, checked before the first authoritative write. */
+  readonly is_cancelled?: () => boolean;
+  /** Called only after run.json has been created successfully. */
+  readonly on_state_created?: () => void;
   readonly max_compare_and_swap_attempts?: number;
   readonly projection?: ResearchResponseProjectionOptions;
+}
+
+/** Production coordinator dependencies with bounded, collision-resistant ids. */
+export function createNodeCoordinatorDependencies(
+  now: () => number = Date.now,
+): CoordinatorDependencies {
+  return {
+    clock: { now },
+    ids: {
+      next(scope) {
+        return `${scope}-${randomUUID()}`;
+      },
+    },
+  };
+}
+
+interface FrozenBindingSource {
+  readonly catalog: { readonly digest: string };
+  readonly request: PreparedResearchExecution['request'];
+  readonly profile_plans_by_identity: PreparedResearchExecution['profile_plans_by_identity'];
+}
+
+/** Bind the runtime only to exact adapters admitted in the frozen plan. */
+export function createRegisteredProviderAttemptBridge(
+  source: FrozenBindingSource,
+  resolveProvider: (adapterId: string) => Provider | undefined,
+  now?: () => number,
+): ProviderAttemptBridgeDependencies {
+  const byBinding = new Map<
+    string,
+    {
+      readonly binding: AdapterBindingIdentity;
+      readonly profile: PreparedResearchExecution['request']['slots'][number]['primary'];
+    }
+  >();
+  const profiles = [
+    ...source.request.slots.map((slot) => slot.primary),
+    ...source.request.fallback_reserve.map((candidate) => candidate.profile),
+  ];
+  for (const plan of Object.values(source.profile_plans_by_identity)) {
+    const profile = profiles.find((candidate) =>
+      providerIdentitiesEqual(candidate.identity, plan.identity),
+    );
+    if (!profile) {
+      throw new Error('A frozen adapter binding is missing its exact profile.');
+    }
+    const key = `${plan.binding.adapter_id}\u0000${plan.binding.binding_id}`;
+    const existing = byBinding.get(key);
+    if (existing && !executionProfilesEqual(existing.profile, profile)) {
+      throw new Error(
+        'One frozen adapter binding cannot identify two profiles.',
+      );
+    }
+    byBinding.set(key, { binding: plan.binding, profile });
+  }
+  return {
+    ...(now && { now }),
+    resolveExactBinding(binding) {
+      const resolved = byBinding.get(
+        `${binding.adapter_id}\u0000${binding.binding_id}`,
+      );
+      if (!resolved) return undefined;
+      const provider = resolveProvider(binding.adapter_id);
+      if (!provider || provider.id !== binding.adapter_id) return undefined;
+      return {
+        binding: resolved.binding,
+        profile: resolved.profile,
+        catalog_digest: source.catalog.digest,
+        provider,
+      };
+    },
+  };
 }
 
 export interface CanonicalPreparedExecutionResult {
@@ -926,10 +1117,9 @@ export interface CanonicalPreparedExecutionResult {
 }
 
 /**
- * Node application seam for the future transport cutover. It binds only the
- * exact frozen adapter bridge, stages safe output before coordinator success,
- * and commits a terminal projection to the same run.json. CLI and MCP do not
- * call this seam yet.
+ * Node application seam shared by CLI and MCP. It binds only the exact frozen
+ * adapter bridge, stages safe output before coordinator success, and commits
+ * a terminal projection to the same run.json.
  */
 export async function runCanonicalPreparedExecution(
   prepared: PreparedResearchExecution,
@@ -958,9 +1148,29 @@ export async function runCanonicalPreparedExecution(
     run_directory: dependencies.run_directory,
     request: prepared.request,
   });
+  const refinedEntries = Object.entries(
+    dependencies.refined_queries_by_slot ?? {},
+  );
+  const executionStore: CoordinationStateStore = {
+    load: (requestId) => store.load(requestId),
+    compareAndSwap: (requestId, expectedVersion, state) =>
+      store.compareAndSwap(requestId, expectedVersion, state),
+    async create(state) {
+      if (dependencies.is_cancelled?.()) {
+        throw new Error('Canonical run cancelled before persistence.');
+      }
+      let refinedState = state;
+      for (const [slotId, query] of refinedEntries) {
+        refinedState = setRefinedSlotQuery(refinedState, slotId, query);
+      }
+      const created = await store.create(refinedState);
+      dependencies.on_state_created?.();
+      return created;
+    },
+  };
   const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
   const runtime = await runPreparedExecution(prepared, {
-    store,
+    store: executionStore,
     coordinator: dependencies.coordinator,
     attempts: {
       async execute(launch, context) {

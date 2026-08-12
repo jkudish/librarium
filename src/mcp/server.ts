@@ -205,8 +205,6 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     async (args): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
-        const credentials = createNodeCredentialContext();
-        await initialize({ ...config, credentials });
         const baseDir = resolve(config.defaults.outputDir);
         const runDir = resolveRunDir(baseDir, args.runDir, repository);
         if (!runDir) {

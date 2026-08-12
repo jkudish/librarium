@@ -1,8 +1,20 @@
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import ora from 'ora';
-import { initializeProviders } from '../adapters/node-registry.js';
+import {
+  getExactProvider,
+  initializeProviders,
+} from '../adapters/node-registry.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { generateSlug } from '../core/prompt-builder.js';
+import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
+import {
+  createNodeCoordinatorDependencies,
+  createRegisteredProviderAttemptBridge,
+  discoverCanonicalRunDirectories,
+  readCanonicalRunManifest,
+  resumeCanonicalPreparedExecution,
+} from '../node-canonical-run.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
 import {
   createNodeRunReconciliationRuntime,
@@ -245,6 +257,86 @@ function jsonPayload(
   };
 }
 
+async function reconcileCanonicalRuns(
+  baseDir: string,
+  _config: Config,
+): Promise<{
+  readonly runs: readonly {
+    readonly runDir: string;
+    readonly state: 'pending' | 'terminal';
+    readonly response?: unknown;
+  }[];
+  readonly pending: number;
+}> {
+  const runs = [];
+  for (const runDir of discoverCanonicalRunDirectories(
+    baseDir,
+    Number.MAX_SAFE_INTEGER,
+  )) {
+    const before = readCanonicalRunManifest(baseDir, runDir);
+    const remoteCustody = before.coordination_state.attempts.some(
+      (attempt) =>
+        attempt.durable_handle &&
+        ['pending', 'running'].includes(attempt.durable_handle.status),
+    );
+    const needsResume =
+      before.coordination_state.status === 'running' ||
+      !before.terminal_response ||
+      remoteCustody;
+    const canonical = needsResume
+      ? await resumeCanonicalPreparedExecution({
+          runs_root: baseDir,
+          run_directory: runDir,
+          coordinator: createNodeCoordinatorDependencies(),
+          attempt_bridge: createRegisteredProviderAttemptBridge(
+            {
+              request: before.request,
+              catalog: { digest: before.coordination_state.catalog_digest },
+              profile_plans_by_identity:
+                before.coordination_state.profile_plans_by_identity,
+            },
+            getExactProvider,
+          ),
+        })
+      : {
+          manifest: before,
+          response: before.terminal_response,
+        };
+    writeCanonicalPresentationArtifacts(
+      canonical.manifest,
+      runDir,
+      generateSlug(canonical.manifest.request.query),
+    );
+    runs.push({
+      runDir,
+      state:
+        canonical.manifest.coordination_state.status === 'running'
+          ? ('pending' as const)
+          : ('terminal' as const),
+      ...(canonical.response && { response: canonical.response }),
+    });
+  }
+  return {
+    runs,
+    pending: runs.filter((run) => run.state === 'pending').length,
+  };
+}
+
+function printCanonicalRuns(
+  runs: Awaited<ReturnType<typeof reconcileCanonicalRuns>>['runs'],
+  print: (line: string) => void,
+): void {
+  if (runs.length === 0) return;
+  print(`\nCanonical runs (${runs.length}):\n`);
+  for (const run of runs) {
+    const response = run.response as
+      | { readonly status?: string; readonly request_id?: string }
+      | undefined;
+    const detail = response?.status ?? run.state;
+    print(`  ${run.runDir} | Status: ${detail}`);
+  }
+}
+
 export function registerStatusCommand(program: Command): void {
   program
     .command('status')
@@ -258,21 +350,55 @@ export function registerStatusCommand(program: Command): void {
           loadConfig(),
           loadProjectConfig(process.cwd()),
         );
-        const credentials = createNodeCredentialContext();
-        const initialized = await initializeProviders({
-          ...config,
-          credentials,
-        });
-        for (const warning of initialized.warnings)
-          process.stderr.write(`[librarium] warning: ${warning}\n`);
-
         const runtime = createNodeRunReconciliationRuntime(config);
         const baseDir = resolve(config.defaults.outputDir);
+        const canonicalRunDirs = discoverCanonicalRunDirectories(
+          baseDir,
+          Number.MAX_SAFE_INTEGER,
+        );
+        const admittedCanonicalAdapters = [
+          ...new Set(
+            canonicalRunDirs.flatMap((runDir) =>
+              Object.values(
+                readCanonicalRunManifest(baseDir, runDir).coordination_state
+                  .profile_plans_by_identity,
+              ).map((plan) => plan.binding.adapter_id),
+            ),
+          ),
+        ];
         const runDirs = runtime.repository
           .discoverRuns(baseDir, Number.MAX_SAFE_INTEGER)
           .map((run) => run.runDir);
+        const historicalCustomAdapters = [
+          ...new Set(
+            runDirs.flatMap((runDir) => {
+              const manifest = runtime.repository.tryReadManifest(runDir);
+              return manifest
+                ? manifest.providers
+                    .map((provider) => provider.id)
+                    .filter((id) => Object.hasOwn(config.customProviders, id))
+                : [];
+            }),
+          ),
+        ];
+        const credentials = createNodeCredentialContext();
+        const initialized = await initializeProviders(
+          { ...config, credentials },
+          {
+            customProviderIds: [
+              ...new Set([
+                ...admittedCanonicalAdapters,
+                ...historicalCustomAdapters,
+              ]),
+            ],
+          },
+        );
+        for (const warning of initialized.warnings)
+          process.stderr.write(`[librarium] warning: ${warning}\n`);
+
+        let canonical = await reconcileCanonicalRuns(baseDir, config);
         let tasks = persistedTasks(runtime, runDirs);
-        if (tasks.length === 0) {
+        if (tasks.length === 0 && canonical.runs.length === 0) {
           if (opts.json)
             console.log(
               JSON.stringify({ tasks: [], message: 'No async tasks' }),
@@ -304,6 +430,7 @@ export function registerStatusCommand(program: Command): void {
           let remaining = true;
           try {
             while (remaining) {
+              canonical = await reconcileCanonicalRuns(baseDir, config);
               const pass = await reconcileRuns(runtime, runDirs, true);
               totalRetrieved += pass.retrieved;
               withSpinnerStopped(spinner, () => record(pass), true);
@@ -313,11 +440,13 @@ export function registerStatusCommand(program: Command): void {
                   .filter((run) => run.error !== undefined)
                   .map((run) => run.runDir),
               );
-              remaining = tasks.some(
-                (task) =>
-                  !failedRuns.has(task.outputDir ?? '') &&
-                  (task.status === 'pending' || task.status === 'running'),
-              );
+              remaining =
+                canonical.pending > 0 ||
+                tasks.some(
+                  (task) =>
+                    !failedRuns.has(task.outputDir ?? '') &&
+                    (task.status === 'pending' || task.status === 'running'),
+                );
               if (remaining) {
                 spinner.text = `Polling ${tasks.filter((task) => task.status === 'pending' || task.status === 'running').length} async tasks...`;
                 await new Promise<void>((done) =>
@@ -366,13 +495,17 @@ export function registerStatusCommand(program: Command): void {
           if (opts.json) {
             console.log(
               JSON.stringify(
-                jsonPayload(tasks, errors, regenerationErrors),
+                {
+                  ...jsonPayload(tasks, errors, regenerationErrors),
+                  canonicalRuns: canonical.runs,
+                },
                 null,
                 2,
               ),
             );
             return;
           }
+          printCanonicalRuns(canonical.runs, print);
           printTasks(tasks, print);
           return;
         }
@@ -382,12 +515,18 @@ export function registerStatusCommand(program: Command): void {
         if (opts.json)
           console.log(
             JSON.stringify(
-              jsonPayload(tasks, errors, regenerationErrors),
+              {
+                ...jsonPayload(tasks, errors, regenerationErrors),
+                canonicalRuns: canonical.runs,
+              },
               null,
               2,
             ),
           );
-        else if (tasks.length > 0) printTasks(tasks, print);
+        else {
+          printCanonicalRuns(canonical.runs, print);
+          if (tasks.length > 0) printTasks(tasks, print);
+        }
       } catch {
         process.stderr.write(`[librarium] warning: ${RECONCILIATION_FAILED}\n`);
         process.exitCode = 1;

@@ -1,9 +1,14 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerProvider } from '../src/adapters/index.js';
-import { readRunManifest } from '../src/core/run-manifest.js';
 import { runResearchSilent } from '../src/mcp/research.js';
 import type { Config, Provider } from '../src/types.js';
 
@@ -30,7 +35,20 @@ describe('silent research live manifest', () => {
       execution: 'inline',
       envVar: '',
       requiresApiKey: false,
-      execute: vi.fn(),
+      execute: vi.fn(async () => {
+        const runDir = readdirSync(baseDir).map((entry) =>
+          join(baseDir, entry),
+        )[0];
+        expect(runDir).toBeDefined();
+        const persisted = JSON.parse(
+          readFileSync(join(runDir as string, 'run.json'), 'utf8'),
+        );
+        expect(persisted).toMatchObject({
+          schemaVersion: 3,
+          coordination_state: { status: 'running' },
+        });
+        throw new Error('dispatch exploded');
+      }),
     };
     registerProvider(provider);
     const config: Config = {
@@ -49,45 +67,39 @@ describe('silent research live manifest', () => {
       trustedProviderIds: [],
       groups: {},
     };
-    const dispatch = vi.fn(async () => {
-      const runDir = readdirSync(baseDir).map((entry) =>
-        join(baseDir, entry),
-      )[0];
-      expect(runDir).toBeDefined();
-      expect(existsSync(join(runDir as string, 'run.json'))).toBe(true);
-      expect(readRunManifest(runDir as string)).toMatchObject({
-        status: 'running',
-        exitCode: null,
-      });
-      throw new Error('dispatch exploded');
-    });
     const warnings: string[] = [];
 
-    await expect(
-      runResearchSilent(
-        { query: 'write ahead', providers: [provider.id], mode: 'sync' },
-        {
-          loadMergedConfig: () => config,
-          initialize: async () => ({
-            warnings: [],
-            loadedCustomProviders: [],
-            skippedCustomProviders: [],
-          }),
-          dispatch,
-          credentials: { env: { EXA_API_KEY: 'test-key' } },
-          onWarn: (message) => warnings.push(message),
-        },
-      ),
-    ).rejects.toThrow('dispatch exploded');
+    const result = await runResearchSilent(
+      { query: 'write ahead', providers: [provider.id], mode: 'sync' },
+      {
+        loadMergedConfig: () => config,
+        initialize: async () => ({
+          warnings: [],
+          loadedCustomProviders: [],
+          skippedCustomProviders: [],
+        }),
+        registeredAdapterIds: () => ['exa'],
+        resolveExactProvider: () => provider,
+        credentials: { env: { EXA_API_KEY: 'test-key' } },
+        onWarn: (message) => warnings.push(message),
+      },
+    );
 
     expect(warnings).toEqual([]);
 
     const runDir = readdirSync(baseDir).map((entry) => join(baseDir, entry))[0];
-    expect(readRunManifest(runDir as string)).toMatchObject({
+    expect(result.response).toMatchObject({
       status: 'failed',
-      exitCode: 2,
-      error: 'dispatch exploded',
+      errors: [{ code: 'librarium.adapter_execute_failed' }],
     });
+    expect(
+      JSON.parse(readFileSync(join(runDir as string, 'run.json'), 'utf8')),
+    ).toMatchObject({
+      schemaVersion: 3,
+      coordination_state: { status: 'unsuccessful' },
+      terminal_response: { status: 'failed' },
+    });
+    expect(existsSync(join(runDir as string, 'coordination.json'))).toBe(false);
   });
 
   it('does not launch an unadmitted fallback after an MCP primary failure', async () => {

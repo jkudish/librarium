@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   rejectRegistration: false,
   stripProjectedFallback: false,
   dispatchedConfig: undefined as Config | undefined,
+  canonicalDeps: undefined as unknown,
   initializeArgs: undefined as unknown,
   spinner: {
     isSpinning: false,
@@ -72,6 +73,9 @@ vi.mock('../src/node-request-preflight.js', () => {
                   identity: {
                     provider_id: 'legacy-provider',
                     profile_id: 'search',
+                    target: {
+                      primary: { model_selection: 'not_applicable' },
+                    },
                   },
                 },
               },
@@ -112,6 +116,7 @@ vi.mock('../src/node-request-preflight.js', () => {
 
 vi.mock('../src/adapters/node-registry.js', () => ({
   getAllProviders: () => [{ id: 'legacy-provider', tier: 'raw-search' }],
+  getExactProvider: (id: string) => ({ id, tier: 'raw-search' }),
   initializeProviders: async (...args: unknown[]) => {
     state.events.push('initialize');
     state.initializeArgs = args;
@@ -164,6 +169,41 @@ vi.mock('../src/core/research-run.js', () => ({
   },
 }));
 
+vi.mock('../src/node-canonical-run.js', () => ({
+  createNodeCoordinatorDependencies: () => ({
+    clock: { now: () => 0 },
+    ids: { next: () => 'id' },
+  }),
+  createRegisteredProviderAttemptBridge: () => ({
+    resolveExactBinding: () => undefined,
+  }),
+  cancelCanonicalRun: vi.fn(),
+  runCanonicalPreparedExecution: async (_prepared: unknown, deps: unknown) => {
+    state.events.push('dispatch');
+    state.canonicalDeps = deps;
+    return {
+      runtime: { state: { status: 'succeeded' }, outputs_by_attempt: {} },
+      manifest: { coordination_state: { status: 'succeeded' } },
+      response: { status: 'succeeded' },
+    };
+  },
+}));
+
+vi.mock('../src/node-canonical-artifacts.js', () => ({
+  writeCanonicalPresentationArtifacts: () => ({
+    reports: [],
+    results: [],
+    sources: [],
+    providerContents: {},
+    totalCitations: 0,
+    totalDurationMs: 0,
+    generatorManifest: {
+      providers: [],
+      sources: { total: 0, unique: 0, file: 'sources.json' },
+    },
+  }),
+}));
+
 import { executeRun } from '../src/commands/run.js';
 import { ResearchInputError, runResearchSilent } from '../src/mcp/research.js';
 
@@ -174,6 +214,7 @@ describe('production request preflight transport ordering', () => {
     state.rejectRegistration = false;
     state.stripProjectedFallback = false;
     state.dispatchedConfig = undefined;
+    state.canonicalDeps = undefined;
     state.initializeArgs = undefined;
     state.spinner.isSpinning = false;
     state.spinner.start = vi.fn(() => {
@@ -215,9 +256,9 @@ describe('production request preflight transport ordering', () => {
 
     expect(outcome).toEqual({
       exitCode: 0,
-      outputDir: '/tmp/unused-cli-output',
+      outputDir: '/tmp/unused-mcp-output',
     });
-    expect(state.events.slice(0, 11)).toEqual([
+    expect(state.events.slice(0, 9)).toEqual([
       'spinner-start',
       'load-global',
       'load-project',
@@ -226,10 +267,12 @@ describe('production request preflight transport ordering', () => {
       'notices',
       'initialize',
       'registered',
-      'spinner-stop',
-      'spinner-start',
-      'dispatch',
+      'run-dir',
     ]);
+    expect(state.events).toContain('dispatch');
+    expect(state.events.indexOf('dispatch')).toBeGreaterThan(
+      state.events.indexOf('run-dir'),
+    );
     expect(state.events).not.toContain('legacy-selection');
     expect(state.initializeArgs).toEqual([
       expect.objectContaining({ credentials: { env: {} } }),
@@ -256,7 +299,7 @@ describe('production request preflight transport ordering', () => {
     ]);
   });
 
-  it('passes the projected config, not a raw incompatible fallback, to CLI dispatch', async () => {
+  it('passes the frozen canonical plan rather than legacy dispatcher config', async () => {
     state.stripProjectedFallback = true;
 
     const outcome = await executeRun('private query', { json: true });
@@ -265,9 +308,12 @@ describe('production request preflight transport ordering', () => {
     expect(fixtureConfig.providers['legacy-provider']?.fallback).toBe(
       'incompatible-fallback',
     );
-    expect(
-      state.dispatchedConfig?.providers['legacy-provider']?.fallback,
-    ).toBeUndefined();
+    expect(state.dispatchedConfig).toBeUndefined();
+    expect(state.canonicalDeps).toEqual(
+      expect.objectContaining({
+        run_directory: '/tmp/unused-mcp-output',
+      }),
+    );
   });
 
   it('maps MCP preflight rejection to the existing input-error path before initialization or run files', async () => {
@@ -301,7 +347,7 @@ describe('production request preflight transport ordering', () => {
       },
     );
 
-    expect(result.manifest.exitCode).toBe(0);
+    expect(result.manifest.coordination_state.status).toBe('succeeded');
     expect(state.events).toEqual([
       'preflight',
       'notices',

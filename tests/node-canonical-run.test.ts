@@ -2,6 +2,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -17,9 +18,16 @@ import {
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { profileIdentityKey } from '../src/core/execution-plan.js';
 import { RunManifestError, readRunManifest } from '../src/core/run-manifest.js';
+import { checkAsyncTasks } from '../src/mcp/async.js';
+import { readRunResults, resolveRunDir } from '../src/mcp/shaping.js';
+import { writeCanonicalPresentationArtifacts } from '../src/node-canonical-artifacts.js';
+import { projectCanonicalRunPresentation } from '../src/node-canonical-presentation.js';
 import {
   CanonicalRunManifestV3Schema,
+  cancelCanonicalRun,
+  createRegisteredProviderAttemptBridge,
   RunJsonCoordinationStateStore,
+  readCanonicalRunManifest,
   resumeCanonicalPreparedExecution,
   runCanonicalPreparedExecution,
 } from '../src/node-canonical-run.js';
@@ -235,6 +243,7 @@ describe('canonical v3 run.json', () => {
         'adapter-primary': provider,
       }),
     });
+    expect(result.response?.results[0]?.citations).toHaveLength(1);
 
     expect(result.response).toMatchObject({
       request_id: 'request-1',
@@ -262,6 +271,150 @@ describe('canonical v3 run.json', () => {
       terminal_response: { status: 'succeeded' },
     });
     expect(() => readRunManifest(runDirectory)).toThrow(RunManifestError);
+  });
+
+  it('writes derived artifacts without changing the v3 authority', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('primary');
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => success('adapter-primary'),
+    };
+    const result = await runCanonicalPreparedExecution(prepared([selected]), {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: createRegisteredProviderAttemptBridge(
+        prepared([selected]),
+        () => provider,
+        () => START,
+      ),
+    });
+    expect(result.response?.status).toBe('succeeded');
+    const before = readFileSync(join(runDirectory, 'run.json'), 'utf8');
+    expect(
+      result.manifest.terminal_response?.results[0]?.citations,
+    ).toHaveLength(1);
+    expect(result.manifest.coordination_state.slots[0]?.result_id).toBe(
+      result.manifest.terminal_response?.results[0]?.id,
+    );
+    const presentation = writeCanonicalPresentationArtifacts(
+      result.manifest,
+      runDirectory,
+      'fixture',
+    );
+    expect(presentation.sources).toMatchObject([
+      { normalizedUrl: 'example.com/source', providers: ['adapter-primary'] },
+    ]);
+    expect(readFileSync(join(runDirectory, 'run.json'), 'utf8')).toBe(before);
+    expect(readdirSync(runDirectory)).not.toContain('coordination.json');
+    expect(
+      readdirSync(runDirectory).filter((name) => name === 'run.json'),
+    ).toHaveLength(1);
+    expect(resolveRunDir(root)).toBe(realpathSync(runDirectory));
+    expect(readRunResults(runDirectory)?.results[0]?.content).toContain(
+      '# Durable result',
+    );
+    const outputFile = presentation.reports[0]?.outputFile;
+    expect(outputFile).toBeDefined();
+    const outside = join(root, 'outside.md');
+    writeFileSync(outside, 'must not leak');
+    rmSync(join(runDirectory, outputFile as string));
+    symlinkSync(outside, join(runDirectory, outputFile as string));
+    const safe = readRunResults(runDirectory);
+    expect(safe?.results[0]?.content).toContain('# Durable result');
+    expect(safe?.results[0]?.content).not.toContain('must not leak');
+  });
+
+  it('keeps failed primary presentation when its fallback succeeds', async () => {
+    const { root, runDirectory } = directories();
+    const primary = profile('primary');
+    const fallback = profile('fallback');
+    const base = prepared([primary]);
+    const fallbackKey = profileIdentityKey(fallback.identity);
+    const plan: PreparedResearchExecution = {
+      ...base,
+      request: {
+        ...base.request,
+        fallback_reserve: [
+          {
+            candidate_id: 'candidate-1',
+            position: 0,
+            profile: fallback,
+            eligible_slot_ids: ['slot-0'],
+          },
+        ],
+      },
+      policy: {
+        ...base.policy,
+        fallback: {
+          kind: 'explicit',
+          reserve: [{ provider_id: 'fallback', profile_id: 'fixture' }],
+        },
+      },
+      profile_plans_by_identity: {
+        ...base.profile_plans_by_identity,
+        [fallbackKey]: {
+          profile_key: fallbackKey,
+          identity: fallback.identity,
+          binding: {
+            adapter_id: 'adapter-fallback',
+            binding_id: 'binding-fallback',
+          },
+        },
+      },
+    };
+    const primaryProvider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => {
+        return {
+          ...success('adapter-primary'),
+          error: 'primary failed',
+          preventFallback: undefined,
+        };
+      },
+    };
+    const fallbackProvider: Provider = {
+      id: 'adapter-fallback',
+      displayName: 'Fallback',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => success('adapter-fallback'),
+    };
+    const result = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: createRegisteredProviderAttemptBridge(
+        plan,
+        (id) => (id === 'adapter-primary' ? primaryProvider : fallbackProvider),
+        () => START,
+      ),
+    });
+    expect(result.response?.status).toBe('succeeded');
+    const presentation = projectCanonicalRunPresentation(
+      result.manifest,
+      runDirectory,
+      'fixture',
+    );
+    expect(presentation.reports).toMatchObject([
+      { id: 'adapter-primary', status: 'error' },
+      {
+        id: 'adapter-fallback',
+        status: 'success',
+        fallbackFor: 'adapter-primary',
+      },
+    ]);
+    expect(presentation.sources[0]?.providers).toEqual(['adapter-fallback']);
   });
 
   it('derives partial and failed terminal shapes from exact slot outcomes', async () => {
@@ -375,6 +528,146 @@ describe('canonical v3 run.json', () => {
     expect(retrieve).toHaveBeenCalledOnce();
     expect(resumed.response?.status).toBe('succeeded');
     expect(readdirSync(runDirectory).sort()).toEqual(['run.json']);
+  });
+
+  it('routes v3 check_async through one idempotent canonical resume pass', async () => {
+    const { root, runDirectory } = directories();
+    const durableProfile = profile('durable', 'background');
+    const submit = vi.fn(async () => ({
+      provider: 'adapter-durable',
+      taskId: 'private-task-id',
+      query: 'canonical persistence',
+      submittedAt: START,
+      status: 'pending' as const,
+    }));
+    const poll = vi.fn(async () => ({ status: 'completed' as const }));
+    const retrieve = vi.fn(async () => success('adapter-durable'));
+    const provider: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit,
+      poll,
+      retrieve,
+    };
+    const plan = prepared([durableProfile], 'async');
+    await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([durableProfile], {
+        'adapter-durable': provider,
+      }),
+    });
+    const config = {
+      version: 1 as const,
+      defaults: {
+        outputDir: root,
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 60,
+        asyncPollInterval: 1,
+        mode: 'async' as const,
+        llmWebSearch: true,
+      },
+      providers: {},
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+    const dependencies = {
+      initialize: vi.fn(async () => ({
+        warnings: [],
+        loadedCustomProviders: [],
+        skippedCustomProviders: [],
+      })),
+      resolveExactProvider: () => provider,
+      resumeCanonical: (
+        input: Parameters<typeof resumeCanonicalPreparedExecution>[0],
+      ) =>
+        resumeCanonicalPreparedExecution({
+          ...input,
+          attempt_bridge: { ...input.attempt_bridge, now: () => START },
+        }),
+      onError: (error: unknown) => {
+        throw error;
+      },
+      coordinator: coordinator('check-'),
+    };
+    const first = await checkAsyncTasks(
+      runDirectory,
+      false,
+      config,
+      dependencies,
+    );
+    if (first.error) throw new Error(JSON.stringify(first));
+    const revision = readCanonicalRunManifest(root, runDirectory).revision;
+    const second = await checkAsyncTasks(
+      runDirectory,
+      false,
+      config,
+      dependencies,
+    );
+    expect(first).toMatchObject({
+      state: 'terminal',
+      retrieved: 1,
+      tasks: [],
+      response: { status: 'succeeded' },
+    });
+    expect(JSON.stringify(first)).not.toContain('private-task-id');
+    expect(second).toMatchObject({
+      state: 'terminal',
+      retrieved: 0,
+      tasks: [],
+      response: { status: 'succeeded' },
+    });
+    expect(readCanonicalRunManifest(root, runDirectory).revision).toBe(
+      revision,
+    );
+    expect(submit).toHaveBeenCalledOnce();
+    expect(poll).toHaveBeenCalledOnce();
+    expect(retrieve).toHaveBeenCalledOnce();
+  });
+
+  it('persists caller cancellation without launching fallback work', async () => {
+    const { root, runDirectory } = directories();
+    const durableProfile = profile('durable', 'background');
+    const provider: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: async () => ({
+        provider: 'adapter-durable',
+        taskId: 'task-1',
+        query: 'canonical persistence',
+        submittedAt: START,
+        status: 'pending',
+      }),
+      poll: vi.fn(),
+      retrieve: vi.fn(),
+    };
+    await runCanonicalPreparedExecution(prepared([durableProfile], 'async'), {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([durableProfile], {
+        'adapter-durable': provider,
+      }),
+    });
+    const cancelled = await cancelCanonicalRun({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('cancel-'),
+    });
+    expect(cancelled.coordination_state.status).toBe('cancelled');
+    expect(cancelled.terminal_response?.status).toBe('failed');
+    expect(cancelled.coordination_state.attempts).toHaveLength(1);
   });
 
   it('keeps acceptance-unknown state inert across restart', async () => {
