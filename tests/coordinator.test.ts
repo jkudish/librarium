@@ -942,7 +942,7 @@ describe('durable handles and terminal mapping', () => {
     state = recordSubmissionAccepted(
       state,
       attemptId,
-      handle(profile, 'succeeded'),
+      handle(profile, 'pending'),
       deps,
       'adapter-state-ref',
     );

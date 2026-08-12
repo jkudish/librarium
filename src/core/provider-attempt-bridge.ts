@@ -125,7 +125,8 @@ function resultOutcome(
     kind: 'finished',
     finished: {
       outcome: 'succeeded',
-      result_id: `result-${launch.attempt_id}`,
+      // Attempt ids are already bounded, opaque, and unique per request.
+      result_id: launch.attempt_id,
       ...(completedHandle && { durable_handle: completedHandle }),
     },
     output: result,
@@ -137,14 +138,15 @@ function durableHandle(
   task: AsyncTaskHandle,
   now: () => number,
 ): DurableHandle {
-  const status: DurableHandle['status'] =
-    task.status === 'completed' ? 'succeeded' : task.status;
   return {
     handle_id: launch.attempt_id,
     provider_task_id: task.taskId,
     provider: launch.profile.identity,
     submitted_at: new Date(task.submittedAt || now()).toISOString(),
-    status,
+    // Submission acceptance is nonterminal even when the submit response also
+    // reports a terminal provider task. Retrieval/terminalization follows the
+    // write-ahead acceptance commit and records the observed terminal handle.
+    status: task.status === 'running' ? 'running' : 'pending',
   };
 }
 
@@ -210,6 +212,45 @@ async function retrieveCompletedTask(
   return resultOutcome(launch, retrieved.value, completedHandle);
 }
 
+function taskFromDurableHandle(
+  launch: AttemptLaunch,
+  handle: DurableHandle,
+  adapterId: string,
+): AsyncTaskHandle {
+  const status = handle.status === 'succeeded' ? 'completed' : handle.status;
+  return {
+    provider: adapterId,
+    taskId: handle.provider_task_id,
+    query: launch.query,
+    submittedAt: Date.parse(handle.submitted_at),
+    status,
+    ...(handle.last_observed_at && {
+      lastPolledAt: Date.parse(handle.last_observed_at),
+    }),
+  };
+}
+
+function resolveDurableProvider(
+  dependencies: ProviderAttemptBridgeDependencies,
+  launch: AttemptLaunch,
+): BackgroundProvider | undefined {
+  const resolved = dependencies.resolveExactBinding(launch.binding);
+  if (
+    !resolved ||
+    resolved.binding.adapter_id !== launch.binding.adapter_id ||
+    resolved.binding.binding_id !== launch.binding.binding_id ||
+    resolved.catalog_digest !== launch.catalog_digest ||
+    !profilesMatch(launch.profile, resolved.profile) ||
+    launch.profile.invocation !== 'background' ||
+    launch.profile.resumability !== 'durable' ||
+    resolved.provider.execution !== 'background' ||
+    resolved.provider.id !== launch.binding.adapter_id
+  ) {
+    return undefined;
+  }
+  return resolved.provider;
+}
+
 /**
  * Provider compatibility bridge. A launch is already frozen to one binding;
  * this bridge only resolves that exact adapter id and invokes its lifecycle.
@@ -221,6 +262,124 @@ export function createProviderAttemptBridge(
   const wait = dependencies.wait ?? defaultWait;
 
   return {
+    async resume(
+      launch: AttemptLaunch,
+      handle: DurableHandle,
+      context: AttemptExecutionContext,
+    ): Promise<AttemptExecutionResult> {
+      const provider = resolveDurableProvider(dependencies, launch);
+      if (
+        !provider ||
+        handle.provider.provider_id !== launch.profile.identity.provider_id ||
+        handle.provider.profile_id !== launch.profile.identity.profile_id
+      ) {
+        return {
+          kind: 'finished',
+          finished: {
+            outcome: 'failed',
+            error: providerFailure(
+              'frozen_adapter_binding_unavailable',
+              `The frozen adapter binding ${launch.binding.adapter_id} is unavailable for durable resume.`,
+              false,
+            ),
+          },
+        };
+      }
+      const task = taskFromDurableHandle(launch, handle, provider.id);
+      if (handle.status === 'succeeded') {
+        return retrieveCompletedTask(provider, task, launch, handle, now);
+      }
+      let latestHandle = handle;
+      for (;;) {
+        const polled = await beforeDeadline(
+          () => provider.poll(task),
+          launch,
+          now,
+        );
+        if (polled.kind === 'deadline') {
+          return {
+            kind: 'finished',
+            finished: {
+              outcome: 'timed_out',
+              error: providerFailure(
+                'attempt_deadline_exceeded',
+                'The durable status check exceeded the attempt deadline.',
+                false,
+                true,
+                'timeout',
+              ),
+              durable_handle: latestHandle,
+            },
+          };
+        }
+        if (polled.kind === 'error') {
+          await context.transientPollFailure(
+            providerFailure(
+              'adapter_poll_failed',
+              'The durable provider status check failed.',
+              false,
+            ),
+          );
+          if (context.mode === 'async') {
+            return { kind: 'accepted', durable_handle: latestHandle };
+          }
+          await wait(
+            Math.min(context.poll_interval_ms, timeoutFor(launch, now)),
+          );
+          continue;
+        }
+        const poll = polled.value;
+        if (poll.status === 'completed') {
+          return retrieveCompletedTask(
+            provider,
+            task,
+            launch,
+            latestHandle,
+            now,
+          );
+        }
+        if (poll.status === 'failed') {
+          return {
+            kind: 'finished',
+            finished: {
+              outcome: 'failed',
+              error: providerFailure(
+                'provider_task_failed',
+                'The durable provider task failed.',
+                true,
+              ),
+              durable_handle: observedHandle(latestHandle, 'failed', now),
+            },
+          };
+        }
+        if (poll.status === 'cancelled') {
+          return {
+            kind: 'finished',
+            finished: {
+              outcome: 'cancelled',
+              error: providerFailure(
+                'provider_task_cancelled',
+                'The durable provider task was cancelled.',
+                false,
+                false,
+                'cancelled',
+              ),
+              durable_handle: observedHandle(latestHandle, 'cancelled', now),
+            },
+          };
+        }
+        latestHandle = observedHandle(
+          latestHandle,
+          poll.status === 'running' ? 'running' : 'pending',
+          now,
+        );
+        if (poll.status === 'running') await context.running();
+        if (context.mode === 'async') {
+          return { kind: 'accepted', durable_handle: latestHandle };
+        }
+        await wait(Math.min(context.poll_interval_ms, timeoutFor(launch, now)));
+      }
+    },
     async execute(
       launch: AttemptLaunch,
       context: AttemptExecutionContext,
@@ -367,7 +526,7 @@ export function createProviderAttemptBridge(
               'The durable provider task failed.',
               true,
             ),
-            durable_handle: handle,
+            durable_handle: observedHandle(handle, 'failed', now),
           },
         };
       }
@@ -383,7 +542,7 @@ export function createProviderAttemptBridge(
               false,
               'cancelled',
             ),
-            durable_handle: handle,
+            durable_handle: observedHandle(handle, 'cancelled', now),
           },
         };
       }

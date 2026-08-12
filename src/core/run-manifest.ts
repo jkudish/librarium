@@ -174,7 +174,7 @@ export function mutateRunManifest(
   expectedRevision?: number,
 ): RunManifest {
   const path = join(outputDir, RUN_MANIFEST_FILE);
-  return withManifestLock(path, () => {
+  return withRunManifestLock(path, () => {
     const current = readRunManifest(outputDir);
     if (
       expectedRevision !== undefined &&
@@ -200,7 +200,16 @@ export function mutateRunManifest(
   });
 }
 
-function withManifestLock<T>(manifestPath: string, action: () => T): T {
+/**
+ * Serialize atomic run.json mutations across processes.
+ *
+ * Canonical v3 persistence reuses this lock so schema versions cannot acquire
+ * the same path through competing lock implementations.
+ */
+export function withRunManifestLock<T>(
+  manifestPath: string,
+  action: () => T,
+): T {
   const lockPath = `${manifestPath}.lock`;
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   const token = randomUUID();

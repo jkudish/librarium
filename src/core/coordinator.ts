@@ -894,6 +894,11 @@ export function recordSubmissionAccepted(
     );
   }
   validateHandleProvider(attempt, handle);
+  if (handle.status !== 'pending' && handle.status !== 'running') {
+    throw new Error(
+      'A newly accepted durable handle must be pending or running.',
+    );
+  }
   attempt.status = 'submitted';
   attempt.durable_handle = handle;
   attempt.adapter_state_ref = adapterStateRef ?? attempt.adapter_state_ref;
@@ -1637,4 +1642,41 @@ export function acceptedDurableHandles(
   return state.attempts.flatMap((attempt) =>
     attempt.durable_handle ? [structuredClone(attempt.durable_handle)] : [],
   );
+}
+
+/** Update private remote-work custody without changing a local terminal outcome. */
+export function recordDurableCustodyObservation(
+  state: CoordinatorState,
+  attemptId: string,
+  handleInput: unknown,
+): CoordinatorState {
+  const handle = DurableHandleSchema.parse(handleInput);
+  const current = attemptFor(state, attemptId);
+  if (!current.durable_handle) {
+    throw new Error('Custody observation requires an accepted durable handle.');
+  }
+  validateHandleProvider(current, handle);
+  if (
+    current.durable_handle.handle_id !== handle.handle_id ||
+    current.durable_handle.provider_task_id !== handle.provider_task_id
+  ) {
+    throw new Error(
+      'Custody observation cannot change durable handle identity.',
+    );
+  }
+  const currentStatus = current.durable_handle.status;
+  const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled']);
+  if (
+    terminalStatuses.has(currentStatus) ||
+    (currentStatus === 'running' && handle.status === 'pending') ||
+    (current.durable_handle.last_observed_at !== undefined &&
+      handle.last_observed_at !== undefined &&
+      Date.parse(handle.last_observed_at) <
+        Date.parse(current.durable_handle.last_observed_at))
+  ) {
+    return state;
+  }
+  const next = cloneState(state);
+  attemptFor(next, attemptId).durable_handle = handle;
+  return next;
 }
