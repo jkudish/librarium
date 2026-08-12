@@ -20,8 +20,8 @@ import {
 } from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
-  isRetiredProviderId,
-  migrateRetiredProviderId,
+  isRetiredProviderToken,
+  migrateRetiredProviderToken,
   retiredProviderGuidance,
   retiredProviderMigrationPriority,
 } from './retired-provider-ids.js';
@@ -696,7 +696,7 @@ function unsafeDictionaryIssues(
   return issues;
 }
 
-const canonicalLegacyId = migrateRetiredProviderId;
+const canonicalLegacyId = migrateRetiredProviderToken;
 const legacyAliasPriority = retiredProviderMigrationPriority;
 
 function legacySource(
@@ -1110,7 +1110,7 @@ function migrateGroups(
     const members: string[] = [];
     const seen = new Set<string>();
     for (const [index, member] of definition.members.entries()) {
-      if (!definition.legacy && isRetiredProviderId(member)) {
+      if (!definition.legacy && isRetiredProviderToken(member)) {
         issues.push(
           issue(
             'config_group_member_alias_removed',
@@ -1168,7 +1168,7 @@ function nativeGroups(
     const exact: string[] = [];
     const seen = new Set<string>();
     for (const [index, member] of members.entries()) {
-      if (isRetiredProviderId(member)) {
+      if (isRetiredProviderToken(member)) {
         issues.push(
           issue(
             'config_group_member_alias_removed',
@@ -1407,7 +1407,7 @@ function semanticIssues(config: LibrariumConfigV2): {
 
   for (const [id, provider] of Object.entries(config.providers)) {
     const bindingIdentity = builtinBindings.get(id);
-    if (isRetiredProviderId(id)) {
+    if (isRetiredProviderToken(id)) {
       issues.push(
         issue(
           'config_provider_alias_removed',
@@ -1475,7 +1475,7 @@ function semanticIssues(config: LibrariumConfigV2): {
   for (const [id, provider] of Object.entries(config.providers)) {
     const fallback = provider.fallback;
     if (!fallback) continue;
-    if (isRetiredProviderId(fallback)) {
+    if (isRetiredProviderToken(fallback)) {
       issues.push(
         issue(
           'config_fallback_alias_removed',

@@ -39,7 +39,7 @@ import {
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
   migrateRetiredProviderId,
-  retiredProviderReplacement,
+  retiredProviderTokenReplacement,
 } from './retired-provider-ids.js';
 import type {
   CanonicalTransportDefaults,
@@ -190,16 +190,11 @@ export function resolveConfigurationProfileToken(
   options: ConfigurationProfileTokenOptions = {},
 ): ConfigurationProfileTokenResolution {
   const sourceToken = token.trim();
-  const [providerToken, ...profileParts] = sourceToken.split('/');
-  const replacement = providerToken
-    ? retiredProviderReplacement(providerToken)
-    : undefined;
+  const replacement = retiredProviderTokenReplacement(sourceToken);
   if (replacement !== undefined && !options.migrateRetired) {
     return { kind: 'retired', token: sourceToken, replacement };
   }
-  const trimmed = replacement
-    ? [replacement, ...profileParts].join('/')
-    : sourceToken;
+  const trimmed = replacement ?? sourceToken;
   const qualified = trimmed.split('/');
   if (qualified.length === 2 && qualified[0] && qualified[1]) {
     const target = {
@@ -209,9 +204,16 @@ export function resolveConfigurationProfileToken(
     const known = [
       ...adapterProfileBindings().values(),
       ...customProfiles.map(customProfileBinding),
-    ].some((binding) => sameProfile(binding, target));
+    ].find((binding) => sameProfile(binding, target));
     return known
-      ? { kind: 'exact', token: trimmed, target }
+      ? {
+          kind: 'exact',
+          token: sourceToken,
+          target,
+          ...(replacement && {
+            alias: { from: sourceToken, adapter_id: known.adapter_id },
+          }),
+        }
       : { kind: 'unknown', token: trimmed, suggestions: [] };
   }
   if (qualified.length !== 1) {

@@ -24,9 +24,36 @@ export function isRetiredProviderId(id: string): id is RetiredProviderId {
   return retiredProviderReplacement(id) !== undefined;
 }
 
+/**
+ * Replaces only the provider-id segment of a provider/profile token.
+ *
+ * Qualified profile selectors remain exact during v1 migration and native-v2
+ * diagnostics, so their suffix must never be discarded.
+ */
+export function retiredProviderTokenReplacement(
+  token: string,
+): string | undefined {
+  const [providerId, ...suffix] = token.split('/');
+  const replacement = providerId
+    ? retiredProviderReplacement(providerId)
+    : undefined;
+  return replacement === undefined
+    ? undefined
+    : [replacement, ...suffix].join('/');
+}
+
+export function isRetiredProviderToken(token: string): boolean {
+  return retiredProviderTokenReplacement(token) !== undefined;
+}
+
 /** v1-only canonicalization. Current selectors must not call this helper. */
 export function migrateRetiredProviderId(id: string): string {
   return retiredProviderReplacement(id) ?? id;
+}
+
+/** v1-only canonicalization that preserves a qualified profile suffix. */
+export function migrateRetiredProviderToken(token: string): string {
+  return retiredProviderTokenReplacement(token) ?? token;
 }
 
 /** Canonical > openai-deep-o3 > openai-deep, independent of input order. */
@@ -40,9 +67,9 @@ export function retiredProviderMigrationPriority(
   return 1;
 }
 
-export function retiredProviderGuidance(id: string): string | undefined {
-  const replacement = retiredProviderReplacement(id);
+export function retiredProviderGuidance(token: string): string | undefined {
+  const replacement = retiredProviderTokenReplacement(token);
   return replacement
-    ? `Provider "${id}" was removed; use "${replacement}".`
+    ? `Provider "${token}" was removed; use "${replacement}".`
     : undefined;
 }

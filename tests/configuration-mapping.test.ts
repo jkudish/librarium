@@ -437,6 +437,30 @@ describe('configuration mapping', () => {
     });
   });
 
+  it.each([
+    ['perplexity-sonar/grounded', 'perplexity-sonar-pro/grounded'],
+    ['perplexity-deep/research', 'perplexity-sonar-deep/research'],
+    ['openai-deep/research', 'openai-research/research'],
+    ['openai-deep-o3/research', 'openai-research/research'],
+  ])('preserves qualified retired suffixes for %s', (token, replacement) => {
+    expect(resolveConfigurationProfileToken(token)).toEqual({
+      kind: 'retired',
+      token,
+      replacement,
+    });
+    expect(
+      resolveConfigurationProfileToken(token, [], { migrateRetired: true }),
+    ).toMatchObject({
+      kind: 'exact',
+      token,
+      target: {
+        provider_id: replacement.split('/')[0],
+        profile_id: replacement.split('/')[1],
+      },
+      alias: { from: token },
+    });
+  });
+
   it('resolves active aliases, display names, and qualified profiles without collapsing OpenRouter', () => {
     expect(
       resolveConfigurationProfileToken('OpenRouter Online Search'),

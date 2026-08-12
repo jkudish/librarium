@@ -267,6 +267,33 @@ describe('public v2 configuration migration', () => {
     }
   });
 
+  it('migrates qualified retired v1 group members without dropping profiles', () => {
+    const members = [
+      'perplexity-sonar/grounded',
+      'perplexity-deep/research',
+      'openai-deep/research',
+      'openai-deep-o3/research',
+    ];
+    const result = migrateConfig({
+      global: v1({ groups: { legacy: members } }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.groups['custom:legacy']).toEqual([
+      'perplexity-sonar-pro/grounded',
+      'perplexity-sonar-deep/research',
+      'openai-research/research',
+    ]);
+    for (const member of members) {
+      expect(result.notices).toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_provider_alias_migrated',
+          message: expect.stringContaining(`"${member}"`),
+        }),
+      );
+    }
+  });
+
   it('makes canonical provider ids win every alias collision independent of JSON order', () => {
     for (const providers of [
       {
@@ -934,6 +961,35 @@ describe('public v2 configuration migration', () => {
         }),
       );
       expect(migrated.issues).not.toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_member_unknown',
+          path: '/groups/custom:retired/0',
+        }),
+      );
+    }
+  });
+
+  it('rejects qualified retired native group members with full replacements', () => {
+    const replacements = {
+      'perplexity-sonar/grounded': 'perplexity-sonar-pro/grounded',
+      'perplexity-deep/research': 'perplexity-sonar-deep/research',
+      'openai-deep/research': 'openai-research/research',
+      'openai-deep-o3/research': 'openai-research/research',
+    } as const;
+    for (const [alias, replacement] of Object.entries(replacements)) {
+      const result = validateConfigV2(
+        v2({ groups: { 'custom:retired': [alias] } }),
+      );
+      expect(result.ok, alias).toBe(false);
+      if (result.ok) continue;
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'config_group_member_alias_removed',
+          path: '/groups/custom:retired/0',
+          message: expect.stringContaining(`use "${replacement}"`),
+        }),
+      );
+      expect(result.issues).not.toContainEqual(
         expect.objectContaining({
           code: 'config_group_member_unknown',
           path: '/groups/custom:retired/0',

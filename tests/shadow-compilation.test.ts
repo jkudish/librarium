@@ -238,6 +238,34 @@ describe('private shadow compilation', () => {
     },
   );
 
+  it.each([
+    ['perplexity-sonar/grounded', 'perplexity-sonar-pro/grounded'],
+    ['perplexity-deep/research', 'perplexity-sonar-deep/research'],
+    ['openai-deep/research', 'openai-research/research'],
+    ['openai-deep-o3/research', 'openai-research/research'],
+  ])(
+    'rejects qualified retired transport token %s with its full replacement',
+    (token, replacement) => {
+      const result = compile(
+        config({ providers: { 'openai-research': { enabled: true } } }),
+        {
+          kind: 'silent_mcp',
+          input: { query: `qualified retired ${token}`, providers: [token] },
+        },
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.issues).toEqual([
+        {
+          code: 'shadow_provider_token_retired',
+          phase: 'transport',
+          path: '/providers/0',
+          message: `Provider "${token}" was removed; use "${replacement}".`,
+        },
+      ]);
+    },
+  );
+
   it('filters blank provider entries like v1 and retains stable token diagnostics', () => {
     const result = compile(config({ providers: { exa: { enabled: true } } }), {
       kind: 'silent_mcp',
