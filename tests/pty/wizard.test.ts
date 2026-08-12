@@ -31,7 +31,7 @@ describeMaybe(
       session = null;
     });
 
-    it('drives query → group → mode → refine → synthesize → confirm → run → decline browse', async () => {
+    it('drives query → group → mode → confirm → refine → synthesize → run → decline browse', async () => {
       // Bare invocation (no args) launches the wizard in a TTY. A mock LLM key
       // makes the refine + synthesize toggles appear (their gate is only key
       // presence, not validity); we decline both so no network call happens.
@@ -62,18 +62,16 @@ describeMaybe(
       await delay(40);
       session.write(KEY.ENTER);
 
-      // Refine toggle (shown because a mock LLM key is set): decline (default No).
-      await session.waitForText('Refine the query for each tier first?');
-      session.write(KEY.ENTER);
-
-      // Synthesize toggle (added after refine): decline (default No).
-      await session.waitForText('Synthesize a grounded answer afterwards?');
-      session.write(KEY.ENTER);
-
-      // Confirm: the summary line must name the smoke group (guards the
-      // navigation count above) before we accept the default (Yes).
+      // Confirm before credential-dependent options. The summary line must
+      // name the smoke group (guards the navigation count above).
       await session.waitForText('Fan out');
       expect(session.plain()).toContain('group "smoke"');
+      session.write(KEY.ENTER);
+
+      // Credential-dependent toggles appear only after consent. Decline both.
+      await session.waitForText('Refine the query for each tier first?');
+      session.write(KEY.ENTER);
+      await session.waitForText('Synthesize a grounded answer afterwards?');
       session.write(KEY.ENTER);
 
       // The run executes the same live table as `librarium run`.

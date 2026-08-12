@@ -4,6 +4,7 @@ import type { CredentialContext } from '../core/credentials.js';
 import { BUILTIN_PROVIDER_DEFINITIONS } from '../core/provider-descriptor.js';
 import {
   preflightProductionRequest,
+  preflightProductionRequestStructure,
   RequestPreflightError,
 } from '../node-request-preflight.js';
 import type { Config, ProviderTier } from '../types.js';
@@ -190,15 +191,47 @@ export async function runWizard(): Promise<void> {
   });
   if (p.isCancel(mode)) return cancel();
 
-  // Resolve an LLM credential only after the query, selector, and mode have
-  // passed the same structural admission gate as executeRun. This retains the
-  // keychain-backed refine/synthesis UX without letting bare `librarium`
-  // initialize providers or touch credentials before request validation.
-  let refine: boolean | symbol = false;
-  let synthesize: boolean | symbol = false;
+  // Validate the request shape before consent without reading environment or
+  // keychain credentials and without importing provider implementations.
   const preflightInput: RunOptions = { mode, skipPreflightConfirm: true };
   if (providers) preflightInput.providers = providers;
+  else if (scope === 'enabled') preflightInput.providers = enabled;
   if (group) preflightInput.group = group;
+  try {
+    preflightProductionRequestStructure({
+      config,
+      transport: {
+        kind: 'cli',
+        input: {
+          query: query.trim(),
+          providers: preflightInput.providers,
+          group: preflightInput.group,
+          mode: preflightInput.mode,
+        },
+      },
+    });
+  } catch (error) {
+    if (error instanceof RequestPreflightError) {
+      p.log.error(error.message);
+      process.exitCode = 2;
+      return;
+    }
+    throw error;
+  }
+  const scopeLabel = group
+    ? `group "${group}"`
+    : providers
+      ? `${providers.length} hand-picked providers`
+      : 'all enabled providers';
+  const confirmed = await p.confirm({
+    message: `Fan out "${query.trim()}" to ${scopeLabel} in ${mode} mode?`,
+  });
+  if (p.isCancel(confirmed) || !confirmed) return cancel();
+
+  // Consent is explicit. Credential resolution is allowed now, but provider
+  // initialization remains inside executeRun after credential-aware preflight.
+  let refine: boolean | symbol = false;
+  let synthesize: boolean | symbol = false;
   let wizardCredentials: CredentialContext;
   try {
     wizardCredentials = preflightProductionRequest({
@@ -214,6 +247,14 @@ export async function runWizard(): Promise<void> {
       },
     }).credentials;
   } catch (error) {
+    if (
+      error instanceof RequestPreflightError &&
+      error.issues.some((issue) => issue.code === 'profile_uncredentialed')
+    ) {
+      p.log.warn('A selected provider needs credentials. Opening onboarding.');
+      await runOnboardingWizard();
+      return;
+    }
     if (error instanceof RequestPreflightError) {
       p.log.error(error.message);
       process.exitCode = 2;
@@ -237,16 +278,6 @@ export async function runWizard(): Promise<void> {
     });
     if (p.isCancel(synthesize)) return cancel();
   }
-
-  const scopeLabel = group
-    ? `group "${group}"`
-    : providers
-      ? `${providers.length} hand-picked providers`
-      : 'all enabled providers';
-  const confirmed = await p.confirm({
-    message: `Fan out "${query.trim()}" to ${scopeLabel} in ${mode} mode?`,
-  });
-  if (p.isCancel(confirmed) || !confirmed) return cancel();
 
   p.outro('starting run');
 

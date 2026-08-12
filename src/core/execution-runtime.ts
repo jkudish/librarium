@@ -463,15 +463,24 @@ export async function runPreparedExecution(
       existing.state.attempts.flatMap((attempt) =>
         attempt.status === 'submitting' && !attempt.durable_handle
           ? [
-              transition(effectiveDependencies, requestId, (state) =>
-                recordAcceptanceUnknown(
+              transition(effectiveDependencies, requestId, (state) => {
+                const currentAttempt = state.attempts.find(
+                  (candidate) => candidate.attempt_id === attempt.attempt_id,
+                );
+                if (
+                  currentAttempt?.status !== 'submitting' ||
+                  currentAttempt.durable_handle
+                ) {
+                  return undefined;
+                }
+                return recordAcceptanceUnknown(
                   state,
-                  attempt.attempt_id,
+                  currentAttempt.attempt_id,
                   effectiveDependencies.coordinator,
-                  attempt.adapter_state_ref,
+                  currentAttempt.adapter_state_ref,
                   'submission_response_uncertain',
-                ),
-              ),
+                );
+              }),
             ]
           : [],
       ),

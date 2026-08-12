@@ -9,6 +9,7 @@ import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { generateSlug } from '../core/prompt-builder.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
+  canonicalRunsRoot,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
   discoverCanonicalRunDirectories,
@@ -273,7 +274,8 @@ async function reconcileCanonicalRuns(
     baseDir,
     Number.MAX_SAFE_INTEGER,
   )) {
-    const before = readCanonicalRunManifest(baseDir, runDir);
+    const runsRoot = canonicalRunsRoot(runDir);
+    const before = readCanonicalRunManifest(runsRoot, runDir);
     const remoteCustody = before.coordination_state.attempts.some(
       (attempt) =>
         attempt.durable_handle &&
@@ -285,7 +287,7 @@ async function reconcileCanonicalRuns(
       remoteCustody;
     const canonical = needsResume
       ? await resumeCanonicalPreparedExecution({
-          runs_root: baseDir,
+          runs_root: runsRoot,
           run_directory: runDir,
           coordinator: createNodeCoordinatorDependencies(),
           attempt_bridge: createRegisteredProviderAttemptBridge(
@@ -360,8 +362,8 @@ export function registerStatusCommand(program: Command): void {
           ...new Set(
             canonicalRunDirs.flatMap((runDir) =>
               Object.values(
-                readCanonicalRunManifest(baseDir, runDir).coordination_state
-                  .profile_plans_by_identity,
+                readCanonicalRunManifest(canonicalRunsRoot(runDir), runDir)
+                  .coordination_state.profile_plans_by_identity,
               ).map((plan) => plan.binding.adapter_id),
             ),
           ),

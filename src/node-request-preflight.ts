@@ -120,6 +120,11 @@ export interface ProductionRequestPreflightResult {
   readonly admittedAdapterIds: readonly string[];
 }
 
+export type StructuralProductionRequestPreflightResult = Omit<
+  ProductionRequestPreflightResult,
+  'credentials'
+>;
+
 /**
  * Return every adapter admitted by the canonical plan, including reserve-only
  * fallbacks. Initialization must make all of these available before any
@@ -171,6 +176,44 @@ function requireCompiled(
   return compiled.prepared;
 }
 
+/** Validate and compile a request without reading environment or keychain credentials. */
+export function preflightProductionRequestStructure(
+  input: ProductionRequestInput,
+): StructuralProductionRequestPreflightResult {
+  const common = {
+    ...input,
+    authoredGroups: configGroupProvenance(input.config),
+  };
+  try {
+    const prepared = requireCompiled(
+      compileRequest({
+        ...common,
+        assumeCredentialAvailability: true,
+        structuralOnly: true,
+        preparation: requestPreparation(),
+      }),
+    );
+    return {
+      prepared,
+      notices: prepared.notices,
+      admittedAdapterIds: admittedAdapterIds(prepared),
+    };
+  } catch (error) {
+    if (error instanceof RequestPreflightError) throw error;
+    throw new RequestPreflightError(
+      [
+        {
+          code: 'request_compilation_failed',
+          phase: 'compilation',
+          path: '',
+          message: 'Request compilation failed before execution could start.',
+        },
+      ],
+      [],
+    );
+  }
+}
+
 /**
  * Run the two admission phases required before a production transport may
  * initialize providers. The first phase never constructs a credential context
@@ -187,29 +230,7 @@ export function preflightProductionRequest(
     authoredGroups: configGroupProvenance(input.config),
   };
 
-  try {
-    requireCompiled(
-      compileRequest({
-        ...common,
-        assumeCredentialAvailability: true,
-        structuralOnly: true,
-        preparation: requestPreparation(),
-      }),
-    );
-  } catch (error) {
-    if (error instanceof RequestPreflightError) throw error;
-    throw new RequestPreflightError(
-      [
-        {
-          code: 'request_compilation_failed',
-          phase: 'compilation',
-          path: '',
-          message: 'Request compilation failed before execution could start.',
-        },
-      ],
-      [],
-    );
-  }
+  preflightProductionRequestStructure(input);
 
   const credentials = (deps.createCredentials ?? createNodeCredentialContext)();
   try {

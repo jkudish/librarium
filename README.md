@@ -1410,6 +1410,8 @@ Each research run creates a timestamped output directory:
 
 `run.json` is created before dispatch and is the only persisted source of truth for the run. Per-run inter-process locking serializes mutations, and `revision` increases on every atomic mutation. Locks fail closed: an orphaned lock after a hard process crash must be removed manually only after confirming no Librarium process is using that run. `status` is `running`, `awaiting_async`, `completed`, `partial`, `failed`, or `cancelled`; `exitCode` is `null` while work is still running or awaiting retrieval. Background providers add a `task` object directly to their provider entry containing the provider task ID, timestamps, mapped status, and safe diagnostics. After retrieval, the compact task audit remains with `retrievedAt`; Librarium does not create or read `async-tasks.json`.
 
+SIGINT records a local terminal cancellation. It does not claim that already accepted remote provider work stopped. Canonical runs retain explicit remote custody and reconcile that work without adding late results or fallbacks after the local cutoff.
+
 The `usage` and `metering` fields are optional. `usage` is reported-only: its `inputTokens`, `outputTokens`, `totalTokens`, and `costUsd` appear only when the provider's API actually returns them, and `usage.costUsd` is never a pricing-table estimate. `metering` carries the provider's metering `kind` and, once a real figure is known, the actual-cost lane (`metering.actual.source` is `provider_reported` for a cost the API returned); network-free pre-dispatch estimates live under `metering.estimate` instead. See [Metering registry and the estimated budget](#metering-registry-and-the-estimated-budget) for the full model.
 
 ## Exit Codes
@@ -1642,9 +1644,9 @@ Or add it to any MCP client's stdio config:
 
 The server exposes these tools:
 
-- `research`: fan out a query across providers; writes the full run directory and returns a compact structured result (output dir, per-provider tallies, top deduped sources, pending async task ids). Full provider text is not inlined.
+- `research`: fan out a query across providers and write the full run directory. Pending schemaVersion 3 runs return a compact receipt. Terminal runs inline the canonical `ResearchResponse`, including full provider content.
 - `get_results`: read provider markdown from a run directory (defaults to the most recent run), capped per provider with a truncation marker, plus the manifest summary.
-- `check_async`: one poll pass over pending async deep-research tasks; with `retrieve` it fetches completed results back into the run.
+- `check_async`: one bounded resume pass over pending async work. For schemaVersion 3, observed completion is always retrieved and committed immediately. `retrieve` only gates retrieval for historical schemaVersion 2 runs. A terminal v3 result can include the full canonical `ResearchResponse` content.
 - `list_providers`: registry and config snapshot (id, name, tier, enabled, key configured).
 - `list_groups`: configured provider groups and their members.
 

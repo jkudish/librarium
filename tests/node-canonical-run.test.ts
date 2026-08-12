@@ -607,7 +607,7 @@ describe('canonical v3 run.json', () => {
     const revision = readCanonicalRunManifest(root, runDirectory).revision;
     const second = await checkAsyncTasks(
       runDirectory,
-      false,
+      true,
       config,
       dependencies,
     );

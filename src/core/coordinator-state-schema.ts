@@ -304,6 +304,7 @@ export const CoordinatorStateSchema = z
     });
 
     const attemptIds = new Set<string>();
+    const attemptsById = new Map<string, (typeof state.attempts)[number]>();
     state.attempts.forEach((attempt, index) => {
       if (attemptIds.has(attempt.attempt_id)) {
         ctx.addIssue({
@@ -313,6 +314,7 @@ export const CoordinatorStateSchema = z
         });
       }
       attemptIds.add(attempt.attempt_id);
+      attemptsById.set(attempt.attempt_id, attempt);
       if (!slotIds.has(attempt.slot_id)) {
         ctx.addIssue({
           code: 'custom',
@@ -389,13 +391,20 @@ export const CoordinatorStateSchema = z
     });
 
     state.slots.forEach((slot, index) => {
-      if (
-        slot.latest_attempt_id !== undefined &&
-        !attemptIds.has(slot.latest_attempt_id)
-      ) {
+      const latestAttempt = slot.latest_attempt_id
+        ? attemptsById.get(slot.latest_attempt_id)
+        : undefined;
+      if (slot.latest_attempt_id !== undefined && !latestAttempt) {
         ctx.addIssue({
           code: 'custom',
           message: 'Latest attempt ids must reference a persisted attempt',
+          path: ['slots', index, 'latest_attempt_id'],
+        });
+      } else if (latestAttempt && latestAttempt.slot_id !== slot.slot_id) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Latest attempt ids must reference an attempt in the same slot',
           path: ['slots', index, 'latest_attempt_id'],
         });
       }

@@ -1,3 +1,9 @@
+import { dirname, resolve } from 'node:path';
+import { readCanonicalRunReportingView } from '../node-canonical-reporting.js';
+import {
+  discoverCanonicalRunDirectories,
+  readRunJsonSchemaVersion,
+} from '../node-canonical-run.js';
 import type { RunArtifactSnapshot } from '../node-run-artifact-codecs.js';
 import { presentationSourceSummary } from '../node-run-artifact-presentation.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
@@ -12,6 +18,7 @@ import type { ProviderReport, RunManifest } from '../types.js';
 export interface RunEntry {
   dir: string;
   manifest: RunManifest;
+  schemaVersion?: 2 | 3;
 }
 
 export { isRunManifest } from '../core/run-manifest.js';
@@ -21,8 +28,25 @@ export function readRunEntry(
   dir: string,
   repository: RunArtifactRepository = new RunArtifactRepository(),
 ): RunEntry | null {
+  const resolved = resolve(dir);
+  const runsRoot = dirname(resolved);
+  let schemaVersion: number | undefined;
+  try {
+    schemaVersion = readRunJsonSchemaVersion(runsRoot, resolved);
+  } catch {
+    schemaVersion = undefined;
+  }
+  if (schemaVersion === 3) {
+    const view = readCanonicalRunReportingView(resolved);
+    if (!view) return null;
+    return {
+      dir: resolved,
+      manifest: view.presentation.generatorManifest,
+      schemaVersion: 3,
+    };
+  }
   const manifest = repository.tryReadManifest(dir);
-  return manifest ? { dir, manifest } : null;
+  return manifest ? { dir, manifest, schemaVersion: 2 } : null;
 }
 
 /** Read one selected run with non-mutating recovery projection for browsing. */
@@ -43,6 +67,13 @@ export interface BrowseRunPresentation {
   readonly mode: RunManifest['mode'];
   readonly providers: readonly BrowseProviderPresentation[];
   readonly sources: { readonly total: number; readonly unique: number };
+}
+
+export interface BrowseRunView {
+  readonly runDir: string;
+  readonly manifest: Readonly<RunManifest>;
+  readonly presentation: BrowseRunPresentation;
+  readonly summary?: string;
 }
 
 /** Project one immutable artifact snapshot into the browse view model. */
@@ -68,6 +99,43 @@ export function shapeBrowseRunSnapshot(
   };
 }
 
+/** Read either historical v2 artifacts or a canonical v3 presentation. */
+export function readBrowseRunView(
+  dir: string,
+  repository: RunArtifactRepository = new RunArtifactRepository(),
+): BrowseRunView | null {
+  const canonical = readCanonicalRunReportingView(dir);
+  if (canonical) {
+    const { presentation } = canonical;
+    return {
+      runDir: canonical.runDir,
+      manifest: presentation.generatorManifest,
+      presentation: {
+        query: presentation.generatorManifest.query,
+        mode: presentation.generatorManifest.mode,
+        providers: presentation.reports.map((report) => ({
+          report,
+          content: presentation.providerContents[report.outputFile] ?? '',
+        })),
+        sources: {
+          total: presentation.totalCitations,
+          unique: presentation.sources.length,
+        },
+      },
+      summary: canonical.summary,
+    };
+  }
+  const snapshot = readRunSnapshot(dir, repository);
+  return snapshot
+    ? {
+        runDir: snapshot.runDir,
+        manifest: snapshot.manifest,
+        presentation: shapeBrowseRunSnapshot(snapshot),
+        summary: snapshot.summary,
+      }
+    : null;
+}
+
 /**
  * Discover recent runs under the output base directory (newest first).
  */
@@ -76,9 +144,27 @@ export function discoverRuns(
   limit = 20,
   repository: RunArtifactRepository = new RunArtifactRepository(),
 ): RunEntry[] {
-  return repository
+  const historical = repository
     .discoverRuns(baseDir, limit)
-    .map(({ runDir, manifest }) => ({ dir: runDir, manifest }));
+    .map(({ runDir, manifest }) => ({
+      dir: runDir,
+      manifest,
+      schemaVersion: 2 as const,
+    }));
+  const canonical = discoverCanonicalRunDirectories(baseDir, limit).map(
+    (runDir) => {
+      const view = readCanonicalRunReportingView(runDir);
+      if (!view) return null;
+      return {
+        dir: runDir,
+        manifest: view.presentation.generatorManifest,
+        schemaVersion: 3 as const,
+      };
+    },
+  );
+  return [...historical, ...canonical.filter((entry) => entry !== null)]
+    .sort((left, right) => right.manifest.timestamp - left.manifest.timestamp)
+    .slice(0, Math.max(0, limit));
 }
 
 /** Format a manifest timestamp (seconds) as a local date-time label. */

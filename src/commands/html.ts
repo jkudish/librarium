@@ -1,8 +1,8 @@
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
+import { writeHtmlReportForRun } from '../node-canonical-reporting.js';
 import { discoverRuns } from './browse-data.js';
-import { writeHtmlReport } from './html-report-v2.js';
 import { openPath } from './run.js';
 import { fileUrl, hyperlink, isColorEnabled } from './run-format.js';
 
@@ -28,9 +28,9 @@ export function registerHtmlCommand(program: Command): void {
         process.exitCode = 2;
         return;
       }
-      const reportPath = writeHtmlReport(dir);
+      const reportPath = writeHtmlReportForRun(dir);
       if (!reportPath) {
-        console.error(`No run manifest (run.json) found in ${dir}`);
+        console.error(`No valid supported run manifest found in ${dir}`);
         process.exitCode = 2;
         return;
       }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeRun } from '../src/commands/run.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import type { Config, Provider } from '../src/types.js';
@@ -206,6 +206,16 @@ describe('canonical CLI transport', () => {
     },
   };
 
+  beforeEach(() => {
+    state.stdout = '';
+    state.runCanonical.mockReset();
+    state.cancelCanonical.mockReset();
+    state.spinner.start.mockClear();
+    state.spinner.stop.mockClear();
+    state.spinner.fail.mockClear();
+    process.exitCode = undefined;
+  });
+
   it('prints one public terminal envelope without private coordinator facts', async () => {
     const response = {
       generator: 'jkudish/librarium',
@@ -245,6 +255,65 @@ describe('canonical CLI transport', () => {
     expect(state.stdout).not.toMatch(
       /coordination_state|durable_handle|attempts|delivery_lease|provider_task_id/,
     );
+  });
+
+  it('returns exit 0 with a compact public envelope for async pending work', async () => {
+    state.runCanonical.mockResolvedValue({
+      runtime: { state: { status: 'running' }, outputs_by_attempt: {} },
+      manifest: { coordination_state: { status: 'running' } },
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      state.stdout += String(chunk);
+      return true;
+    });
+    vi.spyOn(console, 'log').mockImplementation((value) => {
+      state.stdout += `${String(value)}\n`;
+    });
+
+    const outcome = await executeRun('query', { json: true });
+
+    expect(outcome.exitCode).toBe(0);
+    expect(JSON.parse(state.stdout)).toEqual({
+      outputDir: '/tmp/canonical-transport/run-1',
+      state: 'pending',
+    });
+    expect(state.stdout).not.toMatch(
+      /coordination_state|durable_handle|attempts|provider_task_id/,
+    );
+  });
+
+  it('returns exit 1 for a partial canonical terminal response', async () => {
+    const response = {
+      generator: 'jkudish/librarium',
+      generator_version: '1.4.1',
+      request_id: 'request-1',
+      status: 'partial' as const,
+      completed_at: '2026-08-11T12:00:01.000Z',
+      results: [],
+      errors: [
+        { code: 'librarium.provider.failed', message: 'One provider failed.' },
+      ],
+    };
+    state.runCanonical.mockResolvedValue({
+      runtime: { state: { status: 'partial' }, outputs_by_attempt: {} },
+      manifest: { coordination_state: { status: 'partial' } },
+      response,
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      state.stdout += String(chunk);
+      return true;
+    });
+    vi.spyOn(console, 'log').mockImplementation((value) => {
+      state.stdout += `${String(value)}\n`;
+    });
+
+    const outcome = await executeRun('query', { json: true });
+
+    expect(outcome.exitCode).toBe(1);
+    expect(JSON.parse(state.stdout)).toMatchObject({
+      state: 'terminal',
+      response: { status: 'partial' },
+    });
   });
 
   it('stops cleanly when interrupted before canonical state creation', async () => {

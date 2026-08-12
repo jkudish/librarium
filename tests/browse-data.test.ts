@@ -13,11 +13,20 @@ import {
   discoverRuns,
   extractPreview,
   isRunManifest,
+  readBrowseRunView,
   readRunEntry,
   readRunSnapshot,
   runTallies,
 } from '../src/commands/browse-data.js';
-import type { RunManifest } from '../src/types.js';
+import { runCanonicalPreparedExecution } from '../src/node-canonical-run.js';
+import type { Provider, RunManifest } from '../src/types.js';
+import {
+  canonicalFixtureBridge,
+  canonicalFixtureCoordinator,
+  canonicalFixturePrepared,
+  canonicalFixtureProfile,
+  canonicalFixtureResult,
+} from './fixtures/canonical-run.js';
 
 let baseDir: string;
 
@@ -182,6 +191,44 @@ describe('readRunEntry / discoverRuns', () => {
 
   it('returns empty for a missing base dir', () => {
     expect(discoverRuns(join(baseDir, 'nope'))).toEqual([]);
+  });
+
+  it('discovers and presents canonical v3 runs without changing run.json', async () => {
+    const dir = join(baseDir, 'canonical-v3');
+    mkdirSync(dir);
+    const profile = canonicalFixtureProfile('canonical');
+    const provider: Provider = {
+      id: 'adapter-canonical',
+      displayName: 'Canonical',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => canonicalFixtureResult('adapter-canonical'),
+    };
+    await runCanonicalPreparedExecution(canonicalFixturePrepared([profile]), {
+      runs_root: baseDir,
+      run_directory: dir,
+      coordinator: canonicalFixtureCoordinator(),
+      attempt_bridge: canonicalFixtureBridge([profile], {
+        'adapter-canonical': provider,
+      }),
+    });
+    const before = readFileSync(join(dir, 'run.json'), 'utf8');
+
+    const entry = readRunEntry(dir);
+    const view = readBrowseRunView(dir);
+
+    expect(entry).toMatchObject({
+      schemaVersion: 3,
+      manifest: { query: 'canonical fixture query' },
+    });
+    expect(discoverRuns(baseDir).map((run) => run.schemaVersion)).toContain(3);
+    expect(view?.presentation.providers[0]).toMatchObject({
+      report: { id: 'adapter-canonical', status: 'success' },
+      content: expect.stringContaining('Canonical result'),
+    });
+    expect(view?.summary).toContain('canonical fixture query');
+    expect(readFileSync(join(dir, 'run.json'), 'utf8')).toBe(before);
   });
 });
 
