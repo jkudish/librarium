@@ -6,15 +6,38 @@ import {
 import type { HttpClient, HttpStreamClient } from '../core/http-client.js';
 import { getMeteringKind } from '../core/metering.js';
 import {
+  adapterProfileBindings,
+  buildProfileBindings,
+  TargetSelectionError,
+} from '../core/profile-bindings.js';
+import { BUILTIN_PROVIDER_CATALOG } from '../core/provider-profiles.js';
+import {
   providerCredentialRef,
   providerHasCredential,
 } from '../core/provider-selection.js';
-import type { Config, Provider, ProviderMeta, ProviderTier } from '../types.js';
+import type {
+  Config,
+  Provider,
+  ProviderConfig,
+  ProviderMeta,
+  ProviderTier,
+} from '../types.js';
 import { ProviderBase } from './base.js';
 import {
   BUILTIN_PROVIDER_DESCRIPTORS,
   type BuiltInProviderDescriptor,
 } from './provider-descriptors.js';
+
+const builtinDeclarations = new Map(
+  BUILTIN_PROVIDER_CATALOG.flatMap((entry) =>
+    entry.profiles.map(
+      (profile) =>
+        [`${entry.provider_id}/${profile.profile_id}`, profile] as const,
+    ),
+  ),
+);
+const builtinProfileBindings = buildProfileBindings(builtinDeclarations);
+const builtinAdapterBindings = adapterProfileBindings();
 
 const providers = new Map<string, Provider>();
 
@@ -117,7 +140,10 @@ export function getProvidersByTier(tier: ProviderTier): Provider[] {
  * Get provider metadata for display (ls command)
  */
 export function getProviderMeta(
-  config: Record<string, { apiKey?: string; enabled?: boolean }>,
+  config: Record<
+    string,
+    Pick<ProviderConfig, 'apiKey' | 'enabled' | 'model' | 'options'>
+  >,
   credentials: CredentialContext = {},
 ): ProviderMeta[] {
   return getAllProviders().map((p) => {
@@ -130,6 +156,27 @@ export function getProviderMeta(
     const hasApiKey = requiresApiKey
       ? providerHasCredential(p, providerConfig, credentials)
       : true;
+    const identity = builtinAdapterBindings.get(p.id);
+    const binding = identity
+      ? builtinProfileBindings.get(
+          `${identity.provider_id}/${identity.profile_id}`,
+        )
+      : undefined;
+    let target;
+    try {
+      target = binding?.resolve({
+        model: providerConfig?.model,
+        options: providerConfig?.options ?? {},
+      }).profile.identity.target;
+    } catch {
+      // Invalid configuration is reported by preflight. Display the declared
+      // target rather than inventing a configured or provider-reported value.
+      target = identity
+        ? builtinDeclarations.get(
+            `${identity.provider_id}/${identity.profile_id}`,
+          )?.target
+        : undefined;
+    }
     return {
       id: p.id,
       displayName: p.displayName,
@@ -145,6 +192,7 @@ export function getProviderMeta(
           ? credentialInfo.source
           : 'missing'
         : 'literal',
+      ...(target !== undefined && { target }),
     };
   });
 }
@@ -165,6 +213,24 @@ export async function initializeProviders(
 
   for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
     const configured = providerConfig[descriptor.id];
+    const identity = builtinAdapterBindings.get(descriptor.id);
+    const binding = identity
+      ? builtinProfileBindings.get(
+          `${identity.provider_id}/${identity.profile_id}`,
+        )
+      : undefined;
+    try {
+      binding?.validateModel(configured?.model);
+    } catch (error) {
+      const detail =
+        error instanceof TargetSelectionError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      warnings.push(`Skipping ${descriptor.id}: ${detail}`);
+      continue;
+    }
     const options = descriptor.optionsSchema.safeParse(
       configured?.options ?? {},
     );

@@ -6,6 +6,7 @@ import type {
   ProviderTier,
   ProviderUsage,
 } from '../types.js';
+import type { BaseProviderOptions } from './base.js';
 import { BaseProvider } from './base.js';
 
 interface OpenRouterAnnotation {
@@ -55,6 +56,12 @@ const OPENROUTER_ONLINE_MODEL =
 export class OpenRouterOnlineProvider extends BaseProvider {
   readonly id = 'openrouter-online';
   readonly tier: ProviderTier = 'ai-grounded';
+  private readonly model: string;
+
+  constructor(options: BaseProviderOptions & { model?: string } = {}) {
+    super(options);
+    this.model = options.model?.trim() || OPENROUTER_ONLINE_MODEL;
+  }
 
   async execute(
     query: string,
@@ -74,7 +81,7 @@ export class OpenRouterOnlineProvider extends BaseProvider {
             'X-Title': 'librarium',
           },
           body: {
-            model: OPENROUTER_ONLINE_MODEL,
+            model: this.model,
             messages: [{ role: 'user', content: query }],
             tools: [{ type: 'openrouter:web_search' }],
           },
@@ -115,7 +122,7 @@ export class OpenRouterOnlineProvider extends BaseProvider {
         content: message.content?.trim() ?? '',
         citations: this.extractCitations(message.annotations),
         durationMs,
-        model: data.model ?? OPENROUTER_ONLINE_MODEL,
+        model: data.model ?? this.model,
         tokenUsage: {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,

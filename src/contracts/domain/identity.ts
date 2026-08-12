@@ -86,11 +86,13 @@ export const ProfileTargetSchema = z
     }
     if (
       underlying.model_selection !== 'configurable' &&
-      underlying.model_selection !== 'fixed'
+      underlying.model_selection !== 'fixed' &&
+      underlying.model_selection !== 'provider_managed'
     ) {
       ctx.addIssue({
         code: 'custom',
-        message: 'Underlying targets must be separately configurable or fixed',
+        message:
+          'Underlying targets must be configurable, fixed, or provider-managed',
         path: ['underlying', 'model_selection'],
       });
     }

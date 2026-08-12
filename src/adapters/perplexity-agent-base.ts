@@ -6,6 +6,7 @@ import type {
   ProviderResult,
   ProviderUsage,
 } from '../types.js';
+import type { BaseProviderOptions } from './base.js';
 import { BackgroundBaseProvider } from './base.js';
 
 interface AgentAnnotation {
@@ -59,7 +60,14 @@ const AGENT_API_URL = 'https://api.perplexity.ai/v1/agent';
 export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider {
   abstract readonly preset: string;
 
+  private readonly underlyingModel?: string;
+
   private storedResults = new Map<string, ProviderResult>();
+
+  constructor(options: BaseProviderOptions & { model?: string } = {}) {
+    super(options);
+    this.underlyingModel = options.model?.trim() || undefined;
+  }
 
   async execute(
     query: string,
@@ -74,6 +82,9 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         headers: { Authorization: `Bearer ${apiKey}` },
         body: {
           preset: this.preset,
+          ...(this.underlyingModel !== undefined && {
+            model: this.underlyingModel,
+          }),
           input: query,
         },
         timeout: options.timeout * 1000,
@@ -114,7 +125,7 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         content,
         citations,
         durationMs,
-        model: data.model ?? this.preset,
+        ...(data.model !== undefined && { model: data.model }),
         tokenUsage: {
           input: data.usage?.input_tokens,
           output: data.usage?.output_tokens,
@@ -181,6 +192,9 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         headers: { Authorization: `Bearer ${apiKey}` },
         body: {
           preset: this.preset,
+          ...(this.underlyingModel !== undefined && {
+            model: this.underlyingModel,
+          }),
           input: 'ping',
         },
         timeout: 15000,

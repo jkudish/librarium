@@ -84,6 +84,37 @@ export const durableResearchProfile: ExecutionProfile = {
   resumability: 'durable',
 };
 
+/**
+ * A real preset-backed profile: Librarium fixes the Agent API preset while the
+ * provider owns the underlying model until a supported model is configured.
+ */
+export const perplexityPresetResearchProfile: ExecutionProfile = {
+  identity: {
+    provider_id: 'perplexity-deep-research',
+    profile_id: 'research',
+    target: {
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: {
+        model_selection: 'provider_managed',
+        kind: 'model',
+      },
+    },
+  },
+  result_kind: 'research_report',
+  grounding_policy: 'required',
+  observation_mode: 'api_output',
+  corpora: ['web'],
+  retrieval_method: 'research_agent',
+  access_mode: 'direct',
+  operator_id: 'perplexity',
+  invocation: 'background',
+  resumability: 'process_local',
+};
+
 export const searchResultsProfile: ExecutionProfile = {
   identity: {
     provider_id: 'brave-search',
@@ -195,6 +226,18 @@ export const representativeRequest = {
         retrieval_methods: ['research_agent'],
       },
       primary: durableResearchProfile,
+    },
+    {
+      slot_id: 'slot-perplexity-preset',
+      position: 2,
+      requirements: {
+        result_kind: 'research_report',
+        grounding_policy: 'required',
+        observation_mode: 'api_output',
+        corpora: ['web'],
+        retrieval_methods: ['research_agent'],
+      },
+      primary: perplexityPresetResearchProfile,
     },
   ],
   fallback_reserve: [

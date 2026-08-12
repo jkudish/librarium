@@ -99,6 +99,14 @@ function providerManagedTarget(
   };
 }
 
+/** A fixed provider preset may expose a separately selected underlying model. */
+function fixedPresetWithUnderlyingModel(preset: string): ProfileTarget {
+  return {
+    primary: { model_selection: 'fixed', kind: 'preset', target_id: preset },
+    underlying: { model_selection: 'provider_managed', kind: 'model' },
+  };
+}
+
 interface ProfileInput {
   readonly profile_id: string;
   readonly selection_order: number;
@@ -390,7 +398,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'grounded',
         selection_order: 220,
-        target: fixedTarget('model', 'gemini-2.5-flash'),
+        target: configurableTarget('model', 'gemini-2.5-flash'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -490,7 +498,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 110,
-        target: fixedTarget('preset', 'deep-research'),
+        target: fixedPresetWithUnderlyingModel('deep-research'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -525,7 +533,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 120,
-        target: fixedTarget('preset', 'advanced-deep-research'),
+        target: fixedPresetWithUnderlyingModel('advanced-deep-research'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -616,7 +624,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'grounded',
         selection_order: 260,
-        target: fixedTarget('model', 'openai/gpt-4o-mini'),
+        target: configurableTarget('model', 'openai/gpt-4o-mini'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],

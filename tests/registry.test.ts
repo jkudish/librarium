@@ -390,6 +390,49 @@ describe('registry', () => {
     expect((gemini as { model?: string }).model).toBe('gemini-2.5-pro');
   });
 
+  it('skips unsupported target overrides before adapter factory work or fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const pastedSecret = 'sk-live-do-not-log';
+    const result = await initializeProviders({
+      providers: {
+        'gemini-grounded': { model: pastedSecret },
+        'openrouter-online': { model: 'openai/gpt-4o' },
+      },
+    });
+
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining('Skipping gemini-grounded'),
+    );
+    expect(getProvider('gemini-grounded')).toBeUndefined();
+    expect(getProvider('openrouter-online')).toBeDefined();
+    expect(result.warnings.join('\n')).not.toContain(pastedSecret);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports configured target selection without claiming an observed model', async () => {
+    await initializeProviders({
+      providers: {
+        'perplexity-deep-research': { model: 'sonar-pro' },
+      },
+    });
+    const meta = getProviderMeta({
+      'perplexity-deep-research': { enabled: true, model: 'sonar-pro' },
+    }).find((provider) => provider.id === 'perplexity-deep-research');
+    expect(meta?.target).toEqual({
+      primary: {
+        model_selection: 'fixed',
+        kind: 'preset',
+        target_id: 'deep-research',
+      },
+      underlying: {
+        model_selection: 'configurable',
+        kind: 'model',
+        target_id: 'sonar-pro',
+      },
+    });
+  });
+
   it('applies OpenAI research model and research options config', async () => {
     await initializeProviders({
       providers: {

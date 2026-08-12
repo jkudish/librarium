@@ -3,6 +3,7 @@ import { OpaqueIdSchema } from './contracts/common.js';
 import {
   type ExecutionProfile,
   ExecutionProfileSchema,
+  type ProfileTarget,
 } from './contracts/domain/index.js';
 
 // Provider tiers
@@ -239,6 +240,8 @@ export interface ProviderMeta {
   configured?: boolean;
   /** How this provider is metered/priced (from the metering registry). */
   meteringKind?: MeteringKind;
+  /** Configured execution target, not a provider-reported runtime observation. */
+  target?: ProfileTarget;
 }
 
 // Config for a single provider

@@ -8,6 +8,7 @@ import {
   adapterProfileBinding,
   adapterProfileBindings,
   buildProfileBindings,
+  TargetSelectionError,
 } from './profile-bindings.js';
 import { BUILTIN_PROVIDER_CATALOG } from './provider-profiles.js';
 import {
@@ -1428,21 +1429,27 @@ function semanticIssues(config: LibrariumConfigV2): {
     const binding = bindings.get(
       `${bindingIdentity.provider_id}/${bindingIdentity.profile_id}`,
     );
-    const declaration = declarations.get(
-      `${bindingIdentity.provider_id}/${bindingIdentity.profile_id}`,
-    );
-    if (
-      provider.model !== undefined &&
-      declaration?.target.primary.model_selection !== 'configurable'
-    ) {
+    let modelValid = true;
+    try {
+      binding?.validateModel(provider.model);
+    } catch (error) {
+      modelValid = false;
+      const diagnostic =
+        error instanceof TargetSelectionError
+          ? error
+          : new TargetSelectionError(
+              'config_model_invalid',
+              error instanceof Error ? error.message : 'Invalid model.',
+            );
       issues.push(
         issue(
-          'config_model_not_configurable',
+          diagnostic.code,
           pointer(['providers', id, 'model']),
-          'This provider profile does not support selecting a different model.',
+          diagnostic.message,
         ),
       );
     }
+    if (!modelValid) continue;
     try {
       const resolved = binding?.resolve({
         model: provider.model,
