@@ -24,7 +24,10 @@ import type {
   PreparationNotice,
   ProfileTarget,
 } from './research-request.js';
-import { sortPreparationDiagnostics } from './research-request.js';
+import {
+  RESEARCH_REQUEST_LIMITS,
+  sortPreparationDiagnostics,
+} from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
   type CliTransportInput,
@@ -37,30 +40,44 @@ import {
 } from './transport-normalization.js';
 
 /**
- * Private, Worker-safe ingress shapes. This is intentionally not re-exported
- * from a package entrypoint or wired to a production transport.
+ * Worker-safe ingress shapes shared by production preflight and compiler
+ * tests. The compiler owns mapping, exact target resolution, normalization,
+ * and admission. Node transports own runtime setup only after this function
+ * has admitted the request.
  */
 type RawCliTransportInput = Omit<CliTransportInput, 'exactTargets'>;
 type RawMcpTransportInput = Omit<McpTransportInput, 'exactTargets'>;
 
-export type ShadowCompilationTransport =
+export type RequestCompilationTransport =
   | { readonly kind: 'cli'; readonly input: RawCliTransportInput }
   | { readonly kind: 'mcp'; readonly input: RawMcpTransportInput }
   | { readonly kind: 'silent_mcp'; readonly input: RawMcpTransportInput };
 
-export interface ShadowCompilationInput {
+export interface RequestCompilationInput {
   /** An already schema-validated merged v1 configuration. */
   readonly config: Config;
   /** Preserves which group spellings were explicitly authored. */
   readonly authoredGroups: AuthoredGroupProvenance;
-  readonly credentials: CredentialContext;
+  /** Runtime credential view used by compiler tests and non-production callers. */
+  readonly credentials?: CredentialContext;
+  /**
+   * Admit against opaque credential references without reading their values.
+   * Node transports still verify credentials before legacy dispatch.
+   */
+  readonly assumeCredentialAvailability?: boolean;
+  /**
+   * Validate mapping, selector, and request structure without making
+   * credential-dependent mode admission decisions. Production uses this only
+   * for the first half of its two-phase ingress gate.
+   */
+  readonly structuralOnly?: boolean;
   /** Optional explicit total; otherwise the exact selected plan derives it. */
   readonly requestDeadlineMs?: number;
-  readonly transport: ShadowCompilationTransport;
+  readonly transport: RequestCompilationTransport;
   readonly preparation: PreparationDependencies;
 }
 
-export type ShadowCompilationResult =
+export type RequestCompilationResult =
   | {
       readonly ok: true;
       readonly prepared: PreparedResearchExecution;
@@ -112,14 +129,14 @@ function resolveProviderTokens(
         phase: 'migration',
         path,
         message:
-          'This trusted enabled custom provider has no execution-profile metadata, so shadow compilation cannot plan it safely.',
+          'This trusted enabled custom provider has no execution-profile metadata, so request compilation cannot plan it safely.',
       });
       continue;
     }
     const resolution = resolveConfigurationProfileToken(token, customProfiles);
     if (resolution.kind === 'retired') {
       issues.push({
-        code: 'shadow_provider_token_retired',
+        code: 'request_provider_token_retired',
         phase: 'transport',
         path,
         message: `Provider "${resolution.token}" was removed; use "${resolution.replacement}".`,
@@ -128,7 +145,7 @@ function resolveProviderTokens(
     }
     if (resolution.kind === 'unknown') {
       issues.push({
-        code: 'shadow_provider_token_unknown',
+        code: 'request_provider_token_unknown',
         phase: 'migration',
         path,
         message:
@@ -138,7 +155,7 @@ function resolveProviderTokens(
     }
     if (resolution.kind === 'ambiguous') {
       issues.push({
-        code: 'shadow_provider_token_ambiguous',
+        code: 'request_provider_token_ambiguous',
         phase: 'migration',
         path,
         message:
@@ -197,7 +214,7 @@ function groupSelectionDiagnostics(
   if (group.length === 0) {
     return [
       {
-        code: 'shadow_group_blank',
+        code: 'request_group_blank',
         phase: 'migration',
         path: '/group',
         message: 'A group selection must not be blank.',
@@ -209,8 +226,8 @@ function groupSelectionDiagnostics(
   return [
     {
       code: REMOVED_BUILTIN_WORKFLOW_IDS.includes(group)
-        ? 'shadow_group_removed'
-        : 'shadow_group_unknown',
+        ? 'request_group_removed'
+        : 'request_group_unknown',
       phase: 'migration',
       path: '/group',
       message: selection.message,
@@ -224,7 +241,7 @@ function escapePointerSegment(segment: string): string {
 
 function customProviderIssues(
   config: Config,
-  transport: ShadowCompilationTransport,
+  transport: RequestCompilationTransport,
   canonicalGroupId: string | undefined,
 ): readonly PreparationIssue[] {
   const configured = missingCustomProviderIds(config);
@@ -255,7 +272,7 @@ function customProviderIssues(
           ? `/customProviders/${escapePointerSegment(id)}`
           : '/group',
     message:
-      'This trusted enabled custom provider has no execution-profile metadata, so shadow compilation cannot plan it safely.',
+      'This trusted enabled custom provider has no execution-profile metadata, so request compilation cannot plan it safely.',
   }));
 }
 
@@ -272,16 +289,16 @@ function missingCustomProviderIds(config: Config): readonly string[] {
 }
 
 function exactTargetSmugglingIssues(
-  transport: ShadowCompilationTransport,
+  transport: RequestCompilationTransport,
 ): readonly PreparationIssue[] {
   if (!Object.hasOwn(transport.input, 'exactTargets')) return [];
   return [
     {
-      code: 'shadow_exact_targets_not_allowed',
+      code: 'request_exact_targets_not_allowed',
       phase: 'transport',
       path: '/providers',
       message:
-        'Raw shadow ingress cannot supply pre-resolved exact targets. Use provider tokens so configuration canonicalization remains authoritative.',
+        'Raw request ingress cannot supply pre-resolved exact targets. Use provider tokens so configuration canonicalization remains authoritative.',
     },
   ];
 }
@@ -303,7 +320,7 @@ function collisionGroupDiagnostics(
   }
   return [
     {
-      code: 'shadow_group_collision',
+      code: 'request_group_collision',
       phase: 'migration',
       path: '/group',
       message:
@@ -313,7 +330,7 @@ function collisionGroupDiagnostics(
 }
 
 function normalizeTransport(
-  transport: ShadowCompilationTransport,
+  transport: RequestCompilationTransport,
   defaults: UnresolvedV1TransportDefaults,
   targets: readonly ProfileTarget[] | undefined,
   group: string | undefined,
@@ -359,15 +376,19 @@ function normalizeTransport(
 
 /**
  * Compile a v1 configuration plus one transport-shaped input without touching
- * runtime execution, stores, bridges, files, imports, registries, or network.
+ * runtime execution, stores, bridges, files, imports, registries, credentials,
+ * or network.
  */
-export function compileShadowRequest(
-  input: ShadowCompilationInput,
-): ShadowCompilationResult {
+export function compileRequest(
+  input: RequestCompilationInput,
+): RequestCompilationResult {
   const rawGroup = input.transport.input.group?.trim();
   const mapped = mapConfiguration(input.config, {
     authoredGroups: input.authoredGroups,
-    credentials: input.credentials,
+    ...(input.credentials && { credentials: input.credentials }),
+    ...(input.assumeCredentialAvailability && {
+      assumeCredentialAvailability: true,
+    }),
     ...(input.requestDeadlineMs !== undefined && {
       requestDeadlineMs: input.requestDeadlineMs,
     }),
@@ -465,8 +486,24 @@ export function compileShadowRequest(
     };
   }
 
+  const normalizedMode = normalized.request.mode;
+  const canDeferModeAdmission =
+    normalizedMode === 'sync' ||
+    normalizedMode === 'async' ||
+    normalizedMode === 'mixed';
+  const admissionInput =
+    input.structuralOnly && canDeferModeAdmission
+      ? {
+          ...normalized.request,
+          mode: 'sync' as const,
+          // Selection-dependent estimate coverage must wait for the
+          // credential-aware pass, which may omit unavailable default/group
+          // profiles. Mapping has already validated budget syntax and bounds.
+          budgets: undefined,
+        }
+      : normalized.request;
   const admitted = admitUnresolvedV1ResearchExecution(
-    normalized.request,
+    admissionInput,
     mapped.catalog,
   );
   if (!admitted.ok) {
@@ -481,6 +518,41 @@ export function compileShadowRequest(
         ...admitted.notices,
       ]),
     };
+  }
+
+  if (input.structuralOnly) {
+    // The first production pass establishes only structural validity. Its
+    // provisional plan includes credential-opaque default/group profiles, so
+    // it must not derive selection-dependent deadlines or exact budgets. The
+    // maximal request deadline keeps materialization schema-valid while the
+    // credential-aware pass computes the executable plan's real limits.
+    const compiled = materializeResearchExecution(
+      admitted.admission,
+      {
+        max_concurrency: admitted.unresolved_limits.max_concurrency,
+        request_deadline_ms: RESEARCH_REQUEST_LIMITS.maxDeadlineMs,
+        inline_attempt_deadline_ms:
+          admitted.unresolved_limits.inline_attempt_deadline_ms,
+        background_attempt_deadline_ms:
+          mapped.deadline_migration.raw_background_attempt_deadline_ms,
+        poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
+      },
+      input.preparation,
+    );
+    const notices = sortPreparationDiagnostics([
+      ...mapperNotices,
+      ...effectiveGroupNotices,
+      ...resolved.notices,
+      ...normalized.notices,
+      ...compiled.notices,
+    ]);
+    return compiled.ok
+      ? { ok: true, prepared: compiled.prepared, notices }
+      : {
+          ok: false,
+          issues: sortPreparationDiagnostics(compiled.issues),
+          notices,
+        };
   }
 
   const unresolvedMode = normalized.request.mode;

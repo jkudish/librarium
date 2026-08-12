@@ -13,6 +13,8 @@ import type {
 // We re-import the adapter registry fresh for each test to avoid shared state.
 let registerProvider: typeof import('../src/adapters/index.js').registerProvider;
 let dispatch: typeof import('../src/core/dispatcher.js').dispatch;
+let preflightProductionRequest: typeof import('../src/node-request-preflight.js').preflightProductionRequest;
+let projectLegacyExecutionConfig: typeof import('../src/node-request-preflight.js').projectLegacyExecutionConfig;
 
 /** Create a minimal Config object with the given provider entries. */
 function makeConfig(
@@ -34,6 +36,8 @@ function makeConfig(
     },
     providers,
     groups: {},
+    customProviders: {},
+    trustedProviderIds: [],
   };
 }
 
@@ -93,6 +97,10 @@ describe('dispatcher fallback', () => {
 
     const dispatcherMod = await import('../src/core/dispatcher.js');
     dispatch = dispatcherMod.dispatch;
+
+    const preflight = await import('../src/node-request-preflight.js');
+    preflightProductionRequest = preflight.preflightProductionRequest;
+    projectLegacyExecutionConfig = preflight.projectLegacyExecutionConfig;
 
     // Create a temp output directory for file writes.
     tmpDir = join(
@@ -161,6 +169,108 @@ describe('dispatcher fallback', () => {
     expect(fallbackReport!.fallbackFor).toBe('primary');
     expect(fallbackReport!.wordCount).toBeGreaterThan(0);
     expect(fallbackReport!.citationCount).toBe(1);
+  });
+
+  it('does not execute an unadmitted incompatible fallback after a primary failure', async () => {
+    const primary = createFailingProvider('exa', 'primary boom', 'raw-search');
+    const fallback = createSuccessProvider('brave-answers', 'ai-grounded');
+    const fallbackExecute = vi.spyOn(fallback, 'execute');
+    registerProvider(primary);
+    registerProvider(fallback);
+
+    const config = makeConfig({
+      exa: {
+        apiKey: '$EXA_API_KEY',
+        enabled: true,
+        fallback: 'brave-answers',
+      },
+      'brave-answers': { apiKey: '$BRAVE_API_KEY', enabled: false },
+    });
+    const preflight = preflightProductionRequest(
+      {
+        config,
+        transport: {
+          kind: 'cli',
+          input: {
+            query: 'fallback safety',
+            providers: ['exa'],
+            mode: 'sync',
+          },
+        },
+      },
+      {
+        createCredentials: () => ({
+          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+        }),
+      },
+    );
+    const projected = projectLegacyExecutionConfig(config, preflight.prepared);
+
+    const { reports } = await dispatch({
+      config: projected,
+      providerIds: ['exa'],
+      query: 'fallback safety',
+      outputDir: tmpDir,
+      mode: 'sync',
+      credentials: {
+        env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+      },
+    });
+
+    expect(projected.providers.exa?.fallback).toBeUndefined();
+    expect(reports).toHaveLength(1);
+    expect(fallbackExecute).not.toHaveBeenCalled();
+  });
+
+  it('preserves an admitted compatible fallback after a primary failure', async () => {
+    const primary = createFailingProvider('exa', 'primary boom', 'raw-search');
+    const fallback = createSuccessProvider('brave-search', 'raw-search');
+    const fallbackExecute = vi.spyOn(fallback, 'execute');
+    registerProvider(primary);
+    registerProvider(fallback);
+
+    const config = makeConfig({
+      exa: {
+        apiKey: '$EXA_API_KEY',
+        enabled: true,
+        fallback: 'brave-search',
+      },
+      'brave-search': { apiKey: '$BRAVE_API_KEY', enabled: true },
+    });
+    const preflight = preflightProductionRequest(
+      {
+        config,
+        transport: {
+          kind: 'cli',
+          input: {
+            query: 'fallback safety',
+            providers: ['exa'],
+            mode: 'sync',
+          },
+        },
+      },
+      {
+        createCredentials: () => ({
+          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+        }),
+      },
+    );
+    const projected = projectLegacyExecutionConfig(config, preflight.prepared);
+
+    const { reports } = await dispatch({
+      config: projected,
+      providerIds: ['exa'],
+      query: 'fallback safety',
+      outputDir: tmpDir,
+      mode: 'sync',
+      credentials: {
+        env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+      },
+    });
+
+    expect(projected.providers.exa?.fallback).toBe('brave-search');
+    expect(reports).toHaveLength(2);
+    expect(fallbackExecute).toHaveBeenCalledTimes(1);
   });
 
   it('does not trigger a configured fallback when the caller disables it', async () => {

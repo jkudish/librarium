@@ -1,0 +1,352 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  assertAdmittedAdaptersRegistered,
+  emitRequestPreflightNotices,
+  formatRequestDiagnosticCodes,
+  preflightProductionRequest,
+  projectLegacyExecutionConfig,
+  RequestPreflightError,
+} from '../src/node-request-preflight.js';
+import type { Config } from '../src/types.js';
+
+function config(overrides: Partial<Config> = {}): Config {
+  return {
+    version: 1,
+    defaults: {
+      outputDir: './agents/librarium',
+      maxParallel: 2,
+      timeout: 30,
+      asyncTimeout: 300,
+      asyncPollInterval: 5,
+      mode: 'sync',
+      llmWebSearch: true,
+    },
+    providers: { exa: { enabled: true } },
+    customProviders: {},
+    trustedProviderIds: [],
+    groups: {},
+    ...overrides,
+  };
+}
+
+function request(source: Config, group?: string) {
+  return {
+    config: source,
+    transport: {
+      kind: 'cli' as const,
+      input: {
+        query: 'private query text',
+        ...(group === undefined ? { providers: ['exa'] } : { group }),
+      },
+    },
+  };
+}
+
+describe('Node production request preflight', () => {
+  it('rejects structural input before constructing credentials', () => {
+    const createCredentials = vi.fn(() => ({ env: {} }));
+
+    expect(() =>
+      preflightProductionRequest(request(config(), '__unknown_group__'), {
+        createCredentials,
+      }),
+    ).toThrow(RequestPreflightError);
+
+    expect(createCredentials).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid mode before constructing credentials', () => {
+    const createCredentials = vi.fn(() => ({ env: {} }));
+
+    expect(() =>
+      preflightProductionRequest(
+        {
+          config: config(),
+          transport: {
+            kind: 'cli',
+            input: {
+              query: 'bad mode',
+              providers: ['exa'],
+              mode: 'invalid' as never,
+            },
+          },
+        },
+        { createCredentials },
+      ),
+    ).toThrow(RequestPreflightError);
+
+    expect(createCredentials).not.toHaveBeenCalled();
+  });
+
+  it('checks a keychain-backed credential only after structural admission', () => {
+    const resolveCredential = vi.fn((value: string) =>
+      value === 'keychain:EXA_API_KEY' ? 'present' : undefined,
+    );
+    const createCredentials = vi.fn(() => ({ resolveCredential }));
+
+    const result = preflightProductionRequest(
+      request(
+        config({
+          providers: { exa: { enabled: true, apiKey: 'keychain:EXA_API_KEY' } },
+        }),
+      ),
+      { createCredentials },
+    );
+
+    expect(result.admittedAdapterIds).toEqual(['exa']);
+    expect(createCredentials).toHaveBeenCalledTimes(1);
+    expect(resolveCredential).toHaveBeenCalledWith('keychain:EXA_API_KEY');
+  });
+
+  it('rejects a missing credential before provider initialization can begin', () => {
+    const createCredentials = vi.fn(() => ({ env: {} }));
+
+    expect(() =>
+      preflightProductionRequest(request(config()), { createCredentials }),
+    ).toThrow(/profile_uncredentialed/);
+
+    expect(createCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an explicitly disabled target before it reads credentials', () => {
+    const createCredentials = vi.fn(() => ({
+      env: { EXA_API_KEY: 'present' },
+    }));
+
+    expect(() =>
+      preflightProductionRequest(
+        request(config({ providers: { exa: { enabled: false } } })),
+        { createCredentials },
+      ),
+    ).toThrow(/profile_disabled/);
+
+    expect(createCredentials).not.toHaveBeenCalled();
+  });
+
+  it('excludes disabled members from an admitted group before runtime setup', () => {
+    const result = preflightProductionRequest(
+      request(
+        config({
+          providers: {
+            exa: { enabled: true },
+            'brave-search': { enabled: false },
+          },
+          groups: { focused: ['exa', 'brave-search'] },
+        }),
+        'focused',
+      ),
+      { createCredentials: () => ({ env: { EXA_API_KEY: 'present' } }) },
+    );
+
+    expect(result.prepared.request.slots).toHaveLength(1);
+    expect(result.admittedAdapterIds).toEqual(['exa']);
+  });
+
+  it('defers default async mode admission until missing credentials are excluded', () => {
+    const createCredentials = vi.fn(() => ({
+      env: { OPENAI_API_KEY: 'present' },
+    }));
+
+    const result = preflightProductionRequest(
+      {
+        config: config({
+          defaults: {
+            ...config().defaults,
+            mode: 'async',
+          },
+          providers: {
+            exa: { enabled: true },
+            'openai-research': { enabled: true },
+          },
+        }),
+        transport: {
+          kind: 'cli',
+          input: { query: 'durable only', mode: 'async' },
+        },
+      },
+      { createCredentials },
+    );
+
+    expect(createCredentials).toHaveBeenCalledTimes(1);
+    expect(result.admittedAdapterIds).toEqual(['openai-research']);
+  });
+
+  it('rejects an explicit inline async target in the credential-aware phase', () => {
+    const createCredentials = vi.fn(() => ({
+      env: { EXA_API_KEY: 'present' },
+    }));
+
+    expect(() =>
+      preflightProductionRequest(
+        {
+          config: config(),
+          transport: {
+            kind: 'cli',
+            input: {
+              query: 'inline cannot be async',
+              providers: ['exa'],
+              mode: 'async',
+            },
+          },
+        },
+        { createCredentials },
+      ),
+    ).toThrow(/async_requires_durable_profile/);
+
+    expect(createCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers default hard-budget admission until unavailable profiles are removed', () => {
+    const createCredentials = vi.fn(() => ({
+      env: { BRAVE_API_KEY: 'present' },
+    }));
+
+    const result = preflightProductionRequest(
+      {
+        config: config({
+          defaults: {
+            ...config().defaults,
+            maxEstimatedCostUsd: 1,
+          },
+          providers: {
+            exa: { enabled: true },
+            'brave-search': { enabled: true },
+          },
+        }),
+        transport: {
+          kind: 'cli',
+          input: { query: 'budgeted default' },
+        },
+      },
+      { createCredentials },
+    );
+
+    expect(createCredentials).toHaveBeenCalledTimes(1);
+    expect(result.admittedAdapterIds).toEqual(['brave-search']);
+  });
+
+  it('defers default deadline derivation until unavailable profiles are removed', () => {
+    const createCredentials = vi.fn(() => ({
+      env: { OPENAI_API_KEY: 'present' },
+    }));
+
+    const result = preflightProductionRequest(
+      {
+        config: config({
+          defaults: {
+            ...config().defaults,
+            mode: 'async',
+            maxParallel: 1,
+            asyncTimeout: 259_200,
+          },
+          providers: {
+            'openai-research': { enabled: true },
+            'gemini-deep': { enabled: true },
+            'perplexity-sonar-deep': { enabled: true },
+          },
+        }),
+        transport: {
+          kind: 'cli',
+          input: { query: 'deadline default', mode: 'async' },
+        },
+      },
+      { createCredentials },
+    );
+
+    expect(createCredentials).toHaveBeenCalledTimes(1);
+    expect(result.admittedAdapterIds).toEqual(['openai-research']);
+  });
+
+  it('requires admitted fallback adapters to register before execution', () => {
+    const result = preflightProductionRequest(
+      request(
+        config({
+          providers: {
+            exa: { enabled: true, fallback: 'brave-search' },
+            'brave-search': { enabled: true },
+          },
+        }),
+      ),
+      {
+        createCredentials: () => ({
+          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+        }),
+      },
+    );
+
+    expect(result.admittedAdapterIds).toEqual(['exa', 'brave-search']);
+    expect(() =>
+      assertAdmittedAdaptersRegistered(result.prepared, ['exa']),
+    ).toThrow(/brave-search/);
+  });
+
+  it('projects only admitted compatible fallbacks to legacy dispatch', () => {
+    const compatible = config({
+      providers: {
+        exa: { enabled: true, fallback: 'brave-search' },
+        'brave-search': { enabled: true },
+      },
+    });
+    const compatiblePreflight = preflightProductionRequest(
+      request(compatible),
+      {
+        createCredentials: () => ({
+          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+        }),
+      },
+    );
+    expect(
+      projectLegacyExecutionConfig(compatible, compatiblePreflight.prepared)
+        .providers.exa?.fallback,
+    ).toBe('brave-search');
+
+    const incompatible = config({
+      providers: {
+        exa: { enabled: true, fallback: 'brave-answers' },
+        'brave-answers': { enabled: false },
+      },
+    });
+    const incompatiblePreflight = preflightProductionRequest(
+      request(incompatible),
+      {
+        createCredentials: () => ({
+          env: { EXA_API_KEY: 'present', BRAVE_API_KEY: 'present' },
+        }),
+      },
+    );
+    expect(
+      projectLegacyExecutionConfig(incompatible, incompatiblePreflight.prepared)
+        .providers.exa?.fallback,
+    ).toBeUndefined();
+  });
+
+  it('keeps emitted notices bounded and free of request content', () => {
+    const warnings: string[] = [];
+    emitRequestPreflightNotices(
+      [
+        {
+          code: 'legacy_mixed_mode_migrated',
+          phase: 'migration',
+          path: '/mode',
+          message: 'private query text',
+        },
+      ],
+      (message) => warnings.push(message),
+    );
+
+    expect(warnings).toEqual([
+      '[librarium] preflight: notices=1 notices_codes=legacy_mixed_mode_migrated',
+    ]);
+    expect(warnings.join()).not.toContain('private query text');
+  });
+
+  it('deduplicates diagnostic codes while retaining the occurrence count', () => {
+    expect(
+      formatRequestDiagnosticCodes('issues', [
+        { code: 'duplicate_code' },
+        { code: 'duplicate_code' },
+        { code: 'other_code' },
+      ]),
+    ).toBe('issues=3 issues_codes=duplicate_code,other_code');
+  });
+});

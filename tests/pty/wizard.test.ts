@@ -55,8 +55,11 @@ describeMaybe(
       }
       session.write(KEY.ENTER);
 
-      // Execution mode: accept the default (mixed).
+      // Execution mode: select sync. The canonical gate makes legacy mixed
+      // async-only, while this inline mock provider has no durable handle.
       await session.waitForText('Execution mode');
+      session.write(KEY.DOWN);
+      await delay(40);
       session.write(KEY.ENTER);
 
       // Refine toggle (shown because a mock LLM key is set): decline (default No).

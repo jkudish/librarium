@@ -106,7 +106,7 @@ function dependencies() {
   };
 }
 
-describe('shadow transport golden equality', () => {
+describe('transport ingress golden equality', () => {
   it('compiles semantically equivalent inputs from all five transports to byte-identical prepared executions', () => {
     const catalog = catalogFor([planningProfile(groundedProfile('alpha'))]);
     const query = '  transport parity query  ';
@@ -370,7 +370,7 @@ describe('transport budgets and legacy mode', () => {
     });
   });
 
-  it('passes legacy mixed mode through to the migration boundary unchanged (v1 surface preserved in shadow)', () => {
+  it('passes legacy mixed mode through to the migration boundary unchanged', () => {
     const catalog = catalogFor([
       planningProfile(groundedProfile('alpha', 'durable')),
     ]);
@@ -395,7 +395,7 @@ describe('transport budgets and legacy mode', () => {
     );
   });
 
-  it('preserves approved selector precedence through the shadow helper', () => {
+  it('preserves approved selector precedence through the ingress compiler', () => {
     const catalog = catalogFor([planningProfile(groundedProfile('alpha'))]);
     const compiled = compileNormalizedTransportRequest(
       normalizeCliRequest(

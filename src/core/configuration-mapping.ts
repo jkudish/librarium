@@ -59,6 +59,12 @@ export interface ConfigurationMappingOptions {
   /** Required to prevent injected v1 DEFAULT_GROUPS entering the catalog. */
   readonly authoredGroups: AuthoredGroupProvenance;
   readonly credentials?: CredentialContext;
+  /**
+   * See ProviderCatalogOptions.assumeCredentialAvailability. This is only for
+   * side-effect-free transport admission; runtime credential checks remain
+   * mandatory before the legacy dispatcher can run.
+   */
+  readonly assumeCredentialAvailability?: boolean;
   readonly catalog?: readonly ProviderCatalogEntry[];
 }
 
@@ -498,7 +504,7 @@ function validateCustomCatalogProfiles(
         phase: 'migration',
         path: `${basePath}/profile/resumability`,
         message:
-          'Custom-provider shadow planning supports inline or durable background profiles; process-local resumability remains on the v1 runtime path.',
+          'Custom-provider canonical planning supports inline or durable background profiles; process-local resumability remains on the v1 runtime path.',
       });
       continue;
     }
@@ -1133,7 +1139,7 @@ function canonicalDefaults(
       request_deadline_ms: deadlineMigration.explicit_request_deadline_ms,
       inline_attempt_deadline_ms: deadlineMigration.inline_attempt_deadline_ms,
       // Native explicit defaults retain the raw v1 timeout; the migrated
-      // shadow path expands it with selected-provider transport overhead.
+      // production request derivation expands it with selected-provider transport overhead.
       background_attempt_deadline_ms:
         deadlineMigration.raw_background_attempt_deadline_ms,
       poll_interval_ms: deadlineMigration.poll_interval_ms,
@@ -1222,6 +1228,9 @@ export function mapConfiguration(
     ...(options.catalog && { catalog: options.catalog }),
     providerConfigs,
     ...(options.credentials && { credentials: options.credentials }),
+    ...(options.assumeCredentialAvailability && {
+      assumeCredentialAvailability: true,
+    }),
     groups,
     // Defaults intentionally stay catalog-owned. config.providers never
     // derives a v2 default roster.

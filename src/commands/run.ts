@@ -24,14 +24,15 @@ import {
 } from '../core/budget.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { generateSlug, resolveOutputDir } from '../core/prompt-builder.js';
-import {
-  ProviderSelectionError,
-  resolveProviderSelection,
-  retiredProviderSelectionIssues,
-} from '../core/provider-selection.js';
+import { retiredProviderSelectionIssues } from '../core/provider-selection.js';
 import { executeResearchRun } from '../core/research-run.js';
-import { createNodeCredentialContext } from '../node-credentials.js';
-import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
+import {
+  assertAdmittedAdaptersRegistered,
+  emitRequestPreflightNotices,
+  legacyPrimaryAdapterIds,
+  preflightProductionRequest,
+  projectLegacyExecutionConfig,
+} from '../node-request-preflight.js';
 import type {
   Config,
   DeduplicatedSource,
@@ -131,6 +132,16 @@ export interface ExecuteRunHooks {
   ) => Promise<PostDispatchResult | undefined>;
 }
 
+export interface ExecuteRunDeps {
+  /** Test/embedding seam for provider initialization. */
+  initialize?: typeof initializeProviders;
+  /**
+   * Exact adapter ids registered by the injected initializer. Production reads
+   * the client-scoped Node registry after initialization.
+   */
+  registeredAdapterIds?: () => Iterable<string>;
+}
+
 /**
  * Strict parser for the shared --max-cost flag. Rejects anything that is not a
  * finite, positive USD amount so a typo never silently disables the budget
@@ -208,6 +219,7 @@ export async function executeRun(
   query: string,
   opts: RunOptions,
   hooks?: ExecuteRunHooks,
+  deps: ExecuteRunDeps = {},
 ): Promise<RunOutcome> {
   {
     // In --json mode stdout must stay pure JSON (the run manifest), so all
@@ -247,66 +259,59 @@ export async function executeRun(
       }
 
       const config = mergeConfigs(globalConfig, projectConfig, cliFlags);
-      emitProductionShadowDiagnostic(
-        {
-          config,
-          env: process.env,
-          transport: {
-            kind: 'cli',
-            input: {
-              query,
-              providers: opts.providers,
-              group: opts.group,
-              mode: opts.mode,
-              parallel: opts.parallel,
-              timeoutSeconds: opts.timeout,
-              maxCostUsd: opts.maxCost,
-              maxEstimatedCostUsd: opts.maxEstimatedCost,
-              fallback: opts.fallback,
-              refine: opts.refine,
-            },
+      const preflight = preflightProductionRequest({
+        config,
+        transport: {
+          kind: 'cli',
+          input: {
+            query,
+            providers: opts.providers,
+            group: opts.group,
+            mode: opts.mode,
+            parallel: opts.parallel,
+            timeoutSeconds: opts.timeout,
+            maxCostUsd: opts.maxCost,
+            maxEstimatedCostUsd: opts.maxEstimatedCost,
+            fallback: opts.fallback,
+            refine: opts.refine,
           },
         },
-        (message) => {
-          const wasSpinning = spinner.isSpinning;
-          if (wasSpinning) spinner.stop();
-          try {
-            process.stderr.write(`${message}\n`);
-          } finally {
-            if (wasSpinning) spinner.start();
-          }
-        },
-      );
-      const credentials = createNodeCredentialContext();
-      const initResult = await initializeProviders({
-        ...config,
-        credentials,
       });
+      emitRequestPreflightNotices(preflight.notices, (message) => {
+        const wasSpinning = spinner.isSpinning;
+        if (wasSpinning) spinner.stop();
+        try {
+          process.stderr.write(`${message}\n`);
+        } finally {
+          if (wasSpinning) spinner.start();
+        }
+      });
+      const credentials = preflight.credentials;
+      const initialize = deps.initialize ?? initializeProviders;
+      const initResult = await initialize(
+        {
+          ...config,
+          credentials,
+        },
+        { customProviderIds: preflight.admittedAdapterIds },
+      );
       for (const warning of initResult.warnings) {
         console.error(`[librarium] warning: ${warning}`);
       }
 
-      let providerIds: string[];
-
-      try {
-        providerIds = resolveProviderSelection(
-          config,
-          { providers: opts.providers, group: opts.group },
-          getAllProviders(),
-          {
-            includeConfiguredOnly: true,
-            requireUsable: true,
-            strictExplicitCredentials: true,
-            credentials,
-            onWarn: (warning) => console.error(warning),
-          },
-        );
-      } catch (e) {
-        if (!(e instanceof ProviderSelectionError)) throw e;
-        spinner.fail(e.message);
-        process.exitCode = 2;
-        return { exitCode: 2 };
-      }
+      // Slice A retains the legacy dispatcher, but it receives the exact
+      // canonical primary projection. This preserves one admission authority
+      // and excludes disabled/uncredentialed group members before init.
+      const providerIds = [...legacyPrimaryAdapterIds(preflight.prepared)];
+      assertAdmittedAdaptersRegistered(
+        preflight.prepared,
+        deps.registeredAdapterIds?.() ??
+          getAllProviders().map((provider) => provider.id),
+      );
+      const executionConfig = projectLegacyExecutionConfig(
+        config,
+        preflight.prepared,
+      );
 
       // Deep-research pre-flight confirm (TTY only). When a run would dispatch
       // several deep-research providers, warn that they take minutes and bill
@@ -387,7 +392,7 @@ export async function executeRun(
         getAllProviders().map((provider) => [provider.id, provider.tier]),
       );
       const fallbackIds = providerIds
-        .map((id) => config.providers[id]?.fallback)
+        .map((id) => executionConfig.providers[id]?.fallback)
         .filter((id): id is string => Boolean(id && tierById.has(id)));
       const tableIds = [...new Set([...providerIds, ...fallbackIds])];
       const widths = computeLineWidths(
@@ -448,7 +453,7 @@ export async function executeRun(
       const { reports, sources, totalCitations, totalDurationMs, manifest } =
         await executeResearchRun({
           query,
-          config,
+          config: executionConfig,
           providerIds,
           outputDir,
           slug,

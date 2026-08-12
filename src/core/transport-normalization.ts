@@ -17,14 +17,13 @@ import type {
 import { sortPreparationDiagnostics } from './research-request.js';
 
 /**
- * Shadow-only transport normalization for the v2 request pipeline
- * (Checkpoint A). Nothing in this module is wired into the production CLI,
- * MCP, or configuration surfaces, and it is not exported from any package
- * entrypoint: it exists so semantically equivalent raw inputs from every
- * transport provably compile to identical PreparedResearchExecution values.
+ * Shared transport normalization for the v2 request pipeline. Production CLI
+ * and MCP ingress use its unresolved variants through request compilation;
+ * other callers use the canonical variants. Semantically equivalent raw inputs
+ * from every transport compile to identical PreparedResearchExecution values.
  *
  * One common normalizer owns selector precedence; each source contributes only a thin
- * projection of the Checkpoint A semantic fields (query, mode including
+ * projection of the shared semantic fields (query, mode including
  * legacy mixed, exactly one selector, fallback intent, limits, exact budgets,
  * exclusions, refinement). Presentation, output, and filesystem fields are
  * deliberately out of scope.
@@ -247,13 +246,13 @@ function normalizeTransportRequest(
 }
 
 /**
- * Shadow orchestration helper: compiles a normalized transport request and
+ * Transport compilation helper: compiles a normalized transport request and
  * merges the transport notices with the preparation notices so migration
  * information never disappears between normalization and compilation. The
  * PreparedResearchExecution itself is untouched, which keeps byte-for-byte
  * plan equality independent of transport-specific notices.
  */
-export type ShadowTransportCompilation =
+export type TransportCompilation =
   | {
       readonly ok: true;
       readonly prepared: PreparedResearchExecution;
@@ -269,7 +268,7 @@ export function compileNormalizedTransportRequest(
   normalized: TransportNormalizationResult,
   catalog: FrozenPlanningCatalog,
   dependencies: PreparationDependencies,
-): ShadowTransportCompilation {
+): TransportCompilation {
   if (!normalized.ok) {
     return {
       ok: false,
@@ -565,7 +564,7 @@ function cliProjection(input: CliTransportInput): TransportProjection {
   };
 }
 
-/** @internal Shadow-only normalization with deliberately unresolved limits. */
+/** @internal Production ingress normalization with deliberately unresolved limits. */
 export function normalizeCliRequestUnresolved(
   input: CliTransportInput,
   defaults: UnresolvedV1TransportDefaults,
@@ -618,7 +617,7 @@ export function normalizeMcpRequest(
   return normalizeTransportRequest('mcp', mcpProjection(input), defaults);
 }
 
-/** @internal Shadow-only normalization with deliberately unresolved limits. */
+/** @internal Production ingress normalization with unresolved v1 limits. */
 export function normalizeMcpRequestUnresolved(
   input: McpTransportInput,
   defaults: UnresolvedV1TransportDefaults,
@@ -637,7 +636,7 @@ export function normalizeSilentMcpRequest(
   );
 }
 
-/** @internal Shadow-only normalization with deliberately unresolved limits. */
+/** @internal Production ingress normalization with unresolved v1 limits. */
 export function normalizeSilentMcpRequestUnresolved(
   input: McpTransportInput,
   defaults: UnresolvedV1TransportDefaults,
@@ -665,13 +664,13 @@ export interface ConfigurationTransportInput {
     readonly asyncPollInterval?: number;
     /** Explicit caller-provided canonical request deadline, in milliseconds. */
     readonly requestDeadlineMs?: number;
-    /** @deprecated shadow compatibility spelling; prefer timeout. */
+    /** @deprecated legacy compatibility spelling; prefer timeout. */
     readonly timeoutSeconds?: number;
-    /** @deprecated shadow compatibility spelling; prefer asyncTimeout. */
+    /** @deprecated legacy compatibility spelling; prefer asyncTimeout. */
     readonly backgroundTimeoutSeconds?: number;
-    /** @deprecated shadow compatibility spelling; prefer requestDeadlineMs. */
+    /** @deprecated legacy compatibility spelling; prefer requestDeadlineMs. */
     readonly requestTimeoutSeconds?: number;
-    /** @deprecated shadow compatibility spelling; prefer asyncPollInterval. */
+    /** @deprecated legacy compatibility spelling; prefer asyncPollInterval. */
     readonly pollIntervalSeconds?: number;
     readonly maxCostUsd?: number;
     readonly maxEstimatedCostUsd?: number;

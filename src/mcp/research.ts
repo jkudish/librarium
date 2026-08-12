@@ -16,9 +16,16 @@ import {
   type ExecuteResearchRunDependencies,
   executeResearchRun,
 } from '../core/research-run.js';
-import { createNodeCredentialContext } from '../node-credentials.js';
+import {
+  assertAdmittedAdaptersRegistered,
+  emitRequestPreflightNotices,
+  legacyPrimaryAdapterIds,
+  type ProductionRequestPreflightResult,
+  preflightProductionRequest,
+  projectLegacyExecutionConfig,
+  RequestPreflightError,
+} from '../node-request-preflight.js';
 import { type CreateRunDirDeps, createRunDir } from '../node-run-directory.js';
-import { emitProductionShadowDiagnostic } from '../node-shadow-diagnostics.js';
 import type { Config, Defaults } from '../types.js';
 
 /**
@@ -45,6 +52,8 @@ export interface SilentRunDeps {
   dispatch?: ExecuteResearchRunDependencies['dispatch'];
   /** Initialize providers (registry side effect). Injectable for tests. */
   initialize?: typeof initializeProviders;
+  /** Exact adapter ids registered by an injected initializer. */
+  registeredAdapterIds?: () => Iterable<string>;
   /** Credentials (env). Defaults to process.env. */
   credentials?: CredentialContext;
   /** Diagnostic sink. Defaults to stderr. Never stdout. */
@@ -109,42 +118,63 @@ export async function runResearchSilent(
     ? deps.loadMergedConfig()
     : defaultLoadMergedConfig(cliFlags);
 
-  emitProductionShadowDiagnostic(
-    {
-      config,
-      env: process.env,
-      transport: {
-        kind: 'silent_mcp',
-        input: {
-          query: args.query,
-          providers: args.providers,
-          group: args.group,
-          mode: args.mode,
-          refine: args.refine,
+  const preflightDeps = deps.credentials
+    ? { createCredentials: () => deps.credentials as CredentialContext }
+    : undefined;
+  let preflight: ProductionRequestPreflightResult;
+  try {
+    preflight = preflightProductionRequest(
+      {
+        config,
+        transport: {
+          kind: 'silent_mcp',
+          input: {
+            query: args.query,
+            providers: args.providers,
+            group: args.group,
+            mode: args.mode,
+            refine: args.refine,
+          },
         },
       },
-    },
-    onWarn,
-  );
-
-  const credentials = deps.credentials ?? createNodeCredentialContext();
+      preflightDeps,
+    );
+  } catch (error) {
+    if (error instanceof RequestPreflightError) {
+      throw new ProviderSelectionError(error.message);
+    }
+    throw error;
+  }
+  emitRequestPreflightNotices(preflight.notices, onWarn);
+  const credentials = preflight.credentials;
 
   const initialize = deps.initialize ?? initializeProviders;
-  const initResult = await initialize({ ...config, credentials });
+  const initResult = await initialize(
+    { ...config, credentials },
+    { customProviderIds: preflight.admittedAdapterIds },
+  );
   for (const warning of initResult.warnings) {
     onWarn(`[librarium] warning: ${warning}`);
   }
 
-  const providerIds = resolveProviderSelectionCore(
+  // Keep v1 execution only as a dispatcher during Slice A. Selection is the
+  // admitted plan, including its stable dedupe of multiple profiles per adapter.
+  const providerIds = [...legacyPrimaryAdapterIds(preflight.prepared)];
+  try {
+    assertAdmittedAdaptersRegistered(
+      preflight.prepared,
+      deps.registeredAdapterIds?.() ??
+        getAllProviders().map((provider) => provider.id),
+    );
+  } catch (error) {
+    if (error instanceof RequestPreflightError) {
+      throw new ProviderSelectionError(error.message);
+    }
+    throw error;
+  }
+  const executionConfig = projectLegacyExecutionConfig(
     config,
-    args,
-    getAllProviders(),
-    {
-      credentials,
-      requireUsable: true,
-      strictExplicitCredentials: true,
-      onWarn,
-    },
+    preflight.prepared,
   );
 
   // Optional one-shot LLM refine. Never allowed to break the run.
@@ -175,7 +205,7 @@ export async function runResearchSilent(
   return executeResearchRun(
     {
       query: args.query,
-      config,
+      config: executionConfig,
       providerIds,
       outputDir,
       slug,

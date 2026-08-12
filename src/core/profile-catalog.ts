@@ -102,6 +102,13 @@ export interface ProviderCatalogOptions {
   /** v1 provider configuration, keyed by adapter id. */
   readonly providerConfigs?: Readonly<Record<string, CatalogProviderConfig>>;
   readonly credentials?: CredentialContext;
+  /**
+   * Admission can validate request and configuration semantics before a Node
+   * transport is allowed to read credentials. In that narrow phase required
+   * credentials are intentionally opaque; the legacy runtime verifies them
+   * after the request has been admitted and before dispatch.
+   */
+  readonly assumeCredentialAvailability?: boolean;
   /** User-defined groups; reserved names are migrated to `custom:<name>`. */
   readonly groups?: Readonly<Record<string, readonly string[]>>;
   /** Ordered configured-default identities for `selector: default`. */
@@ -212,7 +219,8 @@ function resolveDeclaration(
     providerConfig?.apiKey ??
     (entry.credential.env_var ? `$${entry.credential.env_var}` : undefined);
   const credentialValid = entry.credential.required
-    ? hasCredential(credentialReference, options.credentials ?? {})
+    ? options.assumeCredentialAvailability ||
+      hasCredential(credentialReference, options.credentials ?? {})
     : true;
 
   let profile = declared;
@@ -284,7 +292,8 @@ function resolveCustomProfile(
     providerConfig?.apiKey ??
     (custom.credential_env_var ? `$${custom.credential_env_var}` : undefined);
   const credentialValid = custom.credential_env_var
-    ? hasCredential(credentialReference, options.credentials ?? {})
+    ? options.assumeCredentialAvailability ||
+      hasCredential(credentialReference, options.credentials ?? {})
     : true;
   const reasons: string[] = [];
   if (!enabled) reasons.push('profile_disabled');
