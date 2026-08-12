@@ -182,7 +182,9 @@ export async function initializeProviders(
           // Invalid raw options have already been rejected by the descriptor
           // schema. Do not pass them to a factory where a coercion could turn
           // a fail-closed configuration error into a live request.
-          options: options.success ? options.data : {},
+          options: options.success
+            ? (options.data as Record<string, unknown>)
+            : {},
         }
       : undefined;
     let provider: Provider;
