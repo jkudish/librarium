@@ -4,6 +4,11 @@ import {
   grokWebOptionsSchema,
   grokXOnlyOptionsSchema,
 } from '../adapters/grok-options.js';
+import {
+  ParallelChatOptionsSchema,
+  ParallelResearchOptionsSchema,
+  ParallelSearchOptionsSchema,
+} from '../adapters/parallel-options.js';
 import { PerplexitySearchOptionsSchema } from '../adapters/perplexity-search-options.js';
 import type { MeteringKind, ProviderTier } from '../types.js';
 import { searchApiOptionsSchema } from './searchapi.js';
@@ -142,6 +147,11 @@ const firecrawlSearchOptions = commonOptions
       message: 'includeDomains and excludeDomains are mutually exclusive',
     },
   );
+const parallelSearchOptions = commonOptions.merge(ParallelSearchOptionsSchema);
+const parallelChatOptions = commonOptions.merge(ParallelChatOptionsSchema);
+const parallelResearchOptions = commonOptions.merge(
+  ParallelResearchOptionsSchema,
+);
 
 const inline = (webSearch?: 'always' | 'optional'): ProviderCapabilities => ({
   execution: 'inline',
@@ -184,6 +194,24 @@ function define(input: DefinitionInput): ProviderDescriptorDefinition {
 }
 
 export const BUILTIN_PROVIDER_DEFINITIONS = [
+  define({
+    id: 'parallel-research', registrationOrder: 5.5, tier: 'deep-research',
+    envVar: 'PARALLEL_API_KEY', defaultModel: 'pro', optionsSchema: parallelResearchOptions,
+    display: { family: 'Parallel', name: 'Parallel Research', description: 'Durable Parallel Task API research with research basis.', bestFor: 'First-party long-running Parallel research tasks.', setupUrl: 'https://docs.parallel.ai/', order: 145 },
+    metering: { kind: 'api_unit_priced', unit: 'processor request' }, capabilities: background(),
+  }),
+  define({
+    id: 'parallel-chat', registrationOrder: 20.5, tier: 'ai-grounded',
+    envVar: 'PARALLEL_API_KEY', defaultModel: 'base', optionsSchema: parallelChatOptions,
+    display: { family: 'Parallel', name: 'Parallel Chat', description: 'Parallel Chat API answers with model-dependent research basis.', bestFor: 'First-party Parallel chat and structured output.', setupUrl: 'https://docs.parallel.ai/chat-api/chat-quickstart', order: 285 },
+    metering: { kind: 'api_unit_priced', unit: 'request' }, capabilities: inline('always'),
+  }),
+  define({
+    id: 'parallel-search', registrationOrder: 24.5, tier: 'raw-search',
+    envVar: 'PARALLEL_API_KEY', optionsSchema: parallelSearchOptions,
+    display: { family: 'Parallel', name: 'Parallel Search', description: 'Ranked Parallel web results and LLM-optimized excerpts.', bestFor: 'First-party ranked web evidence without answer synthesis.', setupUrl: 'https://docs.parallel.ai/search/search-quickstart', order: 295 },
+    metering: { kind: 'api_unit_priced', unit: 'request' }, capabilities: inline('always'),
+  }),
   define({
     id: 'brave-search',
     registrationOrder: 15,

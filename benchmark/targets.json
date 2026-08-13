@@ -2,6 +2,27 @@
   "schemaVersion": 1,
   "providers": [
     {
+      "id": "parallel-research",
+      "tier": "deep-research",
+      "envVar": "PARALLEL_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "parallel-chat",
+      "tier": "ai-grounded",
+      "envVar": "PARALLEL_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "parallel-search",
+      "tier": "raw-search",
+      "envVar": "PARALLEL_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
       "id": "perplexity-sonar-deep",
       "tier": "deep-research",
       "envVar": "PERPLEXITY_API_KEY",
@@ -249,6 +270,7 @@
   ],
   "builtInGroups": {
     "deep": [
+      "parallel-research",
       "perplexity-sonar-deep",
       "perplexity-deep-research",
       "perplexity-advanced-deep",
@@ -263,6 +285,7 @@
       "kagi-fastgpt"
     ],
     "raw": [
+      "parallel-search",
       "perplexity-search",
       "brave-search",
       "jina-search",
@@ -296,6 +319,7 @@
       "grok"
     ],
     "comprehensive": [
+      "parallel-research",
       "perplexity-sonar-deep",
       "perplexity-deep-research",
       "perplexity-advanced-deep",
@@ -317,10 +341,12 @@
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
-      "perplexity-pro-search"
+      "perplexity-pro-search",
+      "parallel-chat"
     ],
     "llm": ["claude", "openai-chat", "gemini-chat", "openrouter-chat"],
     "all": [
+      "parallel-research",
       "perplexity-sonar-deep",
       "perplexity-deep-research",
       "perplexity-advanced-deep",
@@ -349,7 +375,9 @@
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
-      "perplexity-pro-search"
+      "perplexity-pro-search",
+      "parallel-chat",
+      "parallel-search"
     ]
   },
   "candidateGroups": {

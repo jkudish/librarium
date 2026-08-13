@@ -139,7 +139,7 @@ export interface ProviderResult {
   tokenUsage?: { input?: number; output?: number };
   usage?: ProviderUsage;
   metering?: ProviderMetering;
-  /** Safe provider-specific observations and configured policy state. */
+  /** Safe, allowlisted provider facts projected into canonical provider_meta. */
   providerMeta?: Record<string, unknown>;
   error?: string;
   /** Fail closed when this result must not trigger a configured fallback. */

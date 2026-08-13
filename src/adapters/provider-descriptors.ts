@@ -30,6 +30,11 @@ import type {
 } from './openrouter.js';
 import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
+import {
+  ParallelChatProvider,
+  ParallelResearchProvider,
+  ParallelSearchProvider,
+} from './parallel.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
 import { PerplexityProSearchProvider } from './perplexity-pro-search.js';
@@ -163,6 +168,22 @@ function perplexitySearchOptions(
 }
 
 const factories: Record<string, ProviderFactory> = {
+  'parallel-research': ({ providerConfig }) =>
+    new ParallelResearchProvider({
+      model:
+        configuredModel({ providerConfig }) ??
+        (typeof option(providerConfig, 'processor') === 'string'
+          ? (option(providerConfig, 'processor') as string)
+          : undefined),
+      configuredOptions: providerConfig?.options,
+    }),
+  'parallel-chat': ({ providerConfig }) =>
+    new ParallelChatProvider({
+      model: configuredModel({ providerConfig }),
+      configuredOptions: providerConfig?.options,
+    }),
+  'parallel-search': ({ providerConfig }) =>
+    new ParallelSearchProvider(providerConfig?.options),
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
   'perplexity-deep-research': (context) =>
     new PerplexityDeepResearchProvider({ model: configuredModel(context) }),

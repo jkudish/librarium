@@ -29,7 +29,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(33);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(36);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -82,6 +82,7 @@ describe('built-in provider descriptors', () => {
       'perplexity-advanced-deep',
       'openai-research',
       'gemini-deep',
+      'parallel-research',
       'perplexity-sonar-pro',
       'gemini-grounded',
       'grok',
@@ -97,10 +98,12 @@ describe('built-in provider descriptors', () => {
       'searchapi',
       'serpapi',
       'tavily',
+      'parallel-chat',
       'claude',
       'openai-chat',
       'gemini-chat',
       'openrouter-chat',
+      'parallel-search',
       'searchapi-chatgpt',
       'searchapi-gemini',
       'searchapi-perplexity',

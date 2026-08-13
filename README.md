@@ -143,7 +143,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 33 built-in provider adapters organized into four tiers:
+Librarium ships with 36 built-in provider adapters organized into four tiers:
 
 The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
 
@@ -163,6 +163,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Perplexity Advanced Deep Research | `perplexity-advanced-deep` | deep-research | `PERPLEXITY_API_KEY` |
 | OpenAI Research (GPT-5.6 Sol) | `openai-research` | deep-research | `OPENAI_API_KEY` |
 | Gemini Deep Research | `gemini-deep` | deep-research | `GEMINI_API_KEY` |
+| Parallel Research | `parallel-research` | deep-research | `PARALLEL_API_KEY` |
 | Perplexity Sonar Pro | `perplexity-sonar-pro` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Perplexity Pro Search | `perplexity-pro-search` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Gemini Grounded Search | `gemini-grounded` | ai-grounded | `GEMINI_API_KEY` |
@@ -174,6 +175,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
 | You.com Research | `you-research` | ai-grounded | `YOU_COM_API_KEY` |
 | Kagi FastGPT | `kagi-fastgpt` | ai-grounded | `KAGI_API_KEY` |
+| Parallel Chat | `parallel-chat` | ai-grounded | `PARALLEL_API_KEY` |
 | SearchAPI ChatGPT | `searchapi-chatgpt` | ai-grounded | `SEARCHAPI_API_KEY` |
 | SearchAPI Gemini | `searchapi-gemini` | ai-grounded | `SEARCHAPI_API_KEY` |
 | SearchAPI Perplexity | `searchapi-perplexity` | ai-grounded | `SEARCHAPI_API_KEY` |
@@ -186,6 +188,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | SearchAPI | `searchapi` | raw-search | `SEARCHAPI_API_KEY` |
 | SerpAPI | `serpapi` | raw-search | `SERPAPI_API_KEY` |
 | Tavily Search | `tavily` | raw-search | `TAVILY_API_KEY` |
+| Parallel Search | `parallel-search` | raw-search | `PARALLEL_API_KEY` |
 | Firecrawl Search | `firecrawl-search` | raw-search | `FIRECRAWL_API_KEY` |
 | Claude | `claude` | llm | `ANTHROPIC_API_KEY` |
 | OpenAI Chat | `openai-chat` | llm | `OPENAI_API_KEY` |
@@ -816,9 +819,9 @@ Groups are named collections of provider IDs. Librarium ships with eight default
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `visibility` | searchapi-chatgpt, searchapi-gemini, searchapi-perplexity, searchapi-google-ai-mode, searchapi-bing-copilot, searchapi-google-ai-overview, perplexity-sonar-pro, gemini-grounded, grok | Explicit nine-surface answer visibility comparison |
-| `comprehensive` | All deep-research + all ai-grounded (including Grok web, X, and combined) | Deep + AI-grounded combined |
+| `comprehensive` | All deep-research + all ai-grounded (including Grok web, X, and combined, and Parallel) | Deep + AI-grounded combined |
 | `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
-| `all` | All 29 grounded providers (including Grok web, X, and combined) | Maximum grounded coverage (excludes the `llm` tier) |
+| `all` | All 32 grounded providers (including Grok web, X, and combined, and Parallel) | Maximum grounded coverage (excludes the `llm` tier) |
 
 `visibility`, `comprehensive`, and `all` are explicit cost boundaries. Choosing
 one may run credentialed members whose setup descriptor is opt-in and whose

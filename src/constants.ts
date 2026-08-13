@@ -313,6 +313,7 @@ export function resolveProviderTokens(
 // Default groups
 export const DEFAULT_GROUPS: Record<string, string[]> = {
   deep: [
+    'parallel-research',
     'perplexity-sonar-deep',
     'perplexity-deep-research',
     'perplexity-advanced-deep',
@@ -327,6 +328,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'kagi-fastgpt',
   ],
   raw: [
+    'parallel-search',
     'perplexity-search',
     'brave-search',
     'jina-search',
@@ -360,6 +362,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'grok',
   ],
   comprehensive: [
+    'parallel-research',
     'perplexity-sonar-deep',
     'perplexity-deep-research',
     'perplexity-advanced-deep',
@@ -382,6 +385,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
     'perplexity-pro-search',
+    'parallel-chat',
   ],
   // Generic LLMs (tier `llm`). Opt-in only: excluded from every default
   // grounded group above and from `all`. They can use provider web search and
@@ -391,6 +395,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   // provider). The `llm` tier is intentionally excluded -- it is opt-in via
   // `-p`, a custom group, or `--group llm`.
   all: [
+    'parallel-research',
     'perplexity-sonar-deep',
     'perplexity-deep-research',
     'perplexity-advanced-deep',
@@ -420,6 +425,8 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
     'perplexity-pro-search',
+    'parallel-chat',
+    'parallel-search',
   ],
 };
 

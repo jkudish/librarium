@@ -590,6 +590,9 @@ describe('v1 total request-deadline migration', () => {
 
   it('matches v2 invocation to the v1 tier deadline class for every built-in adapter', () => {
     const expectedAdapterIds = [
+      'parallel-research',
+      'parallel-chat',
+      'parallel-search',
       'perplexity-sonar-deep',
       'perplexity-deep-research',
       'perplexity-advanced-deep',
@@ -627,7 +630,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(33);
+    expect(new Set(expectedAdapterIds).size).toBe(36);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

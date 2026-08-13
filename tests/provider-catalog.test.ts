@@ -103,6 +103,7 @@ const IMPLEMENTED_MATRIX = [
   ['perplexity-advanced-deep', 'research'],
   ['openai-research', 'research'],
   ['gemini-deep', 'research'],
+  ['parallel', 'research'],
   ['perplexity-sonar-pro', 'grounded'],
   ['perplexity-pro-search', 'grounded'],
   ['gemini-grounded', 'grounded'],
@@ -121,6 +122,7 @@ const IMPLEMENTED_MATRIX = [
   ['searchapi', 'search'],
   ['serpapi', 'search'],
   ['tavily', 'search'],
+  ['parallel', 'search'],
   ['searchapi-chatgpt', 'surface'],
   ['searchapi-gemini', 'surface'],
   ['searchapi-perplexity', 'surface'],
@@ -131,12 +133,10 @@ const IMPLEMENTED_MATRIX = [
   ['openai-chat', 'chat'],
   ['gemini-chat', 'chat'],
   ['openrouter', 'chat'],
+  ['parallel', 'chat'],
 ] as const;
 
 const PLANNED_MATRIX = [
-  ['parallel', 'search'],
-  ['parallel', 'chat'],
-  ['parallel', 'research'],
   ['valyu', 'search'],
   ['valyu', 'research'],
 ] as const;
@@ -2181,15 +2181,14 @@ describe('provider catalog -- configured reference diagnostics', () => {
 
   it('reports planned, unbound references separately from unknown ones', () => {
     const built = catalog({
-      groups: { future: ['parallel/research', 'valyu'] },
-      defaults: [{ provider_id: 'parallel', profile_id: 'research' }],
+      groups: { future: ['valyu'] },
+      defaults: [{ provider_id: 'valyu', profile_id: 'research' }],
       reserve: [{ provider_id: 'valyu', profile_id: 'research' }],
     });
 
     expect(built.issues.map((issue) => [issue.code, issue.path])).toEqual([
       ['configured_default_unbound_profile', '/defaults/0'],
       ['custom_group_member_unbound_profile', '/groups/future/0'],
-      ['custom_group_member_unbound_profile', '/groups/future/1'],
       ['configured_reserve_unbound_profile', '/reserve/0'],
     ]);
     expect(keysOf(built.resolveDefault())).toEqual([]);

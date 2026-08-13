@@ -77,6 +77,8 @@ const MODEL_OVERRIDE_ALLOWLISTS: Readonly<Record<string, ReadonlySet<string>>> =
   {
     'gemini-grounded': new Set(['gemini-2.5-flash', 'gemini-2.5-pro']),
     'openrouter-online': new Set(['openai/gpt-4o-mini', 'openai/gpt-4o']),
+    'parallel-chat': new Set(['speed', 'lite', 'base', 'core']),
+    'parallel-research': new Set(['pro', 'pro-fast', 'ultra', 'ultra-fast']),
   };
 
 function normalizedConfiguredModel(
@@ -356,11 +358,45 @@ interface BindingSpec extends AdapterProfileBinding {
   readonly project?: BindingInput['project'];
 }
 
+function parallelResearchTargetProjection(
+  profile: ExecutionProfile,
+  options: Record<string, unknown>,
+): ExecutionProfile {
+  const processor = options.processor;
+  if (typeof processor !== 'string') return profile;
+  return {
+    ...profile,
+    identity: {
+      ...profile.identity,
+      target: {
+        ...profile.identity.target,
+        primary: {
+          model_selection: 'configurable',
+          kind: 'preset',
+          target_id: processor,
+        },
+      },
+    },
+  };
+}
+
 /**
  * Every implemented declaration appears here exactly once. Missing, duplicate,
  * and orphan bindings all fail deterministically at catalog construction.
  */
 export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
+  {
+    provider_id: 'parallel',
+    profile_id: 'research',
+    adapter_id: 'parallel-research',
+    project: parallelResearchTargetProjection,
+  },
+  { provider_id: 'parallel', profile_id: 'chat', adapter_id: 'parallel-chat' },
+  {
+    provider_id: 'parallel',
+    profile_id: 'search',
+    adapter_id: 'parallel-search',
+  },
   {
     provider_id: 'perplexity-sonar-deep',
     profile_id: 'research',
