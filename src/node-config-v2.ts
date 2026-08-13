@@ -7,7 +7,10 @@ import {
   migrateConfig,
   validateConfigV2,
 } from './core/config-v2.js';
-import { safeWriteFile } from './core/fs-utils.js';
+import {
+  assertWindowsOwnerOnlyAclSupport,
+  safeWriteFile,
+} from './core/fs-utils.js';
 import type { PreparationIssue } from './core/research-request.js';
 
 export interface LoadConfigV2Options {
@@ -105,10 +108,11 @@ export function loadConfigV2(
 /**
  * Explicitly persist a validated native v2 configuration.
  *
- * The write is atomic and owner-only on Unix. Windows fails before touching
- * disk until Librarium can establish and verify an equivalent ACL. Loading and
- * ordinary execution never call this function, so migration cannot silently
- * rewrite user files.
+ * The write is atomic and owner-only. Unix uses a verified 0600 mode. Windows
+ * establishes a protected DACL containing only the current user, then retains
+ * the creation handle through writing, verification, and atomic replacement.
+ * Missing Windows ACL support fails closed. Loading and ordinary execution
+ * never call this function, so migration cannot silently rewrite user files.
  */
 export function saveConfigV2(
   config: LibrariumConfigV2,
@@ -121,9 +125,11 @@ export function saveConfigV2(
       validated.issues,
     );
   }
-  if (process.platform === 'win32') {
+  try {
+    assertWindowsOwnerOnlyAclSupport();
+  } catch {
     throw new ConfigV2FileError(
-      'Owner-only config saves are unsupported on Windows because no equivalent ACL is established.',
+      'Owner-only config saves require verified Windows ACL support.',
     );
   }
   const path = resolve(options.path);
