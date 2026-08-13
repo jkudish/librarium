@@ -256,7 +256,7 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
       return {
         provider: this.id,
         tier: this.tier,
-        content: text ?? JSON.stringify(structured, null, 2),
+        content: text || JSON.stringify(structured, null, 2),
         citations: citations(run.output?.grounding, this.id),
         durationMs: Math.round(performance.now() - start),
         usage: usage(run.usage, run.costDollars),

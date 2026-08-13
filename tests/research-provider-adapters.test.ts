@@ -207,6 +207,35 @@ describe('durable research provider adapters', () => {
     });
   });
 
+  it('uses non-empty Exa structured output when text is blank', async () => {
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: async () =>
+        response(
+          exaRun({
+            status: 'completed',
+            completedAt: '2026-08-12T12:01:00.000Z',
+            output: {
+              text: '   ',
+              structured: { conclusion: 'report' },
+              grounding: [],
+            },
+          }),
+        ) as never,
+    });
+    await expect(
+      provider.retrieve({
+        provider: provider.id,
+        taskId: 'agent_run_x',
+        query: 'q',
+        submittedAt: 0,
+        status: 'completed',
+      }),
+    ).resolves.toMatchObject({
+      content: '{\n  "conclusion": "report"\n}',
+    });
+  });
+
   it('uses valid Exa text when the structured result is empty', async () => {
     const provider = new ExaResearchProvider({
       credentials: { env: { EXA_API_KEY: 'test-key' } },
