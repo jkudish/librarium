@@ -69,7 +69,7 @@ export interface ProviderDescriptorDefinition {
 }
 
 const positiveNumber = z.number().positive();
-const commonOptions = z
+export const commonOptions = z
   .object({
     perRequestUsd: positiveNumber.optional(),
     creditUsd: positiveNumber.optional(),
@@ -77,10 +77,10 @@ const commonOptions = z
     perUnitUsd: positiveNumber.optional(),
   })
   .passthrough();
-const webSearchOptions = commonOptions.extend({
+export const webSearchOptions = commonOptions.extend({
   webSearch: z.boolean().optional(),
 });
-const openRouterOptions = webSearchOptions
+export const openRouterOptions = webSearchOptions
   .extend({
     providerOrder: z.array(z.string().trim().min(1)).nonempty().optional(),
     allowFallbacks: z.boolean().optional(),
@@ -115,22 +115,22 @@ const openRouterOptions = webSearchOptions
     }
   })
   .strict();
-const openRouterGroundedOptions = openRouterOptions.safeExtend({
+export const openRouterGroundedOptions = openRouterOptions.safeExtend({
   webSearch: z.literal(true).optional(),
 });
-const openAiResearchOptions = commonOptions.extend({
+export const openAiResearchOptions = commonOptions.extend({
   maxToolCalls: z.number().int().positive().optional(),
   reasoningEffort: z
     .enum(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
     .optional(),
   returnTokenBudget: z.enum(['default', 'unlimited']).optional(),
 });
-const claudeOptions = webSearchOptions.extend({
+export const claudeOptions = webSearchOptions.extend({
   maxTokens: z.number().int().positive().optional(),
   thinking: z.enum(['adaptive', 'disabled']).optional(),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
-const firecrawlSearchOptions = commonOptions
+export const firecrawlSearchOptions = commonOptions
   .extend({
     sources: z
       .array(z.enum(['web', 'news']))
@@ -154,9 +154,13 @@ const firecrawlSearchOptions = commonOptions
       message: 'includeDomains and excludeDomains are mutually exclusive',
     },
   );
-const parallelSearchOptions = commonOptions.merge(ParallelSearchOptionsSchema);
-const parallelChatOptions = commonOptions.merge(ParallelChatOptionsSchema);
-const parallelResearchOptions = commonOptions.merge(
+export const parallelSearchOptions = commonOptions.merge(
+  ParallelSearchOptionsSchema,
+);
+export const parallelChatOptions = commonOptions.merge(
+  ParallelChatOptionsSchema,
+);
+export const parallelResearchOptions = commonOptions.merge(
   ParallelResearchOptionsSchema,
 );
 
@@ -170,7 +174,7 @@ const domain = z
   );
 const nonEmptyDomains = z.array(domain).min(1).max(500);
 const jsonObject = z.record(z.string(), z.unknown());
-const tavilyResearchOptions = commonOptions
+export const tavilyResearchOptions = commonOptions
   .extend({
     // `model` is reserved for the v1 target-selection field. This provider's
     // documented Research API model stays inside its strict option bag.
@@ -184,7 +188,7 @@ const tavilyResearchOptions = commonOptions
     citationFormat: z.enum(['numbered', 'mla', 'apa', 'chicago']).optional(),
   })
   .strict();
-const exaResearchOptions = commonOptions
+export const exaResearchOptions = commonOptions
   .extend({
     effort: z
       .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'auto', 'max'])
@@ -210,7 +214,7 @@ const exaResearchOptions = commonOptions
       });
     }
   });
-const youResearchBackgroundOptions = commonOptions
+export const youResearchBackgroundOptions = commonOptions
   .extend({
     researchEffort: z
       .enum(['lite', 'standard', 'deep', 'exhaustive', 'frontier'])
