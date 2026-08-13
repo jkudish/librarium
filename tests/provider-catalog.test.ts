@@ -287,8 +287,7 @@ describe('provider catalog -- declarations', () => {
       expect(declaration.features?.json_schema_output).toBe(
         ['exa/research', 'tavily/research', 'you-research/research'].includes(
           key,
-        )
-          || key === 'parallel/chat'
+        ) || key === 'parallel/chat'
           ? true
           : undefined,
       );
