@@ -30,6 +30,11 @@ import type {
 } from './openrouter.js';
 import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
+import {
+  ParallelChatProvider,
+  ParallelResearchProvider,
+  ParallelSearchProvider,
+} from './parallel.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
 import { PerplexityProSearchProvider } from './perplexity-pro-search.js';
@@ -162,7 +167,41 @@ function perplexitySearchOptions(
   return options;
 }
 
+const METERING_OPTION_KEYS = new Set([
+  'perRequestUsd',
+  'creditUsd',
+  'creditsPerRequest',
+  'perUnitUsd',
+]);
+
+/** Descriptor metering values are local metadata, not Parallel API options. */
+function parallelOptions(
+  providerConfig: ProviderConfig | undefined,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(providerConfig?.options ?? {}).filter(
+      ([key]) => !METERING_OPTION_KEYS.has(key),
+    ),
+  );
+}
+
 const factories: Record<string, ProviderFactory> = {
+  'parallel-research': ({ providerConfig }) =>
+    new ParallelResearchProvider({
+      model:
+        configuredModel({ providerConfig }) ??
+        (typeof option(providerConfig, 'processor') === 'string'
+          ? (option(providerConfig, 'processor') as string)
+          : undefined),
+      configuredOptions: parallelOptions(providerConfig),
+    }),
+  'parallel-chat': ({ providerConfig }) =>
+    new ParallelChatProvider({
+      model: configuredModel({ providerConfig }),
+      configuredOptions: parallelOptions(providerConfig),
+    }),
+  'parallel-search': ({ providerConfig }) =>
+    new ParallelSearchProvider(parallelOptions(providerConfig)),
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
   'perplexity-deep-research': (context) =>
     new PerplexityDeepResearchProvider({ model: configuredModel(context) }),

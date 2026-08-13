@@ -7,6 +7,7 @@ import {
 import { PerplexitySearchOptionsSchema } from '../src/adapters/perplexity-search-options.js';
 import { BUILTIN_PROVIDER_DESCRIPTORS } from '../src/adapters/provider-descriptors.js';
 import {
+  computeInitProviderChoices,
   DEFAULT_GROUPS,
   PROVIDER_DISPLAY_NAMES,
   PROVIDER_ENV_VARS,
@@ -29,7 +30,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(33);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(36);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -82,6 +83,7 @@ describe('built-in provider descriptors', () => {
       'perplexity-advanced-deep',
       'openai-research',
       'gemini-deep',
+      'parallel-research',
       'perplexity-sonar-pro',
       'gemini-grounded',
       'grok',
@@ -97,10 +99,12 @@ describe('built-in provider descriptors', () => {
       'searchapi',
       'serpapi',
       'tavily',
+      'parallel-chat',
       'claude',
       'openai-chat',
       'gemini-chat',
       'openrouter-chat',
+      'parallel-search',
       'searchapi-chatgpt',
       'searchapi-gemini',
       'searchapi-perplexity',
@@ -131,6 +135,9 @@ describe('built-in provider descriptors', () => {
         'openai-chat',
         'gemini-chat',
         'openrouter-chat',
+        'parallel-research',
+        'parallel-chat',
+        'parallel-search',
       ]),
     );
     expect(
@@ -142,6 +149,48 @@ describe('built-in provider descriptors', () => {
         ({ id }) => id === 'perplexity-sonar-pro',
       )?.credential.autoEnable,
     ).toBe(true);
+  });
+
+  it('keeps every Parallel profile opt-in when its shared key is present', () => {
+    const parallel = computeInitProviderChoices({
+      PARALLEL_API_KEY: 'parallel-fixture-key',
+    }).filter((choice) => choice.envVar === 'PARALLEL_API_KEY');
+
+    expect(
+      parallel.map(({ id, isOptIn, enableByDefault }) => ({
+        id,
+        isOptIn,
+        enableByDefault,
+      })),
+    ).toEqual([
+      { id: 'parallel-research', isOptIn: true, enableByDefault: false },
+      { id: 'parallel-chat', isOptIn: true, enableByDefault: false },
+      { id: 'parallel-search', isOptIn: true, enableByDefault: false },
+    ]);
+  });
+
+  it('does not forward Parallel metering-only options to strict adapter schemas', async () => {
+    const httpClient = vi.fn(async () => ({
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      durationMs: 1,
+      data: { results: [] },
+    }));
+    const initialized = await initializeProviders({
+      httpClient,
+      credentials: { env: { PARALLEL_API_KEY: 'parallel-fixture-key' } },
+      providers: { 'parallel-search': { options: { perUnitUsd: 0.01 } } },
+    });
+
+    expect(initialized.warnings).not.toContain(
+      'Invalid options for parallel-search',
+    );
+    const result = await getProvider('parallel-search')?.execute('query', {
+      timeout: 5,
+    });
+    expect(result?.error).toBeUndefined();
+    expect(httpClient).toHaveBeenCalledOnce();
   });
 
   it('uses strict typed option schemas for the new integration surfaces', () => {
@@ -513,6 +562,7 @@ describe('built-in provider descriptors', () => {
     expect(persistence).toEqual({
       'openai-research': 'remote',
       'gemini-deep': 'remote',
+      'parallel-research': 'remote',
       'perplexity-sonar-deep': 'remote',
       'perplexity-deep-research': 'process-local',
       'perplexity-advanced-deep': 'process-local',

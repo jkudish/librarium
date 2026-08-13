@@ -11,6 +11,7 @@ export const secretEnvironmentVariables = [
   'JINA_AI_API_KEY',
   'KAGI_API_KEY',
   'OPENAI_API_KEY',
+  'PARALLEL_API_KEY',
   'OPENROUTER_API_KEY',
   'PERPLEXITY_API_KEY',
   'SEARCHAPI_API_KEY',

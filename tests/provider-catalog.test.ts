@@ -103,6 +103,7 @@ const IMPLEMENTED_MATRIX = [
   ['perplexity-advanced-deep', 'research'],
   ['openai-research', 'research'],
   ['gemini-deep', 'research'],
+  ['parallel', 'research'],
   ['perplexity-sonar-pro', 'grounded'],
   ['perplexity-pro-search', 'grounded'],
   ['gemini-grounded', 'grounded'],
@@ -121,6 +122,7 @@ const IMPLEMENTED_MATRIX = [
   ['searchapi', 'search'],
   ['serpapi', 'search'],
   ['tavily', 'search'],
+  ['parallel', 'search'],
   ['searchapi-chatgpt', 'surface'],
   ['searchapi-gemini', 'surface'],
   ['searchapi-perplexity', 'surface'],
@@ -131,12 +133,10 @@ const IMPLEMENTED_MATRIX = [
   ['openai-chat', 'chat'],
   ['gemini-chat', 'chat'],
   ['openrouter', 'chat'],
+  ['parallel', 'chat'],
 ] as const;
 
 const PLANNED_MATRIX = [
-  ['parallel', 'search'],
-  ['parallel', 'chat'],
-  ['parallel', 'research'],
   ['valyu', 'search'],
   ['valyu', 'research'],
 ] as const;
@@ -269,15 +269,19 @@ describe('provider catalog -- declarations', () => {
   });
 
   it('advertises optional features only where an adapter proves them', () => {
-    for (const { declaration } of refs) {
+    for (const { entry, declaration } of refs) {
       if (declaration.status === 'planned') {
         expect(declaration.features).toBeUndefined();
         continue;
       }
-      // No public adapter implements remote cancellation or JSON-schema output
-      // today, so nothing may advertise them.
+      // No public adapter implements remote cancellation. Parallel Chat
+      // documents JSON-schema output, so it may advertise that one feature.
       expect(declaration.features?.remote_cancellation).toBeUndefined();
-      expect(declaration.features?.json_schema_output).toBeUndefined();
+      expect(declaration.features?.json_schema_output).toBe(
+        refKey(entry.provider_id, declaration.profile_id) === 'parallel/chat'
+          ? true
+          : undefined,
+      );
     }
   });
 
@@ -940,6 +944,7 @@ describe('provider catalog -- built-in workflows', () => {
       'perplexity-advanced-deep/research',
       'openai-research/research',
       'gemini-deep/research',
+      'parallel/research',
     ]);
   });
 
@@ -1002,10 +1007,6 @@ describe('provider catalog -- built-in workflows', () => {
     expect(omitted).toContainEqual({
       profile_key: 'perplexity-pro-search/grounded',
       reason: 'configuration_invalid',
-    });
-    expect(omitted).toContainEqual({
-      profile_key: 'parallel/research',
-      reason: 'profile_not_implemented',
     });
   });
 
@@ -1172,7 +1173,6 @@ describe('provider catalog -- target selection', () => {
     for (const [providerId, profileId] of [
       ['you-research', 'grounded'],
       ['searchapi-chatgpt', 'surface'],
-      ['parallel', 'research'],
       ['valyu', 'research'],
     ] as const) {
       const primary = built.get(providerId, profileId)?.profile.identity.target
@@ -1435,6 +1435,7 @@ describe('provider catalog -- explicit and capability selection', () => {
       'searchapi/search',
       'serpapi/search',
       'tavily/search',
+      'parallel/search',
     ]);
   });
 
@@ -1454,7 +1455,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     );
     expect(selected).not.toContain('serpapi/search');
     expect(selected).not.toContain('tavily/search');
-    expect(selected).toHaveLength(6);
+    expect(selected).toHaveLength(7);
   });
 
   it('never selects an unauthenticated profile by capability', () => {
@@ -1847,7 +1848,7 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(11);
+    expect(configurable).toHaveLength(13);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',
@@ -2181,15 +2182,14 @@ describe('provider catalog -- configured reference diagnostics', () => {
 
   it('reports planned, unbound references separately from unknown ones', () => {
     const built = catalog({
-      groups: { future: ['parallel/research', 'valyu'] },
-      defaults: [{ provider_id: 'parallel', profile_id: 'research' }],
+      groups: { future: ['valyu'] },
+      defaults: [{ provider_id: 'valyu', profile_id: 'research' }],
       reserve: [{ provider_id: 'valyu', profile_id: 'research' }],
     });
 
     expect(built.issues.map((issue) => [issue.code, issue.path])).toEqual([
       ['configured_default_unbound_profile', '/defaults/0'],
       ['custom_group_member_unbound_profile', '/groups/future/0'],
-      ['custom_group_member_unbound_profile', '/groups/future/1'],
       ['configured_reserve_unbound_profile', '/reserve/0'],
     ]);
     expect(keysOf(built.resolveDefault())).toEqual([]);
