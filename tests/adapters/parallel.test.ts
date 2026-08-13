@@ -366,6 +366,8 @@ describe('Parallel first-party providers', () => {
     { status: 'queued' },
     { run_id: '', status: 'queued' },
     { run_id: '   ', status: 'queued' },
+    { run_id: ' trun_1', status: 'queued' },
+    { run_id: 'trun_1 ', status: 'queued' },
   ])(
     'rejects Task creation without a usable remote identity (%o)',
     async (data) => {
@@ -384,6 +386,8 @@ describe('Parallel first-party providers', () => {
   it.each([
     [{ status: 'running' }, 'invalid_response'],
     [{ run_id: 'trun_other', status: 'running' }, 'identity_mismatch'],
+    [{ run_id: ' trun_1', status: 'running' }, 'invalid_response'],
+    [{ run_id: 'trun_1 ', status: 'running' }, 'invalid_response'],
   ])(
     'rejects Task status with missing or mismatched run identity (%o)',
     async (data, rawStatus) => {
@@ -414,6 +418,20 @@ describe('Parallel first-party providers', () => {
         output: { type: 'text', content: 'Wrong.' },
       },
       'different run_id',
+    ],
+    [
+      {
+        run: { run_id: ' trun_1', status: 'completed' },
+        output: { type: 'text', content: 'Wrong.' },
+      },
+      'invalid Task result response',
+    ],
+    [
+      {
+        run: { run_id: 'trun_1 ', status: 'completed' },
+        output: { type: 'text', content: 'Wrong.' },
+      },
+      'invalid Task result response',
     ],
   ])(
     'rejects Task result with missing or mismatched run identity (%o)',

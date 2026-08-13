@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OpaqueIdSchema } from '../contracts/common.js';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
 import { normalizeUrl } from '../core/normalizer.js';
 import type {
@@ -146,7 +147,7 @@ const taskResultSchema = z
   .object({
     run: z
       .object({
-        run_id: z.string().trim().min(1),
+        run_id: OpaqueIdSchema,
         status: z.string(),
         processor: z.string().optional(),
         error: z
@@ -176,7 +177,7 @@ const textTaskOutputSchema = z
 
 const taskRunSchema = z
   .object({
-    run_id: z.string().trim().min(1),
+    run_id: OpaqueIdSchema,
     status: z.string(),
     processor: z.string().optional(),
     error: z
@@ -606,11 +607,7 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       throw new UnsafeToRetrySubmissionError(
         'Parallel accepted an invalid task response',
       );
-    const id = text(parsedResponse.data.run_id);
-    if (!id)
-      throw new UnsafeToRetrySubmissionError(
-        'Parallel accepted a task response without run_id',
-      );
+    const id = parsedResponse.data.run_id;
     // Creation establishes the remote identity used for every later request.
     // The returned handle therefore derives only from the validated response.
     const status = parsedResponse.data.status ?? 'queued';
