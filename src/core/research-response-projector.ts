@@ -336,7 +336,9 @@ export function normalizeProviderAttemptOutput(
       ...(nonEmpty(citation.snippet) && {
         excerpt: nonEmpty(citation.snippet),
       }),
-      ...(nonEmpty(citation.locator) && { locator: nonEmpty(citation.locator) }),
+      ...(nonEmpty(citation.locator) && {
+        locator: nonEmpty(citation.locator),
+      }),
     })),
     ...(legacyUsage(legacy) && { usage: legacyUsage(legacy) }),
     provider_meta: providerMeta,

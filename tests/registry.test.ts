@@ -169,10 +169,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 36 providers', async () => {
+  it('initializeProviders registers all 38 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(36);
+    expect(all).toHaveLength(38);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -213,6 +213,8 @@ describe('registry', () => {
     expect(ids).toContain('parallel-research');
     expect(ids).toContain('parallel-chat');
     expect(ids).toContain('parallel-search');
+    expect(ids).toContain('valyu-search');
+    expect(ids).toContain('valyu-research');
   });
 
   it('marks only providers with a complete task lifecycle as background', async () => {
@@ -230,10 +232,11 @@ describe('registry', () => {
       'perplexity-advanced-deep',
       'perplexity-deep-research',
       'perplexity-sonar-deep',
+      'valyu-research',
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(30);
+    ).toHaveLength(31);
   });
 
   it('injects credentials into every background built-in', async () => {

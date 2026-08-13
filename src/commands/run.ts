@@ -369,7 +369,6 @@ export async function executeRun(
     let interrupted = false;
     let cancellation: Promise<void> | undefined;
     const coordinator = createNodeCoordinatorDependencies();
-    const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
     const cancellationBridge = createRegisteredProviderAttemptBridge(
       preflight.prepared,
       resolveExactProvider,

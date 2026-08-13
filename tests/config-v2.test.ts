@@ -608,7 +608,6 @@ describe('public v2 configuration migration', () => {
     expect(rejected.ok).toBe(false);
     if (!rejected.ok) {
       expect(rejected.issues.map(({ path }) => path)).toEqual([
-        '/groups/custom:bad/0',
         '/groups/custom:bad/1',
       ]);
     }
