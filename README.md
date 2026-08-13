@@ -1559,8 +1559,9 @@ Node services:
 - `saveConfigV2(config, { path })` is the explicit atomic v2 write boundary. It
   validates first and enforces owner-only permissions before commit. Unix uses
   a verified `0600` mode. Windows establishes and reads back a protected DACL
-  that grants full control only to the current process user before atomic
-  replacement. Missing ACL support fails closed before destination replacement.
+  that grants full control only to the current process user. It retains the
+  creation handle through writing, verification, and atomic replacement.
+  Missing ACL support fails closed before destination replacement.
 
 ```ts
 import {

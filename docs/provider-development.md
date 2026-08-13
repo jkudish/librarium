@@ -60,8 +60,9 @@ Usage"). The boundary matters for provider development:
   them. It also owns explicit config-file load/save: loads never rewrite and
   `saveConfigV2()` validates before an atomic owner-only write. Unix uses a
   verified `0600` mode. Windows creates the temporary file with a protected
-  DACL containing one full-control rule for the current process user and reads
-  it back before replacement; missing ACL support fails closed.
+  DACL containing one full-control rule for the current process user and keeps
+  that creation handle through write, verification, and replacement; missing
+  ACL support fails closed.
   Complete configured runs still go through the `librarium` CLI while the v2
   high-level library runner is finalized.
 

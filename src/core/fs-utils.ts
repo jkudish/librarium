@@ -13,9 +13,19 @@ import {
 import { win32 } from 'node:path';
 
 interface WindowsOwnerOnlyAcl {
-  readonly createExclusive: (path: string, markCreated: () => void) => void;
-  readonly verify: (path: string) => void;
+  readonly replaceAtomically: (
+    temporaryPath: string,
+    destinationPath: string,
+    content: string,
+    mutationStage?: WindowsMutationStage,
+  ) => void;
 }
+
+type WindowsMutationStage =
+  | 'initial-verify-to-write'
+  | 'write-to-final-verify'
+  | 'final-verify-to-rename'
+  | 'failure-cleanup';
 
 interface SafeWriteFileOptions {
   readonly mode?: number;
@@ -23,13 +33,74 @@ interface SafeWriteFileOptions {
   readonly ownerOnly?: boolean;
   /** Internal mutation-test seam. Production callers must use the default. */
   readonly windowsAcl?: WindowsOwnerOnlyAcl;
+  /** Native Windows regression hook. Never set in production. */
+  readonly windowsMutationStage?: WindowsMutationStage;
 }
 
 const WINDOWS_ACL_TIMEOUT_MS = 15_000;
 const WINDOWS_ACL_MAX_BUFFER = 64 * 1024;
 
+const WINDOWS_NATIVE_FILE_TYPE = `
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+public static class LibrariumNativeFile {
+  private enum FILE_INFO_BY_HANDLE_CLASS {
+    FileRenameInfo = 3,
+    FileDispositionInfo = 4
+  }
+
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool SetFileInformationByHandle(
+    SafeFileHandle handle,
+    FILE_INFO_BY_HANDLE_CLASS informationClass,
+    IntPtr information,
+    uint bufferSize
+  );
+
+  public static void Rename(SafeFileHandle handle, string destination) {
+    byte[] name = Encoding.Unicode.GetBytes(destination);
+    int rootOffset = IntPtr.Size == 8 ? 8 : 4;
+    int lengthOffset = rootOffset + IntPtr.Size;
+    int nameOffset = lengthOffset + sizeof(uint);
+    int size = nameOffset + name.Length;
+    IntPtr buffer = Marshal.AllocHGlobal(size);
+    try {
+      for (int index = 0; index < size; index++) Marshal.WriteByte(buffer, index, 0);
+      Marshal.WriteInt32(buffer, 0, 1);
+      Marshal.WriteIntPtr(buffer, rootOffset, IntPtr.Zero);
+      Marshal.WriteInt32(buffer, lengthOffset, name.Length);
+      Marshal.Copy(name, 0, IntPtr.Add(buffer, nameOffset), name.Length);
+      if (!SetFileInformationByHandle(handle, FILE_INFO_BY_HANDLE_CLASS.FileRenameInfo, buffer, (uint)size)) {
+        throw new Win32Exception(Marshal.GetLastWin32Error());
+      }
+    } finally {
+      Marshal.FreeHGlobal(buffer);
+    }
+  }
+
+  public static void DeleteOnClose(SafeFileHandle handle) {
+    IntPtr buffer = Marshal.AllocHGlobal(1);
+    try {
+      Marshal.WriteByte(buffer, 0, 1);
+      if (!SetFileInformationByHandle(handle, FILE_INFO_BY_HANDLE_CLASS.FileDispositionInfo, buffer, 1)) {
+        throw new Win32Exception(Marshal.GetLastWin32Error());
+      }
+    } finally {
+      Marshal.FreeHGlobal(buffer);
+    }
+  }
+}
+`;
+
 const WINDOWS_ASSERT_OWNER_ONLY_ACL_SUPPORT = `
 $ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+${WINDOWS_NATIVE_FILE_TYPE}
+'@
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
 if ($null -eq $sid) { throw 'The current Windows identity has no user SID.' }
 $acl = New-Object System.Security.AccessControl.FileSecurity
@@ -45,13 +116,23 @@ $constructor = [IO.FileStream].GetConstructor(@(
   [Security.AccessControl.FileSecurity]
 ))
 if ($null -eq $constructor) { throw 'The secure FileStream constructor is unavailable.' }
+[void][LibrariumNativeFile]
 [Console]::Out.Write('supported')
 `;
 
-const WINDOWS_CREATE_OWNER_ONLY_FILE = `
+const WINDOWS_REPLACE_OWNER_ONLY_FILE = `
 $ErrorActionPreference = 'Stop'
-$encodedPath = [Console]::In.ReadToEnd()
-$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedPath))
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$temporaryPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload.temporaryPath))
+$destinationPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload.destinationPath))
+$content = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload.content))
+$mutationStage = $payload.mutationStage
+$mutationConfirmed = $false
+
+Add-Type -TypeDefinition @'
+${WINDOWS_NATIVE_FILE_TYPE}
+'@
+
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
 if ($null -eq $sid) { throw 'The current Windows identity has no user SID.' }
 
@@ -65,11 +146,50 @@ $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentL
 )
 $acl.AddAccessRule($rule)
 
+function Assert-OwnerOnlyAcl([IO.FileStream] $stream) {
+  $verifiedAcl = $stream.GetAccessControl()
+  $owner = $verifiedAcl.GetOwner([Security.Principal.SecurityIdentifier])
+  $rules = @($verifiedAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+  $fullControl = [int][Security.AccessControl.FileSystemRights]::FullControl
+  $noneInheritance = [Security.AccessControl.InheritanceFlags]::None
+  $nonePropagation = [Security.AccessControl.PropagationFlags]::None
+  $allow = [Security.AccessControl.AccessControlType]::Allow
+
+  if ($owner.Value -ne $sid.Value) { throw 'The file owner is not the current user.' }
+  if (-not $verifiedAcl.AreAccessRulesProtected) { throw 'The file DACL is not protected.' }
+  if ($rules.Count -ne 1) { throw 'The file DACL does not contain exactly one ACE.' }
+  $verifiedRule = $rules[0]
+  if ($verifiedRule.IdentityReference.Value -ne $sid.Value) { throw 'The file ACE is not for the current user.' }
+  if ($verifiedRule.IsInherited) { throw 'The file ACE is inherited.' }
+  if ($verifiedRule.AccessControlType -ne $allow) { throw 'The file ACE is not an allow rule.' }
+  if ([int]$verifiedRule.FileSystemRights -ne $fullControl) { throw 'The file ACE is not full control.' }
+  if ($verifiedRule.InheritanceFlags -ne $noneInheritance) { throw 'The file ACE has inheritance flags.' }
+  if ($verifiedRule.PropagationFlags -ne $nonePropagation) { throw 'The file ACE has propagation flags.' }
+}
+
+function Assert-NamespaceSwapBlocked([string] $stage) {
+  if ($mutationStage -ne $stage) { return }
+  $heldPath = "$temporaryPath.swap"
+  $moveBlocked = $false
+  try {
+    [IO.File]::Move($temporaryPath, $heldPath)
+  } catch [IO.IOException] {
+    $win32Error = $_.Exception.HResult -band 0xffff
+    if ($win32Error -ne 32) { throw }
+    $moveBlocked = $true
+    $script:mutationConfirmed = $true
+  }
+  if (-not $moveBlocked) {
+    [IO.File]::WriteAllText($temporaryPath, 'attacker replacement')
+    throw "Namespace substitution unexpectedly succeeded at $stage."
+  }
+}
+
 $stream = $null
-$created = $false
+$committed = $false
 try {
   $stream = New-Object IO.FileStream -ArgumentList @(
-    $path,
+    $temporaryPath,
     [IO.FileMode]::CreateNew,
     [Security.AccessControl.FileSystemRights]::FullControl,
     [IO.FileShare]::None,
@@ -77,15 +197,44 @@ try {
     [IO.FileOptions]::None,
     $acl
   )
-  $created = $true
+  Assert-OwnerOnlyAcl $stream
+  Assert-NamespaceSwapBlocked 'initial-verify-to-write'
+
+  $bytes = [Text.Encoding]::UTF8.GetBytes($content)
+  $stream.Write($bytes, 0, $bytes.Length)
+  $stream.Flush($true)
+  Assert-NamespaceSwapBlocked 'write-to-final-verify'
+  Assert-OwnerOnlyAcl $stream
+  Assert-NamespaceSwapBlocked 'final-verify-to-rename'
+
+  if ($null -ne $mutationStage -and $mutationStage -ne 'failure-cleanup' -and -not $mutationConfirmed) {
+    throw "The namespace mutation was not tested at $mutationStage."
+  }
+
+  if ($mutationStage -eq 'failure-cleanup') {
+    throw 'Injected failure before handle-bound cleanup.'
+  }
+
+  [LibrariumNativeFile]::Rename($stream.SafeFileHandle, $destinationPath)
+  $committed = $true
+  Assert-OwnerOnlyAcl $stream
   $stream.Dispose()
   $stream = $null
-  [Console]::Out.Write('created')
+  [Console]::Out.Write('replaced')
 } catch {
   try {
-    if ($null -ne $stream) { $stream.Dispose() }
+    if ($null -ne $stream -and -not $committed) {
+      try {
+        Assert-NamespaceSwapBlocked 'failure-cleanup'
+        if ($mutationStage -eq 'failure-cleanup' -and -not $mutationConfirmed) {
+          throw 'The namespace mutation was not tested during failure cleanup.'
+        }
+      } finally {
+        [LibrariumNativeFile]::DeleteOnClose($stream.SafeFileHandle)
+      }
+    }
   } finally {
-    if ($created) { [IO.File]::Delete($path) }
+    if ($null -ne $stream) { $stream.Dispose() }
   }
   throw
 }
@@ -155,6 +304,41 @@ function runWindowsAclScript(path: string, script: string): string {
   );
 }
 
+function runWindowsOwnerOnlyReplace(
+  temporaryPath: string,
+  destinationPath: string,
+  content: string,
+  mutationStage?: WindowsMutationStage,
+): string {
+  return execFileSync(
+    windowsPowerShellExecutable(),
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(WINDOWS_REPLACE_OWNER_ONLY_FILE, 'utf16le').toString(
+        'base64',
+      ),
+    ],
+    {
+      encoding: 'utf8',
+      input: JSON.stringify({
+        temporaryPath: Buffer.from(temporaryPath, 'utf8').toString('base64'),
+        destinationPath: Buffer.from(destinationPath, 'utf8').toString(
+          'base64',
+        ),
+        content: Buffer.from(content, 'utf8').toString('base64'),
+        mutationStage,
+      }),
+      maxBuffer: WINDOWS_ACL_MAX_BUFFER,
+      shell: false,
+      timeout: WINDOWS_ACL_TIMEOUT_MS,
+      windowsHide: true,
+    },
+  );
+}
+
 /** Fail before filesystem mutation when the required inbox ACL tool is absent. */
 export function assertWindowsOwnerOnlyAclSupport(): void {
   if (process.platform !== 'win32') return;
@@ -169,10 +353,22 @@ export function assertWindowsOwnerOnlyAclSupport(): void {
   }
 }
 
-/** Exclusively create a file with a protected current-user-only DACL. */
-export function createWindowsOwnerOnlyFile(path: string): void {
-  if (runWindowsAclScript(path, WINDOWS_CREATE_OWNER_ONLY_FILE) !== 'created') {
-    throw new Error('Windows owner-only creation returned no proof.');
+/** Replace a destination while retaining one protected temp-file handle. */
+function replaceWindowsOwnerOnlyFile(
+  temporaryPath: string,
+  destinationPath: string,
+  content: string,
+  mutationStage?: WindowsMutationStage,
+): void {
+  if (
+    runWindowsOwnerOnlyReplace(
+      temporaryPath,
+      destinationPath,
+      content,
+      mutationStage,
+    ) !== 'replaced'
+  ) {
+    throw new Error('Windows owner-only replacement returned no proof.');
   }
 }
 
@@ -184,11 +380,7 @@ export function verifyWindowsOwnerOnlyAcl(path: string): void {
 }
 
 const DEFAULT_WINDOWS_ACL: WindowsOwnerOnlyAcl = {
-  createExclusive: (path, markCreated) => {
-    createWindowsOwnerOnlyFile(path);
-    markCreated();
-  },
-  verify: verifyWindowsOwnerOnlyAcl,
+  replaceAtomically: replaceWindowsOwnerOnlyFile,
 };
 
 /**
@@ -196,7 +388,8 @@ const DEFAULT_WINDOWS_ACL: WindowsOwnerOnlyAcl = {
  * renaming it over the destination.
  *
  * Owner-only writes establish and verify their Unix mode or Windows DACL on
- * the empty temp file before writing content, then verify again before rename.
+ * the empty temp file before writing content. Windows retains the creation
+ * handle through the final ACL check and handle-bound rename.
  */
 export function safeWriteFile(
   path: string,
@@ -218,16 +411,16 @@ export function safeWriteFile(
   try {
     if (options?.ownerOnly && process.platform === 'win32') {
       const windowsAcl = options.windowsAcl ?? DEFAULT_WINDOWS_ACL;
-      // FileMode.CreateNew plus FileSecurity applies the protected DACL in the
-      // same OS create operation. No broadly inherited handle exists first.
-      windowsAcl.createExclusive(tmp, () => {
-        created = true;
-      });
-      if (!created) {
-        throw new Error('Windows owner-only creation returned no proof.');
-      }
-      windowsAcl.verify(tmp);
-      descriptor = openSync(tmp, 'r+');
+      // The Windows transaction retains the creation handle through ACL
+      // verification, write, handle-bound rename, and failure disposal. Node
+      // must never act on the temporary pathname after this call begins.
+      windowsAcl.replaceAtomically(
+        tmp,
+        path,
+        content,
+        options.windowsMutationStage,
+      );
+      return;
     } else {
       // wx makes creation exclusive even if a random-name collision or a
       // pre-existing symlink is present. Track ownership so a collision never
@@ -250,10 +443,6 @@ export function safeWriteFile(
     writeFileSync(descriptor, content, { encoding: 'utf8' });
     closeSync(descriptor);
     descriptor = undefined;
-
-    if (options?.ownerOnly && process.platform === 'win32') {
-      (options.windowsAcl ?? DEFAULT_WINDOWS_ACL).verify(tmp);
-    }
 
     renameSync(tmp, path);
     created = false;

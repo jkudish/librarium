@@ -284,21 +284,29 @@ describe('explicit Node v2 config files', () => {
       mode: 0o600,
       ownerOnly: true,
       windowsAcl: {
-        createExclusive(tempPath, markCreated) {
-          writeFileSync(tempPath, '', { flag: 'wx' });
-          markCreated();
-          observed.push(`created:${readFileSync(tempPath, 'utf8')}`);
-        },
-        verify(tempPath) {
-          observed.push(`verified:${readFileSync(tempPath, 'utf8')}`);
+        replaceAtomically(
+          temporaryPath,
+          destinationPath,
+          content,
+          mutationStage,
+        ) {
+          observed.push(
+            `temporary:${temporaryPath.startsWith(`${path}.tmp.`)}`,
+          );
+          observed.push(`destination:${destinationPath === path}`);
+          observed.push(`content:${content}`);
+          observed.push(`mutation:${mutationStage}`);
+          writeFileSync(destinationPath, content, { flag: 'wx' });
         },
       },
+      windowsMutationStage: 'final-verify-to-rename',
     });
 
     expect(observed).toEqual([
-      'created:',
-      'verified:',
-      'verified:owner-only-content',
+      'temporary:true',
+      'destination:true',
+      'content:owner-only-content',
+      'mutation:final-verify-to-rename',
     ]);
     expect(readFileSync(path, 'utf8')).toBe('owner-only-content');
     expect(readdirSync(directory)).toEqual(['windows-order.json']);
@@ -315,13 +323,8 @@ describe('explicit Node v2 config files', () => {
         mode: 0o600,
         ownerOnly: true,
         windowsAcl: {
-          createExclusive(tempPath, markCreated) {
-            writeFileSync(tempPath, '', { flag: 'wx' });
-            markCreated();
+          replaceAtomically() {
             throw new Error('injected ACL application failure');
-          },
-          verify() {
-            throw new Error('verification must not run');
           },
         },
       }),
@@ -342,13 +345,10 @@ describe('explicit Node v2 config files', () => {
         mode: 0o600,
         ownerOnly: true,
         windowsAcl: {
-          createExclusive(tempPath) {
+          replaceAtomically(tempPath) {
             collisionPath = tempPath;
             writeFileSync(tempPath, 'someone-else');
             throw new Error('injected exclusive-create collision');
-          },
-          verify() {
-            throw new Error('verification must not run');
           },
         },
       }),
@@ -363,21 +363,18 @@ describe('explicit Node v2 config files', () => {
     }
     const path = join(directory, 'windows-verify-failure.json');
     writeFileSync(path, 'original');
-    let verifications = 0;
 
     expect(() =>
       safeWriteFile(path, 'must-not-commit', {
         mode: 0o600,
         ownerOnly: true,
         windowsAcl: {
-          createExclusive(tempPath, markCreated) {
+          replaceAtomically(tempPath) {
             writeFileSync(tempPath, '', { flag: 'wx' });
-            markCreated();
-          },
-          verify() {
-            verifications += 1;
-            if (verifications === 2) {
+            try {
               throw new Error('injected ACL verification failure');
+            } finally {
+              rmSync(tempPath);
             }
           },
         },
@@ -399,12 +396,13 @@ describe('explicit Node v2 config files', () => {
         mode: 0o600,
         ownerOnly: true,
         windowsAcl: {
-          createExclusive(tempPath, markCreated) {
+          replaceAtomically(tempPath) {
             writeFileSync(tempPath, '', { flag: 'wx' });
-            markCreated();
-          },
-          verify() {
-            throw new Error('injected first ACL verification failure');
+            try {
+              throw new Error('injected first ACL verification failure');
+            } finally {
+              rmSync(tempPath);
+            }
           },
         },
       }),
@@ -533,6 +531,45 @@ describe.runIf(process.platform === 'win32')(
       addNativeWindowsEveryoneRule(path);
 
       expect(() => verifyWindowsOwnerOnlyAcl(path)).toThrow();
+    });
+
+    it.each([
+      'initial-verify-to-write',
+      'write-to-final-verify',
+      'final-verify-to-rename',
+    ] as const)(
+      'blocks namespace substitution at %s while retaining the creation handle',
+      (windowsMutationStage) => {
+        const path = join(directory, `${windowsMutationStage}.json`);
+
+        safeWriteFile(path, 'handle-bound-content', {
+          mode: 0o600,
+          ownerOnly: true,
+          windowsMutationStage,
+        });
+
+        verifyWindowsOwnerOnlyAcl(path);
+        expect(readFileSync(path, 'utf8')).toBe('handle-bound-content');
+        expect(readdirSync(directory)).toEqual([
+          `${windowsMutationStage}.json`,
+        ]);
+      },
+    );
+
+    it('binds failure cleanup to the retained handle after a swap attempt', () => {
+      const path = join(directory, 'cleanup-replacement.json');
+      writeFileSync(path, 'original-destination');
+
+      expect(() =>
+        safeWriteFile(path, 'must-not-commit', {
+          mode: 0o600,
+          ownerOnly: true,
+          windowsMutationStage: 'failure-cleanup',
+        }),
+      ).toThrow('Injected failure before handle-bound cleanup.');
+
+      expect(readFileSync(path, 'utf8')).toBe('original-destination');
+      expect(readdirSync(directory)).toEqual(['cleanup-replacement.json']);
     });
   },
 );

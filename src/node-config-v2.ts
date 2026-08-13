@@ -109,8 +109,8 @@ export function loadConfigV2(
  * Explicitly persist a validated native v2 configuration.
  *
  * The write is atomic and owner-only. Unix uses a verified 0600 mode. Windows
- * establishes a protected DACL containing only the current user, verifies it
- * before writing content, and verifies it again before atomic replacement.
+ * establishes a protected DACL containing only the current user, then retains
+ * the creation handle through writing, verification, and atomic replacement.
  * Missing Windows ACL support fails closed. Loading and ordinary execution
  * never call this function, so migration cannot silently rewrite user files.
  */
