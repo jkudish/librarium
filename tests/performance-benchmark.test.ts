@@ -35,4 +35,21 @@ describe('offline performance benchmark helpers', () => {
     expect(result.min_ms).toBeLessThanOrEqual(result.median_ms);
     expect(result.median_ms).toBeLessThanOrEqual(result.p95_ms);
   });
+
+  it('prepares each fixture outside the timed operation', async () => {
+    let prepared = 0;
+    const seen: number[] = [];
+    const result = await measure({
+      warmup: 1,
+      iterations: 3,
+      prepare: () => ++prepared,
+      operation: (fixture) => {
+        seen.push(fixture);
+      },
+    });
+
+    expect(prepared).toBe(4);
+    expect(seen).toEqual([1, 2, 3, 4]);
+    expect(result.samples_ms).toHaveLength(3);
+  });
 });

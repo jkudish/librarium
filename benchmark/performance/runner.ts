@@ -241,6 +241,9 @@ async function main(): Promise<void> {
       for (let index = 0; index < count; index++)
         await createRun(base, `run-${String(index).padStart(3, '0')}`, 1);
       const repository = new RunArtifactRepository();
+      const runDirectories = Array.from({ length: count }, (_, index) =>
+        join(base, `run-${String(index).padStart(3, '0')}`),
+      );
       metrics.push({
         name: `artifact-read-retrieved-${count}-runs`,
         parameters: { runs: count, state: 'retrieved' },
@@ -248,9 +251,9 @@ async function main(): Promise<void> {
           warmup,
           iterations,
           operation: () =>
-            repository.readSnapshot(join(base, 'run-000'), {
-              view: 'recovery',
-            }),
+            runDirectories.map((directory) =>
+              repository.readSnapshot(directory, { view: 'recovery' }),
+            ),
         })),
       });
       metrics.push({
@@ -268,7 +271,10 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: () => writeHtmlReport(join(base, 'run-000'), repository),
+          operation: () =>
+            runDirectories.map((directory) =>
+              writeHtmlReport(directory, repository),
+            ),
         })),
       });
       metrics.push({
@@ -277,7 +283,10 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: () => writeJsonlReport(join(base, 'run-000'), repository),
+          operation: () =>
+            runDirectories.map((directory) =>
+              writeJsonlReport(directory, repository),
+            ),
         })),
       });
       const service = new RunReconciliationService({
@@ -292,7 +301,12 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: () => service.reconcileOnce(join(base, 'run-000')),
+          operation: () =>
+            Promise.all(
+              runDirectories.map((directory) =>
+                service.reconcileOnce(directory),
+              ),
+            ),
         })),
       });
       metrics.push({
@@ -301,13 +315,24 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: async () => {
+          prepare: async () => {
             const directory = mkdtempSync(join(temp, 'pending-read-'));
+            const runs = [];
+            for (let index = 0; index < count; index++) {
+              runs.push(
+                await createPendingRun(
+                  directory,
+                  `run-${String(index).padStart(3, '0')}`,
+                ),
+              );
+            }
+            return { directory, runs };
+          },
+          operation: ({ directory, runs }) => {
             try {
-              const runDirectory = await createPendingRun(directory, 'run');
-              return repository.readSnapshot(runDirectory, {
-                view: 'recovery',
-              });
+              return runs.map((runDirectory) =>
+                repository.readSnapshot(runDirectory, { view: 'recovery' }),
+              );
             } finally {
               rmSync(directory, { recursive: true, force: true });
             }
@@ -320,18 +345,36 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: async () => {
+          prepare: async () => {
             const directory = mkdtempSync(join(temp, 'pending-reconcile-'));
-            try {
-              const runDirectory = await createPendingRun(directory, 'run');
-              const pendingRepository = new RunArtifactRepository();
-              const pendingService = new RunReconciliationService({
+            const runs = [];
+            for (let index = 0; index < count; index++) {
+              runs.push(
+                await createPendingRun(
+                  directory,
+                  `run-${String(index).padStart(3, '0')}`,
+                ),
+              );
+            }
+            const pendingRepository = new RunArtifactRepository();
+            return {
+              directory,
+              runs,
+              service: new RunReconciliationService({
                 repository: pendingRepository,
                 resolveBackgroundProvider: () => undefined,
                 getProviderConfig: () => undefined,
                 now: () => 1,
-              });
-              return pendingService.reconcileOnce(runDirectory);
+              }),
+            };
+          },
+          operation: async ({ directory, runs, service: pendingService }) => {
+            try {
+              return await Promise.all(
+                runs.map((runDirectory) =>
+                  pendingService.reconcileOnce(runDirectory),
+                ),
+              );
             } finally {
               rmSync(directory, { recursive: true, force: true });
             }
@@ -347,14 +390,19 @@ async function main(): Promise<void> {
           `canonical-${String(index).padStart(3, '0')}`,
         );
       }
-      const runDirectory = join(base, 'canonical-000');
+      const runDirectories = Array.from({ length: count }, (_, index) =>
+        join(base, `canonical-${String(index).padStart(3, '0')}`),
+      );
       metrics.push({
         name: `canonical-read-${count}-runs`,
         parameters: { runs: count, schema_version: 3 },
         ...(await measure({
           warmup,
           iterations,
-          operation: () => readCanonicalRunReportingView(runDirectory),
+          operation: () =>
+            runDirectories.map((directory) =>
+              readCanonicalRunReportingView(directory),
+            ),
         })),
       });
       metrics.push({
@@ -372,7 +420,8 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: () => writeHtmlReportForRun(runDirectory),
+          operation: () =>
+            runDirectories.map((directory) => writeHtmlReportForRun(directory)),
         })),
       });
       metrics.push({
@@ -381,7 +430,10 @@ async function main(): Promise<void> {
         ...(await measure({
           warmup,
           iterations,
-          operation: () => writeJsonlReportForRun(runDirectory),
+          operation: () =>
+            runDirectories.map((directory) =>
+              writeJsonlReportForRun(directory),
+            ),
         })),
       });
     }

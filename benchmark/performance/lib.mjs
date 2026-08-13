@@ -21,12 +21,16 @@ export function summarizeSamples(samples) {
   };
 }
 
-export async function measure({ warmup, iterations, operation }) {
-  for (let index = 0; index < warmup; index++) await operation();
+export async function measure({ warmup, iterations, prepare, operation }) {
+  for (let index = 0; index < warmup; index++) {
+    const prepared = prepare === undefined ? undefined : await prepare();
+    await operation(prepared);
+  }
   const samples = [];
   for (let index = 0; index < iterations; index++) {
+    const prepared = prepare === undefined ? undefined : await prepare();
     const started = performance.now();
-    await operation();
+    await operation(prepared);
     samples.push(performance.now() - started);
   }
   return summarizeSamples(samples);
