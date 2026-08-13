@@ -17,6 +17,8 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     if: github.actor == 'jkudish'
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -42,6 +44,26 @@ jobs:
 
       - name: Test
         run: npm run test
+
+      - name: Declaration consumer fixtures
+        run: npm run test:declarations
+
+      - name: Contract snapshot drift
+        run: |
+          npm run contracts:generate
+          git diff --exit-code -- contracts/v1
+
+      - name: Workers compatibility tests
+        run: npm run test:workers
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: Packed consumer smoke test
+        run: npm run test:packed
+
+      - name: Offline benchmark fixture replay
+        run: npm run benchmark:ci
 
   release:
     needs: ci
