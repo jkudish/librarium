@@ -10,6 +10,7 @@ import {
   createCoordinatorState,
   recordAcceptanceUnknown,
   recordAttemptFinished,
+  recordAttemptProgress,
   recordAttemptRunning,
   recordDurableCustodyObservation,
   recordLaunchDispatched,
@@ -56,7 +57,7 @@ export interface AttemptExecutionContext {
     reason?: UnresolvedAcceptance['reason'],
   ): Promise<void>;
   transientPollFailure(error: StructuredError): Promise<void>;
-  running(): Promise<void>;
+  running(progress?: number, message?: string): Promise<void>;
 }
 
 export type AttemptExecutionResult =
@@ -288,19 +289,36 @@ export async function runPreparedExecution(
           );
         });
       },
-      running: async () => {
+      running: async (progress, message) => {
         await transition(effectiveDependencies, requestId, (state) => {
           const attempt = state.attempts.find(
             (candidate) => candidate.attempt_id === launch.attempt_id,
           );
-          if (state.status !== 'running' || attempt?.status === 'running') {
+          if (
+            state.status !== 'running' ||
+            (attempt?.status !== 'submitted' && attempt?.status !== 'running')
+          ) {
             return undefined;
           }
-          return recordAttemptRunning(
-            state,
-            launch.attempt_id,
-            effectiveDependencies.coordinator,
-          );
+          const running =
+            attempt.status === 'submitted'
+              ? recordAttemptRunning(
+                  state,
+                  launch.attempt_id,
+                  effectiveDependencies.coordinator,
+                )
+              : state;
+          return progress === undefined
+            ? attempt.status === 'submitted'
+              ? running
+              : undefined
+            : recordAttemptProgress(
+                running,
+                launch.attempt_id,
+                progress,
+                message,
+                effectiveDependencies.coordinator,
+              );
         });
       },
     };

@@ -39,6 +39,11 @@ export function writeCanonicalPresentationArtifacts(
       citations: result?.citations ?? [],
       ...(result?.model && { model: result.model }),
       ...(report.usage && { usage: report.usage }),
+      ...(presentation.providerMetadata[report.id] && {
+        providerMeta: structuredClone(
+          presentation.providerMetadata[report.id] as Record<string, unknown>,
+        ),
+      }),
     });
   }
   repository.writeSources(outputDir, presentation.sources);

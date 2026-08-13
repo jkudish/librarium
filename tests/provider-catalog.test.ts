@@ -104,6 +104,7 @@ const IMPLEMENTED_MATRIX = [
   ['openai-research', 'research'],
   ['gemini-deep', 'research'],
   ['parallel', 'research'],
+  ['valyu', 'research'],
   ['exa', 'research'],
   ['tavily', 'research'],
   ['you-research', 'research'],
@@ -126,6 +127,7 @@ const IMPLEMENTED_MATRIX = [
   ['serpapi', 'search'],
   ['tavily', 'search'],
   ['parallel', 'search'],
+  ['valyu', 'search'],
   ['searchapi-chatgpt', 'surface'],
   ['searchapi-gemini', 'surface'],
   ['searchapi-perplexity', 'surface'],
@@ -139,10 +141,7 @@ const IMPLEMENTED_MATRIX = [
   ['parallel', 'chat'],
 ] as const;
 
-const PLANNED_MATRIX = [
-  ['valyu', 'search'],
-  ['valyu', 'research'],
-] as const;
+const PLANNED_MATRIX: readonly (readonly [string, string])[] = [];
 
 const PLANNED_PROVIDER_IDS = [
   ...new Set(PLANNED_MATRIX.map(([providerId]) => providerId)),
@@ -281,9 +280,9 @@ describe('provider catalog -- declarations', () => {
         continue;
       }
       const key = refKey(ref.entry.provider_id, declaration.profile_id);
-      // No public adapter implements remote cancellation. Parallel Chat and
-      // durable research adapters document JSON-schema output.
-      expect(declaration.features?.remote_cancellation).toBeUndefined();
+      expect(declaration.features?.remote_cancellation).toBe(
+        key === 'valyu/research' ? true : undefined,
+      );
       expect(declaration.features?.json_schema_output).toBe(
         ['exa/research', 'tavily/research', 'you-research/research'].includes(
           key,
@@ -954,6 +953,7 @@ describe('provider catalog -- built-in workflows', () => {
       'openai-research/research',
       'gemini-deep/research',
       'parallel/research',
+      'valyu/research',
       'exa/research',
       'tavily/research',
       'you-research/research',
@@ -1190,7 +1190,7 @@ describe('provider catalog -- target selection', () => {
     for (const [providerId, profileId] of [
       ['you-research', 'grounded'],
       ['searchapi-chatgpt', 'surface'],
-      ['valyu', 'research'],
+      ['you-research', 'research'],
     ] as const) {
       const primary = built.get(providerId, profileId)?.profile.identity.target
         .primary;
@@ -1453,6 +1453,7 @@ describe('provider catalog -- explicit and capability selection', () => {
       'serpapi/search',
       'tavily/search',
       'parallel/search',
+      'valyu/search',
     ]);
   });
 
@@ -1472,7 +1473,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     );
     expect(selected).not.toContain('serpapi/search');
     expect(selected).not.toContain('tavily/search');
-    expect(selected).toHaveLength(7);
+    expect(selected).toHaveLength(8);
   });
 
   it('never selects an unauthenticated profile by capability', () => {
@@ -1871,7 +1872,7 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(13);
+    expect(configurable).toHaveLength(14);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',
@@ -1909,6 +1910,22 @@ describe('provider catalog -- configured target fidelity', () => {
         declared,
       );
     }
+  });
+
+  it('projects the Valyu research mode into its configurable preset target', () => {
+    const built = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        'valyu-research': { options: { mode: 'heavy' } },
+      }),
+      credentials: allCredentials(),
+    });
+    expect(built.get('valyu', 'research')?.profile.identity.target).toEqual({
+      primary: {
+        model_selection: 'configurable',
+        kind: 'preset',
+        target_id: 'heavy',
+      },
+    });
   });
 
   it('declares Gemini Deep as a configurable agent with no invented model', () => {
@@ -2203,20 +2220,18 @@ describe('provider catalog -- configured reference diagnostics', () => {
     expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([]);
   });
 
-  it('reports planned, unbound references separately from unknown ones', () => {
+  it('resolves implemented Valyu references through exact bindings', () => {
     const built = catalog({
       groups: { future: ['valyu'] },
       defaults: [{ provider_id: 'valyu', profile_id: 'research' }],
       reserve: [{ provider_id: 'valyu', profile_id: 'research' }],
     });
 
-    expect(built.issues.map((issue) => [issue.code, issue.path])).toEqual([
-      ['configured_default_unbound_profile', '/defaults/0'],
-      ['custom_group_member_unbound_profile', '/groups/future/0'],
-      ['configured_reserve_unbound_profile', '/reserve/0'],
+    expect(built.issues).toEqual([]);
+    expect(keysOf(built.resolveDefault())).toEqual(['valyu/research']);
+    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([
+      'valyu/research',
     ]);
-    expect(keysOf(built.resolveDefault())).toEqual([]);
-    expect(keysOf(built.resolveConfiguredReserve([]))).toEqual([]);
   });
 
   it('reports a malformed group member instead of silently truncating it', () => {

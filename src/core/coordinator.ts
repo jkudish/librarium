@@ -985,6 +985,39 @@ export function recordAttemptRunning(
   return next;
 }
 
+/** Persist one bounded provider progress observation for a running attempt. */
+export function recordAttemptProgress(
+  state: CoordinatorState,
+  attemptId: string,
+  progressInput: unknown,
+  messageInput: unknown,
+  dependencies: CoordinatorDependencies,
+): CoordinatorState {
+  const deadlineState = advanceDeadlines(state, dependencies);
+  if (deadlineState.status !== 'running') return deadlineState;
+  const attempt = attemptFor(deadlineState, attemptId);
+  if (attempt.status !== 'running') {
+    throw new Error('Attempt progress requires a running attempt.');
+  }
+  const progress = z.number().int().min(0).max(100).parse(progressInput);
+  const message =
+    messageInput === undefined
+      ? undefined
+      : z.string().trim().min(1).max(512).parse(messageInput);
+  const next = cloneState(deadlineState);
+  appendLifecycle(next, {
+    ...eventBase(next, dependencies, iso(dependencies.clock.now())),
+    slot_id: attempt.slot_id,
+    attempt_id: attempt.attempt_id,
+    event_kind: 'attempt_progress',
+    data: {
+      progress_percent: progress,
+      ...(message !== undefined && { message }),
+    },
+  });
+  return next;
+}
+
 function markAcceptanceUnknownUnchecked(
   state: CoordinatorState,
   attemptId: string,

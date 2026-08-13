@@ -127,6 +127,23 @@ export interface Citation {
   title?: string;
   snippet?: string;
   provider: string;
+  /** Stable, non-secret provider source identifier when the API reports one. */
+  providerReference?: string;
+  /** Narrow source kind used by the canonical terminal projection. */
+  sourceKind?:
+    | 'web_page'
+    | 'news_article'
+    | 'x_post'
+    | 'file'
+    | 'place'
+    | 'video'
+    | 'forum_post'
+    | 'unknown';
+  publisher?: string;
+  /** RFC 3339 publication timestamp when the provider reports one. */
+  publishedAt?: string;
+  /** Provider-reported source locator, such as a text fragment. */
+  locator?: string;
 }
 
 // Result from any provider execution
@@ -227,6 +244,8 @@ export interface BackgroundProvider extends ProviderCommon {
   submit(query: string, options: ProviderOptions): Promise<AsyncTaskHandle>;
   poll(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
   retrieve(handle: AsyncTaskHandle): Promise<ProviderResult>;
+  /** Optional remote cancellation for providers that document it. */
+  cancel?(handle: AsyncTaskHandle): Promise<AsyncPollResult>;
 }
 
 // Provider interface — each adapter implements one execution contract.

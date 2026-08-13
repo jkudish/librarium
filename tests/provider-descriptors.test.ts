@@ -30,7 +30,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(36);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(38);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -114,6 +114,8 @@ describe('built-in provider descriptors', () => {
       'perplexity-pro-search',
       'grok-x-only',
       'grok-combined',
+      'valyu-search',
+      'valyu-research',
     ]);
   });
 
@@ -566,6 +568,7 @@ describe('built-in provider descriptors', () => {
       'perplexity-sonar-deep': 'remote',
       'perplexity-deep-research': 'process-local',
       'perplexity-advanced-deep': 'process-local',
+      'valyu-research': 'remote',
     });
   });
 

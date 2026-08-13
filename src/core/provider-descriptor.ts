@@ -10,6 +10,10 @@ import {
   ParallelSearchOptionsSchema,
 } from '../adapters/parallel-options.js';
 import { PerplexitySearchOptionsSchema } from '../adapters/perplexity-search-options.js';
+import {
+  ValyuResearchOptionsSchema,
+  ValyuSearchOptionsSchema,
+} from '../adapters/valyu-options.js';
 import type { MeteringKind, ProviderTier } from '../types.js';
 import { searchApiOptionsSchema } from './searchapi.js';
 
@@ -532,6 +536,40 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       order: 40,
     },
     metering: { kind: 'credit_priced', unit: 'credit' },
+    capabilities: background(),
+  }),
+  define({
+    id: 'valyu-search',
+    registrationOrder: 35,
+    tier: 'raw-search',
+    envVar: 'VALYU_API_KEY',
+    optionsSchema: ValyuSearchOptionsSchema,
+    display: {
+      family: 'Valyu',
+      name: 'Valyu Search',
+      description: 'First-party web and specialized-data search from Valyu.',
+      bestFor: 'Source discovery across web, news, and specialized datasets.',
+      setupUrl: 'https://platform.valyu.ai',
+      order: 41,
+    },
+    metering: { kind: 'native_cost' },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'valyu-research',
+    registrationOrder: 36,
+    tier: 'deep-research',
+    envVar: 'VALYU_API_KEY',
+    optionsSchema: ValyuResearchOptionsSchema,
+    display: {
+      family: 'Valyu',
+      name: 'Valyu DeepResearch',
+      description: 'Durable first-party Valyu multi-source research reports.',
+      bestFor: 'Long-running cited research across web and specialized data.',
+      setupUrl: 'https://platform.valyu.ai',
+      order: 111,
+    },
+    metering: { kind: 'native_cost' },
     capabilities: background(),
   }),
   define({

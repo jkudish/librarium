@@ -8,6 +8,7 @@ import {
   type Stats,
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { ProviderMetaSchema } from './contracts/interchange/research-result.js';
 import type {
   ActualCostSource,
   Citation,
@@ -39,6 +40,8 @@ export interface RunArtifactMeta {
     >
   >;
   readonly metering?: ProviderMetering;
+  /** Safe public provider metadata copied from the canonical terminal result. */
+  readonly providerMeta?: Readonly<Record<string, unknown>>;
   readonly citations: readonly Citation[];
 }
 
@@ -335,10 +338,15 @@ export function parseMeta(
     value.usage === undefined ? undefined : parseUsage(value.usage);
   const normalizedMetering =
     value.metering === undefined ? undefined : parseMetering(value.metering);
+  const providerMeta =
+    value.providerMeta === undefined
+      ? undefined
+      : ProviderMetaSchema.safeParse(value.providerMeta);
   if (
     (value.tokenUsage !== undefined && token === undefined) ||
     (value.usage !== undefined && normalizedUsage === undefined) ||
-    (value.metering !== undefined && normalizedMetering === undefined)
+    (value.metering !== undefined && normalizedMetering === undefined) ||
+    (value.providerMeta !== undefined && !providerMeta?.success)
   ) {
     return null;
   }
@@ -355,6 +363,9 @@ export function parseMeta(
     ...(normalizedMetering === undefined
       ? {}
       : { metering: normalizedMetering }),
+    ...(providerMeta?.success
+      ? { providerMeta: structuredClone(providerMeta.data) }
+      : {}),
     citations,
   };
 }

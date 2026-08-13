@@ -58,6 +58,13 @@
       "costConfidence": "unknown"
     },
     {
+      "id": "valyu-research",
+      "tier": "deep-research",
+      "envVar": "VALYU_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
       "id": "perplexity-sonar-pro",
       "tier": "ai-grounded",
       "envVar": "PERPLEXITY_API_KEY",
@@ -240,6 +247,13 @@
       "costConfidence": "unknown"
     },
     {
+      "id": "valyu-search",
+      "tier": "raw-search",
+      "envVar": "VALYU_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
       "id": "claude",
       "tier": "llm",
       "envVar": "ANTHROPIC_API_KEY",
@@ -275,7 +289,8 @@
       "perplexity-deep-research",
       "perplexity-advanced-deep",
       "openai-research",
-      "gemini-deep"
+      "gemini-deep",
+      "valyu-research"
     ],
     "quick": [
       "gemini-grounded",
@@ -292,7 +307,8 @@
       "firecrawl-search",
       "searchapi",
       "serpapi",
-      "tavily"
+      "tavily",
+      "valyu-search"
     ],
     "fast": [
       "perplexity-sonar-pro",
@@ -325,6 +341,7 @@
       "perplexity-advanced-deep",
       "openai-research",
       "gemini-deep",
+      "valyu-research",
       "perplexity-sonar-pro",
       "gemini-grounded",
       "grok",
@@ -352,6 +369,7 @@
       "perplexity-advanced-deep",
       "openai-research",
       "gemini-deep",
+      "valyu-research",
       "perplexity-sonar-pro",
       "gemini-grounded",
       "grok",
@@ -369,6 +387,7 @@
       "searchapi",
       "serpapi",
       "tavily",
+      "valyu-search",
       "searchapi-chatgpt",
       "searchapi-gemini",
       "searchapi-perplexity",

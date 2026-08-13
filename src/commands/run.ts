@@ -369,12 +369,17 @@ export async function executeRun(
     let interrupted = false;
     let cancellation: Promise<void> | undefined;
     const coordinator = createNodeCoordinatorDependencies();
+    const cancellationBridge = createRegisteredProviderAttemptBridge(
+      preflight.prepared,
+      resolveExactProvider,
+    );
     const scheduleCancellation = (): void => {
       if (!stateCreated || !outputDir || cancellation) return;
       cancellation = cancelCanonicalRun({
         runs_root: baseDir,
         run_directory: outputDir,
         coordinator,
+        attempt_bridge: cancellationBridge,
       })
         .then(() => undefined)
         .catch(() => undefined);
@@ -439,6 +444,7 @@ export async function executeRun(
             runs_root: baseDir,
             run_directory: outputDir,
             coordinator,
+            attempt_bridge: cancellationBridge,
           })
         : undefined;
       if (!cancelled) {
@@ -469,6 +475,7 @@ export async function executeRun(
         runs_root: baseDir,
         run_directory: outputDir,
         coordinator,
+        attempt_bridge: cancellationBridge,
       });
       canonical = {
         ...canonical,

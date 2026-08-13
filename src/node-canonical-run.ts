@@ -647,6 +647,8 @@ export interface CancelCanonicalRunDependencies {
   readonly runs_root: string;
   readonly run_directory: string;
   readonly coordinator: CoordinatorDependencies;
+  /** Exact frozen bridge used for best-effort provider-side cancellation. */
+  readonly attempt_bridge?: ProviderAttemptBridgeDependencies;
   readonly max_compare_and_swap_attempts?: number;
 }
 
@@ -660,10 +662,77 @@ export async function cancelCanonicalRun(
   });
   const current = store.readManifest();
   if (current.coordination_state.status !== 'running') return current;
+  const cancellationObservations = new Map<
+    string,
+    Parameters<typeof recordDurableCustodyObservation>[2]
+  >();
+  if (dependencies.attempt_bridge) {
+    const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
+    for (const attempt of current.coordination_state.attempts) {
+      const handle = attempt.durable_handle;
+      if (
+        !handle ||
+        !['pending', 'running'].includes(handle.status) ||
+        !bridge.cancel
+      ) {
+        continue;
+      }
+      const plan =
+        current.coordination_state.profile_plans_by_identity[
+          providerIdentityKey(attempt.profile.identity)
+        ];
+      if (!plan) continue;
+      try {
+        const observed = await bridge.cancel(
+          {
+            attempt_id: attempt.attempt_id,
+            slot_id: attempt.slot_id,
+            profile: attempt.profile,
+            binding: plan.binding,
+            catalog_digest: current.coordination_state.catalog_digest,
+            query: attempt.query,
+            deadline_at: attempt.deadline_at,
+            delivery_lease_id: 'durable-cancel',
+            idempotency_key: `${current.request.request_id}:${attempt.attempt_id}`,
+          },
+          handle,
+        );
+        if (observed) {
+          cancellationObservations.set(attempt.attempt_id, observed);
+        }
+      } catch {
+        // Local cancellation still commits. The unchanged durable handle keeps
+        // possible remote custody visible for later reconciliation.
+      }
+    }
+  }
   await updateCoordinationState(
     store,
     current.request.request_id,
-    (state) => cancelCoordination(state, dependencies.coordinator),
+    (state) => {
+      // Completion may win while provider cancellation is in flight. Never
+      // replace that terminal outcome with a later local cancellation.
+      if (state.status !== 'running') return undefined;
+      let next = state;
+      for (const [attemptId, handle] of cancellationObservations) {
+        const attempt = next.attempts.find(
+          (candidate) => candidate.attempt_id === attemptId,
+        );
+        if (
+          !attempt?.durable_handle ||
+          !['submitted', 'running'].includes(attempt.status) ||
+          !['pending', 'running'].includes(attempt.durable_handle.status)
+        ) {
+          continue;
+        }
+        try {
+          next = recordDurableCustodyObservation(next, attemptId, handle);
+        } catch {
+          // A stale or mismatched observation cannot block local cancellation.
+        }
+      }
+      return cancelCoordination(next, dependencies.coordinator);
+    },
     dependencies.max_compare_and_swap_attempts,
   );
   store.persistTerminalResponse({
