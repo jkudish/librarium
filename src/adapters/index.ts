@@ -284,6 +284,9 @@ export async function initializeProviders(
     try {
       provider = descriptor.factory({
         providerConfig: normalizedConfig,
+        // Descriptor validation is the only configuration boundary. Factories
+        // receive its parsed value, never the raw option record.
+        options: options.success ? options.data : {},
         defaults: config.defaults,
       });
     } catch (error) {

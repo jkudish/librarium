@@ -1,16 +1,33 @@
-import { Marked } from 'marked';
-import type { RunArtifactPresentationSourceSummary } from '../node-run-artifact-presentation.js';
 import type {
   ClaimSupport,
   DeduplicatedSource,
   ProviderMetering,
   ProviderReport,
   ProviderUsage,
-  RunManifest,
   VerificationMetadata,
   VerificationUsageSummary,
 } from '../types.js';
+import {
+  answerBody,
+  escapeHtml,
+  renderMarkdown,
+  safeUrl,
+} from './html-report-sanitization.js';
+import {
+  createHtmlReportViewModel,
+  type HtmlReportInput,
+  type HtmlReportViewModel,
+} from './html-report-view-model.js';
 import { formatDuration, usageLabel } from './run-format.js';
+
+export {
+  answerBody,
+  escapeHtml,
+  renderMarkdown,
+  safeUrl,
+} from './html-report-sanitization.js';
+export type { HtmlReportInput } from './html-report-view-model.js';
+export { createHtmlReportViewModel } from './html-report-view-model.js';
 
 /**
  * Self-contained HTML report generator for a run directory.
@@ -20,90 +37,6 @@ import { formatDuration, usageLabel } from './run-format.js';
  * filesystem wrapper used by `run --html`, `librarium html`, browse, and
  * status --retrieve regeneration.
  */
-
-export interface HtmlReportInput {
-  manifest: Readonly<RunManifest>;
-  /** Recovery-view reports used for presentation. Defaults to manifest providers. */
-  reports?: readonly Readonly<ProviderReport>[];
-  /** Provider markdown contents keyed by report outputFile. */
-  providerContents: Readonly<Record<string, string>>;
-  sources: readonly Readonly<DeduplicatedSource>[];
-  /** Counts aligned with the presented source rows. Defaults to manifest facts. */
-  sourceSummary?: RunArtifactPresentationSourceSummary;
-  /**
-   * The synthesized grounded answer (answer.md body) when the run produced one.
-   * Leads the report as an "Answer" section before the provider tabs.
-   * provider/model come from the manifest's additive `answer` metadata.
-   */
-  answer?: { content: string; provider?: string; model?: string };
-}
-
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-/**
- * Only allow link schemes that cannot execute code when the report is opened
- * from file:// (provider output and citation URLs are untrusted).
- */
-export function safeUrl(url: string): string | null {
-  const trimmed = url.trim();
-  if (
-    !trimmed ||
-    Array.from(trimmed).some((character) => {
-      const code = character.charCodeAt(0);
-      return code < 32 || code === 127 || character === '\\';
-    })
-  )
-    return null;
-  if (/^\/\//.test(trimmed)) return null;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
-  try {
-    const parsed = new URL(trimmed);
-    return parsed.protocol === 'http:' ||
-      parsed.protocol === 'https:' ||
-      parsed.protocol === 'mailto:'
-      ? trimmed
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Markdown renderer that never passes raw HTML through (provider output is
- * untrusted), rejects unsafe link schemes, and adds rel="noopener" to
- * external links.
- */
-const markdown = new Marked({
-  renderer: {
-    html(token: { text: string }): string {
-      return escapeHtml(token.text);
-    },
-    link(token: {
-      href: string;
-      title?: string | null;
-      tokens: unknown;
-    }): string {
-      const title = token.title ? ` title="${escapeHtml(token.title)}"` : '';
-      const body = (this as any).parser.parseInline(token.tokens);
-      const href = safeUrl(token.href);
-      if (href === null) {
-        return `<span${title}>${body}</span>`;
-      }
-      return `<a href="${escapeHtml(href)}"${title} rel="noopener" target="_blank">${body}</a>`;
-    },
-  },
-});
-
-export function renderMarkdown(content: string): string {
-  return markdown.parse(content, { async: false }) as string;
-}
 
 function glyphFor(report: ProviderReport): { glyph: string; cls: string } {
   switch (report.status) {
@@ -211,23 +144,6 @@ function providerPanelBody(
     return `${errorBanner}${renderMarkdown(content)}`;
   }
   return '<p class="pending-note">No output file found for this provider.</p>';
-}
-
-/**
- * Strip answer.md's leading `# query` heading and its trailing `## Sources`
- * list so the report renders only the answer body: the query is already the
- * report's H1 and the deduped sources have their own tab. Defensive: if the
- * expected structure is absent, the content passes through untouched. Pure
- * string surgery on already-untrusted markdown; renderMarkdown still escapes
- * raw HTML and applies safeUrl to links.
- */
-export function answerBody(content: string): string {
-  let body = content.replace(/\r\n/g, '\n');
-  // Drop a single leading level-1 heading (the echoed query).
-  body = body.replace(/^\s*#[^\S\n]+[^\n]*\n+/, '');
-  // Drop a trailing "## Sources" section through end of file.
-  body = body.replace(/\n#{1,6}[^\S\n]+Sources\b[\s\S]*$/i, '\n');
-  return body.trim();
 }
 
 /**
@@ -631,12 +547,19 @@ const SCRIPT = `(function () {
 
 /** Pure generator: manifest plus file contents in, full HTML document out. */
 export function generateHtmlReport(input: HtmlReportInput): string {
-  const { manifest, providerContents, sources, answer } = input;
-  const reports = input.reports ?? manifest.providers;
-  const sourceSummary = input.sourceSummary ?? {
-    total: manifest.sources.total,
-    unique: sources.length,
-  };
+  return renderHtmlReport(createHtmlReportViewModel(input));
+}
+
+/** Render a pure, already-loaded report view. */
+export function renderHtmlReport(view: HtmlReportViewModel): string {
+  const {
+    manifest,
+    providerContents,
+    sources,
+    answer,
+    reports,
+    sourceSummary,
+  } = view;
 
   const answerHtml =
     answer && answer.content.trim().length > 0 ? answerSection(answer) : '';
@@ -645,8 +568,7 @@ export function generateHtmlReport(input: HtmlReportInput): string {
     : '';
 
   // Default active tab: first successful provider, else the first row.
-  const firstSuccess = reports.findIndex((r) => r.status === 'success');
-  const activeIndex = firstSuccess === -1 ? 0 : firstSuccess;
+  const { activeIndex } = view;
 
   const rows = reports
     .map((report, index) => providerRow(report, index, index === activeIndex))

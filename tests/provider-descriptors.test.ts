@@ -489,6 +489,44 @@ describe('built-in provider descriptors', () => {
     expect(request?.body).not.toHaveProperty('max_tool_calls');
   });
 
+  it('passes parsed background factory options through unchanged', async () => {
+    const httpClient = vi.fn(async () => ({
+      status: 200,
+      headers: new Headers(),
+      data: { id: 'response-1', status: 'queued' },
+    }));
+    const result = await initializeProviders({
+      credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+      httpClient,
+      providers: {
+        'openai-research': {
+          options: {
+            maxToolCalls: 3,
+            reasoningEffort: 'medium',
+            returnTokenBudget: 'unlimited',
+          },
+        },
+      },
+    });
+
+    expect(result.warnings).toEqual([]);
+    const openai = getProvider('openai-research');
+    expect(openai?.execution).toBe('background');
+    if (openai?.execution !== 'background') return;
+
+    await openai.submit('typed factory options', { timeout: 10 });
+    expect(httpClient).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/responses',
+      expect.objectContaining({
+        body: expect.objectContaining({
+          reasoning: { effort: 'medium' },
+          tools: [{ type: 'web_search', return_token_budget: 'unlimited' }],
+          max_tool_calls: 3,
+        }),
+      }),
+    );
+  });
+
   it('isolates an invalid provider option schema from other adapters', async () => {
     const httpClient = vi.fn(async () => ({
       status: 200,
