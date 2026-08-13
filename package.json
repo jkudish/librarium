@@ -31,6 +31,7 @@
     "build:sea": "node scripts/build-sea.mjs",
     "contracts:generate": "node scripts/generate-contract-snapshot.mjs",
     "benchmark": "node benchmark/cli.mjs",
+    "benchmark:performance": "node --experimental-strip-types benchmark/performance/cli.mjs",
     "benchmark:validate": "node benchmark/validate.mjs",
     "benchmark:ci": "node benchmark/ci.mjs",
     "dev": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup --watch",
