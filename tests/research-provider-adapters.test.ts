@@ -152,6 +152,16 @@ describe('durable research provider adapters', () => {
     for (const data of [
       exaRun({ status: 'mystery' }),
       exaRun({ status: 'completed', completedAt: '2026-08-12T12:01:00.000Z' }),
+      exaRun({
+        status: 'completed',
+        completedAt: '2026-08-12T12:01:00.000Z',
+        output: { structured: {}, grounding: [] },
+      }),
+      exaRun({
+        status: 'completed',
+        completedAt: '2026-08-12T12:01:00.000Z',
+        output: { text: '   ', structured: {}, grounding: [] },
+      }),
     ]) {
       const provider = new ExaResearchProvider({
         credentials: { env: { EXA_API_KEY: 'test-key' } },
@@ -167,6 +177,57 @@ describe('durable research provider adapters', () => {
       expect(result.error).toBeTruthy();
       expect(result.content).toBe('');
     }
+  });
+
+  it('accepts a non-empty Exa structured result without text', async () => {
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: async () =>
+        response(
+          exaRun({
+            status: 'completed',
+            completedAt: '2026-08-12T12:01:00.000Z',
+            output: {
+              structured: { conclusion: 'report' },
+              grounding: [],
+            },
+          }),
+        ) as never,
+    });
+    await expect(
+      provider.retrieve({
+        provider: provider.id,
+        taskId: 'agent_run_x',
+        query: 'q',
+        submittedAt: 0,
+        status: 'completed',
+      }),
+    ).resolves.toMatchObject({
+      content: '{\n  "conclusion": "report"\n}',
+    });
+  });
+
+  it('uses valid Exa text when the structured result is empty', async () => {
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: async () =>
+        response(
+          exaRun({
+            status: 'completed',
+            completedAt: '2026-08-12T12:01:00.000Z',
+            output: { text: 'report', structured: {}, grounding: [] },
+          }),
+        ) as never,
+    });
+    await expect(
+      provider.retrieve({
+        provider: provider.id,
+        taskId: 'agent_run_x',
+        query: 'q',
+        submittedAt: 0,
+        status: 'completed',
+      }),
+    ).resolves.toMatchObject({ content: 'report' });
   });
 
   it('preserves a valid Exa remote id from a malformed create response', async () => {
@@ -390,6 +451,10 @@ describe('durable research provider adapters', () => {
   it('rejects invalid structured and source options before any transport call', async () => {
     const invalidCases = [
       {
+        provider: 'exa' as const,
+        options: { outputSchema: {} },
+      },
+      {
         provider: 'tavily' as const,
         options: { outputSchema: { type: 'object' } },
       },
@@ -426,6 +491,7 @@ describe('durable research provider adapters', () => {
         },
         credentials: {
           env: {
+            EXA_API_KEY: 'test-key',
             TAVILY_API_KEY: 'test-key',
             YOU_COM_API_KEY: 'test-key',
           },
@@ -435,7 +501,9 @@ describe('durable research provider adapters', () => {
       const id =
         testCase.provider === 'tavily'
           ? 'tavily-research'
-          : 'you-research-background';
+          : testCase.provider === 'exa'
+            ? 'exa-research'
+            : 'you-research-background';
       const provider = getExactProvider(id);
       expect(provider?.configurationError).toBeTruthy();
       await expect(

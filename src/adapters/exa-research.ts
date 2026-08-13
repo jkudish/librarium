@@ -45,6 +45,7 @@ const ExaCitation = z.object({
   title: z.string().min(1).optional(),
   text: z.string().optional(),
 });
+const ExaStructuredOutput = z.record(z.string(), z.unknown());
 const ExaRun = z.object({
   id: ExaId,
   object: z.literal('agent_run').optional(),
@@ -54,7 +55,7 @@ const ExaRun = z.object({
   output: z
     .object({
       text: z.string().optional(),
-      structured: z.record(z.string(), z.unknown()).nullable().optional(),
+      structured: ExaStructuredOutput.nullable().optional(),
       grounding: z
         .array(z.object({ citations: z.array(ExaCitation).optional() }))
         .optional(),
@@ -245,8 +246,9 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
           run.error?.message ?? `Task is not complete: status=${run.status}`,
         );
       const structured = run.output?.structured;
+      const hasStructured = structured && Object.keys(structured).length > 0;
       const text = run.output?.text?.trim();
-      if (!text && !structured)
+      if (!text && !hasStructured)
         return this.error(
           start,
           'Exa Agent completed without non-empty output',

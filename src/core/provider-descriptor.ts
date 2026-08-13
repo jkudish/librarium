@@ -185,7 +185,12 @@ const exaResearchOptions = commonOptions
       .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'auto', 'max'])
       .optional(),
     systemPrompt: z.string().trim().min(1).optional(),
-    outputSchema: jsonObject.optional(),
+    outputSchema: jsonObject
+      .refine(
+        (schema) => Object.keys(schema).length > 0,
+        'outputSchema must be a non-empty object',
+      )
+      .optional(),
     maxCostDollars: z.number().positive().optional(),
   })
   .strict()
