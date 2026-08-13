@@ -18,6 +18,14 @@ import type {
 
 type BackgroundProvider = Extract<Provider, { execution: 'background' }>;
 
+export interface ProviderAttemptBridge extends AttemptExecutionPort {
+  /** Best-effort exact-binding remote cancellation for accepted durable work. */
+  cancel?(
+    launch: AttemptLaunch,
+    handle: DurableHandle,
+  ): Promise<DurableHandle | undefined>;
+}
+
 export interface ProviderAttemptBridgeDependencies {
   /** Exact binding lookup only: aliases and selector policy are absent. */
   resolveExactBinding(binding: AdapterBindingIdentity):
@@ -257,11 +265,30 @@ function resolveDurableProvider(
  */
 export function createProviderAttemptBridge(
   dependencies: ProviderAttemptBridgeDependencies,
-): AttemptExecutionPort {
+): ProviderAttemptBridge {
   const now = dependencies.now ?? Date.now;
   const wait = dependencies.wait ?? defaultWait;
 
   return {
+    async cancel(
+      launch: AttemptLaunch,
+      handle: DurableHandle,
+    ): Promise<DurableHandle | undefined> {
+      const provider = resolveDurableProvider(dependencies, launch);
+      if (
+        !provider?.cancel ||
+        !['pending', 'running'].includes(handle.status) ||
+        handle.provider.provider_id !== launch.profile.identity.provider_id ||
+        handle.provider.profile_id !== launch.profile.identity.profile_id
+      ) {
+        return undefined;
+      }
+      const task = taskFromDurableHandle(launch, handle, provider.id);
+      const cancelled = await provider.cancel(task);
+      return cancelled.status === 'cancelled'
+        ? observedHandle(handle, 'cancelled', now)
+        : undefined;
+    },
     async resume(
       launch: AttemptLaunch,
       handle: DurableHandle,
@@ -373,7 +400,9 @@ export function createProviderAttemptBridge(
           poll.status === 'running' ? 'running' : 'pending',
           now,
         );
-        if (poll.status === 'running') await context.running();
+        if (poll.status === 'running') {
+          await context.running(poll.progress, poll.message);
+        }
         if (context.mode === 'async') {
           return { kind: 'accepted', durable_handle: latestHandle };
         }
@@ -606,7 +635,7 @@ export function createProviderAttemptBridge(
         const poll = polled.value;
         if (poll.status === 'running') {
           latestHandle = observedHandle(latestHandle, 'running', now);
-          await context.running();
+          await context.running(poll.progress, poll.message);
         }
         if (poll.status === 'completed') {
           return retrieveCompletedTask(

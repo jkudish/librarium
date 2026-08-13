@@ -55,6 +55,12 @@ import { SearchApiPerplexityProvider } from './searchapi-perplexity.js';
 import { SerpApiProvider } from './serpapi.js';
 import { TavilyProvider } from './tavily.js';
 import { TavilyResearchProvider } from './tavily-research.js';
+import type {
+  ValyuResearchOptions,
+  ValyuSearchOptions,
+} from './valyu-options.js';
+import { ValyuResearchProvider } from './valyu-research.js';
+import { ValyuSearchProvider } from './valyu-search.js';
 import { YouResearchProvider } from './you-research.js';
 import { YouResearchBackgroundProvider } from './you-research-background.js';
 
@@ -186,6 +192,11 @@ function parallelOptions(
       ([key]) => !METERING_OPTION_KEYS.has(key),
     ),
   );
+}
+
+/** Options have already passed the authoritative descriptor schema. */
+function validatedOptions<T>(providerConfig: ProviderConfig | undefined): T {
+  return (providerConfig?.options ?? {}) as T;
 }
 
 const factories: Record<string, ProviderFactory> = {
@@ -357,6 +368,14 @@ const factories: Record<string, ProviderFactory> = {
         | 'chicago'
         | undefined,
     }),
+  'valyu-search': ({ providerConfig }) =>
+    new ValyuSearchProvider(
+      validatedOptions<ValyuSearchOptions>(providerConfig),
+    ),
+  'valyu-research': ({ providerConfig }) =>
+    new ValyuResearchProvider(
+      validatedOptions<ValyuResearchOptions>(providerConfig),
+    ),
   claude: (context) =>
     new ClaudeProvider({
       model: model('claude', context),

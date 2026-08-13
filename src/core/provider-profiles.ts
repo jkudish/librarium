@@ -1242,19 +1242,18 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   {
     provider_id: 'valyu',
     order: 610,
-    aliases: [],
+    aliases: ['valyu-search', 'valyu-research'],
     display: {
       family: 'Valyu',
       name: 'Valyu',
-      description:
-        'Valyu retrieval across web and licensed specialized corpora.',
-      best_for: 'Specialized datasets alongside ordinary web retrieval.',
-      setup_url: 'https://docs.valyu.network/',
+      description: 'First-party search and durable research from Valyu.',
+      best_for: 'Web and specialized-data discovery or cited research.',
+      setup_url: 'https://platform.valyu.ai',
     },
     credential: {
       env_var: 'VALYU_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       declare({
@@ -1267,12 +1266,11 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         corpora: ['web', 'specialized'],
         retrieval_method: 'search_endpoint',
         operator_id: 'valyu',
-        status: 'planned',
       }),
       declare({
         profile_id: 'research',
         selection_order: 160,
-        target: providerManagedTarget(),
+        target: configurableTarget('preset', 'standard'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web', 'specialized'],
@@ -1280,7 +1278,8 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         operator_id: 'valyu',
         invocation: 'background',
         resumability: 'durable',
-        status: 'planned',
+        workflows: ['deep'],
+        features: { web_search: 'always', remote_cancellation: true },
       }),
     ],
   },

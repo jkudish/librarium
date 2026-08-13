@@ -754,9 +754,16 @@ describe('private prepared execution runtime', () => {
   });
 
   it('keeps polling through transient errors and repeated running states before fallback', async () => {
-    const pollSteps: Array<Error | { status: 'running' | 'failed' }> = [
+    const pollSteps: Array<
+      | Error
+      | {
+          status: 'running' | 'failed';
+          progress?: number;
+          message?: string;
+        }
+    > = [
       new Error('Bearer secret-token'),
-      { status: 'running' },
+      { status: 'running', progress: 25, message: 'Reading sources' },
       { status: 'running' },
       { status: 'failed' },
     ];
@@ -823,6 +830,17 @@ describe('private prepared execution runtime', () => {
       },
     });
     expect(JSON.stringify(result.state)).not.toContain('secret-token');
+    expect(result.state.lifecycle).toContainEqual(
+      expect.objectContaining({
+        event_kind: 'attempt_progress',
+        data: { progress_percent: 25, message: 'Reading sources' },
+      }),
+    );
+    expect(
+      result.state.lifecycle.filter(
+        (event) => event.event_kind === 'attempt_progress',
+      ),
+    ).toHaveLength(1);
   });
 
   it('returns an async accepted handle without polling or retrieving', async () => {

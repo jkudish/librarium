@@ -168,6 +168,12 @@ function success(provider: string): ProviderResult {
       costUsd: 0.125,
       raw: { authorization: 'Bearer secret' },
     },
+    providerMeta: {
+      'fixture:artifact': {
+        kind: 'pdf',
+        url: 'https://example.com/report.pdf?expires=soon',
+      },
+    },
   };
 }
 
@@ -321,6 +327,18 @@ describe('canonical v3 run.json', () => {
     );
     const outputFile = presentation.reports[0]?.outputFile;
     expect(outputFile).toBeDefined();
+    const metaFile = presentation.reports[0]?.metaFile;
+    expect(metaFile).toBeDefined();
+    expect(
+      JSON.parse(readFileSync(join(runDirectory, metaFile as string), 'utf8')),
+    ).toMatchObject({
+      providerMeta: {
+        'fixture:artifact': {
+          kind: 'pdf',
+          url: 'https://example.com/report.pdf?expires=soon',
+        },
+      },
+    });
     const outside = join(root, 'outside.md');
     writeFileSync(outside, 'must not leak');
     rmSync(join(runDirectory, outputFile as string));
@@ -632,9 +650,13 @@ describe('canonical v3 run.json', () => {
     expect(retrieve).toHaveBeenCalledOnce();
   });
 
-  it('persists caller cancellation without launching fallback work', async () => {
+  it('attempts remote cancellation only for accepted pending/running work', async () => {
     const { root, runDirectory } = directories();
     const durableProfile = profile('durable', 'background');
+    const cancel = vi.fn(async (handle) => ({
+      status: 'cancelled' as const,
+      rawStatus: `cancelled:${handle.taskId}`,
+    }));
     const provider: Provider = {
       id: 'adapter-durable',
       displayName: 'Durable',
@@ -651,6 +673,7 @@ describe('canonical v3 run.json', () => {
       }),
       poll: vi.fn(),
       retrieve: vi.fn(),
+      cancel,
     };
     await runCanonicalPreparedExecution(prepared([durableProfile], 'async'), {
       runs_root: root,
@@ -664,10 +687,295 @@ describe('canonical v3 run.json', () => {
       runs_root: root,
       run_directory: runDirectory,
       coordinator: coordinator('cancel-'),
+      attempt_bridge: exactBindings([durableProfile], {
+        'adapter-durable': provider,
+      }),
     });
     expect(cancelled.coordination_state.status).toBe('cancelled');
     expect(cancelled.terminal_response?.status).toBe('failed');
     expect(cancelled.coordination_state.attempts).toHaveLength(1);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(
+      cancelled.coordination_state.attempts[0]?.durable_handle,
+    ).toMatchObject({ provider_task_id: 'task-1', status: 'cancelled' });
+    const repeated = await cancelCanonicalRun({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('repeat-'),
+      attempt_bridge: exactBindings([durableProfile], {
+        'adapter-durable': provider,
+      }),
+    });
+    expect(repeated.coordination_state.status).toBe('cancelled');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['no-hook', undefined],
+    [
+      'cancel-error',
+      vi.fn(async () => {
+        throw new Error('Authorization: Bearer cancel-secret');
+      }),
+    ],
+  ])(
+    'commits local cancellation for %s providers',
+    async (_case, cancelHook) => {
+      const { root, runDirectory } = directories();
+      const durableProfile = profile('durable', 'background');
+      const provider: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: async () => ({
+          provider: 'adapter-durable',
+          taskId: 'task-unchanged',
+          query: 'canonical persistence',
+          submittedAt: START,
+          status: 'running',
+        }),
+        poll: vi.fn(),
+        retrieve: vi.fn(),
+        ...(cancelHook && { cancel: cancelHook }),
+      };
+      const bindings = exactBindings([durableProfile], {
+        'adapter-durable': provider,
+      });
+      await runCanonicalPreparedExecution(prepared([durableProfile], 'async'), {
+        runs_root: root,
+        run_directory: runDirectory,
+        coordinator: coordinator(),
+        attempt_bridge: bindings,
+      });
+      const before = readCanonicalRunManifest(root, runDirectory)
+        .coordination_state.attempts[0]?.durable_handle;
+      const cancelled = await cancelCanonicalRun({
+        runs_root: root,
+        run_directory: runDirectory,
+        coordinator: coordinator('cancel-'),
+        attempt_bridge: bindings,
+      });
+      expect(cancelled.coordination_state.status).toBe('cancelled');
+      expect(cancelled.coordination_state.attempts[0]?.durable_handle).toEqual(
+        before,
+      );
+      expect(JSON.stringify(cancelled)).not.toContain('cancel-secret');
+    },
+  );
+
+  it('does not let late cancellation overwrite a terminal success', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('primary');
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => success('adapter-primary'),
+    };
+    const completed = await runCanonicalPreparedExecution(
+      prepared([selected]),
+      {
+        runs_root: root,
+        run_directory: runDirectory,
+        coordinator: coordinator(),
+        attempt_bridge: exactBindings([selected], {
+          'adapter-primary': provider,
+        }),
+      },
+    );
+    expect(completed.response?.status).toBe('succeeded');
+    const before = readFileSync(join(runDirectory, 'run.json'), 'utf8');
+    const cancelled = await cancelCanonicalRun({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('late-cancel-'),
+    });
+    expect(cancelled.coordination_state.status).toBe('succeeded');
+    expect(cancelled.terminal_response?.status).toBe('succeeded');
+    expect(readFileSync(join(runDirectory, 'run.json'), 'utf8')).toBe(before);
+  });
+
+  it('preserves terminal success when completion wins a cancellation race', async () => {
+    const { root, runDirectory } = directories();
+    const durableProfile = profile('durable', 'background');
+    let releaseCancel: (() => void) | undefined;
+    const cancelStarted = Promise.withResolvers<void>();
+    const cancel = vi.fn(
+      () =>
+        new Promise<{ status: 'cancelled' }>((resolve) => {
+          cancelStarted.resolve();
+          releaseCancel = () => resolve({ status: 'cancelled' });
+        }),
+    );
+    const provider: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: async () => ({
+        provider: 'adapter-durable',
+        taskId: 'task-race',
+        query: 'canonical persistence',
+        submittedAt: START,
+        status: 'running',
+      }),
+      poll: vi.fn(async () => ({ status: 'completed' as const })),
+      retrieve: vi.fn(async () => success('adapter-durable')),
+      cancel,
+    };
+    const bindings = exactBindings([durableProfile], {
+      'adapter-durable': provider,
+    });
+    await runCanonicalPreparedExecution(prepared([durableProfile], 'async'), {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: bindings,
+    });
+    const cancellation = cancelCanonicalRun({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('cancel-'),
+      attempt_bridge: bindings,
+    });
+    await cancelStarted.promise;
+    const completed = await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('resume-'),
+      attempt_bridge: bindings,
+    });
+    expect(completed.response?.status).toBe('succeeded');
+    releaseCancel?.();
+    const raced = await cancellation;
+    expect(raced.coordination_state.status).toBe('succeeded');
+    expect(raced.coordination_state.attempts[0]).toMatchObject({
+      status: 'succeeded',
+      durable_handle: { status: 'succeeded', provider_task_id: 'task-race' },
+    });
+    expect(raced.terminal_response?.status).toBe('succeeded');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('projects specialized Valyu provenance without widening public corpora', async () => {
+    const { root, runDirectory } = directories();
+    const selected: ExecutionProfile = {
+      ...profile('valyu'),
+      corpora: ['specialized'],
+    };
+    const provider: Provider = {
+      id: 'adapter-valyu',
+      displayName: 'Valyu',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => ({
+        provider: 'adapter-valyu',
+        tier: 'raw-search',
+        content: '# Specialized result',
+        durationMs: 7,
+        usage: { costUsd: 0.004 },
+        citations: [
+          {
+            provider: 'adapter-valyu',
+            url: 'https://example.com/study',
+            title: 'Study',
+            providerReference: 'valyu/medical/study-1',
+            sourceKind: 'web_page',
+            publisher: 'valyu/medical',
+          },
+        ],
+        providerMeta: {
+          'valyu:transaction_id': 'tx-specialized',
+          'valyu:dataset': 'valyu/medical',
+        },
+      }),
+    };
+    const result = await runCanonicalPreparedExecution(prepared([selected]), {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([selected], { 'adapter-valyu': provider }),
+    });
+    expect(result.response?.results[0]).toMatchObject({
+      provenance: { corpora: [] },
+      usage: { actual_cost: '0.004', currency: 'USD' },
+      citations: [
+        {
+          source: {
+            provider_reference: 'valyu/medical/study-1',
+            publisher: 'valyu/medical',
+          },
+        },
+      ],
+      provider_meta: {
+        'valyu:transaction_id': 'tx-specialized',
+        'valyu:dataset': 'valyu/medical',
+      },
+    });
+    expect(result.response?.results[0]?.provenance.corpora).toEqual([]);
+  });
+
+  it('projects specialized-only Valyu research without widening public corpora', async () => {
+    const { root, runDirectory } = directories();
+    const selected: ExecutionProfile = {
+      ...profile('valyu', 'background'),
+      result_kind: 'research_report',
+      corpora: ['specialized'],
+      retrieval_method: 'research_agent',
+    };
+    const provider: Provider = {
+      id: 'adapter-valyu',
+      displayName: 'Valyu',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: async () => ({
+        provider: 'adapter-valyu',
+        taskId: 'dr-specialized',
+        query: 'canonical persistence',
+        submittedAt: START,
+        status: 'completed',
+      }),
+      poll: vi.fn(),
+      retrieve: async () => ({
+        provider: 'adapter-valyu',
+        tier: 'deep-research',
+        content: '# Specialized research',
+        durationMs: 9,
+        citations: [
+          {
+            provider: 'adapter-valyu',
+            url: 'https://example.com/dataset-record',
+            providerReference: 'valyu/medical/record-1',
+          },
+        ],
+        providerMeta: { 'valyu:mode': 'heavy' },
+      }),
+    };
+    const result = await runCanonicalPreparedExecution(
+      prepared([selected], 'async'),
+      {
+        runs_root: root,
+        run_directory: runDirectory,
+        coordinator: coordinator(),
+        attempt_bridge: exactBindings([selected], {
+          'adapter-valyu': provider,
+        }),
+      },
+    );
+    expect(result.response?.results[0]).toMatchObject({
+      provenance: { result_kind: 'research_report', corpora: [] },
+      provider_meta: { 'valyu:mode': 'heavy' },
+    });
   });
 
   it('keeps acceptance-unknown state inert across restart', async () => {

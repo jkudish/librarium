@@ -111,6 +111,22 @@ const LegacyProviderResultSchema = z.strictObject({
       title: z.string().optional(),
       snippet: z.string().optional(),
       provider: z.string().min(1),
+      providerReference: z.string().min(1).optional(),
+      sourceKind: z
+        .enum([
+          'web_page',
+          'news_article',
+          'x_post',
+          'file',
+          'place',
+          'video',
+          'forum_post',
+          'unknown',
+        ])
+        .optional(),
+      publisher: z.string().min(1).optional(),
+      publishedAt: Rfc3339UtcSchema.optional(),
+      locator: z.string().min(1).optional(),
     }),
   ),
   durationMs: z.number().finite().nonnegative(),
@@ -304,14 +320,23 @@ export function normalizeProviderAttemptOutput(
       id: `citation-${index + 1}`,
       derivation: 'provider_reported' as const,
       source: {
-        // URL identity only — never invent tool provenance from the profile.
-        kind: classifySourceKindFromUrl(citation.url),
+        // Prefer an allowlisted provider fact, otherwise infer URL identity
+        // only — never invent tool provenance from the profile.
+        kind: citation.sourceKind ?? classifySourceKindFromUrl(citation.url),
         url: citation.url,
+        ...(citation.providerReference && {
+          provider_reference: citation.providerReference,
+        }),
         ...(nonEmpty(citation.title) && { title: nonEmpty(citation.title) }),
+        ...(nonEmpty(citation.publisher) && {
+          publisher: nonEmpty(citation.publisher),
+        }),
+        ...(citation.publishedAt && { published_at: citation.publishedAt }),
       },
       ...(nonEmpty(citation.snippet) && {
         excerpt: nonEmpty(citation.snippet),
       }),
+      ...(nonEmpty(citation.locator) && { locator: nonEmpty(citation.locator) }),
     })),
     ...(legacyUsage(legacy) && { usage: legacyUsage(legacy) }),
     provider_meta: providerMeta,
@@ -330,7 +355,16 @@ const SUPPORTED_RETRIEVAL_METHODS = new Set([
   'research_agent',
   'model_only',
 ]);
-const SUPPORTED_CORPORA = new Set(['web', 'news', 'x', 'files', 'places']);
+const SUPPORTED_CORPORA = new Set([
+  'web',
+  'news',
+  'x',
+  'files',
+  'places',
+  // Specialized is internal-only: project it by omitting it from the older
+  // terminal provenance vocabulary.
+  'specialized',
+]);
 
 export function assertResearchResponseProjectableProfile(
   profile: ExecutionProfile,
@@ -380,7 +414,10 @@ function terminalProvenance(
     retrieval_methods: [
       profile.retrieval_method as ResearchResult['provenance']['retrieval_methods'][number],
     ],
-    corpora: [...(profile.corpora as ResearchResult['provenance']['corpora'])],
+    corpora: profile.corpora.filter(
+      (corpus): corpus is ResearchResult['provenance']['corpora'][number] =>
+        corpus !== 'specialized',
+    ),
     observed_at: output.observed_at,
     ...(profile.collector_id && { collector: profile.collector_id }),
     ...(profile.surface_id && { surface: profile.surface_id }),

@@ -102,6 +102,15 @@ function validateConfiguredModel(
   const configured = normalizedConfiguredModel(model);
   if (!configured) return;
 
+  // Valyu chooses its documented research preset through validated provider
+  // options. A top-level model override cannot be serialized by its adapter.
+  if (adapterId === 'valyu-research') {
+    throw new TargetSelectionError(
+      'config_model_not_configurable',
+      'Valyu research presets must be selected with the mode option.',
+    );
+  }
+
   const target = profile.identity.target;
   const slot =
     target.primary.model_selection === 'configurable'
@@ -381,6 +390,61 @@ function parallelResearchTargetProjection(
   };
 }
 
+/** Valyu search corpus follows the validated search type and fast-mode rules. */
+function valyuSearchProjection(
+  profile: ExecutionProfile,
+  options: Record<string, unknown>,
+): ExecutionProfile {
+  const configuredSearchType = options.searchType;
+  const searchType =
+    options.fastMode === true && configuredSearchType !== 'news'
+      ? 'web'
+      : configuredSearchType;
+  const corpora: Corpus[] =
+    searchType === 'web'
+      ? ['web']
+      : searchType === 'news'
+        ? ['news']
+        : searchType === 'proprietary'
+          ? ['specialized']
+          : ['web', 'specialized'];
+  return { ...profile, corpora };
+}
+
+/** Valyu research mode and search backend are exact configured strategies. */
+function valyuResearchProjection(
+  profile: ExecutionProfile,
+  options: Record<string, unknown>,
+): ExecutionProfile {
+  const mode = typeof options.mode === 'string' ? options.mode : 'standard';
+  const nested =
+    options.search && typeof options.search === 'object'
+      ? (options.search as Record<string, unknown>)
+      : undefined;
+  const searchType = nested?.searchType;
+  const corpora: Corpus[] =
+    searchType === 'web'
+      ? ['web']
+      : searchType === 'proprietary'
+        ? ['specialized']
+        : ['web', 'specialized'];
+  return {
+    ...profile,
+    corpora,
+    identity: {
+      ...profile.identity,
+      target: {
+        ...profile.identity.target,
+        primary: {
+          model_selection: 'configurable',
+          kind: 'preset',
+          target_id: mode,
+        },
+      },
+    },
+  };
+}
+
 /**
  * Every implemented declaration appears here exactly once. Missing, duplicate,
  * and orphan bindings all fail deterministically at catalog construction.
@@ -504,6 +568,18 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     provider_id: 'tavily',
     profile_id: 'research',
     adapter_id: 'tavily-research',
+  },
+  {
+    provider_id: 'valyu',
+    profile_id: 'search',
+    adapter_id: 'valyu-search',
+    project: valyuSearchProjection,
+  },
+  {
+    provider_id: 'valyu',
+    profile_id: 'research',
+    adapter_id: 'valyu-research',
+    project: valyuResearchProjection,
   },
   {
     provider_id: 'searchapi-chatgpt',

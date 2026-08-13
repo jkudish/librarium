@@ -98,6 +98,10 @@ export interface CanonicalRunPresentation {
   readonly results: ProviderDispatchResult[];
   readonly sources: DeduplicatedSource[];
   readonly providerContents: Readonly<Record<string, string>>;
+  /** Safe canonical metadata keyed by derived provider artifact id. */
+  readonly providerMetadata: Readonly<
+    Record<string, Readonly<Record<string, unknown>>>
+  >;
   readonly totalCitations: number;
   readonly totalDurationMs: number;
   /** In-memory v2-shaped view for existing HTML/JSONL generators only. */
@@ -117,6 +121,7 @@ export function projectCanonicalRunPresentation(
   const reports: ProviderReport[] = [];
   const results: ProviderDispatchResult[] = [];
   const providerContents: Record<string, string> = {};
+  const providerMetadata: Record<string, Record<string, unknown>> = {};
 
   for (const slot of [...manifest.coordination_state.slots].sort(
     (left, right) => left.position - right.position,
@@ -242,6 +247,9 @@ export function projectCanonicalRunPresentation(
       ...(error && { error }),
       ...(fallbackFor && { fallbackFor }),
     });
+    if (projected?.provider_meta) {
+      providerMetadata[id] = structuredClone(projected.provider_meta);
+    }
   }
 
   const sources = deduplicateSources(
@@ -297,6 +305,7 @@ export function projectCanonicalRunPresentation(
     results,
     sources,
     providerContents,
+    providerMetadata,
     totalCitations,
     totalDurationMs,
     generatorManifest,
