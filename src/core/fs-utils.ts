@@ -37,7 +37,10 @@ interface SafeWriteFileOptions {
   readonly windowsMutationStage?: WindowsMutationStage;
 }
 
-const WINDOWS_ACL_TIMEOUT_MS = 15_000;
+// Cold Windows PowerShell + Add-Type startup can exceed 15 seconds on loaded
+// Node 22 CI runners. Keep the security transaction bounded without treating
+// normal first-use compilation as missing ACL support.
+const WINDOWS_ACL_TIMEOUT_MS = 30_000;
 const WINDOWS_ACL_MAX_BUFFER = 64 * 1024;
 
 const WINDOWS_NATIVE_FILE_TYPE = `
