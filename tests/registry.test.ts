@@ -169,10 +169,10 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 31 providers', async () => {
+  it('initializeProviders registers all 33 providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(31);
+    expect(all).toHaveLength(33);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -184,6 +184,8 @@ describe('registry', () => {
     expect(ids).toContain('gemini-deep');
     expect(ids).toContain('gemini-grounded');
     expect(ids).toContain('grok');
+    expect(ids).toContain('grok-x-only');
+    expect(ids).toContain('grok-combined');
     expect(ids).toContain('openrouter-online');
     expect(ids).toContain('perplexity-sonar-pro');
     expect(ids).toContain('brave-answers');
@@ -227,7 +229,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(26);
+    ).toHaveLength(28);
   });
 
   it('injects credentials into every background built-in', async () => {

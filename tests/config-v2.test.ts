@@ -571,7 +571,7 @@ describe('public v2 configuration migration', () => {
     const rejected = validateConfigV2(
       v2({
         groups: {
-          'custom:bad': ['grok-x-only/x', 'missing/search'],
+          'custom:bad': ['parallel/research', 'missing/search'],
         },
       }),
     );

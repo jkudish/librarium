@@ -29,7 +29,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(31);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(33);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -108,6 +108,8 @@ describe('built-in provider descriptors', () => {
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
       'perplexity-pro-search',
+      'grok-x-only',
+      'grok-combined',
     ]);
   });
 
@@ -165,6 +167,28 @@ describe('built-in provider descriptors', () => {
         ({ id }) => id === 'perplexity-pro-search',
       )?.optionsSchema.safeParse({ undocumented: true }).success,
     ).toBe(false);
+    for (const id of ['grok', 'grok-x-only', 'grok-combined'] as const) {
+      expect(
+        BUILTIN_PROVIDER_DESCRIPTORS.find(
+          ({ id: candidate }) => candidate === id,
+        )?.optionsSchema.safeParse({ undocumented: true }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('blocks invalid Grok options before HTTP without disabling other adapters', async () => {
+    const httpClient = vi.fn();
+    const result = await initializeProviders({
+      httpClient,
+      providers: { grok: { options: { allowedXHandles: ['xai'] } } },
+    });
+
+    expect(result.warnings.join('\n')).toContain('Invalid options for grok');
+    await expect(
+      getProvider('grok')?.execute('must not run', { timeout: 5 }),
+    ).resolves.toMatchObject({ error: 'Invalid options for grok' });
+    expect(getProvider('grok-x-only')).toBeDefined();
+    expect(httpClient).not.toHaveBeenCalled();
   });
 
   it('fails closed on invalid SearchAPI zeroRetention options', async () => {

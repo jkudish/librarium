@@ -49,7 +49,7 @@ describe('default groups -- llm tier', () => {
     }
   });
 
-  it('includes Grok only in visibility, comprehensive, and all', () => {
+  it('includes Grok web in visibility, comprehensive, and all', () => {
     expect(DEFAULT_GROUPS.visibility).toContain('grok');
     expect(DEFAULT_GROUPS.comprehensive).toContain('grok');
     expect(DEFAULT_GROUPS.all).toContain('grok');
@@ -59,11 +59,23 @@ describe('default groups -- llm tier', () => {
 });
 
 describe('default groups -- grok membership invariant', () => {
-  it('keeps grok out of every group except visibility, comprehensive, and all', () => {
+  it('keeps grok web out of every group except visibility, comprehensive, and all', () => {
     const allowed = new Set(['visibility', 'comprehensive', 'all']);
     for (const [group, members] of Object.entries(DEFAULT_GROUPS)) {
       if (allowed.has(group)) expect(members).toContain('grok');
       else expect(members).not.toContain('grok');
+    }
+  });
+
+  it('adds X-only and combined only to comprehensive and all, never visibility', () => {
+    for (const id of ['grok-x-only', 'grok-combined'] as const) {
+      expect(DEFAULT_GROUPS.comprehensive).toContain(id);
+      expect(DEFAULT_GROUPS.all).toContain(id);
+      expect(DEFAULT_GROUPS.visibility).not.toContain(id);
+      expect(DEFAULT_GROUPS.quick).not.toContain(id);
+      expect(DEFAULT_GROUPS.fast).not.toContain(id);
+      expect(DEFAULT_GROUPS.deep).not.toContain(id);
+      expect(DEFAULT_GROUPS.llm).not.toContain(id);
     }
   });
 });
@@ -91,9 +103,9 @@ describe('default groups -- visibility expansion', () => {
     }
   });
 
-  it('has eight default groups and all 27 grounded providers', () => {
+  it('has eight default groups and all 29 grounded providers', () => {
     expect(Object.keys(DEFAULT_GROUPS)).toHaveLength(8);
-    expect(DEFAULT_GROUPS.all).toHaveLength(27);
+    expect(DEFAULT_GROUPS.all).toHaveLength(29);
   });
 });
 

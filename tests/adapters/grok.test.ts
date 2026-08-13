@@ -1,5 +1,14 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import { GrokProvider } from '../../src/adapters/grok.js';
+import {
+  GrokCombinedProvider,
+  GrokProvider,
+  GrokXOnlyProvider,
+} from '../../src/adapters/grok.js';
+import {
+  buildGrokRequestBody,
+  classifyGrokSourceKind,
+  validateGrokOptions,
+} from '../../src/adapters/grok-responses.js';
 
 vi.mock('../../src/constants.js', async (importOriginal) => {
   const original =
@@ -167,14 +176,13 @@ describe('GrokProvider', () => {
     const result = await provider().execute('ground this', { timeout: 10 });
 
     expect(result.tokenUsage).toEqual({ input: 120, output: 45 });
-    expect(result.usage).toEqual({
-      inputTokens: 120,
-      outputTokens: 45,
-      totalTokens: 165,
-      raw: {
-        usage,
-        server_side_tool_usage: serverSideToolUsage,
-      },
+    expect(result.usage?.inputTokens).toBe(120);
+    expect(result.usage?.outputTokens).toBe(45);
+    expect(result.usage?.totalTokens).toBe(165);
+    expect(result.usage?.raw).toMatchObject({
+      strategy: 'web',
+      usage,
+      server_side_tool_usage: serverSideToolUsage,
     });
     expect(result.usage?.costUsd).toBeUndefined();
   });
@@ -199,7 +207,7 @@ describe('GrokProvider', () => {
     const result = await provider().execute('ground this', { timeout: 10 });
 
     expect(result.usage?.costUsd).toBeCloseTo(0.0300244, 10);
-    expect(result.usage?.raw).toEqual({ usage });
+    expect(result.usage?.raw).toMatchObject({ strategy: 'web', usage });
   });
 
   it('sends only the Responses API web_search tool with authorization', async () => {
@@ -393,5 +401,189 @@ describe('GrokProvider — live-verified edge cases', () => {
     expect(result.error).toBeUndefined();
     expect(result.citations).toHaveLength(1);
     expect(result.citations[0]?.url).toBe('https://example.com/ok');
+  });
+});
+
+describe('Grok search strategies', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('classifies citation source kinds from URL identity only', () => {
+    expect(classifyGrokSourceKind('https://x.com/xai/status/123')).toBe(
+      'x_post',
+    );
+    expect(classifyGrokSourceKind('https://twitter.com/i/status/99')).toBe(
+      'x_post',
+    );
+    expect(classifyGrokSourceKind('https://example.com/report')).toBe(
+      'web_page',
+    );
+    expect(classifyGrokSourceKind('https://x.com/xai')).toBe('unknown');
+    expect(classifyGrokSourceKind('not-a-url')).toBe('unknown');
+  });
+
+  it('validates handle maximums and mutual exclusions before launch', () => {
+    expect(() =>
+      validateGrokOptions('x', {
+        allowedXHandles: Array.from({ length: 21 }, (_, i) => `user${i}`),
+      }),
+    ).toThrow(/at most 20/);
+    expect(() =>
+      validateGrokOptions('x', {
+        allowedXHandles: ['elonmusk'],
+        excludedXHandles: ['xai'],
+      }),
+    ).toThrow(/mutually exclusive/);
+    expect(() =>
+      validateGrokOptions('web', {
+        allowedDomains: ['x.ai'],
+        excludedDomains: ['example.com'],
+      }),
+    ).toThrow(/mutually exclusive/);
+    expect(() =>
+      validateGrokOptions('web', {
+        allowedDomains: Array.from({ length: 6 }, (_, i) => `site${i}.test`),
+      }),
+    ).toThrow(/at most 5/);
+    expect(() =>
+      validateGrokOptions('web', { allowedXHandles: ['elonmusk'] }),
+    ).toThrow(/not supported by the web/);
+    expect(() => validateGrokOptions('x', { undocumented: true })).toThrow(
+      /Unknown Grok option: undocumented/,
+    );
+    expect(() => validateGrokOptions('x', { enableImageSearch: true })).toThrow(
+      /not supported by the x/,
+    );
+    expect(() =>
+      validateGrokOptions('web', { enableVideoUnderstanding: true }),
+    ).toThrow(/not supported by the web/);
+    expect(() => validateGrokOptions('x', { maxTurns: 0 })).toThrow(
+      /positive integer/,
+    );
+    expect(() => validateGrokOptions('x', { perRequestUsd: 0 })).toThrow(
+      /positive number/,
+    );
+    expect(() =>
+      validateGrokOptions('x', {
+        fromDate: '2025-10-10',
+        toDate: '2025-10-01',
+      }),
+    ).toThrow(/fromDate must be on or before toDate/);
+    expect(() => validateGrokOptions('x', { fromDate: '2025-02-29' })).toThrow(
+      /ISO8601 date/,
+    );
+    expect(() =>
+      validateGrokOptions('web', { allowedDomains: ['https://x.ai/path'] }),
+    ).toThrow(/valid hostname/);
+    expect(
+      validateGrokOptions('x', {
+        allowedXHandles: ['@ElonMusk'],
+        fromDate: '2025-10-01',
+        toDate: '2025-10-10',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        allowedXHandles: ['ElonMusk'],
+        fromDate: '2025-10-01',
+        toDate: '2025-10-10',
+      }),
+    );
+  });
+
+  it('builds X-only and combined tool arrays from immutable strategies', () => {
+    expect(
+      buildGrokRequestBody('grok-4.5', 'q', 'x', {
+        allowedXHandles: ['elonmusk'],
+        maxTurns: 3,
+      }),
+    ).toEqual({
+      model: 'grok-4.5',
+      input: [{ role: 'user', content: 'q' }],
+      tools: [{ type: 'x_search', allowed_x_handles: ['elonmusk'] }],
+      max_turns: 3,
+    });
+
+    expect(
+      buildGrokRequestBody('grok-4.5', 'q', 'combined', {
+        allowedDomains: ['x.ai'],
+        enableImageUnderstanding: true,
+        enableVideoUnderstanding: true,
+        maxOutputTokens: 2048,
+      }),
+    ).toEqual({
+      model: 'grok-4.5',
+      input: [{ role: 'user', content: 'q' }],
+      tools: [
+        {
+          type: 'web_search',
+          filters: { allowed_domains: ['x.ai'] },
+          enable_image_understanding: true,
+        },
+        {
+          type: 'x_search',
+          enable_image_understanding: true,
+          enable_video_understanding: true,
+        },
+      ],
+      max_output_tokens: 2048,
+    });
+  });
+
+  it('sends only x_search for the X-only adapter', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, outputResponse()));
+    globalThis.fetch = fetchMock;
+
+    const adapter = new GrokXOnlyProvider({
+      credentials: { env: { XAI_API_KEY: 'xai-test-key' } },
+      searchOptions: { allowedXHandles: ['xai'] },
+    });
+    const result = await adapter.execute('x only', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.provider).toBe('grok-x-only');
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(body.tools).toEqual([
+      { type: 'x_search', allowed_x_handles: ['xai'] },
+    ]);
+    expect(JSON.stringify(body.tools)).not.toContain('web_search');
+  });
+
+  it('sends both tools once for the combined adapter', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, outputResponse()));
+    globalThis.fetch = fetchMock;
+
+    const adapter = new GrokCombinedProvider({
+      credentials: { env: { XAI_API_KEY: 'xai-test-key' } },
+    });
+    const result = await adapter.execute('combined', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.provider).toBe('grok-combined');
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string,
+    );
+    expect(body.tools).toEqual([{ type: 'web_search' }, { type: 'x_search' }]);
+  });
+
+  it('rejects invalid search options at construction time', () => {
+    expect(
+      () =>
+        new GrokProvider({
+          searchOptions: { allowedXHandles: ['xai'] },
+        }),
+    ).toThrow(/not supported by the web/);
   });
 });

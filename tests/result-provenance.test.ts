@@ -16,6 +16,7 @@ import {
   normalizedSourceKey,
   upstreamCorrelation,
 } from '../src/core/result-provenance.js';
+import { classifySourceKindFromUrl } from '../src/core/source-kind.js';
 
 function catalog() {
   const providerConfigs = Object.fromEntries(
@@ -194,6 +195,24 @@ describe('result provenance -- Grok combined execution', () => {
       profileOf('grok-combined', 'combined').identity.provider_id,
     ];
     expect(new Set(ids).size).toBe(3);
+  });
+});
+
+describe('result provenance -- URL source identity', () => {
+  it('classifies only unambiguous X posts and HTTP(S) web pages', () => {
+    expect(classifySourceKindFromUrl('https://x.com/xai/status/123')).toBe(
+      'x_post',
+    );
+    expect(
+      classifySourceKindFromUrl('https://x.com/xai/status/123not-a-status'),
+    ).toBe('unknown');
+    expect(classifySourceKindFromUrl('https://x.com/xai')).toBe('unknown');
+    expect(classifySourceKindFromUrl('https://example.com/report')).toBe(
+      'web_page',
+    );
+    expect(classifySourceKindFromUrl('mailto:editor@example.com')).toBe(
+      'unknown',
+    );
   });
 });
 

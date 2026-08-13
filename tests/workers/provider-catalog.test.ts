@@ -35,8 +35,8 @@ describe('provider catalog in workerd', () => {
     const catalog = workerCatalog();
     expect(catalog.entries).toHaveLength(34);
     expect(catalog.resolved).toHaveLength(38);
-    expect(catalog.profiles).toHaveLength(31);
-    expect(catalog.workflow('all').members).toHaveLength(31);
+    expect(catalog.profiles).toHaveLength(33);
+    expect(catalog.workflow('all').members).toHaveLength(33);
     expect(catalog.workflow('quick').members).toHaveLength(5);
     expect(catalog.workflow('visibility').members).toHaveLength(9);
     expect(catalog.workflow('deep').members).toHaveLength(5);

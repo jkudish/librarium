@@ -143,7 +143,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 31 built-in provider adapters organized into four tiers:
+Librarium ships with 33 built-in provider adapters organized into four tiers:
 
 The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
 
@@ -167,6 +167,8 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Perplexity Pro Search | `perplexity-pro-search` | ai-grounded | `PERPLEXITY_API_KEY` |
 | Gemini Grounded Search | `gemini-grounded` | ai-grounded | `GEMINI_API_KEY` |
 | Grok (xAI) | `grok` | ai-grounded | `XAI_API_KEY` |
+| Grok X Search (xAI) | `grok-x-only` | ai-grounded | `XAI_API_KEY` |
+| Grok Combined Search (xAI) | `grok-combined` | ai-grounded | `XAI_API_KEY` |
 | ChatGPT Search (OpenRouter) | `openrouter-online` | ai-grounded | `OPENROUTER_API_KEY` |
 | Brave AI Answers | `brave-answers` | ai-grounded | `BRAVE_API_KEY` |
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
@@ -814,9 +816,9 @@ Groups are named collections of provider IDs. Librarium ships with eight default
 | `raw` | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Traditional search results |
 | `fast` | perplexity-sonar-pro, gemini-grounded, openrouter-online, perplexity-search, brave-answers, exa, kagi-fastgpt, jina-search, brave-search, firecrawl-search, tavily | Quick results from multiple tiers |
 | `visibility` | searchapi-chatgpt, searchapi-gemini, searchapi-perplexity, searchapi-google-ai-mode, searchapi-bing-copilot, searchapi-google-ai-overview, perplexity-sonar-pro, gemini-grounded, grok | Explicit nine-surface answer visibility comparison |
-| `comprehensive` | All deep-research + all ai-grounded (including Grok) | Deep + AI-grounded combined |
+| `comprehensive` | All deep-research + all ai-grounded (including Grok web, X, and combined) | Deep + AI-grounded combined |
 | `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
-| `all` | All 27 grounded providers (including Grok) | Maximum grounded coverage (excludes the `llm` tier) |
+| `all` | All 29 grounded providers (including Grok web, X, and combined) | Maximum grounded coverage (excludes the `llm` tier) |
 
 `visibility`, `comprehensive`, and `all` are explicit cost boundaries. Choosing
 one may run credentialed members whose setup descriptor is opt-in and whose

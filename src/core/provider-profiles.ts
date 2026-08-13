@@ -691,14 +691,12 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'x',
         selection_order: 240,
-        // Planned: #2346/#2544 audit the target before binding it.
-        target: providerManagedTarget('model'),
+        target: configurableTarget('model', 'grok-4.5'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['x'],
         retrieval_method: 'model_search_tool',
         operator_id: 'xai',
-        status: 'planned',
       }),
     ],
   },
@@ -718,7 +716,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'combined',
         selection_order: 250,
-        target: providerManagedTarget('model'),
+        target: configurableTarget('model', 'grok-4.5'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         // One attempt, one result, one metering record, two corpora. This is
@@ -726,7 +724,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         corpora: ['web', 'x'],
         retrieval_method: 'model_search_tool',
         operator_id: 'xai',
-        status: 'planned',
+        features: { web_search: 'always' },
       }),
     ],
   },

@@ -23,6 +23,7 @@ import type {
   CoordinatorSlotState,
   CoordinatorState,
 } from './coordinator.js';
+import { classifySourceKindFromUrl } from './source-kind.js';
 
 const CanonicalOutputBase = {
   result_id: OpaqueIdSchema,
@@ -289,7 +290,8 @@ export function normalizeProviderAttemptOutput(
       id: `citation-${index + 1}`,
       derivation: 'provider_reported' as const,
       source: {
-        kind: 'unknown' as const,
+        // URL identity only — never invent tool provenance from the profile.
+        kind: classifySourceKindFromUrl(citation.url),
         url: citation.url,
         ...(nonEmpty(citation.title) && { title: nonEmpty(citation.title) }),
       },
