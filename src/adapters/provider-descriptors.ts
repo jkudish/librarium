@@ -23,6 +23,11 @@ import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
 import { OpenAIChatProvider } from './openai-chat.js';
 import { OpenAIResearchProvider } from './openai-research.js';
+import type {
+  OpenRouterDataCollection,
+  OpenRouterProviderOptions,
+  OpenRouterReasoningEffort,
+} from './openrouter.js';
 import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
 import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
@@ -82,6 +87,46 @@ function webSearch(context: BuiltInProviderFactoryContext): boolean {
   return typeof configured === 'boolean'
     ? configured
     : (context.defaults?.llmWebSearch ?? true);
+}
+
+function openRouterOptions(
+  context: BuiltInProviderFactoryContext,
+): Pick<
+  OpenRouterProviderOptions,
+  | 'providerOrder'
+  | 'allowFallbacks'
+  | 'requireParameters'
+  | 'dataCollection'
+  | 'zdr'
+  | 'reasoningEffort'
+  | 'reasoningMaxTokens'
+  | 'reasoningExclude'
+> {
+  const options = context.providerConfig?.options ?? {};
+  return {
+    ...(Array.isArray(options.providerOrder) && {
+      providerOrder: options.providerOrder as string[],
+    }),
+    ...(typeof options.allowFallbacks === 'boolean' && {
+      allowFallbacks: options.allowFallbacks,
+    }),
+    ...(typeof options.requireParameters === 'boolean' && {
+      requireParameters: options.requireParameters,
+    }),
+    ...(options.dataCollection === 'allow' || options.dataCollection === 'deny'
+      ? { dataCollection: options.dataCollection as OpenRouterDataCollection }
+      : {}),
+    ...(typeof options.zdr === 'boolean' && { zdr: options.zdr }),
+    ...(typeof options.reasoningEffort === 'string' && {
+      reasoningEffort: options.reasoningEffort as OpenRouterReasoningEffort,
+    }),
+    ...(typeof options.reasoningMaxTokens === 'number' && {
+      reasoningMaxTokens: options.reasoningMaxTokens,
+    }),
+    ...(typeof options.reasoningExclude === 'boolean' && {
+      reasoningExclude: options.reasoningExclude,
+    }),
+  };
 }
 
 function searchApiZeroRetention(
@@ -155,6 +200,7 @@ const factories: Record<string, ProviderFactory> = {
   'openrouter-online': (context) =>
     new OpenRouterOnlineProvider({
       model: model('openrouter-online', context),
+      ...openRouterOptions(context),
     }),
   'brave-answers': () => new BraveAnswersProvider(),
   exa: () => new ExaProvider(),
@@ -229,6 +275,7 @@ const factories: Record<string, ProviderFactory> = {
     new OpenRouterChatProvider({
       model: model('openrouter-chat', context),
       webSearch: webSearch(context),
+      ...openRouterOptions(context),
     }),
 };
 

@@ -385,7 +385,7 @@ describe('llm providers', () => {
 
   // --- OpenRouter chat (with cost accounting) ---
 
-  it('calls OpenRouter chat with web search, usage accounting, and citations', async () => {
+  it('calls OpenRouter chat with documented web search and citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         model: 'openai/gpt-5.6-terra',
@@ -448,12 +448,11 @@ describe('llm providers', () => {
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'openai/gpt-5.6-terra',
       messages: [{ role: 'user', content: 'hello' }],
-      tools: [{ type: 'openrouter:web_search' }],
-      usage: { include: true },
+      plugins: [{ id: 'web' }],
     });
   });
 
-  it('can disable OpenRouter web search and strips a legacy online suffix', async () => {
+  it('can disable OpenRouter web search without mutating the selected model', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         model: 'anthropic/claude-sonnet-5',
@@ -463,7 +462,7 @@ describe('llm providers', () => {
     globalThis.fetch = fetchMock;
 
     const provider = new OpenRouterChatProvider({
-      model: 'anthropic/claude-sonnet-5:online',
+      model: 'anthropic/claude-sonnet-5',
       webSearch: false,
       credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
     });
@@ -474,7 +473,102 @@ describe('llm providers', () => {
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'anthropic/claude-sonnet-5',
       messages: [{ role: 'user', content: 'hello' }],
-      usage: { include: true },
+    });
+  });
+
+  it('sends only documented OpenRouter routing, privacy, and reasoning fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'openai/gpt-5.6-terra',
+        choices: [{ message: { content: 'Configured answer.' } }],
+        usage: {
+          prompt_tokens: 4,
+          completion_tokens: 8,
+          total_tokens: 12,
+          prompt_tokens_details: { cached_tokens: 2, cache_write_tokens: 1 },
+          completion_tokens_details: { reasoning_tokens: 3 },
+          server_tool_use: { web_search_requests: 1 },
+          cost: 0.000123,
+        },
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new OpenRouterChatProvider({
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+      providerOrder: ['openai', 'azure'],
+      allowFallbacks: false,
+      requireParameters: true,
+      dataCollection: 'deny',
+      reasoningEffort: 'high',
+      reasoningExclude: true,
+    });
+    const result = await provider.execute('hello', { timeout: 10 });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({
+      model: 'openai/gpt-5.6-terra',
+      messages: [{ role: 'user', content: 'hello' }],
+      plugins: [{ id: 'web' }],
+      provider: {
+        order: ['openai', 'azure'],
+        allow_fallbacks: false,
+        require_parameters: true,
+        data_collection: 'deny',
+      },
+      reasoning: { effort: 'high', exclude: true },
+    });
+    expect(result.usage).toMatchObject({
+      cacheReadInputTokens: 2,
+      cacheWriteInputTokens: 1,
+      reasoningTokens: 3,
+    });
+    expect(result.providerMeta).toEqual({
+      'openrouter:profile': 'chat',
+      'openrouter:search': { enabled: true, requests: 1 },
+      'openrouter:routing': {
+        order: ['openai', 'azure'],
+        allow_fallbacks: false,
+        require_parameters: true,
+        data_collection: 'deny',
+      },
+      'openrouter:reasoning': { effort: 'high', exclude: true, tokens: 3 },
+    });
+  });
+
+  it('rejects contradictory reasoning choices before OpenRouter dispatch', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    expect(
+      () =>
+        new OpenRouterChatProvider({
+          reasoningEffort: 'high',
+          reasoningMaxTokens: 100,
+          credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+        }),
+    ).toThrow('mutually exclusive');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('allows OpenRouter ZDR only when optional web search is disabled', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        choices: [{ message: { content: 'Private answer.' } }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new OpenRouterChatProvider({
+      webSearch: false,
+      zdr: true,
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+    });
+    await provider.execute('hello', { timeout: 10 });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({
+      model: 'openai/gpt-5.6-terra',
+      messages: [{ role: 'user', content: 'hello' }],
+      provider: { zdr: true },
     });
   });
 

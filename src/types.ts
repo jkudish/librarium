@@ -37,6 +37,9 @@ export interface ProviderUsage {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  cacheWriteInputTokens?: number;
+  cacheReadInputTokens?: number;
+  reasoningTokens?: number;
   costUsd?: number;
   /** Provider-reported billable units, such as credits. Never estimated. */
   billableUnits?: number;
@@ -136,6 +139,8 @@ export interface ProviderResult {
   tokenUsage?: { input?: number; output?: number };
   usage?: ProviderUsage;
   metering?: ProviderMetering;
+  /** Safe provider-specific observations and configured policy state. */
+  providerMeta?: Record<string, unknown>;
   error?: string;
   /** Fail closed when this result must not trigger a configured fallback. */
   preventFallback?: true;
