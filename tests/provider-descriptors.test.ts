@@ -210,6 +210,56 @@ describe('built-in provider descriptors', () => {
     expect(chat?.safeParse({ profile: 'grounded' }).success).toBe(false);
   });
 
+  it('wires documented OpenRouter policies through its factory', async () => {
+    const httpClient = vi.fn(async () => ({
+      status: 200,
+      headers: {},
+      data: { choices: [{ message: { content: 'Configured answer.' } }] },
+    }));
+    const result = await initializeProviders({
+      credentials: { env: { OPENROUTER_API_KEY: 'synthetic-key' } },
+      httpClient,
+      providers: {
+        'openrouter-chat': {
+          options: {
+            webSearch: false,
+            providerOrder: ['openai', 'azure'],
+            allowFallbacks: false,
+            requireParameters: true,
+            dataCollection: 'deny',
+            zdr: true,
+            reasoningMaxTokens: 256,
+            reasoningExclude: true,
+          },
+        },
+      },
+    });
+
+    expect(result.warnings).toEqual([]);
+    await expect(
+      getProvider('openrouter-chat')?.execute('factory policy check', {
+        timeout: 5,
+      }),
+    ).resolves.toMatchObject({ content: 'Configured answer.' });
+    expect(httpClient).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/chat/completions',
+      expect.objectContaining({
+        body: {
+          model: 'openai/gpt-5.6-terra',
+          messages: [{ role: 'user', content: 'factory policy check' }],
+          provider: {
+            order: ['openai', 'azure'],
+            allow_fallbacks: false,
+            require_parameters: true,
+            data_collection: 'deny',
+            zdr: true,
+          },
+          reasoning: { max_tokens: 256, exclude: true },
+        },
+      }),
+    );
+  });
+
   it('fails closed on invalid SearchAPI zeroRetention options', async () => {
     const httpClient = vi.fn();
     const result = await initializeProviders({
