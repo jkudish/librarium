@@ -115,6 +115,33 @@ function nestedObjects(count: number): Record<string, unknown> {
 }
 
 describe('public v2 configuration migration', () => {
+  it('never grants trust to custom providers during v1 migration', () => {
+    const custom = customSource('acme');
+    const source = v1({
+      customProviders: {
+        acme: {
+          type: custom.type,
+          module: custom.module,
+          executionProfile: {
+            bindingId: custom.execution_profile.binding_id,
+            profile: custom.execution_profile.profile,
+          },
+        },
+      },
+      providers: { acme: { enabled: true } },
+    });
+
+    const result = migrateConfig({ global: source });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'config_custom_provider_untrusted' }),
+    );
+    expect(JSON.stringify(result)).not.toContain(
+      'trusted_provider_ids":["acme',
+    );
+  });
+
   it('migrates exact v1 defaults, mixed mode, costs, and runtime fields', () => {
     const result = migrateConfig({
       global: v1({
