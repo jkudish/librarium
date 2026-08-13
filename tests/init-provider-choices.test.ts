@@ -23,6 +23,12 @@ const NEW_OPT_IN_PROVIDERS = [
   'perplexity-pro-search',
 ] as const;
 
+const PARALLEL_OPT_IN_PROVIDERS = [
+  'parallel-research',
+  'parallel-chat',
+  'parallel-search',
+] as const;
+
 describe('isLlmTierProvider', () => {
   it('identifies the four opt-in llm providers', () => {
     for (const id of LLM_PROVIDERS) {
@@ -79,6 +85,20 @@ describe('computeInitProviderChoices (init opt-in policy)', () => {
       const choice = choices.find((candidate) => candidate.id === id);
       expect(choice).toMatchObject({
         id,
+        keyPresent: true,
+        isOptIn: true,
+        enableByDefault: false,
+      });
+    }
+  });
+
+  it('does not automatically enable any Parallel profile for its shared key', () => {
+    const choices = computeInitProviderChoices({
+      PARALLEL_API_KEY: 'parallel-key',
+    });
+
+    for (const id of PARALLEL_OPT_IN_PROVIDERS) {
+      expect(choices.find((choice) => choice.id === id)).toMatchObject({
         keyPresent: true,
         isOptIn: true,
         enableByDefault: false,

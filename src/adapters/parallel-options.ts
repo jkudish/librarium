@@ -1,12 +1,47 @@
 import { z } from 'zod';
+import { ISO_3166_ALPHA2 } from './perplexity-search-options.js';
 
-const domain = z.string().trim().min(1).max(253);
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD');
+const hostnameLabel = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const hostname = new RegExp(`^${hostnameLabel}(?:\\.${hostnameLabel})+$`, 'i');
+const bareExtension = new RegExp(
+  `^\\.${hostnameLabel}(?:\\.${hostnameLabel})*$`,
+  'i',
+);
+
+/** Parallel accepts domains or bare extensions such as `.edu`, never URLs. */
+const domain = z
+  .string()
+  .trim()
+  .min(2)
+  .max(253)
+  .refine(
+    (value) => hostname.test(value) || bareExtension.test(value),
+    'must be a plain domain or bare extension (for example, example.com or .edu)',
+  )
+  .transform((value) => value.toLowerCase());
+
+const date = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD')
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  }, 'must be a real RFC 3339 calendar date');
+
 const location = z
   .string()
   .trim()
   .regex(/^[A-Za-z]{2}$/, 'must be an ISO 3166-1 alpha-2 code')
-  .transform((value) => value.toUpperCase());
+  .transform((value) => value.toUpperCase())
+  .refine(
+    (value) => ISO_3166_ALPHA2.has(value),
+    'must be an ISO 3166-1 alpha-2 code',
+  );
 
 const sourcePolicy = z
   .object({

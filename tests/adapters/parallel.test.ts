@@ -8,6 +8,7 @@ import type {
   HttpClient,
   HttpRequestOptions,
 } from '../../src/core/http-client.js';
+import { normalizeProviderAttemptOutput } from '../../src/core/research-response-projector.js';
 
 const key = 'parallel-fixture-key';
 
@@ -104,9 +105,29 @@ describe('Parallel first-party providers', () => {
     expect(http).not.toHaveBeenCalled();
   });
 
+  it.each([{}, { results: {} }, { results: [null] }])(
+    'rejects malformed successful Search payloads (%o)',
+    async (data) => {
+      const result = await new ParallelSearchProvider(
+        {},
+        {
+          apiKey: key,
+          httpClient: client(data),
+        },
+      ).execute('query', { timeout: 9 });
+
+      expect(result).toMatchObject({
+        content: '',
+        citations: [],
+        error: 'Parallel returned an invalid Search response',
+      });
+    },
+  );
+
   it('maps chat basis only when the response reports it and supports JSON schema output', async () => {
     const http = client({
-      id: 'chat_1',
+      id: 'chat_record_1',
+      interaction_id: 'interaction_1',
       model: 'base',
       choices: [{ message: { content: '{"answer":"yes"}' } }],
       basis: [
@@ -141,7 +162,7 @@ describe('Parallel first-party providers', () => {
       }),
     ]);
     expect(result.providerMeta).toMatchObject({
-      'parallel:interaction_id': 'chat_1',
+      'parallel:interaction_id': 'interaction_1',
       'parallel:basis_available': true,
     });
     const [, request] = (http as unknown as ReturnType<typeof vi.fn>).mock
@@ -155,6 +176,70 @@ describe('Parallel first-party providers', () => {
       },
     });
   });
+
+  it('uses a configured model when the documented compatibility field is empty and persists the canonical result', async () => {
+    const provider = new ParallelChatProvider({
+      apiKey: key,
+      httpClient: client({
+        id: 'chat_record_2',
+        interaction_id: 'interaction_2',
+        model: '',
+        choices: [{ message: { content: 'Compatible response.' } }],
+      }),
+      model: 'base',
+    });
+
+    const result = await provider.execute('question', { timeout: 9 });
+    expect(result).toMatchObject({
+      content: 'Compatible response.',
+      model: 'base',
+      providerMeta: { 'parallel:interaction_id': 'interaction_2' },
+    });
+    expect(result.providerMeta).not.toHaveProperty('parallel:id');
+    expect(
+      normalizeProviderAttemptOutput(
+        { binding: { adapter_id: 'parallel-chat' } } as never,
+        'result-1',
+        result,
+        '2026-08-12T00:00:00.000Z',
+      ),
+    ).toMatchObject({ content: 'Compatible response.', model: 'base' });
+  });
+
+  it('does not conflate a chat record id with an interaction id', async () => {
+    const result = await new ParallelChatProvider({
+      apiKey: key,
+      httpClient: client({
+        id: 'chat_record_only',
+        model: 'base',
+        choices: [{ message: { content: 'Response.' } }],
+      }),
+      model: 'base',
+    }).execute('question', { timeout: 9 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.providerMeta).not.toHaveProperty('parallel:interaction_id');
+  });
+
+  it.each([
+    [{ choices: [] }, 'invalid Chat response'],
+    [{ choices: [{ message: {} }] }, 'invalid Chat response'],
+  ])(
+    'rejects malformed successful Chat payloads (%o)',
+    async (data, message) => {
+      const result = await new ParallelChatProvider({
+        apiKey: key,
+        httpClient: client(data),
+        model: 'base',
+      }).execute('question', { timeout: 9 });
+
+      expect(result).toMatchObject({
+        content: '',
+        citations: [],
+        error: expect.stringContaining(message),
+      });
+    },
+  );
 
   it('has durable Task create, poll, retrieve and terminal mapping', async () => {
     const http = vi
@@ -244,5 +329,111 @@ describe('Parallel first-party providers', () => {
       'processor must be one of',
     );
     expect(http).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed Task create and status bodies without accepting a remote state', async () => {
+    const createProvider = new ParallelResearchProvider({
+      apiKey: key,
+      httpClient: client({ run_id: 'trun_1', status: 42 }),
+      model: 'pro',
+    });
+    await expect(
+      createProvider.submit('research', { timeout: 90 }),
+    ).rejects.toThrow('invalid task response');
+
+    const pollProvider = new ParallelResearchProvider({
+      apiKey: key,
+      httpClient: client({ run_id: 'trun_1' }),
+      model: 'pro',
+    });
+    await expect(
+      pollProvider.poll({ taskId: 'trun_1' } as never),
+    ).resolves.toEqual({
+      status: 'failed',
+      rawStatus: 'invalid_response',
+      message: 'Parallel returned an invalid task status response',
+    });
+  });
+
+  it.each([
+    [{ run: { status: 'completed' }, output: {} }, 'without text output'],
+    [
+      { run: { status: 'completed' }, output: { type: 'json', content: {} } },
+      'without text output',
+    ],
+    [
+      { run: { status: 'completed' }, output: { type: 'text', content: {} } },
+      'without text output',
+    ],
+    [{}, 'invalid Task result response'],
+  ])(
+    'rejects malformed completed Task payloads (%o)',
+    async (data, message) => {
+      const result = await new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: client(data),
+        model: 'pro',
+      }).retrieve({ taskId: 'trun_1' } as never);
+
+      expect(result).toMatchObject({
+        content: '',
+        citations: [],
+        error: expect.stringContaining(message),
+      });
+      expect(result.content).not.toBe('{}');
+    },
+  );
+
+  it.each([
+    ['https://example.test', 'URL scheme'],
+    ['example.test/path', 'path'],
+    ['user@example.test', 'credentials'],
+    ['example.test:443', 'port'],
+  ])(
+    'rejects non-domain source policy values before dispatch (%s)',
+    async (domain) => {
+      const http = vi.fn();
+      const result = await new ParallelSearchProvider(
+        { sourcePolicy: { includeDomains: [domain] } },
+        { apiKey: key, httpClient: http as unknown as HttpClient },
+      ).execute('query', { timeout: 9 });
+
+      expect(result.error).toContain('plain domain');
+      expect(http).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [{ sourcePolicy: { afterDate: '2026-02-30' } }],
+    [{ location: 'ZZ' }],
+    [{ location: 'Canada' }],
+  ])(
+    'rejects invalid calendar and country controls before dispatch (%o)',
+    async (configuredOptions) => {
+      const http = vi.fn();
+      const result = await new ParallelSearchProvider(configuredOptions, {
+        apiKey: key,
+        httpClient: http as unknown as HttpClient,
+      }).execute('query', { timeout: 9 });
+
+      expect(result.error).toContain('parallel-search options');
+      expect(http).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts documented bare extensions in source policy', async () => {
+    const http = client({ results: [] });
+    await new ParallelSearchProvider(
+      { sourcePolicy: { includeDomains: ['.edu', 'subdomain.example.gov'] } },
+      { apiKey: key, httpClient: http },
+    ).execute('query', { timeout: 9 });
+
+    expect(
+      (http as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]?.body,
+    ).toMatchObject({
+      advanced_settings: {
+        source_policy: { include_domains: ['.edu', 'subdomain.example.gov'] },
+      },
+    });
   });
 });

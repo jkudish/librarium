@@ -167,6 +167,24 @@ function perplexitySearchOptions(
   return options;
 }
 
+const METERING_OPTION_KEYS = new Set([
+  'perRequestUsd',
+  'creditUsd',
+  'creditsPerRequest',
+  'perUnitUsd',
+]);
+
+/** Descriptor metering values are local metadata, not Parallel API options. */
+function parallelOptions(
+  providerConfig: ProviderConfig | undefined,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(providerConfig?.options ?? {}).filter(
+      ([key]) => !METERING_OPTION_KEYS.has(key),
+    ),
+  );
+}
+
 const factories: Record<string, ProviderFactory> = {
   'parallel-research': ({ providerConfig }) =>
     new ParallelResearchProvider({
@@ -175,15 +193,15 @@ const factories: Record<string, ProviderFactory> = {
         (typeof option(providerConfig, 'processor') === 'string'
           ? (option(providerConfig, 'processor') as string)
           : undefined),
-      configuredOptions: providerConfig?.options,
+      configuredOptions: parallelOptions(providerConfig),
     }),
   'parallel-chat': ({ providerConfig }) =>
     new ParallelChatProvider({
       model: configuredModel({ providerConfig }),
-      configuredOptions: providerConfig?.options,
+      configuredOptions: parallelOptions(providerConfig),
     }),
   'parallel-search': ({ providerConfig }) =>
-    new ParallelSearchProvider(providerConfig?.options),
+    new ParallelSearchProvider(parallelOptions(providerConfig)),
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
   'perplexity-deep-research': (context) =>
     new PerplexityDeepResearchProvider({ model: configuredModel(context) }),

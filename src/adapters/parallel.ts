@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
 import { normalizeUrl } from '../core/normalizer.js';
 import type {
@@ -65,6 +66,7 @@ interface TaskResult {
 }
 interface ChatResponse {
   id?: string;
+  interaction_id?: string;
   model?: string;
   choices?: Array<{ message?: { content?: string } }>;
   basis?: FieldBasis[];
@@ -74,6 +76,110 @@ interface ChatResponse {
     total_tokens?: number;
   };
 }
+
+const fieldBasisSchema = z
+  .object({
+    field: z.unknown().optional(),
+    citations: z
+      .array(
+        z.object({
+          url: z.unknown().optional(),
+          excerpts: z.unknown().optional(),
+        }),
+      )
+      .optional(),
+    reasoning: z.unknown().optional(),
+    confidence: z.unknown().optional(),
+  })
+  .passthrough();
+
+const searchResponseSchema = z
+  .object({
+    search_id: z.unknown().optional(),
+    session_id: z.unknown().optional(),
+    results: z.array(
+      z
+        .object({
+          url: z.unknown().optional(),
+          title: z.unknown().optional(),
+          excerpts: z.unknown().optional(),
+          publish_date: z.unknown().optional(),
+        })
+        .passthrough(),
+    ),
+    warnings: z.unknown().optional(),
+    usage: z.unknown().optional(),
+  })
+  .passthrough();
+
+const chatResponseSchema = z
+  .object({
+    id: z.unknown().optional(),
+    interaction_id: z.unknown().optional(),
+    model: z.unknown().optional(),
+    choices: z
+      .array(
+        z
+          .object({
+            message: z.object({ content: z.string() }).passthrough().optional(),
+          })
+          .passthrough(),
+      )
+      .min(1),
+    basis: z.array(fieldBasisSchema).optional(),
+    usage: z
+      .object({
+        prompt_tokens: z.number().int().nonnegative().optional(),
+        completion_tokens: z.number().int().nonnegative().optional(),
+        total_tokens: z.number().int().nonnegative().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const taskResultSchema = z
+  .object({
+    run: z
+      .object({
+        status: z.string(),
+        processor: z.string().optional(),
+        error: z
+          .object({ message: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough(),
+    output: z
+      .object({
+        type: z.unknown().optional(),
+        content: z.unknown().optional(),
+        basis: z.array(fieldBasisSchema).optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const textTaskOutputSchema = z
+  .object({
+    type: z.literal('text'),
+    content: z.string(),
+    basis: z.array(fieldBasisSchema).optional(),
+  })
+  .passthrough();
+
+const taskRunSchema = z
+  .object({
+    run_id: z.string(),
+    status: z.string(),
+    processor: z.string().optional(),
+    error: z
+      .object({ message: z.string().optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
@@ -189,9 +295,13 @@ export class ParallelSearchProvider extends BaseProvider {
           durationMs,
           this.formatError(response.status, response.data),
         );
-      const results = Array.isArray(response.data.results)
-        ? response.data.results
-        : [];
+      const parsedResponse = searchResponseSchema.safeParse(response.data);
+      if (!parsedResponse.success)
+        return this.resultError(
+          durationMs,
+          'Parallel returned an invalid Search response',
+        );
+      const results = parsedResponse.data.results;
       const cited = results.flatMap((result) => {
         const url = text(result.url);
         return url
@@ -219,17 +329,17 @@ export class ParallelSearchProvider extends BaseProvider {
         citations: cited,
         durationMs,
         providerMeta: {
-          ...(text(response.data.search_id) && {
-            'parallel:search_id': text(response.data.search_id),
+          ...(text(parsedResponse.data.search_id) && {
+            'parallel:search_id': text(parsedResponse.data.search_id),
           }),
-          ...(text(response.data.session_id) && {
-            'parallel:session_id': text(response.data.session_id),
+          ...(text(parsedResponse.data.session_id) && {
+            'parallel:session_id': text(parsedResponse.data.session_id),
           }),
-          ...(response.data.warnings !== undefined && {
-            'parallel:warnings': response.data.warnings,
+          ...(parsedResponse.data.warnings !== undefined && {
+            'parallel:warnings': parsedResponse.data.warnings,
           }),
-          ...(response.data.usage !== undefined && {
-            'parallel:usage': response.data.usage,
+          ...(parsedResponse.data.usage !== undefined && {
+            'parallel:usage': parsedResponse.data.usage,
           }),
         },
       };
@@ -354,25 +464,39 @@ export class ParallelChatProvider extends BaseProvider {
           durationMs,
           error: this.formatError(response.status, response.data),
         };
-      const basis = basisMeta(response.data.basis);
+      const parsedResponse = chatResponseSchema.safeParse(response.data);
+      if (!parsedResponse.success)
+        return this.resultError(
+          durationMs,
+          'Parallel returned an invalid Chat response',
+        );
+      const content = parsedResponse.data.choices
+        .map((choice) => choice.message?.content)
+        .find((value): value is string => typeof value === 'string');
+      if (content === undefined)
+        return this.resultError(
+          durationMs,
+          'Parallel returned a Chat response without message content',
+        );
+      const basis = basisMeta(parsedResponse.data.basis);
       return {
         provider: this.id,
         tier: this.tier,
-        content: response.data.choices?.[0]?.message?.content ?? '',
-        citations: citationsFromBasis(response.data.basis, this.id),
+        content,
+        citations: citationsFromBasis(parsedResponse.data.basis, this.id),
         durationMs,
-        model: response.data.model ?? this.model,
+        model: text(parsedResponse.data.model) ?? this.model,
         tokenUsage: {
-          input: response.data.usage?.prompt_tokens,
-          output: response.data.usage?.completion_tokens,
+          input: parsedResponse.data.usage?.prompt_tokens,
+          output: parsedResponse.data.usage?.completion_tokens,
         },
-        usage: usage(response.data.usage),
+        usage: usage(parsedResponse.data.usage),
         providerMeta: {
-          ...(text(response.data.id) && {
-            'parallel:interaction_id': text(response.data.id),
+          ...(text(parsedResponse.data.interaction_id) && {
+            'parallel:interaction_id': text(parsedResponse.data.interaction_id),
           }),
           ...(basis && { 'parallel:basis': basis }),
-          'parallel:basis_available': response.data.basis !== undefined,
+          'parallel:basis_available': parsedResponse.data.basis !== undefined,
         },
       };
     } catch (error) {
@@ -385,6 +509,16 @@ export class ParallelChatProvider extends BaseProvider {
         error: this.formatCatchError(error),
       };
     }
+  }
+  private resultError(durationMs: number, error: string): ProviderResult {
+    return {
+      provider: this.id,
+      tier: this.tier,
+      content: '',
+      citations: [],
+      durationMs,
+      error,
+    };
   }
 }
 
@@ -448,12 +582,17 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       throw new UnsafeToRetrySubmissionError(
         this.formatError(response.status, response.data),
       );
-    const id = text(response.data.run_id);
+    const parsedResponse = taskRunSchema.safeParse(response.data);
+    if (!parsedResponse.success)
+      throw new UnsafeToRetrySubmissionError(
+        'Parallel accepted an invalid task response',
+      );
+    const id = text(parsedResponse.data.run_id);
     if (!id)
       throw new UnsafeToRetrySubmissionError(
         'Parallel accepted a task response without run_id',
       );
-    const status = response.data.status ?? 'queued';
+    const status = parsedResponse.data.status ?? 'queued';
     return {
       provider: this.id,
       taskId: id,
@@ -488,10 +627,17 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
         message: `Poll returned HTTP ${response.status}`,
       };
     }
-    const rawStatus = response.data.status ?? 'unknown';
+    const parsedResponse = taskRunSchema.safeParse(response.data);
+    if (!parsedResponse.success)
+      return {
+        status: 'failed',
+        rawStatus: 'invalid_response',
+        message: 'Parallel returned an invalid task status response',
+      };
+    const rawStatus = parsedResponse.data.status;
     const status = STATUS[rawStatus];
     return status
-      ? { status, rawStatus, message: response.data.error?.message }
+      ? { status, rawStatus, message: parsedResponse.data.error?.message }
       : {
           status: handle.status === 'pending' ? 'pending' : 'running',
           rawStatus,
@@ -515,25 +661,35 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
           durationMs,
           `Retrieve failed with HTTP ${response.status}`,
         );
-      if (response.data.run?.status !== 'completed')
+      const parsedResponse = taskResultSchema.safeParse(response.data);
+      if (!parsedResponse.success)
         return this.errorResult(
           durationMs,
-          response.data.run?.error?.message ??
-            `Task is not complete: status=${response.data.run?.status ?? 'unknown'}`,
+          'Parallel returned an invalid Task result response',
         );
-      const output = response.data.output;
-      const content =
-        typeof output?.content === 'string'
-          ? output.content
-          : JSON.stringify(output?.content ?? {});
-      const basis = basisMeta(output?.basis);
+      if (parsedResponse.data.run.status !== 'completed')
+        return this.errorResult(
+          durationMs,
+          parsedResponse.data.run.error?.message ??
+            `Task is not complete: status=${parsedResponse.data.run.status}`,
+        );
+      // This adapter requests a fixed text schema. Do not stringify unknown or
+      // structured output into a fabricated successful report.
+      const output = textTaskOutputSchema.safeParse(parsedResponse.data.output);
+      if (!output.success)
+        return this.errorResult(
+          durationMs,
+          'Parallel returned a completed Task without text output',
+        );
+      const content = output.data.content;
+      const basis = basisMeta(output.data.basis);
       return {
         provider: this.id,
         tier: this.tier,
         content,
-        citations: citationsFromBasis(output?.basis, this.id),
+        citations: citationsFromBasis(output.data.basis, this.id),
         durationMs,
-        model: response.data.run?.processor ?? this.processor,
+        model: text(parsedResponse.data.run.processor) ?? this.processor,
         providerMeta: {
           'parallel:run_id': handle.taskId,
           ...(basis && { 'parallel:basis': basis }),
