@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -10,9 +11,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LibrariumConfigV2 } from '../src/core/config-v2.js';
-import { safeWriteFile } from '../src/core/fs-utils.js';
+import {
+  safeWriteFile,
+  verifyWindowsOwnerOnlyAcl,
+} from '../src/core/fs-utils.js';
 import {
   ConfigV2FileError,
   loadConfigV2,
@@ -41,6 +45,89 @@ function config(): LibrariumConfigV2 {
   };
 }
 
+function setNativeWindowsInheritedAcl(path: string): void {
+  const systemRoot = process.env.SystemRoot;
+  if (systemRoot === undefined) {
+    throw new Error('SystemRoot is required for native Windows ACL tests.');
+  }
+  const script = `
+$ErrorActionPreference = 'Stop'
+$encodedPath = [Console]::In.ReadToEnd()
+$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedPath))
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$everyone = New-Object Security.Principal.SecurityIdentifier 'S-1-1-0'
+$inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+$acl = New-Object Security.AccessControl.DirectorySecurity
+$acl.SetOwner($sid)
+$acl.SetAccessRuleProtection($true, $false)
+$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+  $sid,
+  [Security.AccessControl.FileSystemRights]::FullControl,
+  $inherit,
+  [Security.AccessControl.PropagationFlags]::None,
+  [Security.AccessControl.AccessControlType]::Allow
+)))
+$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+  $everyone,
+  [Security.AccessControl.FileSystemRights]::ReadAndExecute,
+  $inherit,
+  [Security.AccessControl.PropagationFlags]::None,
+  [Security.AccessControl.AccessControlType]::Allow
+)))
+[IO.Directory]::SetAccessControl($path, $acl)
+`;
+  execFileSync(
+    join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ],
+    {
+      input: Buffer.from(path, 'utf8').toString('base64'),
+      shell: false,
+      windowsHide: true,
+    },
+  );
+}
+
+function addNativeWindowsEveryoneRule(path: string): void {
+  const systemRoot = process.env.SystemRoot;
+  if (systemRoot === undefined) {
+    throw new Error('SystemRoot is required for native Windows ACL tests.');
+  }
+  const script = `
+$ErrorActionPreference = 'Stop'
+$encodedPath = [Console]::In.ReadToEnd()
+$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedPath))
+$everyone = New-Object Security.Principal.SecurityIdentifier 'S-1-1-0'
+$acl = [IO.File]::GetAccessControl($path)
+$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+  $everyone,
+  [Security.AccessControl.FileSystemRights]::Read,
+  [Security.AccessControl.AccessControlType]::Allow
+)))
+[IO.File]::SetAccessControl($path, $acl)
+`;
+  execFileSync(
+    join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ],
+    {
+      input: Buffer.from(path, 'utf8').toString('base64'),
+      shell: false,
+      windowsHide: true,
+    },
+  );
+}
+
 describe('explicit Node v2 config files', () => {
   let directory: string;
 
@@ -49,6 +136,7 @@ describe('explicit Node v2 config files', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     rmSync(directory, { recursive: true, force: true });
   });
 
@@ -170,12 +258,161 @@ describe('explicit Node v2 config files', () => {
     }
   });
 
-  it('rejects owner-only saves on Windows before creating directories', () => {
-    if (process.platform !== 'win32') return;
-    const path = join(directory, 'windows', 'config.json');
-    expect(() => saveConfigV2(config(), { path })).toThrow(ConfigV2FileError);
+  it('rejects missing Windows ACL support before creating directories', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    const previousSystemRoot = process.env.SystemRoot;
+    process.env.SystemRoot = 'relative-system-root';
+    const path = join(directory, 'windows-preflight', 'config.json');
+    try {
+      expect(() => saveConfigV2(config(), { path })).toThrow(ConfigV2FileError);
+      expect(existsSync(path)).toBe(false);
+      expect(existsSync(dirname(path))).toBe(false);
+    } finally {
+      if (previousSystemRoot === undefined) delete process.env.SystemRoot;
+      else process.env.SystemRoot = previousSystemRoot;
+    }
+  });
+
+  it('requires Windows ACL verification before bytes and replacement', () => {
+    if (process.platform !== 'win32') {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    }
+    const path = join(directory, 'windows-order.json');
+    const observed: string[] = [];
+
+    safeWriteFile(path, 'owner-only-content', {
+      mode: 0o600,
+      ownerOnly: true,
+      windowsAcl: {
+        createExclusive(tempPath, markCreated) {
+          writeFileSync(tempPath, '', { flag: 'wx' });
+          markCreated();
+          observed.push(`created:${readFileSync(tempPath, 'utf8')}`);
+        },
+        verify(tempPath) {
+          observed.push(`verified:${readFileSync(tempPath, 'utf8')}`);
+        },
+      },
+    });
+
+    expect(observed).toEqual([
+      'created:',
+      'verified:',
+      'verified:owner-only-content',
+    ]);
+    expect(readFileSync(path, 'utf8')).toBe('owner-only-content');
+    expect(readdirSync(directory)).toEqual(['windows-order.json']);
+  });
+
+  it('cleans a Windows temp file when ACL application fails', () => {
+    if (process.platform !== 'win32') {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    }
+    const path = join(directory, 'windows-apply-failure.json');
+
+    expect(() =>
+      safeWriteFile(path, 'must-not-commit', {
+        mode: 0o600,
+        ownerOnly: true,
+        windowsAcl: {
+          createExclusive(tempPath, markCreated) {
+            writeFileSync(tempPath, '', { flag: 'wx' });
+            markCreated();
+            throw new Error('injected ACL application failure');
+          },
+          verify() {
+            throw new Error('verification must not run');
+          },
+        },
+      }),
+    ).toThrow('injected ACL application failure');
     expect(existsSync(path)).toBe(false);
-    expect(existsSync(dirname(path))).toBe(false);
+    expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it('does not unlink a colliding Windows temp path it did not create', () => {
+    if (process.platform !== 'win32') {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    }
+    const path = join(directory, 'windows-create-collision.json');
+    let collisionPath = '';
+
+    expect(() =>
+      safeWriteFile(path, 'must-not-commit', {
+        mode: 0o600,
+        ownerOnly: true,
+        windowsAcl: {
+          createExclusive(tempPath) {
+            collisionPath = tempPath;
+            writeFileSync(tempPath, 'someone-else');
+            throw new Error('injected exclusive-create collision');
+          },
+          verify() {
+            throw new Error('verification must not run');
+          },
+        },
+      }),
+    ).toThrow('injected exclusive-create collision');
+    expect(readFileSync(collisionPath, 'utf8')).toBe('someone-else');
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('keeps the destination and cleans the Windows temp after verification failure', () => {
+    if (process.platform !== 'win32') {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    }
+    const path = join(directory, 'windows-verify-failure.json');
+    writeFileSync(path, 'original');
+    let verifications = 0;
+
+    expect(() =>
+      safeWriteFile(path, 'must-not-commit', {
+        mode: 0o600,
+        ownerOnly: true,
+        windowsAcl: {
+          createExclusive(tempPath, markCreated) {
+            writeFileSync(tempPath, '', { flag: 'wx' });
+            markCreated();
+          },
+          verify() {
+            verifications += 1;
+            if (verifications === 2) {
+              throw new Error('injected ACL verification failure');
+            }
+          },
+        },
+      }),
+    ).toThrow('injected ACL verification failure');
+    expect(readFileSync(path, 'utf8')).toBe('original');
+    expect(readdirSync(directory)).toEqual(['windows-verify-failure.json']);
+  });
+
+  it('keeps the destination and cleans the Windows temp after first verification failure', () => {
+    if (process.platform !== 'win32') {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    }
+    const path = join(directory, 'windows-first-verify-failure.json');
+    writeFileSync(path, 'original');
+
+    expect(() =>
+      safeWriteFile(path, 'must-not-write', {
+        mode: 0o600,
+        ownerOnly: true,
+        windowsAcl: {
+          createExclusive(tempPath, markCreated) {
+            writeFileSync(tempPath, '', { flag: 'wx' });
+            markCreated();
+          },
+          verify() {
+            throw new Error('injected first ACL verification failure');
+          },
+        },
+      }),
+    ).toThrow('injected first ACL verification failure');
+    expect(readFileSync(path, 'utf8')).toBe('original');
+    expect(readdirSync(directory)).toEqual([
+      'windows-first-verify-failure.json',
+    ]);
   });
 
   it('preserves ordinary mode-only atomic writes on every platform', () => {
@@ -243,3 +480,59 @@ describe('explicit Node v2 config files', () => {
     );
   });
 });
+
+describe.runIf(process.platform === 'win32')(
+  'native Windows owner-only ACL saves',
+  () => {
+    let directory: string;
+
+    beforeEach(() => {
+      directory = mkdtempSync(join(tmpdir(), 'librarium-config-v2-windows-'));
+    });
+
+    afterEach(() => {
+      rmSync(directory, { recursive: true, force: true });
+    });
+
+    it('performs a Windows first write and whole-file overwrite with owner-only ACLs', () => {
+      const path = join(directory, "config [owner] ' &.json");
+      saveConfigV2(config(), { path });
+      verifyWindowsOwnerOnlyAcl(path);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(config());
+
+      const replacement: LibrariumConfigV2 = {
+        ...config(),
+        runtime: {
+          output_dir: './windows-replacement-runs',
+          llm_web_search: false,
+        },
+      };
+      saveConfigV2(replacement, { path });
+
+      verifyWindowsOwnerOnlyAcl(path);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(replacement);
+      expect(readdirSync(directory)).toEqual(["config [owner] ' &.json"]);
+    });
+
+    it('removes inherited Windows trustees from a restrictive parent ACL', () => {
+      const parent = join(directory, 'restricted-inheritance');
+      mkdirSync(parent);
+      setNativeWindowsInheritedAcl(parent);
+      const path = join(parent, 'config.json');
+
+      saveConfigV2(config(), { path });
+
+      verifyWindowsOwnerOnlyAcl(path);
+      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual(config());
+      expect(readdirSync(parent)).toEqual(['config.json']);
+    });
+
+    it('rejects a Windows ACL after an extra trustee is added', () => {
+      const path = join(directory, 'tampered-config.json');
+      saveConfigV2(config(), { path });
+      addNativeWindowsEveryoneRule(path);
+
+      expect(() => verifyWindowsOwnerOnlyAcl(path)).toThrow();
+    });
+  },
+);

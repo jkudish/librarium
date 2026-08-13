@@ -1557,9 +1557,10 @@ Node services:
 - `loadConfigV2({ global_path, project_path? })` reads and migrates without
   rewriting either file.
 - `saveConfigV2(config, { path })` is the explicit atomic v2 write boundary. It
-  validates first and enforces owner-only permissions before commit on Unix;
-  Windows fails before touching disk until an equivalent ACL writer is
-  available.
+  validates first and enforces owner-only permissions before commit. Unix uses
+  a verified `0600` mode. Windows establishes and reads back a protected DACL
+  that grants full control only to the current process user before atomic
+  replacement. Missing ACL support fails closed before destination replacement.
 
 ```ts
 import {

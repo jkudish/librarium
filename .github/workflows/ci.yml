@@ -101,6 +101,10 @@ jobs:
       - name: Unit tests
         run: npm run test
 
+      - name: Native Windows owner-only ACL tests
+        if: runner.os == 'Windows'
+        run: npx vitest run tests/node-config-v2.test.ts -t Windows --reporter=verbose
+
       - name: Offline benchmark fixture replay
         if: matrix.run-integration
         run: npm run benchmark:ci
