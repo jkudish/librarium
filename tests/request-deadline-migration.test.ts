@@ -608,6 +608,7 @@ describe('v1 total request-deadline migration', () => {
       'brave-answers',
       'you-research',
       'you-research-background',
+      'you-answer',
       'kagi-fastgpt',
       'exa',
       'exa-research',
@@ -635,7 +636,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(41);
+    expect(new Set(expectedAdapterIds).size).toBe(42);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

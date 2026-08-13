@@ -117,6 +117,7 @@ const IMPLEMENTED_MATRIX = [
   ['openrouter', 'grounded'],
   ['brave-answers', 'grounded'],
   ['you-research', 'grounded'],
+  ['you-answer', 'grounded'],
   ['kagi-fastgpt', 'grounded'],
   ['exa', 'search'],
   ['perplexity-search', 'search'],
@@ -1189,6 +1190,7 @@ describe('provider catalog -- target selection', () => {
   it('declares provider-managed targets without inventing a target id', () => {
     for (const [providerId, profileId] of [
       ['you-research', 'grounded'],
+      ['you-answer', 'grounded'],
       ['searchapi-chatgpt', 'surface'],
       ['you-research', 'research'],
     ] as const) {
@@ -1271,6 +1273,10 @@ describe('provider catalog -- network-free estimates', () => {
   const built = catalog();
 
   it('records exact plan prices as microusd integers', () => {
+    expect(built.get('you-answer', 'grounded')?.estimate).toEqual({
+      estimated_cost_microusd: '5000',
+      billable_units: [{ unit: 'request', quantity: '1' }],
+    });
     expect(built.get('brave-search', 'search')?.estimate).toEqual({
       estimated_cost_microusd: '5000',
       billable_units: [{ unit: 'request', quantity: '1' }],
@@ -1976,6 +1982,7 @@ describe('provider catalog -- configured target fidelity', () => {
         'openrouter-online': { model: 'not-reviewed' },
         'kagi-fastgpt': { model: 'ignored-preset' },
         'you-research': { model: 'ignored-model' },
+        'you-answer': { model: 'ignored-model' },
         'searchapi-chatgpt': { model: 'ignored-model' },
         exa: { model: 'ignored-model' },
       }),
@@ -1997,6 +2004,9 @@ describe('provider catalog -- configured target fidelity', () => {
     });
     expect(
       built.get('you-research', 'grounded')?.profile.identity.target.primary,
+    ).toEqual({ model_selection: 'provider_managed' });
+    expect(
+      built.get('you-answer', 'grounded')?.profile.identity.target.primary,
     ).toEqual({ model_selection: 'provider_managed' });
     expect(
       built.get('searchapi-chatgpt', 'surface')?.profile.identity.target

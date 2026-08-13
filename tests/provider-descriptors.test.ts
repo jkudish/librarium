@@ -30,7 +30,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(38);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(39);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -91,6 +91,7 @@ describe('built-in provider descriptors', () => {
       'brave-answers',
       'exa',
       'you-research',
+      'you-answer',
       'kagi-fastgpt',
       'perplexity-search',
       'brave-search',
@@ -140,6 +141,7 @@ describe('built-in provider descriptors', () => {
         'parallel-research',
         'parallel-chat',
         'parallel-search',
+        'you-answer',
       ]),
     );
     expect(
@@ -225,6 +227,11 @@ describe('built-in provider descriptors', () => {
         )?.optionsSchema.safeParse({ undocumented: true }).success,
       ).toBe(false);
     }
+    expect(
+      BUILTIN_PROVIDER_DESCRIPTORS.find(
+        ({ id }) => id === 'you-answer',
+      )?.optionsSchema.safeParse({ undocumented: true }).success,
+    ).toBe(false);
   });
 
   it('blocks invalid Grok options before HTTP without disabling other adapters', async () => {

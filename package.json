@@ -42,6 +42,7 @@
     "test:sea": "npm run build:sea && node scripts/verify-sea.mjs",
     "test:workers": "npm run build && vitest run --config vitest.workers.config.ts",
     "test:pty": "npm run build && vitest run --config vitest.pty.config.ts",
+    "smoke:you-answer": "node scripts/you-answer-live-smoke.mjs",
     "test:watch": "vitest",
     "typecheck": "npm run verify:typescript && node scripts/run-typescript.mjs --noEmit --project tsconfig.json",
     "verify:typescript": "node scripts/verify-typescript-toolchain.mjs",

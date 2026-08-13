@@ -804,6 +804,40 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     ],
   },
   {
+    provider_id: 'you-answer',
+    order: 165,
+    aliases: [],
+    display: {
+      family: 'You.com',
+      name: 'You.com Answer',
+      description:
+        'A single inline You.com Answer API observation with citations.',
+      best_for:
+        'Focused web-grounded answers where Answer and Research remain distinct.',
+      setup_url: 'https://you.com/docs/guides/answer',
+    },
+    credential: {
+      // Canonical application credential. The provider docs also show
+      // YDC_API_KEY in examples, but an alias must not duplicate a secret.
+      env_var: 'YOU_COM_API_KEY',
+      required: true,
+      auto_enable: false,
+    },
+    profiles: [
+      declare({
+        profile_id: 'grounded',
+        selection_order: 285,
+        target: providerManagedTarget(),
+        result_kind: 'grounded_answer',
+        grounding_policy: 'required',
+        corpora: ['web'],
+        retrieval_method: 'search_endpoint',
+        operator_id: 'you-com',
+        features: { web_search: 'always' },
+      }),
+    ],
+  },
+  {
     provider_id: 'kagi-fastgpt',
     order: 170,
     aliases: [],

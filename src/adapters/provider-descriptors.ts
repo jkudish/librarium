@@ -61,6 +61,7 @@ import type {
 } from './valyu-options.js';
 import { ValyuResearchProvider } from './valyu-research.js';
 import { ValyuSearchProvider } from './valyu-search.js';
+import { YouAnswerProvider } from './you-answer.js';
 import { YouResearchProvider } from './you-research.js';
 import { YouResearchBackgroundProvider } from './you-research-background.js';
 
@@ -279,6 +280,8 @@ const factories: Record<string, ProviderFactory> = {
         | undefined,
     }),
   'you-research': () => new YouResearchProvider(),
+  'you-answer': ({ providerConfig }) =>
+    new YouAnswerProvider(providerConfig?.options),
   'you-research-background': ({ providerConfig }) =>
     new YouResearchBackgroundProvider({
       researchEffort: option(providerConfig, 'researchEffort') as

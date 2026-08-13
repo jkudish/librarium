@@ -23,6 +23,7 @@ describe('metering registry: kinds', () => {
     expect(getMeteringKind('serpapi')).toBe('request_priced');
     expect(getMeteringKind('brave-search')).toBe('request_priced');
     expect(getMeteringKind('kagi-fastgpt')).toBe('request_priced');
+    expect(getMeteringKind('you-answer')).toBe('request_priced');
     expect(getMeteringKind('searchapi-chatgpt')).toBe('request_priced');
     expect(getMeteringKind('searchapi-google-ai-overview')).toBe(
       'request_priced',
@@ -106,6 +107,7 @@ describe('metering registry: estimates', () => {
     'perplexity-search',
     'brave-search',
     'kagi-fastgpt',
+    'you-answer',
   ])('keeps %s at one logical request unit', (providerId) => {
     expect(estimateMetering(providerId)?.billableUnits).toBe(1);
   });
@@ -176,6 +178,20 @@ describe('buildProviderMetering: estimate vs actual separation', () => {
     const metering = buildProviderMetering('serpapi');
     expect(metering.kind).toBe('request_priced');
     expect(metering.estimate?.estimatedCostUsd).toBe(0.015);
+    expect(metering.actual).toBeUndefined();
+  });
+
+  it('reserves Answer’s documented fixed price without inventing failed-call actual spend', () => {
+    const metering = buildProviderMetering('you-answer');
+    expect(metering).toMatchObject({
+      kind: 'request_priced',
+      estimate: {
+        estimatedCostUsd: 0.005,
+        billableUnits: 1,
+        unit: 'request',
+        costConfidence: 'estimated',
+      },
+    });
     expect(metering.actual).toBeUndefined();
   });
 
