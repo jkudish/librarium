@@ -1407,31 +1407,27 @@ describe('private prepared execution runtime', () => {
     expect(result.state.status).toBe('succeeded');
   });
 
-  it(
-    'derives enough CAS retries for the maximum concurrent completion wave',
-    async () => {
-      const primaries = Array.from({ length: 64 }, (_, index) =>
-        profile(`primary-${index}`),
-      );
-      const result = await runPreparedExecution(prepared(primaries), {
-        store: new InMemoryCoordinationStateStore(),
-        coordinator: coordinatorDependencies(),
-        attempts: {
-          execute: async (launch) => ({
-            kind: 'finished',
-            finished: {
-              outcome: 'succeeded',
-              result_id: `result-${launch.attempt_id}`,
-            },
-          }),
-        },
-      });
+  it('derives enough CAS retries for the maximum concurrent completion wave', async () => {
+    const primaries = Array.from({ length: 64 }, (_, index) =>
+      profile(`primary-${index}`),
+    );
+    const result = await runPreparedExecution(prepared(primaries), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: {
+        execute: async (launch) => ({
+          kind: 'finished',
+          finished: {
+            outcome: 'succeeded',
+            result_id: `result-${launch.attempt_id}`,
+          },
+        }),
+      },
+    });
 
-      expect(result.state.status).toBe('succeeded');
-      expect(result.state.attempts).toHaveLength(64);
-    },
-    60_000,
-  );
+    expect(result.state.status).toBe('succeeded');
+    expect(result.state.attempts).toHaveLength(64);
+  }, 60_000);
 
   it('bounds persisted provider diagnostics', async () => {
     const provider: Provider = {
