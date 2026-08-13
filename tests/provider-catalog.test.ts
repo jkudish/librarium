@@ -1272,30 +1272,39 @@ describe('provider catalog -- configuration-driven resolution', () => {
 describe('provider catalog -- network-free estimates', () => {
   const built = catalog();
 
-  it('records exact plan prices as microusd integers', () => {
-    expect(built.get('you-answer', 'grounded')?.estimate).toEqual({
-      estimated_cost_microusd: '5000',
-      billable_units: [{ unit: 'request', quantity: '1' }],
-    });
+  it('projects only complete bounded quotes to exact microusd reservations', () => {
     expect(built.get('brave-search', 'search')?.estimate).toEqual({
       estimated_cost_microusd: '5000',
-      billable_units: [{ unit: 'request', quantity: '1' }],
+      billable_units: [{ unit: 'requests', quantity: '1' }],
     });
-    expect(
-      built.get('searchapi-google-ai-overview', 'surface')?.estimate,
-    ).toEqual({
-      estimated_cost_microusd: '4000',
-      billable_units: [{ unit: 'request', quantity: '2' }],
+    expect(built.get('perplexity-search', 'search')?.estimate).toEqual({
+      estimated_cost_microusd: '5000',
+      billable_units: [{ unit: 'requests', quantity: '1' }],
+    });
+    expect(built.get('you-research', 'grounded')?.estimate).toEqual({
+      estimated_cost_microusd: '50000',
+      billable_units: [{ unit: 'research_requests', quantity: '1' }],
     });
   });
 
-  it('records credit units without inventing a dollar value', () => {
-    expect(built.get('tavily', 'search')?.estimate).toEqual({
-      billable_units: [{ unit: 'credit', quantity: '2' }],
-    });
+  it('does not establish hard budgets from stale or account-dependent prices', () => {
+    expect(built.get('you-answer', 'grounded')?.estimate).toBeUndefined();
+    expect(built.get('tavily', 'search')?.estimate).toBeUndefined();
     expect(
-      built.get('tavily', 'search')?.estimate?.estimated_cost_microusd,
+      built.get('searchapi-google-ai-overview', 'surface')?.estimate,
     ).toBeUndefined();
+  });
+
+  it('uses a reviewed fallback only under its explicit account conditions', () => {
+    const payg = catalog({
+      providerConfigs: enabledConfigs({
+        tavily: { pricingConditions: { account_plan: 'payg' } },
+      }),
+    });
+    expect(payg.get('tavily', 'search')?.estimate).toEqual({
+      estimated_cost_microusd: '16000',
+      billable_units: [{ unit: 'credits', quantity: '2' }],
+    });
   });
 
   it('omits volatile token and native prices entirely', () => {
@@ -1303,7 +1312,6 @@ describe('provider catalog -- network-free estimates', () => {
       ['perplexity-sonar-pro', 'grounded'],
       ['gemini-deep', 'research'],
       ['grok', 'web'],
-      ['exa', 'search'],
       ['brave-answers', 'grounded'],
       ['claude', 'chat'],
     ] as const) {
@@ -1434,6 +1442,44 @@ describe('provider catalog -- explicit and capability selection', () => {
     expect(result.issues).toContainEqual(
       expect.objectContaining({ code: 'explicit_profile_excluded' }),
     );
+  });
+
+  it('reserves both requests in configured Google AI Overview pricing', () => {
+    const configured = catalog({
+      configuredPricing: [
+        {
+          id: 'searchapi-google-ai-overview.account',
+          provider_id: 'searchapi-google-ai-overview',
+          profile_id: 'surface',
+          currency: 'USD',
+          completeness: 'complete',
+          confidence: 'confirmed',
+          expected_units: ['requests'],
+          fixed_quantities: { requests: '2' },
+          missing_units: [],
+          rates: [
+            {
+              unit: 'requests',
+              amount_decimal: '0.004',
+              per_decimal: '1',
+            },
+          ],
+          provenance: {
+            source_class: 'configured_account_rate',
+            source_reference: 'configured:searchapi/account-rate',
+            effective_at: '2026-08-13T00:00:00.000Z',
+            retrieved_at: '2026-08-13T00:00:00.000Z',
+          },
+        },
+      ],
+    });
+
+    expect(
+      configured.get('searchapi-google-ai-overview', 'surface')?.estimate,
+    ).toEqual({
+      estimated_cost_microusd: '8000',
+      billable_units: [{ unit: 'requests', quantity: '2' }],
+    });
   });
 
   it('returns every matching authenticated profile in deterministic order', () => {
