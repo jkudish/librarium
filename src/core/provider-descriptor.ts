@@ -68,6 +68,44 @@ const commonOptions = z
 const webSearchOptions = commonOptions.extend({
   webSearch: z.boolean().optional(),
 });
+const openRouterOptions = webSearchOptions
+  .extend({
+    providerOrder: z.array(z.string().trim().min(1)).nonempty().optional(),
+    allowFallbacks: z.boolean().optional(),
+    requireParameters: z.boolean().optional(),
+    dataCollection: z.enum(['allow', 'deny']).optional(),
+    zdr: z.boolean().optional(),
+    reasoningEffort: z
+      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      .optional(),
+    reasoningMaxTokens: z.number().int().positive().optional(),
+    reasoningExclude: z.boolean().optional(),
+  })
+  .superRefine((options, ctx) => {
+    if (
+      options.reasoningEffort !== undefined &&
+      options.reasoningMaxTokens !== undefined
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reasoningMaxTokens'],
+        message:
+          'reasoningEffort and reasoningMaxTokens are mutually exclusive',
+      });
+    }
+    if (options.zdr === true && options.webSearch !== false) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['zdr'],
+        message:
+          'zdr requires webSearch: false because OpenRouter ZDR does not apply to the web plugin',
+      });
+    }
+  })
+  .strict();
+const openRouterGroundedOptions = openRouterOptions.safeExtend({
+  webSearch: z.literal(true).optional(),
+});
 const openAiResearchOptions = commonOptions.extend({
   maxToolCalls: z.number().int().positive().optional(),
   reasoningEffort: z
@@ -384,6 +422,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       order: 150,
     },
     metering: { kind: 'native_cost' },
+    optionsSchema: openRouterGroundedOptions,
     capabilities: inline('always'),
   }),
   define({
@@ -795,7 +834,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     tier: 'llm',
     envVar: 'OPENROUTER_API_KEY',
     defaultModel: 'openai/gpt-5.6-terra',
-    optionsSchema: webSearchOptions,
+    optionsSchema: openRouterOptions,
     display: {
       family: 'OpenRouter',
       name: 'OpenRouter Chat',

@@ -259,7 +259,6 @@ describe('usage extraction', () => {
       outputTokens: 13,
       totalTokens: 20,
       costUsd: 0.00045,
-      raw: apiUsage,
     });
   });
 

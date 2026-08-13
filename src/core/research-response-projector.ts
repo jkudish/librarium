@@ -126,6 +126,9 @@ const LegacyProviderResultSchema = z.strictObject({
       inputTokens: z.number().int().safe().nonnegative().optional(),
       outputTokens: z.number().int().safe().nonnegative().optional(),
       totalTokens: z.number().int().safe().nonnegative().optional(),
+      cacheWriteInputTokens: z.number().int().safe().nonnegative().optional(),
+      cacheReadInputTokens: z.number().int().safe().nonnegative().optional(),
+      reasoningTokens: z.number().int().safe().nonnegative().optional(),
       costUsd: z.number().finite().nonnegative().optional(),
       billableUnits: z.number().finite().nonnegative().optional(),
       unit: z.string().min(1).optional(),
@@ -173,6 +176,7 @@ const LegacyProviderResultSchema = z.strictObject({
         .optional(),
     })
     .optional(),
+  providerMeta: ProviderMetaSchema.optional(),
   error: z.string().optional(),
   preventFallback: z.literal(true).optional(),
 });
@@ -210,6 +214,15 @@ function legacyUsage(
     ...(promptTokens !== undefined && { prompt_tokens: promptTokens }),
     ...(completionTokens !== undefined && {
       completion_tokens: completionTokens,
+    }),
+    ...(result.usage?.cacheWriteInputTokens !== undefined && {
+      cache_write_input_tokens: result.usage.cacheWriteInputTokens,
+    }),
+    ...(result.usage?.cacheReadInputTokens !== undefined && {
+      cache_read_input_tokens: result.usage.cacheReadInputTokens,
+    }),
+    ...(result.usage?.reasoningTokens !== undefined && {
+      reasoning_tokens: result.usage.reasoningTokens,
     }),
     ...(actualCost !== undefined && {
       actual_cost: decimalFromNumber(actualCost),
@@ -264,6 +277,7 @@ export function normalizeProviderAttemptOutput(
   });
 
   const providerMeta = ProviderMetaSchema.parse({
+    ...(legacy.providerMeta ?? {}),
     'librarium:tier': legacy.tier,
     'librarium:duration_ms': legacy.durationMs,
     ...(legacy.metering && {

@@ -165,7 +165,7 @@ describe('grounded providers', () => {
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'openai/gpt-4o-mini',
       messages: [{ role: 'user', content: 'search online' }],
-      tools: [{ type: 'openrouter:web_search' }],
+      plugins: [{ id: 'web' }],
     });
   });
 
@@ -183,7 +183,35 @@ describe('grounded providers', () => {
 
     expect(result.content).toBe('');
     expect(result.citations).toEqual([]);
-    expect(result.error).toContain('annotations');
+    expect(result.error).toContain('URL citations');
+  });
+
+  it('rejects disabled web search before OpenRouter dispatch', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    expect(
+      () =>
+        new OpenRouterOnlineProvider({
+          webSearch: false,
+          credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+        }),
+    ).toThrow('always requires web search');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects ZDR when grounded search is required before OpenRouter dispatch', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+
+    expect(
+      () =>
+        new OpenRouterOnlineProvider({
+          zdr: true,
+          credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+        }),
+    ).toThrow('ZDR does not apply to the web plugin');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([

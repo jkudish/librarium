@@ -191,6 +191,25 @@ describe('built-in provider descriptors', () => {
     expect(httpClient).not.toHaveBeenCalled();
   });
 
+  it('rejects unsupported or contradictory OpenRouter policies before dispatch', () => {
+    const grounded = BUILTIN_PROVIDER_DESCRIPTORS.find(
+      ({ id }) => id === 'openrouter-online',
+    )?.optionsSchema;
+    const chat = BUILTIN_PROVIDER_DESCRIPTORS.find(
+      ({ id }) => id === 'openrouter-chat',
+    )?.optionsSchema;
+
+    expect(grounded?.safeParse({ webSearch: false }).success).toBe(false);
+    expect(
+      chat?.safeParse({ reasoningEffort: 'high', reasoningMaxTokens: 100 })
+        .success,
+    ).toBe(false);
+    expect(grounded?.safeParse({ zdr: true }).success).toBe(false);
+    expect(chat?.safeParse({ zdr: true }).success).toBe(false);
+    expect(chat?.safeParse({ zdr: true, webSearch: false }).success).toBe(true);
+    expect(chat?.safeParse({ profile: 'grounded' }).success).toBe(false);
+  });
+
   it('fails closed on invalid SearchAPI zeroRetention options', async () => {
     const httpClient = vi.fn();
     const result = await initializeProviders({
