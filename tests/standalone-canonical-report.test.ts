@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { browseRunDir } from '../src/commands/browse.js';
 import { registerHtmlCommand } from '../src/commands/html.js';
 import { registerJsonlCommand } from '../src/commands/jsonl.js';
+import { readCanonicalRunReportingView } from '../src/node-canonical-reporting.js';
 import { runCanonicalPreparedExecution } from '../src/node-canonical-run.js';
 import type { Provider } from '../src/types.js';
 import {
@@ -74,6 +75,33 @@ describe('standalone canonical report commands', () => {
       'Canonical result',
     );
     expect(readFileSync(join(runDir, 'run.json'), 'utf8')).toBe(runJsonBefore);
+  });
+
+  it('loads v3 reporting from run.json rather than derived sidecars', async () => {
+    const runDir = await canonicalRun();
+    writeFileSync(
+      join(runDir, 'adapter-report.md'),
+      '<script>sidecar</script>',
+    );
+    writeFileSync(
+      join(runDir, 'sources.json'),
+      JSON.stringify([{ url: 'javascript:sidecar' }]),
+    );
+    writeFileSync(join(runDir, 'summary.md'), 'sidecar summary');
+
+    const view = readCanonicalRunReportingView(runDir);
+
+    expect(Object.values(view?.presentation.providerContents ?? {})).toEqual(
+      expect.arrayContaining([expect.stringContaining('Canonical result')]),
+    );
+    expect(view?.summary).not.toBe('sidecar summary');
+    expect(view?.presentation.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: 'https://example.com/canonical-source',
+        }),
+      ]),
+    );
   });
 
   it('renders schemaVersion 3 JSONL from canonical public output', async () => {

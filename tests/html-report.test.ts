@@ -10,8 +10,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   answerBody,
+  createHtmlReportViewModel,
   escapeHtml,
   generateHtmlReport,
+  renderHtmlReport,
   renderMarkdown,
   safeUrl,
 } from '../src/commands/html-report.js';
@@ -147,6 +149,18 @@ describe('safeUrl', () => {
 });
 
 describe('generateHtmlReport', () => {
+  it('keeps the facade byte-identical to rendering its pure view model', () => {
+    const input = {
+      manifest: makeManifest(),
+      providerContents: { 'exa.md': '<script>unsafe</script> body' },
+      sources: SOURCES,
+    };
+
+    expect(generateHtmlReport(input)).toBe(
+      renderHtmlReport(createHtmlReportViewModel(input)),
+    );
+  });
+
   it('uses the query as the escaped page title and heading', () => {
     const html = generateHtmlReport({
       manifest: makeManifest({ query: 'a <b>"query"</b>' }),
