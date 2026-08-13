@@ -7,6 +7,7 @@ import type { Citation, DeduplicatedSource } from '../types.js';
  * - Strip trailing slashes
  * - Strip tracking params (utm_*, ref, fbclid, gclid, etc.)
  * - Lowercase hostname
+ * - Ignore fragments, which only identify client-side document locations
  */
 export function normalizeUrl(url: string): string {
   try {
@@ -17,30 +18,32 @@ export function normalizeUrl(url: string): string {
     if (parsed.hostname.startsWith('www.')) {
       parsed.hostname = parsed.hostname.slice(4);
     }
-    // Strip tracking params
-    const trackingParams = [
-      'utm_source',
-      'utm_medium',
-      'utm_campaign',
-      'utm_term',
-      'utm_content',
+    // Remove every case-insensitive UTM key, rather than only the common
+    // names. Preserve other query parameters because they can select distinct
+    // source content. Rebuild the parameters so deleting a key never skips
+    // the next entry while URLSearchParams is being iterated. Fragments are
+    // deliberately omitted below: they identify a location in a document,
+    // not a separate source for deduplication.
+    const trackingParams = new Set([
       'ref',
       'fbclid',
       'gclid',
       'msclkid',
       'mc_cid',
       'mc_eid',
-    ];
-    for (const param of trackingParams) {
-      parsed.searchParams.delete(param);
+    ]);
+    const retainedParams = [...parsed.searchParams].filter(([key]) => {
+      const normalized = key.toLowerCase();
+      return !normalized.startsWith('utm_') && !trackingParams.has(normalized);
+    });
+    parsed.search = '';
+    for (const [key, value] of retainedParams) {
+      parsed.searchParams.append(key, value);
     }
     // Rebuild without protocol, strip trailing slash
     let normalized = `${parsed.host}${parsed.pathname}`;
     if (parsed.searchParams.toString()) {
       normalized += `?${parsed.searchParams.toString()}`;
-    }
-    if (parsed.hash) {
-      normalized += parsed.hash;
     }
     return normalized.replace(/\/+$/, '');
   } catch {

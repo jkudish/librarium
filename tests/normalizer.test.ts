@@ -21,10 +21,18 @@ describe('normalizeUrl', () => {
     expect(normalizeUrl('https://example.com/page/')).toBe('example.com/page');
   });
 
-  it('strips utm_* params', () => {
+  it('strips every case-insensitive utm_* param', () => {
     const url =
-      'https://example.com/page?utm_source=twitter&utm_medium=social&utm_campaign=launch&keep=yes';
+      'https://example.com/page?utm_source=twitter&utm_custom_placement=hero&UTM_MEDIUM=social&utm_campaign=launch&keep=yes';
     expect(normalizeUrl(url)).toBe('example.com/page?keep=yes');
+  });
+
+  it('ignores fragments but preserves meaningful query parameters', () => {
+    expect(
+      normalizeUrl(
+        'https://example.com/page?article=42&filter=recent&utm_source=newsletter#evidence',
+      ),
+    ).toBe('example.com/page?article=42&filter=recent');
   });
 
   it('strips fbclid, gclid, and other tracking params', () => {
@@ -75,6 +83,23 @@ describe('deduplicateSources', () => {
     expect(result[0].citationCount).toBe(2);
     expect(result[0].providers).toContain('perplexity-sonar-pro');
     expect(result[0].providers).toContain('brave-answers');
+  });
+
+  it('merges citations that only differ by UTM keys or fragment', () => {
+    const citations: Citation[] = [
+      {
+        url: 'https://example.com/page?keep=yes&utm_campaign=launch#first',
+        provider: 'exa',
+      },
+      {
+        url: 'https://example.com/page?utm_custom=x&keep=yes#second',
+        provider: 'brave-answers',
+      },
+    ];
+
+    expect(deduplicateSources(citations)).toMatchObject([
+      { normalizedUrl: 'example.com/page?keep=yes', citationCount: 2 },
+    ]);
   });
 
   it('keeps distinct ports as separate sources', () => {
