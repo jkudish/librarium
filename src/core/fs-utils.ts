@@ -66,7 +66,8 @@ public static class LibrariumNativeFile {
     int rootOffset = IntPtr.Size == 8 ? 8 : 4;
     int lengthOffset = rootOffset + IntPtr.Size;
     int nameOffset = lengthOffset + sizeof(uint);
-    int size = nameOffset + name.Length;
+    int structureSize = IntPtr.Size == 8 ? 24 : 16;
+    int size = structureSize + name.Length;
     IntPtr buffer = Marshal.AllocHGlobal(size);
     try {
       for (int index = 0; index < size; index++) Marshal.WriteByte(buffer, index, 0);
