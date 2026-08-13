@@ -180,7 +180,16 @@ function bindingConfig(
   options: ProviderCatalogOptions,
   adapterId: string,
 ): CatalogProviderConfig | undefined {
-  return options.providerConfigs?.[adapterId];
+  const publicProviderConfig: Readonly<Record<string, string>> = {
+    'exa-research': 'exa',
+    'tavily-research': 'tavily',
+    'you-research-background': 'you-research',
+  };
+  const publicId = publicProviderConfig[adapterId];
+  return publicId
+    ? (options.providerConfigs?.[publicId] ??
+        options.providerConfigs?.[adapterId])
+    : options.providerConfigs?.[adapterId];
 }
 
 function resolveDeclaration(

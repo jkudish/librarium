@@ -10,6 +10,7 @@ import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
 import { ClaudeProvider } from './claude.js';
 import { ExaProvider } from './exa.js';
+import { ExaResearchProvider } from './exa-research.js';
 import { FirecrawlSearchProvider } from './firecrawl-search.js';
 import { GeminiChatProvider } from './gemini-chat.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
@@ -53,7 +54,9 @@ import { SearchApiGoogleAiOverviewProvider } from './searchapi-google-ai-overvie
 import { SearchApiPerplexityProvider } from './searchapi-perplexity.js';
 import { SerpApiProvider } from './serpapi.js';
 import { TavilyProvider } from './tavily.js';
+import { TavilyResearchProvider } from './tavily-research.js';
 import { YouResearchProvider } from './you-research.js';
+import { YouResearchBackgroundProvider } from './you-research-background.js';
 
 export interface BuiltInProviderFactoryContext {
   providerConfig?: ProviderConfig;
@@ -243,7 +246,52 @@ const factories: Record<string, ProviderFactory> = {
     }),
   'brave-answers': () => new BraveAnswersProvider(),
   exa: () => new ExaProvider(),
+  'exa-research': ({ providerConfig }) =>
+    new ExaResearchProvider({
+      effort: option(providerConfig, 'effort') as
+        | 'minimal'
+        | 'low'
+        | 'medium'
+        | 'high'
+        | 'xhigh'
+        | 'auto'
+        | 'max'
+        | undefined,
+      systemPrompt: option(providerConfig, 'systemPrompt') as
+        | string
+        | undefined,
+      outputSchema: option(providerConfig, 'outputSchema') as
+        | Record<string, unknown>
+        | undefined,
+      maxCostDollars: option(providerConfig, 'maxCostDollars') as
+        | number
+        | undefined,
+    }),
   'you-research': () => new YouResearchProvider(),
+  'you-research-background': ({ providerConfig }) =>
+    new YouResearchBackgroundProvider({
+      researchEffort: option(providerConfig, 'researchEffort') as
+        | 'lite'
+        | 'standard'
+        | 'deep'
+        | 'exhaustive'
+        | 'frontier'
+        | undefined,
+      outputSchema: option(providerConfig, 'outputSchema') as
+        | Record<string, unknown>
+        | undefined,
+      includeDomains: option(providerConfig, 'includeDomains') as
+        | string[]
+        | undefined,
+      excludeDomains: option(providerConfig, 'excludeDomains') as
+        | string[]
+        | undefined,
+      boostDomains: option(providerConfig, 'boostDomains') as
+        | string[]
+        | undefined,
+      freshness: option(providerConfig, 'freshness') as string | undefined,
+      country: option(providerConfig, 'country') as string | undefined,
+    }),
   'kagi-fastgpt': () => new KagiFastGPTProvider(),
   'perplexity-search': ({ providerConfig }) =>
     new PerplexitySearchProvider(perplexitySearchOptions(providerConfig)),
@@ -292,6 +340,23 @@ const factories: Record<string, ProviderFactory> = {
   'perplexity-pro-search': () => new PerplexityProSearchProvider(),
   serpapi: () => new SerpApiProvider(),
   tavily: () => new TavilyProvider(),
+  'tavily-research': ({ providerConfig }) =>
+    new TavilyResearchProvider({
+      model: option(providerConfig, 'researchModel') as
+        | 'mini'
+        | 'pro'
+        | 'auto'
+        | undefined,
+      outputSchema: option(providerConfig, 'outputSchema') as
+        | Record<string, unknown>
+        | undefined,
+      citationFormat: option(providerConfig, 'citationFormat') as
+        | 'numbered'
+        | 'mla'
+        | 'apa'
+        | 'chicago'
+        | undefined,
+    }),
   claude: (context) =>
     new ClaudeProvider({
       model: model('claude', context),
@@ -319,7 +384,9 @@ const factories: Record<string, ProviderFactory> = {
 };
 
 export const BUILTIN_PROVIDER_DESCRIPTORS: readonly BuiltInProviderDescriptor[] =
-  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map((definition) => {
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.filter(
+    (definition) => definition.internal !== true,
+  ).map((definition) => {
     const factory = factories[definition.id];
     if (!factory) {
       throw new Error(`Missing built-in provider factory: ${definition.id}`);
@@ -340,4 +407,13 @@ export function getBuiltInProviderDescriptor(
   return BUILTIN_PROVIDER_DESCRIPTORS.find(
     (descriptor) => descriptor.id === id,
   );
+}
+
+/** Private internal background strategies for canonical exact bindings. */
+export function getInternalBuiltInProviderDescriptor(
+  id: string,
+): BuiltInProviderDescriptor | undefined {
+  const definition = getBuiltinProviderDefinition(id);
+  if (!definition?.internal) return undefined;
+  return { ...definition, factory: factories[id] };
 }

@@ -34,12 +34,12 @@ describe('provider catalog in workerd', () => {
   it('builds the full catalog without Node APIs', () => {
     const catalog = workerCatalog();
     expect(catalog.entries).toHaveLength(34);
-    expect(catalog.resolved).toHaveLength(38);
-    expect(catalog.profiles).toHaveLength(36);
-    expect(catalog.workflow('all').members).toHaveLength(36);
+    expect(catalog.resolved).toHaveLength(41);
+    expect(catalog.profiles).toHaveLength(39);
+    expect(catalog.workflow('all').members).toHaveLength(39);
     expect(catalog.workflow('quick').members).toHaveLength(5);
     expect(catalog.workflow('visibility').members).toHaveLength(9);
-    expect(catalog.workflow('deep').members).toHaveLength(6);
+    expect(catalog.workflow('deep').members).toHaveLength(9);
   });
 
   it('maps configuration without importing Node config loading', () => {
@@ -67,7 +67,7 @@ describe('provider catalog in workerd', () => {
       },
     });
     expect(mapped.groups).toEqual({ team: ['exa/search'] });
-    expect(mapped.catalog.resolveDefault()).toHaveLength(1);
+    expect(mapped.catalog.resolveDefault()).toHaveLength(2);
   });
 
   it('fingerprints deterministically without crypto', () => {

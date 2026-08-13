@@ -283,11 +283,22 @@ export async function executeRun(
     for (const warning of init.warnings) {
       process.stderr.write(`[librarium] warning: ${warning}\n`);
     }
-    assertAdmittedAdaptersRegistered(
-      preflight.prepared,
+    const registered = new Set(
       deps.registeredAdapterIds?.() ??
         getAllProviders().map((provider) => provider.id),
     );
+    // Private background adapters do not appear in public registry listings.
+    // They are nevertheless required by an already frozen exact plan and have
+    // been initialized above from the same admitted adapter set.
+    const internalAdapterIds = new Set([
+      'exa-research',
+      'tavily-research',
+      'you-research-background',
+    ]);
+    for (const adapterId of preflight.admittedAdapterIds) {
+      if (internalAdapterIds.has(adapterId)) registered.add(adapterId);
+    }
+    assertAdmittedAdaptersRegistered(preflight.prepared, registered);
     const providerIds = preflight.prepared.request.slots.map((slot) => {
       const plan =
         preflight.prepared.profile_plans_by_identity[

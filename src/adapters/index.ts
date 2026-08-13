@@ -26,6 +26,7 @@ import { ProviderBase } from './base.js';
 import {
   BUILTIN_PROVIDER_DESCRIPTORS,
   type BuiltInProviderDescriptor,
+  getInternalBuiltInProviderDescriptor,
 } from './provider-descriptors.js';
 
 const builtinDeclarations = new Map(
@@ -40,6 +41,11 @@ const builtinProfileBindings = buildProfileBindings(builtinDeclarations);
 const builtinAdapterBindings = adapterProfileBindings();
 
 const providers = new Map<string, Provider>();
+const INTERNAL_ADAPTER_IDS = new Set([
+  'exa-research',
+  'tavily-research',
+  'you-research-background',
+]);
 
 export type ProviderInitConfig = Partial<
   Pick<
@@ -126,7 +132,14 @@ export function getExactProvider(id: string): Provider | undefined {
  * Get all registered providers
  */
 export function getAllProviders(): Provider[] {
-  return Array.from(providers.values());
+  return Array.from(providers.values()).filter(
+    (provider) => !INTERNAL_ADAPTER_IDS.has(provider.id),
+  );
+}
+
+/** Internal research adapters remain resolvable by exact frozen binding only. */
+export function registeredAdapterIds(): string[] {
+  return Array.from(providers.keys());
 }
 
 /**
@@ -211,8 +224,29 @@ export async function initializeProviders(
   const httpStreamClient = config.httpStreamClient;
   const warnings: string[] = [];
 
-  for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
-    const configured = providerConfig[descriptor.id];
+  const descriptors = [
+    ...BUILTIN_PROVIDER_DESCRIPTORS,
+    ...['exa-research', 'tavily-research', 'you-research-background'].flatMap(
+      (id) => {
+        const descriptor = getInternalBuiltInProviderDescriptor(id);
+        return descriptor ? [descriptor] : [];
+      },
+    ),
+  ];
+  for (const descriptor of descriptors) {
+    // Research profiles share the established public provider configuration,
+    // while their background adapters retain distinct internal ids.
+    const configured =
+      providerConfig[descriptor.id] ??
+      providerConfig[
+        (
+          {
+            'exa-research': 'exa',
+            'tavily-research': 'tavily',
+            'you-research-background': 'you-research',
+          } as Readonly<Record<string, string>>
+        )[descriptor.id] ?? ''
+      ];
     const identity = builtinAdapterBindings.get(descriptor.id);
     const binding = identity
       ? builtinProfileBindings.get(

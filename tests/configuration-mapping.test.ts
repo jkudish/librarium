@@ -313,7 +313,10 @@ describe('configuration mapping', () => {
     expect(
       mapped.catalog.get('acme-provider', 'search')?.availability,
     ).toMatchObject({ enabled: false, reserve_only: true, selectable: false });
-    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
+    expect(keys(mapped.catalog.resolveDefault())).toEqual([
+      'exa/research',
+      'exa/search',
+    ]);
   });
 
   it('owns and freezes custom profile bindings independently of caller config', () => {
@@ -536,6 +539,7 @@ describe('configuration mapping', () => {
     );
 
     expect(keys(mapped.catalog.resolveDefault())).toEqual([
+      'exa/research',
       'exa/search',
       'brave-search/search',
     ]);
@@ -643,7 +647,10 @@ describe('configuration mapping', () => {
         path: '/providers/__proto__/fallback',
       }),
     );
-    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
+    expect(keys(mapped.catalog.resolveDefault())).toEqual([
+      'exa/research',
+      'exa/search',
+    ]);
   });
 
   it('retains raw global and project authored layers with project precedence', () => {
@@ -865,8 +872,12 @@ describe('configuration mapping', () => {
       }),
       { requestDeadlineMs: 2_000_000, credentials: credentials() },
     );
-    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
+    expect(keys(mapped.catalog.resolveDefault())).toEqual([
+      'exa/research',
+      'exa/search',
+    ]);
     expect(keys(mapped.catalog.workflow('all').members)).toEqual([
+      'exa/research',
       'exa/search',
     ]);
     expect(keys(mapped.catalog.resolveConfiguredReserve([]))).toEqual([

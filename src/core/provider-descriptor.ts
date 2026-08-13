@@ -37,6 +37,8 @@ export type ProviderCapabilities =
 
 export interface ProviderDescriptorDefinition {
   id: string;
+  /** Internal adapter ids bind public catalog profiles but are never selectors. */
+  internal?: true;
   registrationOrder: number;
   aliases: readonly string[];
   tier: ProviderTier;
@@ -152,6 +154,71 @@ const parallelChatOptions = commonOptions.merge(ParallelChatOptionsSchema);
 const parallelResearchOptions = commonOptions.merge(
   ParallelResearchOptionsSchema,
 );
+
+const nonEmptyStrings = z.array(z.string().trim().min(1)).nonempty();
+const jsonObject = z.record(z.string(), z.unknown());
+const tavilyResearchOptions = commonOptions
+  .extend({
+    // `model` is reserved for the v1 target-selection field. This provider's
+    // documented Research API model stays inside its strict option bag.
+    researchModel: z.enum(['mini', 'pro', 'auto']).optional(),
+    outputSchema: jsonObject.optional(),
+    citationFormat: z.enum(['numbered', 'mla', 'apa', 'chicago']).optional(),
+  })
+  .strict();
+const exaResearchOptions = commonOptions
+  .extend({
+    effort: z
+      .enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'auto', 'max'])
+      .optional(),
+    systemPrompt: z.string().trim().min(1).optional(),
+    outputSchema: jsonObject.optional(),
+    maxCostDollars: z.number().positive().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.maxCostDollars &&
+      !['auto', 'max'].includes(value.effort ?? 'auto')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'maxCostDollars is supported only with effort "auto" or "max"',
+      });
+    }
+  });
+const youResearchBackgroundOptions = commonOptions
+  .extend({
+    researchEffort: z
+      .enum(['lite', 'standard', 'deep', 'exhaustive', 'frontier'])
+      .optional(),
+    outputSchema: jsonObject.optional(),
+    includeDomains: nonEmptyStrings.optional(),
+    excludeDomains: nonEmptyStrings.optional(),
+    boostDomains: nonEmptyStrings.optional(),
+    freshness: z.string().trim().min(1).optional(),
+    country: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/)
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.outputSchema && value.researchEffort === 'lite') {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'outputSchema is not supported with researchEffort "lite"',
+      });
+    }
+    if (value.includeDomains && (value.excludeDomains || value.boostDomains)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'includeDomains cannot be combined with excludeDomains or boostDomains',
+      });
+    }
+  });
 
 const inline = (webSearch?: 'always' | 'optional'): ProviderCapabilities => ({
   execution: 'inline',
@@ -310,6 +377,25 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     capabilities: inline('always'),
   }),
   define({
+    id: 'exa-research',
+    internal: true,
+    registrationOrder: 32,
+    tier: 'deep-research',
+    envVar: 'EXA_API_KEY',
+    optionsSchema: exaResearchOptions,
+    display: {
+      family: 'Exa',
+      name: 'Exa Research Adapter',
+      description:
+        'Internal durable Exa Agent adapter for the Exa research profile.',
+      bestFor: 'Canonical Exa research profile execution.',
+      setupUrl: 'https://exa.ai/docs/reference/agent-api/create-a-run',
+      order: 30,
+    },
+    metering: { kind: 'native_cost' },
+    capabilities: background(),
+  }),
+  define({
     id: 'tavily',
     registrationOrder: 20,
     tier: 'raw-search',
@@ -329,6 +415,26 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       unit: 'credit',
     },
     capabilities: inline('always'),
+  }),
+  define({
+    id: 'tavily-research',
+    internal: true,
+    registrationOrder: 33,
+    tier: 'deep-research',
+    envVar: 'TAVILY_API_KEY',
+    optionsSchema: tavilyResearchOptions,
+    display: {
+      family: 'Tavily',
+      name: 'Tavily Research Adapter',
+      description:
+        'Internal durable Tavily Research adapter for the Tavily research profile.',
+      bestFor: 'Canonical Tavily research profile execution.',
+      setupUrl:
+        'https://docs.tavily.com/documentation/api-reference/endpoint/research',
+      order: 40,
+    },
+    metering: { kind: 'credit_priced', unit: 'credit' },
+    capabilities: background(),
   }),
   define({
     id: 'openai-research',
@@ -580,6 +686,25 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       unit: 'query',
     },
     capabilities: inline('always'),
+  }),
+  define({
+    id: 'you-research-background',
+    internal: true,
+    registrationOrder: 34,
+    tier: 'deep-research',
+    envVar: 'YOU_COM_API_KEY',
+    optionsSchema: youResearchBackgroundOptions,
+    display: {
+      family: 'You.com',
+      name: 'You.com Research Background Adapter',
+      description:
+        'Internal durable You.com Research adapter for the You.com research profile.',
+      bestFor: 'Canonical You.com research profile execution.',
+      setupUrl: 'https://you.com/docs/api-reference/research/v1-research',
+      order: 160,
+    },
+    metering: { kind: 'manual_unmetered' },
+    capabilities: background(),
   }),
   define({
     id: 'kagi-fastgpt',

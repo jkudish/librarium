@@ -18,7 +18,9 @@ export interface ProviderCatalogEntry {
 
 export const PROVIDER_CATALOG: Record<string, ProviderCatalogEntry> =
   Object.fromEntries(
-    BUILTIN_PROVIDER_DEFINITIONS.map((definition) => [
+    BUILTIN_PROVIDER_DEFINITIONS.filter(
+      (definition) => definition.internal !== true,
+    ).map((definition) => [
       definition.id,
       {
         id: definition.id,

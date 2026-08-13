@@ -43,7 +43,9 @@ export const PRICING_VERSION = '2026-08';
  * `options` (see readPricingOverride).
  */
 const REGISTRY: Record<string, ProviderMeteringDescriptor> = Object.fromEntries(
-  BUILTIN_PROVIDER_DEFINITIONS.map(({ id, metering }) => [id, metering]),
+  BUILTIN_PROVIDER_DEFINITIONS.filter(({ internal }) => internal !== true).map(
+    ({ id, metering }) => [id, metering],
+  ),
 );
 
 /** Capability for unregistered/custom providers: no reliable per-call metering. */

@@ -9,6 +9,7 @@ import {
   initializeProviders as initializeBuiltinProviders,
   type ProviderInitConfig,
   type ProviderInitResult,
+  registeredAdapterIds,
   registerProvider,
 } from './index.js';
 
@@ -18,6 +19,7 @@ export {
   getProvider,
   getProviderMeta,
   getProvidersByTier,
+  registeredAdapterIds,
   registerProvider,
 };
 

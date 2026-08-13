@@ -460,11 +460,21 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     adapter_id: 'you-research',
   },
   {
+    provider_id: 'you-research',
+    profile_id: 'research',
+    adapter_id: 'you-research-background',
+  },
+  {
     provider_id: 'kagi-fastgpt',
     profile_id: 'grounded',
     adapter_id: 'kagi-fastgpt',
   },
   { provider_id: 'exa', profile_id: 'search', adapter_id: 'exa' },
+  {
+    provider_id: 'exa',
+    profile_id: 'research',
+    adapter_id: 'exa-research',
+  },
   {
     provider_id: 'perplexity-search',
     profile_id: 'search',
@@ -489,6 +499,11 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
   { provider_id: 'searchapi', profile_id: 'search', adapter_id: 'searchapi' },
   { provider_id: 'serpapi', profile_id: 'search', adapter_id: 'serpapi' },
   { provider_id: 'tavily', profile_id: 'search', adapter_id: 'tavily' },
+  {
+    provider_id: 'tavily',
+    profile_id: 'research',
+    adapter_id: 'tavily-research',
+  },
   {
     provider_id: 'searchapi-chatgpt',
     profile_id: 'surface',

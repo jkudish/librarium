@@ -104,6 +104,9 @@ const IMPLEMENTED_MATRIX = [
   ['openai-research', 'research'],
   ['gemini-deep', 'research'],
   ['parallel', 'research'],
+  ['exa', 'research'],
+  ['tavily', 'research'],
+  ['you-research', 'research'],
   ['perplexity-sonar-pro', 'grounded'],
   ['perplexity-pro-search', 'grounded'],
   ['gemini-grounded', 'grounded'],
@@ -214,7 +217,8 @@ describe('provider catalog -- declarations', () => {
   });
 
   it('omits grounding policy for search results and requires it elsewhere', () => {
-    for (const { declaration } of refs) {
+    for (const ref of refs) {
+      const { declaration } = ref;
       if (declaration.result_kind === 'search_results') {
         expect(declaration.grounding_policy).toBeUndefined();
       } else {
@@ -254,7 +258,8 @@ describe('provider catalog -- declarations', () => {
       'invocation',
       'resumability',
     ]);
-    for (const { declaration } of refs) {
+    for (const ref of refs) {
+      const { declaration } = ref;
       for (const key of Object.keys(declaration)) {
         expect(allowed.has(key)).toBe(true);
       }
@@ -269,16 +274,21 @@ describe('provider catalog -- declarations', () => {
   });
 
   it('advertises optional features only where an adapter proves them', () => {
-    for (const { entry, declaration } of refs) {
+    for (const ref of refs) {
+      const { declaration } = ref;
       if (declaration.status === 'planned') {
         expect(declaration.features).toBeUndefined();
         continue;
       }
-      // No public adapter implements remote cancellation. Parallel Chat
-      // documents JSON-schema output, so it may advertise that one feature.
+      const key = refKey(ref.entry.provider_id, declaration.profile_id);
+      // No public adapter implements remote cancellation. Parallel Chat and
+      // durable research adapters document JSON-schema output.
       expect(declaration.features?.remote_cancellation).toBeUndefined();
       expect(declaration.features?.json_schema_output).toBe(
-        refKey(entry.provider_id, declaration.profile_id) === 'parallel/chat'
+        ['exa/research', 'tavily/research', 'you-research/research'].includes(
+          key,
+        )
+          || key === 'parallel/chat'
           ? true
           : undefined,
       );
@@ -945,6 +955,9 @@ describe('provider catalog -- built-in workflows', () => {
       'openai-research/research',
       'gemini-deep/research',
       'parallel/research',
+      'exa/research',
+      'tavily/research',
+      'you-research/research',
     ]);
   });
 
@@ -988,16 +1001,21 @@ describe('provider catalog -- built-in workflows', () => {
 
     const members = keysOf(built.workflow('all').members);
     expect(members).not.toContain('exa/search');
+    expect(members).not.toContain('exa/research');
     expect(members).not.toContain('kagi-fastgpt/grounded');
     expect(members).not.toContain('perplexity-pro-search/grounded');
     for (const [providerId, profileId] of PLANNED_MATRIX) {
       expect(members).not.toContain(refKey(providerId, profileId));
     }
-    expect(members).toHaveLength(IMPLEMENTED_MATRIX.length - 3);
+    expect(members).toHaveLength(IMPLEMENTED_MATRIX.length - 4);
 
     const omitted = built.workflow('all').omitted;
     expect(omitted).toContainEqual({
       profile_key: 'exa/search',
+      reason: 'profile_disabled',
+    });
+    expect(omitted).toContainEqual({
+      profile_key: 'exa/research',
       reason: 'profile_disabled',
     });
     expect(omitted).toContainEqual({
