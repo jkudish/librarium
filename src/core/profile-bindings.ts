@@ -402,6 +402,12 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     adapter_id: 'gemini-grounded',
   },
   { provider_id: 'grok', profile_id: 'web', adapter_id: 'grok' },
+  { provider_id: 'grok-x-only', profile_id: 'x', adapter_id: 'grok-x-only' },
+  {
+    provider_id: 'grok-combined',
+    profile_id: 'combined',
+    adapter_id: 'grok-combined',
+  },
   {
     provider_id: 'openrouter',
     profile_id: 'grounded',

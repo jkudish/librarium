@@ -14,7 +14,11 @@ import { FirecrawlSearchProvider } from './firecrawl-search.js';
 import { GeminiChatProvider } from './gemini-chat.js';
 import { GeminiDeepProvider } from './gemini-deep.js';
 import { GeminiGroundedProvider } from './gemini-grounded.js';
-import { GrokProvider } from './grok.js';
+import {
+  GrokCombinedProvider,
+  GrokProvider,
+  GrokXOnlyProvider,
+} from './grok.js';
 import { JinaSearchProvider } from './jina-search.js';
 import { KagiFastGPTProvider } from './kagi-fastgpt.js';
 import { OpenAIChatProvider } from './openai-chat.js';
@@ -133,7 +137,21 @@ const factories: Record<string, ProviderFactory> = {
   'perplexity-sonar-pro': () => new PerplexitySonarProProvider(),
   'gemini-grounded': (context) =>
     new GeminiGroundedProvider({ model: model('gemini-grounded', context) }),
-  grok: (context) => new GrokProvider({ model: model('grok', context) }),
+  grok: (context) =>
+    new GrokProvider({
+      model: model('grok', context),
+      searchOptions: context.providerConfig?.options,
+    }),
+  'grok-x-only': (context) =>
+    new GrokXOnlyProvider({
+      model: model('grok-x-only', context),
+      searchOptions: context.providerConfig?.options,
+    }),
+  'grok-combined': (context) =>
+    new GrokCombinedProvider({
+      model: model('grok-combined', context),
+      searchOptions: context.providerConfig?.options,
+    }),
   'openrouter-online': (context) =>
     new OpenRouterOnlineProvider({
       model: model('openrouter-online', context),

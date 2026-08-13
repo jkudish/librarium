@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  grokCombinedOptionsSchema,
+  grokWebOptionsSchema,
+  grokXOnlyOptionsSchema,
+} from '../adapters/grok-options.js';
 import { PerplexitySearchOptionsSchema } from '../adapters/perplexity-search-options.js';
 import type { MeteringKind, ProviderTier } from '../types.js';
 import { searchApiOptionsSchema } from './searchapi.js';
@@ -387,6 +392,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
     defaultModel: 'grok-4.5',
+    optionsSchema: grokWebOptionsSchema,
     display: {
       family: 'xAI',
       name: 'Grok (xAI)',
@@ -398,6 +404,53 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     metering: {
       kind: 'native_tokens',
       defaultPerRequestUsd: 0.015,
+      unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'grok-x-only',
+    registrationOrder: 32,
+    tier: 'ai-grounded',
+    envVar: 'XAI_API_KEY',
+    defaultModel: 'grok-4.5',
+    autoEnable: false,
+    optionsSchema: grokXOnlyOptionsSchema,
+    display: {
+      family: 'xAI',
+      name: 'Grok X Search',
+      description: 'Grok Responses API answers grounded only in the X corpus.',
+      bestFor: 'Observing what the X corpus alone supports.',
+      setupUrl: 'https://console.x.ai',
+      order: 156,
+    },
+    metering: {
+      kind: 'native_tokens',
+      defaultPerRequestUsd: 0.015,
+      unit: 'request',
+    },
+    capabilities: inline(),
+  }),
+  define({
+    id: 'grok-combined',
+    registrationOrder: 33,
+    tier: 'ai-grounded',
+    envVar: 'XAI_API_KEY',
+    defaultModel: 'grok-4.5',
+    autoEnable: false,
+    optionsSchema: grokCombinedOptionsSchema,
+    display: {
+      family: 'xAI',
+      name: 'Grok Combined Search',
+      description:
+        'One Grok Responses execution grounded in both web and X corpora.',
+      bestFor: 'A single cited answer spanning web and X sources.',
+      setupUrl: 'https://console.x.ai',
+      order: 157,
+    },
+    metering: {
+      kind: 'native_tokens',
+      defaultPerRequestUsd: 0.025,
       unit: 'request',
     },
     capabilities: inline('always'),

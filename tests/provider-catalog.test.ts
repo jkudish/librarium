@@ -107,6 +107,8 @@ const IMPLEMENTED_MATRIX = [
   ['perplexity-pro-search', 'grounded'],
   ['gemini-grounded', 'grounded'],
   ['grok', 'web'],
+  ['grok-x-only', 'x'],
+  ['grok-combined', 'combined'],
   ['openrouter', 'grounded'],
   ['brave-answers', 'grounded'],
   ['you-research', 'grounded'],
@@ -132,8 +134,6 @@ const IMPLEMENTED_MATRIX = [
 ] as const;
 
 const PLANNED_MATRIX = [
-  ['grok-x-only', 'x'],
-  ['grok-combined', 'combined'],
   ['parallel', 'search'],
   ['parallel', 'chat'],
   ['parallel', 'research'],
@@ -1806,6 +1806,8 @@ const CONFIGURABLE_TARGET_MATRIX = [
     'deep-research-preview-04-2026',
   ],
   ['grok', 'web', 'grok', 'model', 'grok-4.5'],
+  ['grok-x-only', 'x', 'grok-x-only', 'model', 'grok-4.5'],
+  ['grok-combined', 'combined', 'grok-combined', 'model', 'grok-4.5'],
   ['claude', 'chat', 'claude', 'model', 'claude-sonnet-5'],
   ['openai-chat', 'chat', 'openai-chat', 'model', 'gpt-5-mini'],
   ['gemini-chat', 'chat', 'gemini-chat', 'model', 'gemini-3.6-flash'],
@@ -1827,7 +1829,7 @@ describe('provider catalog -- configured target fidelity', () => {
     });
   });
 
-  it('preserves the seven existing configurable primary targets', () => {
+  it('preserves the configurable primary targets', () => {
     const configurable = catalog()
       .resolved.filter(
         (item) =>
@@ -1845,7 +1847,7 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(9);
+    expect(configurable).toHaveLength(11);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',
@@ -2181,7 +2183,7 @@ describe('provider catalog -- configured reference diagnostics', () => {
     const built = catalog({
       groups: { future: ['parallel/research', 'valyu'] },
       defaults: [{ provider_id: 'parallel', profile_id: 'research' }],
-      reserve: [{ provider_id: 'grok-x-only', profile_id: 'x' }],
+      reserve: [{ provider_id: 'valyu', profile_id: 'research' }],
     });
 
     expect(built.issues.map((issue) => [issue.code, issue.path])).toEqual([

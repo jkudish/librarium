@@ -66,6 +66,22 @@
       "pricingVersion": "2026-08"
     },
     {
+      "id": "grok-x-only",
+      "tier": "ai-grounded",
+      "envVar": "XAI_API_KEY",
+      "estimatedCostUsd": 0.015,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
+      "id": "grok-combined",
+      "tier": "ai-grounded",
+      "envVar": "XAI_API_KEY",
+      "estimatedCostUsd": 0.025,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
       "id": "openrouter-online",
       "tier": "ai-grounded",
       "envVar": "OPENROUTER_API_KEY",
@@ -288,6 +304,8 @@
       "perplexity-sonar-pro",
       "gemini-grounded",
       "grok",
+      "grok-x-only",
+      "grok-combined",
       "openrouter-online",
       "brave-answers",
       "exa",
@@ -311,6 +329,8 @@
       "perplexity-sonar-pro",
       "gemini-grounded",
       "grok",
+      "grok-x-only",
+      "grok-combined",
       "openrouter-online",
       "brave-answers",
       "exa",
