@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
 import type {
   AsyncPollResult,
@@ -20,22 +21,42 @@ export interface YouResearchBackgroundProviderOptions
   freshness?: string;
   country?: string;
 }
-interface YouSource {
-  url: string;
-  title?: string;
-  snippets?: string[];
-}
-interface YouOutput {
-  content?: string | Record<string, unknown>;
-  sources?: YouSource[];
-}
-interface YouTask {
-  task_id: string;
-  status: string;
-  created_at?: string;
-  error?: string | { message?: string };
-  result?: { output?: YouOutput } | null;
-}
+const YouId = z.string().uuid();
+const YouSource = z.object({
+  url: z.string().url(),
+  title: z.string().min(1).optional(),
+  snippets: z.array(z.string()).optional(),
+});
+type YouSource = z.infer<typeof YouSource>;
+const YouOutput = z.object({
+  content: z.union([
+    z.string().trim().min(1),
+    z
+      .record(z.string(), z.unknown())
+      .refine((value) => Object.keys(value).length > 0),
+  ]),
+  content_type: z.enum(['text', 'object']).optional(),
+  sources: z.array(YouSource),
+});
+const YouSubmit = z.object({
+  task_id: YouId,
+  type: z.literal('research'),
+  status: z.literal('queued'),
+  created_at: z.string().datetime({ offset: true }),
+  stream_url: z.string().min(1).optional(),
+});
+const YouTask = z.object({
+  id: YouId,
+  task_type: z.literal('research'),
+  status: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled']),
+  created_at: z.string().datetime({ offset: true }),
+  updated_at: z.string().datetime({ offset: true }).nullable().optional(),
+  completed_at: z.string().datetime({ offset: true }).nullable().optional(),
+  error: z.string().min(1).nullable(),
+  result: z
+    .object({ output: YouOutput, warnings: z.array(z.unknown()).optional() })
+    .nullable(),
+});
 const URL = 'https://api.you.com/v1/research';
 const statuses: Record<string, AsyncTaskHandle['status']> = {
   queued: 'pending',
@@ -95,7 +116,7 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
   ): Promise<AsyncTaskHandle> {
     let response;
     try {
-      response = await this.request<YouTask>(URL, {
+      response = await this.request<unknown>(URL, {
         method: 'POST',
         headers: this.headers(),
         body: this.body(query),
@@ -115,19 +136,32 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
       throw new UnsafeToRetrySubmissionError(
         this.formatError(response.status, response.data),
       );
-    const status = statuses[response.data.status];
+    const parsed = YouSubmit.safeParse(response.data);
+    if (!parsed.success) {
+      const id = YouId.safeParse(
+        (response.data as { task_id?: unknown })?.task_id,
+      );
+      if (!id.success)
+        throw new UnsafeToRetrySubmissionError(
+          'You.com returned an invalid research handle',
+        );
+      return {
+        provider: this.id,
+        taskId: id.data,
+        query,
+        submittedAt: Date.now(),
+        status: 'failed',
+        providerStatus: 'invalid_response',
+        lastPollError: 'You.com returned a malformed create response',
+      };
+    }
     return {
       provider: this.id,
-      taskId: response.data.task_id,
+      taskId: parsed.data.task_id,
       query,
-      submittedAt: Date.parse(response.data.created_at ?? '') || Date.now(),
-      status: status ?? 'pending',
-      providerStatus: response.data.status,
-      ...(status
-        ? {}
-        : {
-            lastPollError: `Unknown You.com research status: ${response.data.status}`,
-          }),
+      submittedAt: Date.parse(parsed.data.created_at),
+      status: 'pending',
+      providerStatus: 'queued',
     };
   }
   async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
@@ -145,17 +179,24 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
         message: `Poll returned HTTP ${response.status}`,
       };
     }
-    const status = statuses[response.data.status];
+    const parsed = YouTask.safeParse(response.data);
+    if (!parsed.success)
+      return {
+        status: 'failed',
+        rawStatus: 'invalid_response',
+        message: 'You.com returned a malformed status response',
+      };
+    const status = statuses[parsed.data.status];
     return status
       ? {
           status,
-          rawStatus: response.data.status,
-          message: message(response.data.error),
+          rawStatus: parsed.data.status,
+          message: parsed.data.error ?? undefined,
         }
       : {
-          status: handle.status === 'pending' ? 'pending' : 'running',
-          rawStatus: response.data.status,
-          message: `Unknown You.com research status: ${response.data.status}`,
+          status: 'failed',
+          rawStatus: 'invalid_status',
+          message: 'Unknown You.com status',
         };
   }
   async retrieve(handle: AsyncTaskHandle): Promise<ProviderResult> {
@@ -167,24 +208,29 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
           start,
           `Retrieve failed with HTTP ${response.status}`,
         );
-      if (statuses[response.data.status] !== 'completed')
+      const parsed = YouTask.safeParse(response.data);
+      if (!parsed.success)
         return this.error(
           start,
-          message(response.data.error) ??
-            `Task is not complete: status=${response.data.status}`,
+          'You.com returned a malformed completed response',
         );
-      const output = response.data.result?.output;
-      const content = output?.content;
+      if (statuses[parsed.data.status] !== 'completed')
+        return this.error(
+          start,
+          parsed.data.error ??
+            `Task is not complete: status=${parsed.data.status}`,
+        );
+      const output = parsed.data.result?.output;
+      if (!output) return this.error(start, 'You.com completed without output');
+      const content = output.content;
       return {
         provider: this.id,
         tier: this.tier,
         content:
           typeof content === 'string'
             ? content
-            : content
-              ? JSON.stringify(content, null, 2)
-              : '',
-        citations: citations(output?.sources, this.id),
+            : JSON.stringify(content, null, 2),
+        citations: citations(output.sources, this.id),
         durationMs: Math.round(performance.now() - start),
       };
     } catch (error) {
@@ -223,7 +269,7 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
     };
   }
   private task(id: string, timeout: number) {
-    return this.request<YouTask>(`${URL}/${encodeURIComponent(id)}`, {
+    return this.request<unknown>(`${URL}/${encodeURIComponent(id)}`, {
       method: 'GET',
       headers: this.headers(),
       timeout,
@@ -258,9 +304,6 @@ function citations(
       snippet: source.snippets?.[0]?.slice(0, 200),
       provider,
     }));
-}
-function message(error: YouTask['error']): string | undefined {
-  return typeof error === 'string' ? error : error?.message;
 }
 function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new Error('Request aborted'));

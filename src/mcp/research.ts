@@ -173,10 +173,13 @@ export async function runResearchSilent(
   }
 
   try {
+    const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
     assertAdmittedAdaptersRegistered(
       preflight.prepared,
       deps.registeredAdapterIds?.() ??
-        getAllProviders().map((provider) => provider.id),
+        preflight.admittedAdapterIds.filter(
+          (id) => resolveExactProvider(id)?.id === id,
+        ),
     );
   } catch (error) {
     if (error instanceof RequestPreflightError) {

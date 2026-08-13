@@ -1,3 +1,4 @@
+import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
 import { loadCustomProviders } from '../node-entry.js';
 import type { Provider, ProviderTier } from '../types.js';
 import {
@@ -100,6 +101,14 @@ export async function initializeProviders(
 ): Promise<ProviderInitResult> {
   const builtinResult = await initializeBuiltinProviders(config);
   const configuredCustomProviders = config.customProviders ?? {};
+  const privateCollision = Object.keys(configuredCustomProviders).find((id) =>
+    INTERNAL_ADAPTER_ID_SET.has(id),
+  );
+  if (privateCollision) {
+    throw new Error(
+      `Custom provider cannot claim internal adapter id "${privateCollision}".`,
+    );
+  }
   const permittedCustomProviderIds = options.customProviderIds
     ? new Set(options.customProviderIds)
     : undefined;

@@ -14,6 +14,7 @@ import {
   adapterProfileBinding,
   adapterProfileBindings,
   buildProfileBindings,
+  executionAdapterProfileBindings,
   TargetSelectionError,
 } from './profile-bindings.js';
 import {
@@ -210,7 +211,7 @@ export function resolveConfigurationProfileToken(
       profile_id: qualified[1],
     };
     const known = [
-      ...adapterProfileBindings().values(),
+      ...executionAdapterProfileBindings().values(),
       ...customProfiles.map(customProfileBinding),
     ].find((binding) => sameProfile(binding, target));
     return known

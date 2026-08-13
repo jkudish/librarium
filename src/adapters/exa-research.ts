@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
 import type {
   AsyncPollResult,
@@ -26,27 +27,49 @@ export interface ExaResearchProviderOptions extends BaseProviderOptions {
   maxCostDollars?: number;
 }
 
-interface ExaCitation {
-  url: string;
-  title?: string;
-  text?: string;
-}
-interface ExaRun {
-  id: string;
-  status: string;
-  createdAt?: string;
-  completedAt?: string | null;
-  output?: {
-    text?: string;
-    structured?: unknown;
-    grounding?: Array<{ citations?: ExaCitation[] }>;
-  };
-  usage?: Record<string, unknown>;
-  costDollars?: { total?: number };
-  error?: { message?: string };
-}
+const ExaId = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9_.:-]+$/);
+const ExaStatus = z.enum([
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+]);
+type ExaCitation = z.infer<typeof ExaCitation>;
+const ExaCitation = z.object({
+  url: z.string().url(),
+  title: z.string().min(1).optional(),
+  text: z.string().optional(),
+});
+const ExaRun = z.object({
+  id: ExaId,
+  object: z.literal('agent_run').optional(),
+  status: ExaStatus,
+  createdAt: z.string().datetime({ offset: true }),
+  completedAt: z.string().datetime({ offset: true }).nullable().optional(),
+  output: z
+    .object({
+      text: z.string().optional(),
+      structured: z.record(z.string(), z.unknown()).nullable().optional(),
+      grounding: z
+        .array(z.object({ citations: z.array(ExaCitation).optional() }))
+        .optional(),
+    })
+    .optional(),
+  usage: z.record(z.string(), z.number().nonnegative()).optional(),
+  costDollars: z
+    .object({ total: z.number().nonnegative() })
+    .passthrough()
+    .optional(),
+  error: z.object({ message: z.string().min(1).optional() }).optional(),
+});
+type ExaRun = z.infer<typeof ExaRun>;
 
-const URL = 'https://api.exa.ai/agent';
+const URL = 'https://api.exa.ai/agent/runs';
 const statuses: Record<string, AsyncTaskHandle['status']> = {
   queued: 'pending',
   running: 'running',
@@ -130,24 +153,37 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (response.status !== 200 && response.status !== 201) {
+    if (response.status !== 200) {
       throw new UnsafeToRetrySubmissionError(
         this.formatError(response.status, response.data),
       );
     }
-    const status = statuses[response.data.status];
+    const parsed = ExaRun.safeParse(response.data);
+    if (!parsed.success) {
+      const id = ExaId.safeParse((response.data as { id?: unknown })?.id);
+      if (!id.success)
+        throw new UnsafeToRetrySubmissionError(
+          'Exa Agent returned an invalid run handle',
+        );
+      return {
+        provider: this.id,
+        taskId: id.data,
+        query,
+        submittedAt: Date.now(),
+        status: 'failed',
+        providerStatus: 'invalid_response',
+        lastPollError: 'Exa Agent returned a malformed create response',
+      };
+    }
+    const data = parsed.data;
+    const status = statuses[data.status];
     return {
       provider: this.id,
-      taskId: response.data.id,
+      taskId: data.id,
       query,
-      submittedAt: Date.parse(response.data.createdAt ?? '') || Date.now(),
-      status: status ?? 'pending',
-      providerStatus: response.data.status,
-      ...(status
-        ? {}
-        : {
-            lastPollError: `Unknown Exa Agent status: ${response.data.status}`,
-          }),
+      submittedAt: Date.parse(data.createdAt),
+      status,
+      providerStatus: data.status,
     };
   }
 
@@ -166,17 +202,24 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
         message: `Poll returned HTTP ${response.status}`,
       };
     }
-    const status = statuses[response.data.status];
+    const parsed = ExaRun.safeParse(response.data);
+    if (!parsed.success)
+      return {
+        status: 'failed',
+        rawStatus: 'invalid_response',
+        message: 'Exa Agent returned a malformed status response',
+      };
+    const status = statuses[parsed.data.status];
     return status
       ? {
           status,
-          rawStatus: response.data.status,
-          message: response.data.error?.message,
+          rawStatus: parsed.data.status,
+          message: parsed.data.error?.message,
         }
       : {
-          status: handle.status === 'pending' ? 'pending' : 'running',
-          rawStatus: response.data.status,
-          message: `Unknown Exa Agent status: ${response.data.status}`,
+          status: 'failed',
+          rawStatus: 'invalid_status',
+          message: 'Unknown Exa Agent status',
         };
   }
 
@@ -189,19 +232,29 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
           start,
           `Retrieve failed with HTTP ${response.status}`,
         );
-      const run = response.data;
+      const parsed = ExaRun.safeParse(response.data);
+      if (!parsed.success)
+        return this.error(
+          start,
+          'Exa Agent returned a malformed completed response',
+        );
+      const run = parsed.data;
       if (statuses[run.status] !== 'completed')
         return this.error(
           start,
           run.error?.message ?? `Task is not complete: status=${run.status}`,
         );
       const structured = run.output?.structured;
+      const text = run.output?.text?.trim();
+      if (!text && !structured)
+        return this.error(
+          start,
+          'Exa Agent completed without non-empty output',
+        );
       return {
         provider: this.id,
         tier: this.tier,
-        content:
-          run.output?.text ??
-          (structured === undefined ? '' : JSON.stringify(structured, null, 2)),
+        content: text ?? JSON.stringify(structured, null, 2),
         citations: citations(run.output?.grounding, this.id),
         durationMs: Math.round(performance.now() - start),
         usage: usage(run.usage, run.costDollars),
@@ -214,7 +267,7 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
   /** Exa documents remote cancellation. The canonical bridge does not expose cancellation. */
   async cancel(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
     const response = await this.request<ExaRun>(
-      `${URL}/runs/${encodeURIComponent(handle.taskId)}/cancel`,
+      `${URL}/${encodeURIComponent(handle.taskId)}/cancel`,
       {
         method: 'POST',
         headers: { 'x-api-key': this.getApiKey() },
@@ -223,15 +276,18 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
     );
     if (response.status !== 200)
       throw new Error(`Cancel returned HTTP ${response.status}`);
+    const parsed = ExaRun.safeParse(response.data);
+    if (!parsed.success)
+      throw new Error('Cancel returned a malformed response');
     return {
-      status: statuses[response.data.status] ?? handle.status,
-      rawStatus: response.data.status,
-      message: response.data.error?.message,
+      status: statuses[parsed.data.status],
+      rawStatus: parsed.data.status,
+      message: parsed.data.error?.message,
     };
   }
 
   private run(taskId: string, timeout: number) {
-    return this.request<ExaRun>(`${URL}/runs/${encodeURIComponent(taskId)}`, {
+    return this.request<ExaRun>(`${URL}/${encodeURIComponent(taskId)}`, {
       method: 'GET',
       headers: { 'x-api-key': this.getApiKey() },
       timeout,

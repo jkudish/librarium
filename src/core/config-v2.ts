@@ -4,6 +4,7 @@ import type { ExecutionProfile } from '../contracts/domain/index.js';
 import { ExecutionProfileSchema } from '../contracts/domain/index.js';
 import { fallbackCompatibilityIssues } from '../contracts/interchange/compatibility.js';
 import type { RequestSlot } from '../contracts/interchange/request.js';
+import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
 import {
   adapterProfileBinding,
   adapterProfileBindings,
@@ -215,6 +216,11 @@ const CustomGroupIdSchema = OpaqueIdSchema.refine(
   { message: 'Persisted v2 groups must use a non-empty custom:<name> id' },
 );
 
+const PublicConfigIdSchema = ConfigIdSchema.refine(
+  (value) => !INTERNAL_ADAPTER_ID_SET.has(value),
+  { message: 'Internal adapter ids are not valid public provider ids' },
+);
+
 const CustomGroupsV2Schema = z.record(
   CustomGroupIdSchema,
   z.array(OpaqueIdSchema),
@@ -223,9 +229,12 @@ const CustomGroupsV2Schema = z.record(
 export const LibrariumConfigV2Schema = z.strictObject({
   version: z.literal(2),
   execution_defaults: ExecutionDefaultsV2Schema,
-  providers: z.record(ConfigIdSchema, ConfigProviderV2Schema),
-  custom_providers: z.record(ConfigIdSchema, CustomProviderSourceV2Schema),
-  trusted_provider_ids: z.array(ConfigIdSchema),
+  providers: z.record(PublicConfigIdSchema, ConfigProviderV2Schema),
+  custom_providers: z.record(
+    PublicConfigIdSchema,
+    CustomProviderSourceV2Schema,
+  ),
+  trusted_provider_ids: z.array(PublicConfigIdSchema),
   groups: CustomGroupsV2Schema,
   runtime: RuntimeConfigV2Schema,
 });
@@ -233,11 +242,11 @@ export const LibrariumConfigV2Schema = z.strictObject({
 export const LibrariumProjectConfigV2Schema = z.strictObject({
   version: z.literal(2),
   execution_defaults: ProjectExecutionDefaultsV2Schema.optional(),
-  providers: z.record(ConfigIdSchema, ProjectProviderV2Schema).optional(),
+  providers: z.record(PublicConfigIdSchema, ProjectProviderV2Schema).optional(),
   custom_providers: z
-    .record(ConfigIdSchema, CustomProviderSourceV2Schema)
+    .record(PublicConfigIdSchema, CustomProviderSourceV2Schema)
     .optional(),
-  trusted_provider_ids: z.array(ConfigIdSchema).optional(),
+  trusted_provider_ids: z.array(PublicConfigIdSchema).optional(),
   groups: CustomGroupsV2Schema.optional(),
   runtime: ProjectRuntimeConfigV2Schema.optional(),
 });

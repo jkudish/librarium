@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   events: [] as string[],
   rejectPreflight: false,
   rejectRegistration: false,
+  missingExactAdapter: false,
   canonicalDeps: undefined as unknown,
   initializeArgs: undefined as unknown,
   spinner: {
@@ -93,9 +94,15 @@ vi.mock('../src/node-request-preflight.js', () => {
       };
     },
     emitRequestPreflightNotices: () => state.events.push('notices'),
-    assertAdmittedAdaptersRegistered: () => {
+    assertAdmittedAdaptersRegistered: (
+      _prepared: unknown,
+      registered: Iterable<string>,
+    ) => {
       state.events.push('registered');
-      if (state.rejectRegistration)
+      if (
+        state.rejectRegistration ||
+        !new Set(registered).has('fallback-provider')
+      )
         throw new RequestPreflightError('missing fallback');
     },
   };
@@ -103,7 +110,10 @@ vi.mock('../src/node-request-preflight.js', () => {
 
 vi.mock('../src/adapters/node-registry.js', () => ({
   getAllProviders: () => [{ id: 'legacy-provider', tier: 'raw-search' }],
-  getExactProvider: (id: string) => ({ id, tier: 'raw-search' }),
+  getExactProvider: (id: string) =>
+    state.missingExactAdapter && id === 'fallback-provider'
+      ? undefined
+      : { id, tier: 'raw-search' },
   initializeProviders: async (...args: unknown[]) => {
     state.events.push('initialize');
     state.initializeArgs = args;
@@ -180,6 +190,7 @@ describe('production request preflight transport ordering', () => {
     state.events.length = 0;
     state.rejectPreflight = false;
     state.rejectRegistration = false;
+    state.missingExactAdapter = false;
     state.canonicalDeps = undefined;
     state.initializeArgs = undefined;
     state.spinner.isSpinning = false;
@@ -263,6 +274,27 @@ describe('production request preflight transport ordering', () => {
       'registered',
       'spinner-fail',
     ]);
+  });
+
+  it('checks the actual exact registry and stops before side effects', async () => {
+    state.missingExactAdapter = true;
+
+    const outcome = await executeRun('private query', { json: true });
+
+    expect(outcome).toEqual({ exitCode: 2 });
+    expect(state.events).toEqual([
+      'spinner-start',
+      'load-global',
+      'load-project',
+      'merge',
+      'preflight',
+      'notices',
+      'initialize',
+      'registered',
+      'spinner-fail',
+    ]);
+    expect(state.events).not.toContain('run-dir');
+    expect(state.events).not.toContain('dispatch');
   });
 
   it('passes the frozen canonical plan rather than legacy dispatcher config', async () => {

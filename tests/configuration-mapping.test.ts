@@ -313,10 +313,7 @@ describe('configuration mapping', () => {
     expect(
       mapped.catalog.get('acme-provider', 'search')?.availability,
     ).toMatchObject({ enabled: false, reserve_only: true, selectable: false });
-    expect(keys(mapped.catalog.resolveDefault())).toEqual([
-      'exa/research',
-      'exa/search',
-    ]);
+    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
   });
 
   it('owns and freezes custom profile bindings independently of caller config', () => {
@@ -403,11 +400,20 @@ describe('configuration mapping', () => {
 
   it('uses the validated full adapter matrix, including distinct OpenRouter identities', () => {
     const matrix = adapterProfileBindings();
-    expect(matrix.size).toBe(BUILTIN_PROFILE_BINDING_SPECS.length);
+    expect(matrix.size).toBe(BUILTIN_PROFILE_BINDING_SPECS.length - 3);
     expect(
       [...matrix.values()].map((binding) => binding.adapter_id).sort(),
     ).toEqual(
-      BUILTIN_PROFILE_BINDING_SPECS.map((binding) => binding.adapter_id).sort(),
+      BUILTIN_PROFILE_BINDING_SPECS.filter(
+        (binding) =>
+          ![
+            'exa-research',
+            'tavily-research',
+            'you-research-background',
+          ].includes(binding.adapter_id),
+      )
+        .map((binding) => binding.adapter_id)
+        .sort(),
     );
     expect(adapterProfileBinding('openrouter-online')).toMatchObject({
       provider_id: 'openrouter',
@@ -487,6 +493,16 @@ describe('configuration mapping', () => {
     });
   });
 
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects private internal adapter token %s',
+    (token) => {
+      expect(resolveConfigurationProfileToken(token)).toMatchObject({
+        kind: 'unknown',
+        token,
+      });
+    },
+  );
+
   it('preserves raw aliases from the real load/merge path for mapper notices', () => {
     const directory = mkdtempSync(join(tmpdir(), 'librarium-mapping-'));
     try {
@@ -539,7 +555,6 @@ describe('configuration mapping', () => {
     );
 
     expect(keys(mapped.catalog.resolveDefault())).toEqual([
-      'exa/research',
       'exa/search',
       'brave-search/search',
     ]);
@@ -647,10 +662,7 @@ describe('configuration mapping', () => {
         path: '/providers/__proto__/fallback',
       }),
     );
-    expect(keys(mapped.catalog.resolveDefault())).toEqual([
-      'exa/research',
-      'exa/search',
-    ]);
+    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
   });
 
   it('retains raw global and project authored layers with project precedence', () => {
@@ -872,10 +884,7 @@ describe('configuration mapping', () => {
       }),
       { requestDeadlineMs: 2_000_000, credentials: credentials() },
     );
-    expect(keys(mapped.catalog.resolveDefault())).toEqual([
-      'exa/research',
-      'exa/search',
-    ]);
+    expect(keys(mapped.catalog.resolveDefault())).toEqual(['exa/search']);
     expect(keys(mapped.catalog.workflow('all').members)).toEqual([
       'exa/research',
       'exa/search',

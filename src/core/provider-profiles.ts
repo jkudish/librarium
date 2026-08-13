@@ -328,7 +328,6 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         features: {
           web_search: 'always',
           json_schema_output: true,
-          remote_cancellation: true,
         },
       }),
     ],

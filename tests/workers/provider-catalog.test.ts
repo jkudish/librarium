@@ -67,7 +67,7 @@ describe('provider catalog in workerd', () => {
       },
     });
     expect(mapped.groups).toEqual({ team: ['exa/search'] });
-    expect(mapped.catalog.resolveDefault()).toHaveLength(2);
+    expect(mapped.catalog.resolveDefault()).toHaveLength(1);
   });
 
   it('fingerprints deterministically without crypto', () => {

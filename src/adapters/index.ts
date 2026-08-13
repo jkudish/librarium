@@ -6,8 +6,8 @@ import {
 import type { HttpClient, HttpStreamClient } from '../core/http-client.js';
 import { getMeteringKind } from '../core/metering.js';
 import {
-  adapterProfileBindings,
   buildProfileBindings,
+  executionAdapterProfileBindings,
   TargetSelectionError,
 } from '../core/profile-bindings.js';
 import { BUILTIN_PROVIDER_CATALOG } from '../core/provider-profiles.js';
@@ -15,6 +15,11 @@ import {
   providerCredentialRef,
   providerHasCredential,
 } from '../core/provider-selection.js';
+import {
+  INTERNAL_ADAPTER_ID_SET,
+  INTERNAL_ADAPTER_IDS,
+  INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS,
+} from '../internal-adapter-ids.js';
 import type {
   Config,
   Provider,
@@ -38,14 +43,9 @@ const builtinDeclarations = new Map(
   ),
 );
 const builtinProfileBindings = buildProfileBindings(builtinDeclarations);
-const builtinAdapterBindings = adapterProfileBindings();
+const builtinAdapterBindings = executionAdapterProfileBindings();
 
 const providers = new Map<string, Provider>();
-const INTERNAL_ADAPTER_IDS = new Set([
-  'exa-research',
-  'tavily-research',
-  'you-research-background',
-]);
 
 export type ProviderInitConfig = Partial<
   Pick<
@@ -133,7 +133,7 @@ export function getExactProvider(id: string): Provider | undefined {
  */
 export function getAllProviders(): Provider[] {
   return Array.from(providers.values()).filter(
-    (provider) => !INTERNAL_ADAPTER_IDS.has(provider.id),
+    (provider) => !INTERNAL_ADAPTER_ID_SET.has(provider.id),
   );
 }
 
@@ -226,26 +226,19 @@ export async function initializeProviders(
 
   const descriptors = [
     ...BUILTIN_PROVIDER_DESCRIPTORS,
-    ...['exa-research', 'tavily-research', 'you-research-background'].flatMap(
-      (id) => {
-        const descriptor = getInternalBuiltInProviderDescriptor(id);
-        return descriptor ? [descriptor] : [];
-      },
-    ),
+    ...INTERNAL_ADAPTER_IDS.flatMap((id) => {
+      const descriptor = getInternalBuiltInProviderDescriptor(id);
+      return descriptor ? [descriptor] : [];
+    }),
   ];
   for (const descriptor of descriptors) {
     // Research profiles share the established public provider configuration,
     // while their background adapters retain distinct internal ids.
     const configured =
-      providerConfig[descriptor.id] ??
       providerConfig[
-        (
-          {
-            'exa-research': 'exa',
-            'tavily-research': 'tavily',
-            'you-research-background': 'you-research',
-          } as Readonly<Record<string, string>>
-        )[descriptor.id] ?? ''
+        INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS[
+          descriptor.id as keyof typeof INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS
+        ] ?? descriptor.id
       ];
     const identity = builtinAdapterBindings.get(descriptor.id);
     const binding = identity

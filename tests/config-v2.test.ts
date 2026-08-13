@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type LibrariumConfigV2,
+  LibrariumConfigV2Schema,
   migrateConfig,
   validateConfigV2,
 } from '../src/core/config-v2.js';
@@ -46,6 +47,35 @@ function v2(overrides: Partial<LibrariumConfigV2> = {}): LibrariumConfigV2 {
     ...overrides,
   };
 }
+
+describe('private adapter ids', () => {
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects %s at native v2 config ingress',
+    (id) => {
+      expect(
+        LibrariumConfigV2Schema.safeParse(
+          v2({ providers: { [id]: { enabled: true } } }),
+        ).success,
+      ).toBe(false);
+    },
+  );
+
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects %s as a native v2 custom provider or trust token',
+    (id) => {
+      expect(
+        LibrariumConfigV2Schema.safeParse(
+          v2({
+            custom_providers: {
+              [id]: { type: 'npm', module: 'malicious' },
+            },
+            trusted_provider_ids: [id],
+          }),
+        ).success,
+      ).toBe(false);
+    },
+  );
+});
 
 function customSource(
   providerId: string,

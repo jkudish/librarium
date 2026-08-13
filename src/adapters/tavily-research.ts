@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
 import type {
   AsyncPollResult,
@@ -15,28 +16,49 @@ export interface TavilyResearchProviderOptions extends BaseProviderOptions {
   citationFormat?: 'numbered' | 'mla' | 'apa' | 'chicago';
 }
 
-interface TavilySource {
-  title?: string;
-  url: string;
-  favicon?: string;
-}
-interface TavilyResearchTask {
-  request_id: string;
-  created_at?: string;
-  status: string;
-  content?: string | Record<string, unknown>;
-  sources?: TavilySource[];
-  response_time?: number;
-  error?: string | { message?: string };
-}
+const TavilyId = z.string().trim().min(1).max(255);
+const TavilySource = z.object({
+  title: z.string().min(1).optional(),
+  url: z.string().url(),
+  favicon: z.string().url().optional(),
+});
+type TavilySource = z.infer<typeof TavilySource>;
+const TavilyPending = z.object({
+  request_id: TavilyId,
+  created_at: z.string().datetime({ offset: true }),
+  status: z.literal('pending'),
+  input: z.string().min(1),
+  model: z.enum(['mini', 'pro', 'auto']),
+  response_time: z.number().nonnegative(),
+});
+const TavilyInProgress = z.object({
+  request_id: TavilyId,
+  status: z.literal('in_progress'),
+  response_time: z.number().nonnegative(),
+});
+const TavilyCompleted = z.object({
+  request_id: TavilyId,
+  created_at: z.string().datetime({ offset: true }),
+  status: z.literal('completed'),
+  content: z.union([
+    z.string().trim().min(1),
+    z
+      .record(z.string(), z.unknown())
+      .refine((value) => Object.keys(value).length > 0),
+  ]),
+  sources: z.array(TavilySource),
+  response_time: z.number().nonnegative(),
+});
+const TavilyFailed = z.object({
+  request_id: TavilyId,
+  status: z.literal('failed'),
+  error: z.union([z.string().min(1), z.object({ message: z.string().min(1) })]),
+});
+type TavilyTerminal =
+  | z.infer<typeof TavilyCompleted>
+  | z.infer<typeof TavilyFailed>;
 
 const URL = 'https://api.tavily.com/research';
-const statuses: Record<string, AsyncTaskHandle['status']> = {
-  pending: 'pending',
-  running: 'running',
-  completed: 'completed',
-  failed: 'failed',
-};
 
 /** Durable Tavily Research adapter bound only to `tavily/research`. */
 export class TavilyResearchProvider extends BackgroundBaseProvider {
@@ -91,7 +113,7 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
   ): Promise<AsyncTaskHandle> {
     let response;
     try {
-      response = await this.request<TavilyResearchTask>(URL, {
+      response = await this.request<unknown>(URL, {
         method: 'POST',
         headers: this.headers(),
         body: {
@@ -119,24 +141,47 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         this.formatError(response.status, response.data),
       );
     }
-    const status = statuses[response.data.status];
+    const parsed = TavilyPending.safeParse(response.data);
+    if (!parsed.success) {
+      const id = TavilyId.safeParse(
+        (response.data as { request_id?: unknown })?.request_id,
+      );
+      if (!id.success)
+        throw new UnsafeToRetrySubmissionError(
+          'Tavily returned an invalid research handle',
+        );
+      return {
+        provider: this.id,
+        taskId: id.data,
+        query,
+        submittedAt: Date.now(),
+        status: 'failed',
+        providerStatus: 'invalid_response',
+        lastPollError: 'Tavily returned a malformed create response',
+      };
+    }
     return {
       provider: this.id,
-      taskId: response.data.request_id,
+      taskId: parsed.data.request_id,
       query,
-      submittedAt: Date.parse(response.data.created_at ?? '') || Date.now(),
-      status: status ?? 'pending',
-      providerStatus: response.data.status,
-      ...(status
-        ? {}
-        : {
-            lastPollError: `Unknown Tavily Research status: ${response.data.status}`,
-          }),
+      submittedAt: Date.parse(parsed.data.created_at),
+      status: 'pending',
+      providerStatus: 'pending',
     };
   }
 
   async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
     const response = await this.task(handle.taskId, 15_000);
+    if (response.status === 202) {
+      const parsed = TavilyInProgress.safeParse(response.data);
+      return parsed.success
+        ? { status: 'running', rawStatus: 'in_progress' }
+        : {
+            status: 'failed',
+            rawStatus: 'invalid_response',
+            message: 'Tavily returned a malformed in-progress response',
+          };
+    }
     if (response.status !== 200) {
       if (
         response.status === 408 ||
@@ -150,17 +195,21 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         message: `Poll returned HTTP ${response.status}`,
       };
     }
-    const status = statuses[response.data.status];
-    return status
-      ? {
-          status,
-          rawStatus: response.data.status,
-          message: message(response.data.error),
-        }
+    const parsed = z
+      .union([TavilyCompleted, TavilyFailed])
+      .safeParse(response.data);
+    if (!parsed.success)
+      return {
+        status: 'failed',
+        rawStatus: 'invalid_response',
+        message: 'Tavily returned a malformed terminal response',
+      };
+    return parsed.data.status === 'completed'
+      ? { status: 'completed', rawStatus: 'completed' }
       : {
-          status: handle.status === 'pending' ? 'pending' : 'running',
-          rawStatus: response.data.status,
-          message: `Unknown Tavily Research status: ${response.data.status}`,
+          status: 'failed',
+          rawStatus: 'failed',
+          message: message(parsed.data.error),
         };
   }
 
@@ -173,12 +222,17 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
           start,
           `Retrieve failed with HTTP ${response.status}`,
         );
-      const task = response.data;
-      if (statuses[task.status] !== 'completed')
+      const parsed = z
+        .union([TavilyCompleted, TavilyFailed])
+        .safeParse(response.data);
+      if (!parsed.success)
         return this.error(
           start,
-          message(task.error) ?? `Task is not complete: status=${task.status}`,
+          'Tavily returned a malformed terminal response',
         );
+      const task: TavilyTerminal = parsed.data;
+      if (task.status !== 'completed')
+        return this.error(start, message(task.error));
       const content = task.content;
       return {
         provider: this.id,
@@ -202,10 +256,11 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
   }
 
   private task(requestId: string, timeout: number) {
-    return this.request<TavilyResearchTask>(
-      `${URL}/${encodeURIComponent(requestId)}`,
-      { method: 'GET', headers: this.headers(), timeout },
-    );
+    return this.request<unknown>(`${URL}/${encodeURIComponent(requestId)}`, {
+      method: 'GET',
+      headers: this.headers(),
+      timeout,
+    });
   }
 
   private error(start: number, error: string): ProviderResult {
@@ -233,7 +288,7 @@ function citations(
     }));
 }
 
-function message(error: TavilyResearchTask['error']): string | undefined {
+function message(error: z.infer<typeof TavilyFailed>['error']): string {
   return typeof error === 'string' ? error : error?.message;
 }
 

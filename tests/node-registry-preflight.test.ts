@@ -144,6 +144,22 @@ describe('admitted custom-provider runtime guard', () => {
     state.descriptorOverride = {};
   });
 
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects custom collision %s before loading custom code',
+    async (id) => {
+      const { initializeProviders } = await import(
+        '../src/adapters/node-registry.js'
+      );
+      await expect(
+        initializeProviders(config({ [id]: source() }), {
+          customProviderIds: [id],
+        }),
+      ).rejects.toThrow(/internal adapter id/);
+      expect(state.loadCalls).toEqual([]);
+      expect(state.registerCalls).toBe(0);
+    },
+  );
+
   it('rejects a loaded descriptor whose tier disagrees with its declaration before registration', async () => {
     state.descriptorOverride = { tier: 'deep-research' };
     const { initializeProviders } = await import(

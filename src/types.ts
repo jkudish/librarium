@@ -5,6 +5,7 @@ import {
   ExecutionProfileSchema,
   type ProfileTarget,
 } from './contracts/domain/index.js';
+import { INTERNAL_ADAPTER_ID_SET } from './internal-adapter-ids.js';
 
 // Provider tiers
 export type ProviderTier =
@@ -362,12 +363,52 @@ export const AnswerConfigSchema = z.object({
 export type AnswerConfig = z.infer<typeof AnswerConfigSchema>;
 
 // Full config schema
+const PublicProviderConfigRecordSchema = z
+  .record(z.string(), ProviderConfigSchema)
+  .superRefine((providers, ctx) => {
+    for (const id of Object.keys(providers)) {
+      if (INTERNAL_ADAPTER_ID_SET.has(id)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [id],
+          message:
+            'Internal adapter ids are not valid provider configuration keys',
+        });
+      }
+    }
+  });
+const PublicProjectProviderConfigRecordSchema = z
+  .record(z.string(), ProjectProviderConfigSchema)
+  .superRefine((providers, ctx) => {
+    for (const id of Object.keys(providers)) {
+      if (INTERNAL_ADAPTER_ID_SET.has(id)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [id],
+          message:
+            'Internal adapter ids are not valid provider configuration keys',
+        });
+      }
+    }
+  });
+const PublicCustomProviderRecordSchema = z.record(
+  z.string().refine((id) => !INTERNAL_ADAPTER_ID_SET.has(id), {
+    message: 'Internal adapter ids cannot be claimed by custom providers',
+  }),
+  CustomProviderSourceSchema,
+);
+const PublicTrustedProviderIdsSchema = z.array(
+  z.string().refine((id) => !INTERNAL_ADAPTER_ID_SET.has(id), {
+    message: 'Internal adapter ids cannot be trusted custom providers',
+  }),
+);
+
 export const ConfigSchema = z.object({
   version: z.literal(1),
   defaults: DefaultsSchema,
-  providers: z.record(z.string(), ProviderConfigSchema).default({}),
-  customProviders: z.record(z.string(), CustomProviderSourceSchema).default({}),
-  trustedProviderIds: z.array(z.string()).default([]),
+  providers: PublicProviderConfigRecordSchema.default({}),
+  customProviders: PublicCustomProviderRecordSchema.default({}),
+  trustedProviderIds: PublicTrustedProviderIdsSchema.default([]),
   groups: z.record(z.string(), z.array(z.string())).default({}),
   refine: RefineConfigSchema.optional(),
   answer: AnswerConfigSchema.optional(),
@@ -389,9 +430,9 @@ export const ProjectConfigSchema = z.object({
       maxEstimatedCostUsd: z.number().optional(),
     })
     .optional(),
-  providers: z.record(z.string(), ProjectProviderConfigSchema).optional(),
-  customProviders: z.record(z.string(), CustomProviderSourceSchema).optional(),
-  trustedProviderIds: z.array(z.string()).optional(),
+  providers: PublicProjectProviderConfigRecordSchema.optional(),
+  customProviders: PublicCustomProviderRecordSchema.optional(),
+  trustedProviderIds: PublicTrustedProviderIdsSchema.optional(),
   groups: z.record(z.string(), z.array(z.string())).optional(),
   refine: RefineConfigSchema.optional(),
   answer: AnswerConfigSchema.optional(),

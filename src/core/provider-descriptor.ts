@@ -155,14 +155,27 @@ const parallelResearchOptions = commonOptions.merge(
   ParallelResearchOptionsSchema,
 );
 
-const nonEmptyStrings = z.array(z.string().trim().min(1)).nonempty();
+const domain = z
+  .string()
+  .trim()
+  .min(1)
+  .max(253)
+  .regex(
+    /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/,
+  );
+const nonEmptyDomains = z.array(domain).min(1).max(500);
 const jsonObject = z.record(z.string(), z.unknown());
 const tavilyResearchOptions = commonOptions
   .extend({
     // `model` is reserved for the v1 target-selection field. This provider's
     // documented Research API model stays inside its strict option bag.
     researchModel: z.enum(['mini', 'pro', 'auto']).optional(),
-    outputSchema: jsonObject.optional(),
+    outputSchema: jsonObject
+      .refine(
+        (schema) => isPlainObject(schema.properties),
+        'outputSchema must include a properties object',
+      )
+      .optional(),
     citationFormat: z.enum(['numbered', 'mla', 'apa', 'chicago']).optional(),
   })
   .strict();
@@ -192,11 +205,20 @@ const youResearchBackgroundOptions = commonOptions
     researchEffort: z
       .enum(['lite', 'standard', 'deep', 'exhaustive', 'frontier'])
       .optional(),
-    outputSchema: jsonObject.optional(),
-    includeDomains: nonEmptyStrings.optional(),
-    excludeDomains: nonEmptyStrings.optional(),
-    boostDomains: nonEmptyStrings.optional(),
-    freshness: z.string().trim().min(1).optional(),
+    outputSchema: jsonObject
+      .refine(
+        isValidYouOutputSchema,
+        'outputSchema exceeds You.com structured output constraints',
+      )
+      .optional(),
+    includeDomains: nonEmptyDomains.optional(),
+    excludeDomains: nonEmptyDomains.optional(),
+    boostDomains: nonEmptyDomains.optional(),
+    freshness: z
+      .string()
+      .trim()
+      .regex(/^(?:day|week|month|year|\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2})$/)
+      .optional(),
     country: z
       .string()
       .trim()
@@ -219,6 +241,77 @@ const youResearchBackgroundOptions = commonOptions
       });
     }
   });
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isValidYouOutputSchema(root: Record<string, unknown>): boolean {
+  let properties = 0;
+  let enumValues = 0;
+  let largeEnumStrings = 0;
+  let schemaStrings = 0;
+  const seen = new Set<object>();
+
+  const visit = (value: unknown, depth: number): boolean => {
+    if (!isPlainObject(value) || depth > 5 || seen.has(value)) return false;
+    seen.add(value);
+    if ('$ref' in value) return false;
+    if (depth === 1 && ('anyOf' in value || value.type !== 'object'))
+      return false;
+
+    const objectSchema = value.type === 'object';
+    if (objectSchema) {
+      if (
+        !isPlainObject(value.properties) ||
+        value.additionalProperties !== false
+      )
+        return false;
+      const keys = Object.keys(value.properties);
+      const required = value.required;
+      if (
+        !Array.isArray(required) ||
+        required.some((item) => typeof item !== 'string') ||
+        required.length !== keys.length ||
+        !keys.every((key) => required.includes(key))
+      )
+        return false;
+      properties += keys.length;
+      schemaStrings += keys.reduce((total, key) => total + key.length, 0);
+      if (properties > 100) return false;
+      for (const child of Object.values(value.properties)) {
+        if (!visit(child, depth + 1)) return false;
+      }
+    }
+
+    if (Array.isArray(value.enum)) {
+      enumValues += value.enum.length;
+      if (enumValues > 500) return false;
+      const strings = value.enum.filter(
+        (item): item is string => typeof item === 'string',
+      );
+      schemaStrings += strings.reduce((total, item) => total + item.length, 0);
+      if (value.enum.length > 250)
+        largeEnumStrings += strings.reduce(
+          (total, item) => total + item.length,
+          0,
+        );
+    }
+    if (typeof value.const === 'string') schemaStrings += value.const.length;
+    if (schemaStrings > 25_000 || largeEnumStrings > 7_500) return false;
+
+    if (value.type === 'null') return false;
+    if (value.items !== undefined && !visit(value.items, depth + 1))
+      return false;
+    if (Array.isArray(value.anyOf)) {
+      for (const branch of value.anyOf)
+        if (!visit(branch, depth + 1)) return false;
+    }
+    return true;
+  };
+
+  return visit(root, 1);
+}
 
 const inline = (webSearch?: 'always' | 'optional'): ProviderCapabilities => ({
   execution: 'inline',

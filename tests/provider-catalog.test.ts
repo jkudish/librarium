@@ -1537,7 +1537,13 @@ describe('provider catalog -- explicit and capability selection', () => {
 describe('provider catalog -- defaults and reserve', () => {
   it('defaults to the ordered enabled profile set when no roster is configured', () => {
     expect(keysOf(catalog().resolveDefault())).toEqual(
-      IMPLEMENTED_MATRIX.map(([p, f]) => refKey(p, f)),
+      IMPLEMENTED_MATRIX.filter(
+        ([provider, profile]) =>
+          !(
+            profile === 'research' &&
+            ['exa', 'tavily', 'you-research'].includes(provider)
+          ),
+      ).map(([p, f]) => refKey(p, f)),
     );
   });
 
