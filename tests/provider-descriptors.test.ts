@@ -562,6 +562,7 @@ describe('built-in provider descriptors', () => {
     expect(persistence).toEqual({
       'openai-research': 'remote',
       'gemini-deep': 'remote',
+      'parallel-research': 'remote',
       'perplexity-sonar-deep': 'remote',
       'perplexity-deep-research': 'process-local',
       'perplexity-advanced-deep': 'process-local',

@@ -233,7 +233,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(28);
+    ).toHaveLength(30);
   });
 
   it('injects credentials into every background built-in', async () => {

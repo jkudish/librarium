@@ -552,7 +552,7 @@ describe('public v2 configuration migration', () => {
     }
   });
 
-  it('normalizes native v2 groups and rejects planned or unknown members', () => {
+  it('normalizes native v2 groups and rejects unknown members', () => {
     const normalized = validateConfigV2(
       v2({
         groups: {
@@ -571,7 +571,7 @@ describe('public v2 configuration migration', () => {
     const rejected = validateConfigV2(
       v2({
         groups: {
-          'custom:bad': ['parallel/research', 'missing/search'],
+          'custom:bad': ['valyu/research', 'missing/search'],
         },
       }),
     );
