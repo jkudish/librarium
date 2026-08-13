@@ -117,10 +117,7 @@ describe('You.com Answer', () => {
   it('accepts explicit empty required arrays but rejects malformed data and citation relations', async () => {
     const cases: Array<[unknown, boolean]> = [
       [{ answer: 'Answer', citations: [], results: { web: [] } }, true],
-      [
-        { answer: 'Answer', citations: {}, results: { web: [] } },
-        false,
-      ],
+      [{ answer: 'Answer', citations: {}, results: { web: [] } }, false],
       [
         {
           answer: 'Answer',
@@ -137,14 +134,8 @@ describe('You.com Answer', () => {
         },
         false,
       ],
-      [
-        { answer: 'Answer', citations: [], results: { web: {} } },
-        false,
-      ],
-      [
-        { answer: 'Answer', citations: [], results: { web: [{}] } },
-        false,
-      ],
+      [{ answer: 'Answer', citations: [], results: { web: {} } }, false],
+      [{ answer: 'Answer', citations: [], results: { web: [{}] } }, false],
       [
         {
           answer: 'Broken reference [[2]].',
