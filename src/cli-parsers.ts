@@ -3,6 +3,7 @@ import {
   RESEARCH_REQUEST_LIMITS,
   ResearchQuerySchema,
 } from './core/research-request.js';
+import { INTERNAL_ADAPTER_ID_SET } from './internal-adapter-ids.js';
 import { type Defaults, LegacyExecutionModeSchema } from './types.js';
 
 const MICRO_USD_PER_USD = 1_000_000n;
@@ -39,6 +40,11 @@ export function parseProviders(value: string): string[] {
   const providers = value.split(',').map((provider) => provider.trim());
   if (providers.some((provider) => provider.length === 0)) {
     return invalid('must be a comma-separated list of non-empty provider IDs.');
+  }
+  if (providers.some((provider) => INTERNAL_ADAPTER_ID_SET.has(provider))) {
+    return invalid(
+      'contains a private internal adapter id; use provider/profile.',
+    );
   }
   if (providers.length > CLI_LIMITS.providers) {
     return invalid(`must contain at most ${CLI_LIMITS.providers} providers.`);

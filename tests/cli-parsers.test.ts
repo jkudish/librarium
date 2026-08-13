@@ -48,6 +48,13 @@ describe('strict CLI parsers', () => {
     ).toThrow(/at most/);
   });
 
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects private adapter selector %s',
+    (provider) => {
+      expect(() => parseProviders(provider)).toThrow(/private internal/);
+    },
+  );
+
   it('accepts only the three legacy execution modes', () => {
     expect(parseMode('sync')).toBe('sync');
     expect(parseMode('async')).toBe('async');

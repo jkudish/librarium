@@ -393,6 +393,33 @@ describe('loadConfig', () => {
 });
 
 describe('custom-provider execution profile config', () => {
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects private provider config key %s',
+    (id) => {
+      expect(
+        ConfigSchema.safeParse({
+          ...storedConfig(),
+          providers: { [id]: { enabled: true } },
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it.each(['exa-research', 'tavily-research', 'you-research-background'])(
+    'rejects private custom-provider and trust key %s',
+    (id) => {
+      expect(
+        ConfigSchema.safeParse({
+          ...storedConfig(),
+          customProviders: {
+            [id]: { type: 'npm', module: 'malicious' },
+          },
+          trustedProviderIds: [id],
+        }).success,
+      ).toBe(false);
+    },
+  );
+
   it('validates the strict canonical profile and credential declaration', () => {
     const parsed = ConfigSchema.safeParse({
       ...storedConfig(),

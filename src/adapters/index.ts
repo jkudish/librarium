@@ -6,8 +6,8 @@ import {
 import type { HttpClient, HttpStreamClient } from '../core/http-client.js';
 import { getMeteringKind } from '../core/metering.js';
 import {
-  adapterProfileBindings,
   buildProfileBindings,
+  executionAdapterProfileBindings,
   TargetSelectionError,
 } from '../core/profile-bindings.js';
 import { BUILTIN_PROVIDER_CATALOG } from '../core/provider-profiles.js';
@@ -15,6 +15,11 @@ import {
   providerCredentialRef,
   providerHasCredential,
 } from '../core/provider-selection.js';
+import {
+  INTERNAL_ADAPTER_ID_SET,
+  INTERNAL_ADAPTER_IDS,
+  INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS,
+} from '../internal-adapter-ids.js';
 import type {
   Config,
   Provider,
@@ -26,6 +31,7 @@ import { ProviderBase } from './base.js';
 import {
   BUILTIN_PROVIDER_DESCRIPTORS,
   type BuiltInProviderDescriptor,
+  getInternalBuiltInProviderDescriptor,
 } from './provider-descriptors.js';
 
 const builtinDeclarations = new Map(
@@ -37,7 +43,7 @@ const builtinDeclarations = new Map(
   ),
 );
 const builtinProfileBindings = buildProfileBindings(builtinDeclarations);
-const builtinAdapterBindings = adapterProfileBindings();
+const builtinAdapterBindings = executionAdapterProfileBindings();
 
 const providers = new Map<string, Provider>();
 
@@ -126,7 +132,14 @@ export function getExactProvider(id: string): Provider | undefined {
  * Get all registered providers
  */
 export function getAllProviders(): Provider[] {
-  return Array.from(providers.values());
+  return Array.from(providers.values()).filter(
+    (provider) => !INTERNAL_ADAPTER_ID_SET.has(provider.id),
+  );
+}
+
+/** Internal research adapters remain resolvable by exact frozen binding only. */
+export function registeredAdapterIds(): string[] {
+  return Array.from(providers.keys());
 }
 
 /**
@@ -211,8 +224,22 @@ export async function initializeProviders(
   const httpStreamClient = config.httpStreamClient;
   const warnings: string[] = [];
 
-  for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
-    const configured = providerConfig[descriptor.id];
+  const descriptors = [
+    ...BUILTIN_PROVIDER_DESCRIPTORS,
+    ...INTERNAL_ADAPTER_IDS.flatMap((id) => {
+      const descriptor = getInternalBuiltInProviderDescriptor(id);
+      return descriptor ? [descriptor] : [];
+    }),
+  ];
+  for (const descriptor of descriptors) {
+    // Research profiles share the established public provider configuration,
+    // while their background adapters retain distinct internal ids.
+    const configured =
+      providerConfig[
+        INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS[
+          descriptor.id as keyof typeof INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS
+        ] ?? descriptor.id
+      ];
     const identity = builtinAdapterBindings.get(descriptor.id);
     const binding = identity
       ? builtinProfileBindings.get(

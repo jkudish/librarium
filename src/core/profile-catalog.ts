@@ -4,6 +4,10 @@ import type {
   ProviderIdentity,
 } from '../contracts/domain/index.js';
 import {
+  INTERNAL_ADAPTER_ID_SET,
+  INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS,
+} from '../internal-adapter-ids.js';
+import {
   BUILTIN_WORKFLOW_IDS,
   type BuiltinWorkflowId,
   CURATED_WORKFLOW_ROSTERS,
@@ -180,7 +184,11 @@ function bindingConfig(
   options: ProviderCatalogOptions,
   adapterId: string,
 ): CatalogProviderConfig | undefined {
-  return options.providerConfigs?.[adapterId];
+  const publicId =
+    INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS[
+      adapterId as keyof typeof INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS
+    ];
+  return options.providerConfigs?.[publicId ?? adapterId];
 }
 
 function resolveDeclaration(
@@ -802,7 +810,12 @@ export function buildProviderCatalog(
         return targetIdentities(configuredDefaults, true);
       }
       return resolved
-        .filter((item) => item.availability.selectable)
+        .filter(
+          (item) =>
+            item.availability.selectable &&
+            item.binding !== undefined &&
+            !INTERNAL_ADAPTER_ID_SET.has(item.binding.adapter_id),
+        )
         .map((item) => item.profile.identity);
     },
     resolveConfiguredReserve(primaries) {

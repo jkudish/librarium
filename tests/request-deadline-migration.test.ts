@@ -607,8 +607,10 @@ describe('v1 total request-deadline migration', () => {
       'openrouter-online',
       'brave-answers',
       'you-research',
+      'you-research-background',
       'kagi-fastgpt',
       'exa',
+      'exa-research',
       'perplexity-search',
       'brave-search',
       'jina-search',
@@ -616,6 +618,7 @@ describe('v1 total request-deadline migration', () => {
       'searchapi',
       'serpapi',
       'tavily',
+      'tavily-research',
       'searchapi-chatgpt',
       'searchapi-gemini',
       'searchapi-perplexity',
@@ -630,7 +633,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(36);
+    expect(new Set(expectedAdapterIds).size).toBe(39);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

@@ -32,24 +32,24 @@ export const MAX_RESPONSE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Provider environment variable names
 export const PROVIDER_ENV_VARS: Record<string, string> = Object.fromEntries(
-  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map(
-    ({ id, credential }) => [id, credential.envVar],
-  ),
+  BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.filter(
+    ({ internal }) => internal !== true,
+  ).map(({ id, credential }) => [id, credential.envVar]),
 );
 
 // Provider display names
 export const PROVIDER_DISPLAY_NAMES: Record<string, string> =
   Object.fromEntries(
-    BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.map(
-      ({ id, display }) => [id, display.name],
-    ),
+    BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER.filter(
+      ({ internal }) => internal !== true,
+    ).map(({ id, display }) => [id, display.name]),
   );
 
 // Backward-compatible provider ID aliases (legacy -> canonical)
 export const PROVIDER_ID_ALIASES: Record<string, string> = Object.fromEntries(
-  BUILTIN_PROVIDER_DEFINITIONS.flatMap(({ id, aliases }) =>
-    aliases.map((alias) => [alias, id]),
-  ),
+  BUILTIN_PROVIDER_DEFINITIONS.filter(
+    ({ internal }) => internal !== true,
+  ).flatMap(({ id, aliases }) => aliases.map((alias) => [alias, id])),
 );
 
 /**
@@ -475,7 +475,7 @@ export function validateDefaultGroups(
     ({ tier }) => tier === 'llm',
   ).map(({ id }) => id);
   const expectedAll = BUILTIN_PROVIDER_DEFINITIONS.filter(
-    ({ tier }) => tier !== 'llm',
+    ({ tier, internal }) => tier !== 'llm' && internal !== true,
   ).map(({ id }) => id);
   const sameMembers = (
     actual: readonly string[] | undefined,
@@ -503,9 +503,9 @@ validateDefaultGroups();
  * explicitly enabled them in config.
  */
 export const LLM_TIER_PROVIDER_IDS: ReadonlySet<string> = new Set(
-  BUILTIN_PROVIDER_DEFINITIONS.filter(({ tier }) => tier === 'llm').map(
-    ({ id }) => id,
-  ),
+  BUILTIN_PROVIDER_DEFINITIONS.filter(
+    ({ tier, internal }) => tier === 'llm' && internal !== true,
+  ).map(({ id }) => id),
 );
 
 /** True when the provider id belongs to the opt-in `llm` tier. */

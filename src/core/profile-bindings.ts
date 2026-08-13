@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Corpus, ExecutionProfile } from '../contracts/domain/index.js';
+import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
 import type { NetworkFreeEstimate } from './execution-plan.js';
 import {
   getBuiltinProviderDefinition,
@@ -460,11 +461,21 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     adapter_id: 'you-research',
   },
   {
+    provider_id: 'you-research',
+    profile_id: 'research',
+    adapter_id: 'you-research-background',
+  },
+  {
     provider_id: 'kagi-fastgpt',
     profile_id: 'grounded',
     adapter_id: 'kagi-fastgpt',
   },
   { provider_id: 'exa', profile_id: 'search', adapter_id: 'exa' },
+  {
+    provider_id: 'exa',
+    profile_id: 'research',
+    adapter_id: 'exa-research',
+  },
   {
     provider_id: 'perplexity-search',
     profile_id: 'search',
@@ -489,6 +500,11 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
   { provider_id: 'searchapi', profile_id: 'search', adapter_id: 'searchapi' },
   { provider_id: 'serpapi', profile_id: 'search', adapter_id: 'serpapi' },
   { provider_id: 'tavily', profile_id: 'search', adapter_id: 'tavily' },
+  {
+    provider_id: 'tavily',
+    profile_id: 'research',
+    adapter_id: 'tavily-research',
+  },
   {
     provider_id: 'searchapi-chatgpt',
     profile_id: 'surface',
@@ -557,6 +573,7 @@ export function adapterProfileBinding(
   adapterId: string,
   specs: readonly AdapterProfileBinding[] = BUILTIN_PROFILE_BINDING_SPECS,
 ): AdapterProfileBinding | undefined {
+  if (INTERNAL_ADAPTER_ID_SET.has(adapterId)) return undefined;
   const matches = specs.filter((spec) => spec.adapter_id === adapterId);
   if (matches.length > 1) {
     throw new ProfileBindingError(
@@ -575,6 +592,30 @@ export function adapterProfileBinding(
 
 /** Validate and materialize the complete adapter-id binding matrix. */
 export function adapterProfileBindings(
+  specs: readonly AdapterProfileBinding[] = BUILTIN_PROFILE_BINDING_SPECS,
+): ReadonlyMap<string, AdapterProfileBinding> {
+  const bindings = new Map<string, AdapterProfileBinding>();
+  for (const spec of specs) {
+    if (INTERNAL_ADAPTER_ID_SET.has(spec.adapter_id)) continue;
+    if (bindings.has(spec.adapter_id)) {
+      throw new ProfileBindingError(
+        `Adapter id has more than one exact profile binding: ${spec.adapter_id}`,
+      );
+    }
+    bindings.set(
+      spec.adapter_id,
+      Object.freeze({
+        adapter_id: spec.adapter_id,
+        provider_id: spec.provider_id,
+        profile_id: spec.profile_id,
+      }),
+    );
+  }
+  return bindings;
+}
+
+/** All exact execution bindings, including private background strategies. */
+export function executionAdapterProfileBindings(
   specs: readonly AdapterProfileBinding[] = BUILTIN_PROFILE_BINDING_SPECS,
 ): ReadonlyMap<string, AdapterProfileBinding> {
   const bindings = new Map<string, AdapterProfileBinding>();

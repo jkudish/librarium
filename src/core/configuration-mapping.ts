@@ -14,6 +14,7 @@ import {
   adapterProfileBinding,
   adapterProfileBindings,
   buildProfileBindings,
+  executionAdapterProfileBindings,
   TargetSelectionError,
 } from './profile-bindings.js';
 import {
@@ -138,7 +139,9 @@ export interface ConfigurationProfileTokenOptions {
 }
 
 const PROVIDER_NAME_ENTRIES: readonly ProviderNameEntry[] =
-  BUILTIN_PROVIDER_DEFINITIONS.map((definition) => ({
+  BUILTIN_PROVIDER_DEFINITIONS.filter(
+    (definition) => definition.internal !== true,
+  ).map((definition) => ({
     id: definition.id,
     displayName: definition.display.name,
   }));
@@ -208,7 +211,7 @@ export function resolveConfigurationProfileToken(
       profile_id: qualified[1],
     };
     const known = [
-      ...adapterProfileBindings().values(),
+      ...executionAdapterProfileBindings().values(),
       ...customProfiles.map(customProfileBinding),
     ].find((binding) => sameProfile(binding, target));
     return known

@@ -80,7 +80,9 @@ function customProviderTier(
  * performs its two-phase admission gate.
  */
 function wizardProviders(config: Config): readonly WizardProvider[] {
-  const builtins = BUILTIN_PROVIDER_DEFINITIONS.map((definition) => ({
+  const builtins = BUILTIN_PROVIDER_DEFINITIONS.filter(
+    (definition) => definition.internal !== true,
+  ).map((definition) => ({
     id: definition.id,
     displayName: definition.display.name,
     tier: definition.tier,

@@ -5,7 +5,6 @@ import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import ora from 'ora';
 import {
-  getAllProviders,
   getExactProvider,
   initializeProviders,
 } from '../adapters/node-registry.js';
@@ -283,11 +282,14 @@ export async function executeRun(
     for (const warning of init.warnings) {
       process.stderr.write(`[librarium] warning: ${warning}\n`);
     }
-    assertAdmittedAdaptersRegistered(
-      preflight.prepared,
+    const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
+    const registered = new Set(
       deps.registeredAdapterIds?.() ??
-        getAllProviders().map((provider) => provider.id),
+        preflight.admittedAdapterIds.filter(
+          (id) => resolveExactProvider(id)?.id === id,
+        ),
     );
+    assertAdmittedAdaptersRegistered(preflight.prepared, registered);
     const providerIds = preflight.prepared.request.slots.map((slot) => {
       const plan =
         preflight.prepared.profile_plans_by_identity[
@@ -298,10 +300,10 @@ export async function executeRun(
       return plan.binding.adapter_id;
     });
     const tierLookup = new Map(
-      getAllProviders().map((provider) => [provider.id, provider.tier]),
-    );
-    const deepResearchIds = providerIds.filter(
-      (id) => tierLookup.get(id) === 'deep-research',
+      providerIds.flatMap((id) => {
+        const provider = resolveExactProvider(id);
+        return provider ? [[id, provider.tier] as const] : [];
+      }),
     );
     if (
       !opts.json &&
@@ -313,7 +315,21 @@ export async function executeRun(
       })
     ) {
       spinner.stop();
-      p.log.warn(deepResearchWarning(deepResearchIds));
+      const deepResearchProfiles = preflight.prepared.request.slots.flatMap(
+        (slot) => {
+          const plan =
+            preflight.prepared.profile_plans_by_identity[
+              providerIdentityKey(slot.primary.identity)
+            ];
+          return plan &&
+            tierLookup.get(plan.binding.adapter_id) === 'deep-research'
+            ? [
+                `${slot.primary.identity.provider_id}/${slot.primary.identity.profile_id}`,
+              ]
+            : [];
+        },
+      );
+      p.log.warn(deepResearchWarning(deepResearchProfiles));
       const proceed = await p.confirm({
         message: 'Proceed with this deep-research run?',
         initialValue: false,
@@ -376,7 +392,6 @@ export async function executeRun(
       return { exitCode: 130 };
     }
     outputDir = createRunDir(baseDir, slug);
-    const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
     const refinedQueriesBySlot = Object.fromEntries(
       preflight.prepared.request.slots.flatMap((slot) => {
         const plan =
