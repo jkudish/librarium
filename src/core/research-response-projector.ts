@@ -291,7 +291,6 @@ export function normalizeProviderAttemptOutput(
         }),
       },
     }),
-    ...(legacy.providerMeta ?? {}),
   });
 
   return CanonicalProviderOutputSchema.parse({

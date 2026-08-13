@@ -224,7 +224,7 @@ function citationsFromBasis(
   for (const item of basis ?? [])
     for (const citation of item.citations ?? []) {
       const url = text(citation.url);
-      if (!url) continue;
+      if (!url || !isHttpUrl(url)) continue;
       const key = normalizeUrl(url);
       if (!found.has(key))
         found.set(key, {
@@ -245,7 +245,7 @@ function basisMeta(basis: FieldBasis[] | undefined) {
     confidence: text(item.confidence),
     citations: (item.citations ?? []).flatMap((citation) => {
       const url = text(citation.url);
-      return url
+      return url && isHttpUrl(url)
         ? [
             {
               url,

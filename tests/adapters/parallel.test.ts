@@ -184,6 +184,38 @@ describe('Parallel first-party providers', () => {
     });
   });
 
+  it('does not expose invalid basis URLs in Chat citations or provider metadata', async () => {
+    const result = await new ParallelChatProvider({
+      apiKey: key,
+      httpClient: client({
+        choices: [{ message: { content: 'Response.' } }],
+        basis: [
+          {
+            citations: [
+              { url: 'javascript:alert(1)', excerpts: ['Unsafe.'] },
+              { url: 'https://user:pass@example.test', excerpts: ['Unsafe.'] },
+              { url: 'https://example.test/safe', excerpts: ['Safe.'] },
+            ],
+          },
+        ],
+      }),
+      model: 'base',
+    }).execute('question', { timeout: 9 });
+
+    expect(result.citations).toEqual([
+      expect.objectContaining({ url: 'https://example.test/safe' }),
+    ]);
+    expect(result.providerMeta).toMatchObject({
+      'parallel:basis': [
+        expect.objectContaining({
+          citations: [
+            { url: 'https://example.test/safe', excerpts: ['Safe.'] },
+          ],
+        }),
+      ],
+    });
+  });
+
   it('uses a configured model when the documented compatibility field is empty and persists the canonical result', async () => {
     const provider = new ParallelChatProvider({
       apiKey: key,
