@@ -143,7 +143,7 @@ librarium
 
 ## Providers
 
-Librarium ships with 38 built-in provider adapters organized into four tiers:
+Librarium ships with 39 built-in provider adapters organized into four tiers:
 
 The onboarding wizard starts with a short recommended starter list, but the full provider list is always available from setup. Recommendations are meant to get a first successful query quickly:
 
@@ -175,6 +175,7 @@ Some provider families unlock multiple adapters with one key. For example, `PERP
 | Brave AI Answers | `brave-answers` | ai-grounded | `BRAVE_API_KEY` |
 | Exa Search | `exa` | ai-grounded | `EXA_API_KEY` |
 | You.com Research | `you-research` | ai-grounded | `YOU_COM_API_KEY` |
+| You.com Answer | `you-answer` | ai-grounded | `YOU_COM_API_KEY` |
 | Kagi FastGPT | `kagi-fastgpt` | ai-grounded | `KAGI_API_KEY` |
 | Parallel Chat | `parallel-chat` | ai-grounded | `PARALLEL_API_KEY` |
 | SearchAPI ChatGPT | `searchapi-chatgpt` | ai-grounded | `SEARCHAPI_API_KEY` |
@@ -202,6 +203,15 @@ Brave AI Answers uses Brave's streaming Answers endpoint so its grounded answer 
 ChatGPT Search (OpenRouter) keeps its GPT-4o Mini/Exa-backed search profile but
 uses OpenRouter's current `openrouter:web_search` server tool rather than the
 deprecated `:online` model suffix.
+
+### You.com Answer live smoke
+
+The Answer API is request-priced. The normal test suite never calls it. To make
+one paid, manual smoke request, set both `YOU_COM_API_KEY` and
+`LIBRARIUM_YOU_ANSWER_LIVE_SMOKE=1`, then run `npm run smoke:you-answer`.
+Optionally set `YOU_ANSWER_SMOKE_QUERY` to a nonblank query of at most 400
+characters. The script outputs counts and timing only; it does not print the
+provider response.
 
 ### SearchAPI consumer surfaces
 
@@ -823,7 +833,7 @@ Groups are named collections of provider IDs. Librarium ships with eight default
 | `visibility` | searchapi-chatgpt, searchapi-gemini, searchapi-perplexity, searchapi-google-ai-mode, searchapi-bing-copilot, searchapi-google-ai-overview, perplexity-sonar-pro, gemini-grounded, grok | Explicit nine-surface answer visibility comparison |
 | `comprehensive` | All deep-research + all ai-grounded (including Grok web, X, and combined, and Parallel) | Deep + AI-grounded combined |
 | `llm` | claude, openai-chat, gemini-chat, openrouter-chat | Opt-in LLM answers; web search and citations on by default |
-| `all` | All 34 grounded providers (including Grok web, X, and combined, Parallel, and Valyu) | Maximum grounded coverage (excludes the `llm` tier) |
+| `all` | All 35 grounded providers (including Grok web, X, and combined, Parallel, Valyu, and opt-in You.com Answer) | Maximum grounded coverage (excludes the `llm` tier) |
 
 `visibility`, `comprehensive`, and `all` are explicit cost boundaries. Choosing
 one may run credentialed members whose setup descriptor is opt-in and whose

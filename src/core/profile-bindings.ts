@@ -530,6 +530,11 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     adapter_id: 'you-research-background',
   },
   {
+    provider_id: 'you-answer',
+    profile_id: 'grounded',
+    adapter_id: 'you-answer',
+  },
+  {
     provider_id: 'kagi-fastgpt',
     profile_id: 'grounded',
     adapter_id: 'kagi-fastgpt',

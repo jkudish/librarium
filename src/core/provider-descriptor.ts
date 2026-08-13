@@ -14,6 +14,7 @@ import {
   ValyuResearchOptionsSchema,
   ValyuSearchOptionsSchema,
 } from '../adapters/valyu-options.js';
+import { YouAnswerOptionsSchema } from '../adapters/you-answer-options.js';
 import type { MeteringKind, ProviderTier } from '../types.js';
 import { searchApiOptionsSchema } from './searchapi.js';
 
@@ -820,6 +821,30 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       kind: 'credit_priced',
       defaultUnitsPerRequest: 1,
       unit: 'query',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'you-answer',
+    registrationOrder: 12.5,
+    tier: 'ai-grounded',
+    envVar: 'YOU_COM_API_KEY',
+    autoEnable: false,
+    optionsSchema: YouAnswerOptionsSchema,
+    display: {
+      family: 'You.com',
+      name: 'You.com Answer',
+      description:
+        'One-request You.com web-grounded answers with provider citations.',
+      bestFor: 'Explicit, focused web-grounded answers with cited evidence.',
+      setupUrl: 'https://you.com/docs/guides/answer',
+      order: 165,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultPerRequestUsd: 0.005,
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
     },
     capabilities: inline('always'),
   }),

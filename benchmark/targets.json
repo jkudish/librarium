@@ -124,6 +124,14 @@
       "costConfidence": "unknown"
     },
     {
+      "id": "you-answer",
+      "tier": "ai-grounded",
+      "envVar": "YOU_COM_API_KEY",
+      "estimatedCostUsd": 0.005,
+      "costConfidence": "estimated",
+      "pricingVersion": "2026-08"
+    },
+    {
       "id": "kagi-fastgpt",
       "tier": "ai-grounded",
       "envVar": "KAGI_API_KEY",
@@ -351,6 +359,7 @@
       "brave-answers",
       "exa",
       "you-research",
+      "you-answer",
       "kagi-fastgpt",
       "searchapi-chatgpt",
       "searchapi-gemini",
@@ -379,6 +388,7 @@
       "brave-answers",
       "exa",
       "you-research",
+      "you-answer",
       "kagi-fastgpt",
       "jina-search",
       "firecrawl-search",
