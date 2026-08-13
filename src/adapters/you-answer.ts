@@ -175,7 +175,6 @@ export class YouAnswerProvider extends BaseProvider {
   }
 
   private parseCitations(value: unknown): AnswerCitation[] {
-    if (value === undefined) return [];
     if (!Array.isArray(value)) {
       throw new Error('You.com Answer returned malformed citations');
     }
@@ -186,9 +185,8 @@ export class YouAnswerProvider extends BaseProvider {
         );
       }
       if (
-        entry.excerpts !== undefined &&
-        (!Array.isArray(entry.excerpts) ||
-          entry.excerpts.some((excerpt) => typeof excerpt !== 'string'))
+        !Array.isArray(entry.excerpts) ||
+        entry.excerpts.some((excerpt) => typeof excerpt !== 'string')
       ) {
         throw new Error(
           `You.com Answer citation ${index + 1} has malformed excerpts`,
@@ -197,19 +195,15 @@ export class YouAnswerProvider extends BaseProvider {
       return {
         number: index + 1,
         sourceUrl: entry.source,
-        excerpts: (entry.excerpts ?? []).filter((excerpt) =>
-          /\S/.test(excerpt),
-        ),
+        excerpts: entry.excerpts.filter((excerpt) => /\S/.test(excerpt)),
       };
     });
   }
 
   private parseConsidered(value: unknown): ConsideredWebResult[] {
-    if (value === undefined) return [];
     if (!isRecord(value)) {
       throw new Error('You.com Answer returned malformed results');
     }
-    if (value.web === undefined) return [];
     if (!Array.isArray(value.web)) {
       throw new Error('You.com Answer returned malformed results.web');
     }

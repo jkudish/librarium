@@ -114,23 +114,46 @@ describe('You.com Answer', () => {
     );
   });
 
-  it('accepts partial optional response fields but rejects malformed data and citation relations', async () => {
+  it('accepts explicit empty required arrays but rejects malformed data and citation relations', async () => {
     const cases: Array<[unknown, boolean]> = [
-      [{ answer: 'Answer without optional relations.' }, true],
-      [{ answer: 'Answer', citations: [] }, true],
-      [{ answer: 'Answer', results: { web: [] } }, true],
-      [{ answer: 'Answer', citations: {} }, false],
-      [{ answer: 'Answer', citations: [{ source: 'not-a-url' }] }, false],
-      [{ answer: 'Answer', results: { web: {} } }, false],
-      [{ answer: 'Answer', results: { web: [{}] } }, false],
+      [{ answer: 'Answer', citations: [], results: { web: [] } }, true],
+      [
+        { answer: 'Answer', citations: {}, results: { web: [] } },
+        false,
+      ],
       [
         {
-          answer: 'Broken reference [[2]].',
-          citations: [{ source: 'https://only.example' }],
+          answer: 'Answer',
+          citations: [{ source: 'not-a-url', excerpts: [] }],
+          results: { web: [] },
         },
         false,
       ],
-      [{ answer: '   ' }, false],
+      [
+        {
+          answer: 'Answer',
+          citations: [{ source: 'https://source.example' }],
+          results: { web: [] },
+        },
+        false,
+      ],
+      [
+        { answer: 'Answer', citations: [], results: { web: {} } },
+        false,
+      ],
+      [
+        { answer: 'Answer', citations: [], results: { web: [{}] } },
+        false,
+      ],
+      [
+        {
+          answer: 'Broken reference [[2]].',
+          citations: [{ source: 'https://only.example', excerpts: [] }],
+          results: { web: [] },
+        },
+        false,
+      ],
+      [{ answer: '   ', citations: [], results: { web: [] } }, false],
       [null, false],
     ];
 
@@ -150,6 +173,32 @@ describe('You.com Answer', () => {
         });
       }
     }
+  });
+
+  it.each([
+    ['citations', { answer: 'Answer', results: { web: [] } }],
+    ['results', { answer: 'Answer', citations: [] }],
+    ['results.web', { answer: 'Answer', citations: [], results: {} }],
+    [
+      'citation excerpts',
+      {
+        answer: 'Answer',
+        citations: [{ source: 'https://source.example' }],
+        results: { web: [] },
+      },
+    ],
+  ])('rejects a 200 response missing required %s', async (_field, data) => {
+    const result = await provider(
+      {},
+      async () => response(200, data) as never,
+    ).execute('required response fields', { timeout: 5 });
+
+    expect(result).toMatchObject({
+      content: '',
+      citations: [],
+      preventFallback: true,
+      error: expect.stringContaining('You.com Answer'),
+    });
   });
 
   it.each([
