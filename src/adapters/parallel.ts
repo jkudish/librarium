@@ -100,7 +100,11 @@ const searchResponseSchema = z
     results: z.array(
       z
         .object({
-          url: z.unknown().optional(),
+          url: z
+            .string()
+            .trim()
+            .min(1)
+            .refine(isHttpUrl, 'must be a valid HTTP(S) URL'),
           title: z.unknown().optional(),
           excerpts: z.unknown().optional(),
           publish_date: z.unknown().optional(),
@@ -142,6 +146,7 @@ const taskResultSchema = z
   .object({
     run: z
       .object({
+        run_id: z.string().trim().min(1),
         status: z.string(),
         processor: z.string().optional(),
         error: z
@@ -171,7 +176,7 @@ const textTaskOutputSchema = z
 
 const taskRunSchema = z
   .object({
-    run_id: z.string(),
+    run_id: z.string().trim().min(1),
     status: z.string(),
     processor: z.string().optional(),
     error: z
@@ -183,6 +188,20 @@ const taskRunSchema = z
 
 function text(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.hostname.length > 0 &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
 }
 function sourcePolicy(options: {
   includeDomains?: string[];
@@ -592,6 +611,8 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       throw new UnsafeToRetrySubmissionError(
         'Parallel accepted a task response without run_id',
       );
+    // Creation establishes the remote identity used for every later request.
+    // The returned handle therefore derives only from the validated response.
     const status = parsedResponse.data.status ?? 'queued';
     return {
       provider: this.id,
@@ -634,6 +655,12 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
         rawStatus: 'invalid_response',
         message: 'Parallel returned an invalid task status response',
       };
+    if (parsedResponse.data.run_id !== handle.taskId)
+      return {
+        status: 'failed',
+        rawStatus: 'identity_mismatch',
+        message: 'Parallel returned task status for a different run_id',
+      };
     const rawStatus = parsedResponse.data.status;
     const status = STATUS[rawStatus];
     return status
@@ -666,6 +693,11 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
         return this.errorResult(
           durationMs,
           'Parallel returned an invalid Task result response',
+        );
+      if (parsedResponse.data.run.run_id !== handle.taskId)
+        return this.errorResult(
+          durationMs,
+          'Parallel returned Task result for a different run_id',
         );
       if (parsedResponse.data.run.status !== 'completed')
         return this.errorResult(

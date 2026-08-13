@@ -105,24 +105,31 @@ describe('Parallel first-party providers', () => {
     expect(http).not.toHaveBeenCalled();
   });
 
-  it.each([{}, { results: {} }, { results: [null] }])(
-    'rejects malformed successful Search payloads (%o)',
-    async (data) => {
-      const result = await new ParallelSearchProvider(
-        {},
-        {
-          apiKey: key,
-          httpClient: client(data),
-        },
-      ).execute('query', { timeout: 9 });
-
-      expect(result).toMatchObject({
-        content: '',
-        citations: [],
-        error: 'Parallel returned an invalid Search response',
-      });
+  it.each([
+    {},
+    { results: {} },
+    { results: [null] },
+    { results: [{}] },
+    { results: [{ url: '   ' }] },
+    { results: [{ url: 'not a URL' }] },
+    {
+      results: [{ url: 'https://example.test/valid' }, { url: 'not a URL' }],
     },
-  );
+  ])('rejects malformed successful Search payloads (%o)', async (data) => {
+    const result = await new ParallelSearchProvider(
+      {},
+      {
+        apiKey: key,
+        httpClient: client(data),
+      },
+    ).execute('query', { timeout: 9 });
+
+    expect(result).toMatchObject({
+      content: '',
+      citations: [],
+      error: 'Parallel returned an invalid Search response',
+    });
+  });
 
   it('maps chat basis only when the response reports it and supports JSON schema output', async () => {
     const http = client({
@@ -356,13 +363,95 @@ describe('Parallel first-party providers', () => {
   });
 
   it.each([
-    [{ run: { status: 'completed' }, output: {} }, 'without text output'],
+    { status: 'queued' },
+    { run_id: '', status: 'queued' },
+    { run_id: '   ', status: 'queued' },
+  ])(
+    'rejects Task creation without a usable remote identity (%o)',
+    async (data) => {
+      const provider = new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: client(data),
+        model: 'pro',
+      });
+
+      await expect(
+        provider.submit('research', { timeout: 90 }),
+      ).rejects.toThrow('invalid task response');
+    },
+  );
+
+  it.each([
+    [{ status: 'running' }, 'invalid_response'],
+    [{ run_id: 'trun_other', status: 'running' }, 'identity_mismatch'],
+  ])(
+    'rejects Task status with missing or mismatched run identity (%o)',
+    async (data, rawStatus) => {
+      const provider = new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: client(data),
+        model: 'pro',
+      });
+
+      const result = await provider.poll({ taskId: 'trun_1' } as never);
+      expect(result).toMatchObject({ status: 'failed', rawStatus });
+      expect(result.status).not.toBe('running');
+      expect(result.status).not.toBe('completed');
+    },
+  );
+
+  it.each([
     [
-      { run: { status: 'completed' }, output: { type: 'json', content: {} } },
+      {
+        run: { status: 'completed' },
+        output: { type: 'text', content: 'Wrong.' },
+      },
+      'invalid Task result response',
+    ],
+    [
+      {
+        run: { run_id: 'trun_other', status: 'completed' },
+        output: { type: 'text', content: 'Wrong.' },
+      },
+      'different run_id',
+    ],
+  ])(
+    'rejects Task result with missing or mismatched run identity (%o)',
+    async (data, message) => {
+      const provider = new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: client(data),
+        model: 'pro',
+      });
+
+      const result = await provider.retrieve({ taskId: 'trun_1' } as never);
+      expect(result).toMatchObject({
+        content: '',
+        citations: [],
+        error: expect.stringContaining(message),
+      });
+      expect(result.providerMeta).toBeUndefined();
+      expect(result.content).not.toContain('Wrong.');
+    },
+  );
+
+  it.each([
+    [
+      { run: { run_id: 'trun_1', status: 'completed' }, output: {} },
       'without text output',
     ],
     [
-      { run: { status: 'completed' }, output: { type: 'text', content: {} } },
+      {
+        run: { run_id: 'trun_1', status: 'completed' },
+        output: { type: 'json', content: {} },
+      },
+      'without text output',
+    ],
+    [
+      {
+        run: { run_id: 'trun_1', status: 'completed' },
+        output: { type: 'text', content: {} },
+      },
       'without text output',
     ],
     [{}, 'invalid Task result response'],
