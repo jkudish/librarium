@@ -42,6 +42,9 @@ interface SafeWriteFileOptions {
 // normal first-use compilation as missing ACL support.
 const WINDOWS_ACL_TIMEOUT_MS = 30_000;
 const WINDOWS_ACL_MAX_BUFFER = 64 * 1024;
+const WINDOWS_RENAME_TRANSIENT_RETRIES = 5;
+const WINDOWS_RENAME_RETRY_DELAY_MS = 20;
+const windowsRenameWaitArray = new Int32Array(new SharedArrayBuffer(4));
 
 const WINDOWS_NATIVE_FILE_TYPE = `
 using System;
@@ -387,6 +390,28 @@ const DEFAULT_WINDOWS_ACL: WindowsOwnerOnlyAcl = {
   replaceAtomically: replaceWindowsOwnerOnlyFile,
 };
 
+function renameTemporaryFile(temporaryPath: string, path: string): void {
+  let windowsTransientRetries = 0;
+  while (true) {
+    try {
+      renameSync(temporaryPath, path);
+      return;
+    } catch (error) {
+      const renameError = error as NodeJS.ErrnoException;
+      const windowsTransient =
+        process.platform === 'win32' &&
+        renameError.syscall === 'rename' &&
+        (renameError.code === 'EPERM' ||
+          renameError.code === 'EACCES' ||
+          renameError.code === 'EBUSY') &&
+        windowsTransientRetries < WINDOWS_RENAME_TRANSIENT_RETRIES;
+      if (!windowsTransient) throw error;
+      windowsTransientRetries += 1;
+      Atomics.wait(windowsRenameWaitArray, 0, 0, WINDOWS_RENAME_RETRY_DELAY_MS);
+    }
+  }
+}
+
 /**
  * Atomically write a file by writing to an exclusive sibling temp file and
  * renaming it over the destination.
@@ -448,7 +473,7 @@ export function safeWriteFile(
     closeSync(descriptor);
     descriptor = undefined;
 
-    renameSync(tmp, path);
+    renameTemporaryFile(tmp, path);
     created = false;
   } catch (error) {
     if (descriptor !== undefined) {
