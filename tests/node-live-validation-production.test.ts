@@ -9,13 +9,17 @@ import {
   type LiveValidationApproval,
   registerLiveValidationCommand,
 } from '../src/commands/live-validation.js';
+import { NamespacedKeySchema } from '../src/contracts/common.js';
 import { loadConfig } from '../src/core/config.js';
 import type { CredentialContext } from '../src/core/credentials.js';
 import {
   type PreparedResearchExecution,
   profileIdentityKey,
 } from '../src/core/execution-plan.js';
-import { buildCanonicalValidationMatrix } from '../src/node-live-validation.js';
+import {
+  buildCanonicalValidationMatrix,
+  LIVE_VALIDATION_CONTRACT_EXTENSION_KEY,
+} from '../src/node-live-validation.js';
 import {
   createProductionFrozenCanonicalExecutor,
   productionValidationMatrix,
@@ -123,6 +127,12 @@ function executorDependencies(
       counters.materialize += 1;
       expect(received.policy.limits.max_concurrency).toBe(1);
       expect(received.request.fallback_reserve).toStrictEqual([]);
+      expect(
+        NamespacedKeySchema.parse(LIVE_VALIDATION_CONTRACT_EXTENSION_KEY),
+      ).toBe(LIVE_VALIDATION_CONTRACT_EXTENSION_KEY);
+      expect(received.request.extensions).toHaveProperty(
+        LIVE_VALIDATION_CONTRACT_EXTENSION_KEY,
+      );
       return {} as any;
     },
     resume: async () => {

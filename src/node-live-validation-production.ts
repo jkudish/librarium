@@ -37,6 +37,7 @@ import {
   CanonicalLiveValidationError,
   type CanonicalValidationTarget,
   type FrozenAttemptReference,
+  LIVE_VALIDATION_CONTRACT_EXTENSION_KEY,
 } from './node-live-validation.js';
 import { readTrustedFrozenReferenceManifest } from './node-live-validation-binding.js';
 import {
@@ -354,7 +355,7 @@ export function createProductionFrozenCanonicalExecutor(
         ...admittedPrepared.request,
         extensions: {
           ...admittedPrepared.request.extensions,
-          'librarium:live_validation_contract_sha256':
+          [LIVE_VALIDATION_CONTRACT_EXTENSION_KEY]:
             frozenProtocolContractHash(contract),
         },
       },
