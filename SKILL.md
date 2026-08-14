@@ -10,9 +10,10 @@ triggers:
 
 # Librarium -- Multi-Provider Deep Research
 
-Run research queries across 31 search, deep-research, answer-engine, and LLM
-provider adapters in parallel, collect results, deduplicate sources, and
-produce structured output.
+Run research queries through Librarium’s v2 public provider/profile catalog.
+There are 35 built-in providers and 42 implemented profiles. Preserve the
+profile and collection provenance when reporting results; do not turn source
+counts or agreement into a confidence claim.
 
 ## Prerequisites
 
@@ -25,21 +26,23 @@ produce structured output.
 ### Phase 1: Query Analysis
 Analyze the user's research question. Determine:
 - Is this a technical, business, or general knowledge query?
-- Which provider group is best suited? (`quick` for fast answers, `deep` for
-  thorough research, `visibility` for an explicit nine-surface answer-engine
-  comparison, `comprehensive` for important decisions, `all` for all 27
-  grounded providers, `llm` for direct model answers with web search enabled by
-  default)
+- Which built-in workflow is best suited? (`quick` for a curated low-latency
+  set, `deep` for research-report profiles, `visibility` for an explicit
+  nine-perspective comparison, `all` for catalog-derived coverage). Use
+  `custom:<name>` for a user-authored group.
 - What execution mode? (`sync` for quick queries, `mixed` for deep research)
 
 ### Phase 2: Provider Selection
 Select providers based on query type:
-- **Technical queries**: Use `comprehensive` group (deep research + AI-grounded)
+- **Technical queries**: Start with `quick`; add named durable profiles or
+  `deep` only when the question warrants the latency and possible spend.
 - **Quick facts**: Use `quick` group (AI-grounded only, fast)
-- **Competitive research**: Use `all` group (maximum grounded coverage)
-- **Answer visibility**: Use `visibility` only when you deliberately want the
-  nine-surface consumer/first-party comparison
-- **Direct model answers**: Use `llm` group (Claude, OpenAI, Gemini, OpenRouter). Web search is enabled by default; disable `llmWebSearch` for an ungrounded baseline with no citations.
+- **Competitive research**: Use `all` only after confirming its configured,
+  credentialed membership and cost exposure.
+- **Answer visibility**: Use `visibility` only when you deliberately want six
+  SearchAPI-collected consumer-surface observations compared with three
+  first-party API baselines. Treat the six collection-vendor results as
+  correlated evidence, not independent confirmation.
 - **Specific provider**: Use `--providers` (canonical IDs or display names,
   e.g. `-p "Exa Search,brave-search"`)
 
@@ -50,13 +53,13 @@ librarium run "your query here" --group <group> [--mode mixed]
 ```
 
 ### Phase 4: Monitor Async Tasks
-If deep-research providers were used in async mode:
+If a profile is `background/durable` and was submitted in async mode:
 ```bash
 librarium status --wait
 ```
 
 ### Phase 5: Retrieve Results
-Once complete, async results can be retrieved:
+Once the provider is observed complete, retrieve the terminal result:
 ```bash
 librarium status --retrieve
 ```
@@ -69,7 +72,10 @@ Read the output files:
 4. `run.json` -- Machine-readable manifest
 
 ### Phase 7: Synthesize
-Combine findings from multiple providers into a coherent answer. Cross-reference sources that appear across multiple providers (higher citation count = higher confidence).
+Combine findings from multiple providers into a coherent answer. Record source
+overlap and provenance, but do not convert a higher citation count into a
+confidence score: shared collectors and repeated sources can make that evidence
+correlated.
 
 ## Key Commands
 
@@ -78,13 +84,14 @@ Combine findings from multiple providers into a coherent answer. Cross-reference
 | `librarium run <query>` | Run research query |
 | `librarium run <query> --group quick` | Fast AI-grounded search |
 | `librarium run <query> --group deep` | Deep research (async) |
-| `librarium run <query> --group visibility` | Compare nine answer-engine surfaces |
-| `librarium run <query> --group all` | All providers |
+| `librarium run <query> --group visibility` | Compare six collected consumer surfaces with three first-party API baselines |
+| `librarium run <query> --group all` | Catalog-derived selectable coverage |
 | `librarium answer <query>` | Fan out (default `quick`) and synthesize one grounded, cited answer to `answer.md` |
 | `librarium run <query> --max-cost 0.50` | Stop launching providers once API-reported cost crosses the budget |
 | `librarium run <query> --yes` | Skip the deep-research pre-flight confirm (3+ deep providers) |
 | `librarium status` | Check async tasks |
-| `librarium status --wait --retrieve` | Wait and fetch async results |
+| `librarium status --wait --retrieve` | Wait and fetch Node CLI async results |
+| `librarium live-validation --fixture /absolute/path/to/fixture.json` | Replay a strict, network-free canonical fixture |
 | `librarium usage [--days N] [--json]` | Aggregate API-reported cost and tokens across past runs |
 | `librarium run <query> --html --open` | Run, then open an HTML report |
 | `librarium run <query> --jsonl` | Run, then write machine-readable results.jsonl |
@@ -106,20 +113,19 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 
 | Tier | Providers | Speed | Depth |
 |------|-----------|-------|-------|
-| deep-research | perplexity-sonar-deep, perplexity-deep-research, perplexity-advanced-deep, openai-research, gemini-deep | Minutes | Comprehensive |
-| ai-grounded | perplexity-sonar-pro, perplexity-pro-search, gemini-grounded, grok, openrouter-online, brave-answers, exa, you-research, kagi-fastgpt, six SearchAPI answer surfaces | Seconds | Grounded answers and observed consumer surfaces |
-| raw-search | perplexity-search, brave-search, jina-search, firecrawl-search, searchapi, serpapi, tavily | Fast | Links and SERP evidence |
-| llm | claude, openai-chat, gemini-chat, openrouter-chat | Seconds | Model-native web search by default; optionally ungrounded |
+| background/durable | Exa, Tavily, OpenAI Research, Gemini Deep, Perplexity Sonar Deep, Parallel, Valyu, and You Research profiles | Minutes to longer | Persisted handles that can be polled and retrieved |
+| background/process-local | Perplexity Deep Research and Advanced Deep Research profiles | Minutes to longer | Do not claim cross-process resumption |
+| inline | Search, grounded, collected surface, and chat profiles | Usually seconds | Immediate response; no durable handle |
 
 ### Visibility and privacy boundary
 
-The six SearchAPI answer adapters observe consumer-facing ChatGPT, Gemini,
+The six SearchAPI surface profiles observe consumer-facing ChatGPT, Gemini,
 Perplexity, Google AI Mode, Bing Copilot, and Google AI Overview output through
-one upstream vendor. Treat agreement among them as correlated visibility
+one upstream collector. Treat agreement among them as correlated visibility
 evidence, not independent corroboration or parity with a particular logged-in
-user. Librarium uses bearer authentication and supports explicit
-`options.zeroRetention`; a rejected retention request fails closed and is never
-retried without the option.
+user. `zeroRetention` is an account capability: if explicitly configured,
+Librarium fails closed when the account rejects it. It makes no broader
+retention or privacy guarantee.
 
 ## Output Structure
 

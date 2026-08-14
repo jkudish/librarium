@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- Refresh the public v2 catalog, workflow, execution, provenance, pricing,
+  privacy, TypeScript/PHP boundary, MCP, and custom-provider guidance. The
+  documentation now states the 35-provider, 42-profile public roster and the
+  four built-in workflows (`quick`, `deep`, `visibility`, and `all`).
+- Replace the README demo with a deterministic, network-denied canonical
+  fixture replay. The demo does not use credentials, paid calls, or mocked
+  provider-network responses.
+- Add source-derived public documentation drift checks for catalog/workflow
+  facts, CLI and MCP surfaces, package exports, Node support, and protocol and
+  artifact versions.
+
 ### Added
 
 - **Answer-engine visibility group**: the new opt-in `visibility` group compares

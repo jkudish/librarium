@@ -1,302 +1,134 @@
-# Provider Development Guide
+# Provider development for Librarium v2
 
-This guide documents the implementation-level contract for custom providers in librarium.
+Librarium v2 selects a public **profile**, not an adapter class. A profile key
+is `provider_id/profile_id`; the Node adapter binding that executes it is
+private. Start by deciding the evidence and execution facts that a result can
+truthfully carry. Do not add a marketing capability that the adapter cannot
+prove.
 
-Use this when you are authoring a provider package or script, not just configuring one.
+## Declare a profile
 
-## Scope
+Add a catalog entry in `src/core/provider-profiles.ts`. An implemented profile
+needs one exact binding in `src/core/profile-bindings.ts`; tests reject a
+missing, duplicate, or orphan binding.
 
-Custom providers support two source types:
+The declaration records only stable capability facts:
 
-- `npm`: load a module from the project or runtime install context
-- `script`: spawn a command per operation and exchange JSON over stdin/stdout
+- identity: provider ID, profile ID, and selected/provider-managed target;
+- result kind, corpus, retrieval method, access and observation modes;
+- operator and, for collected consumer surfaces, collector, surface, and
+  unknown context;
+- `inline` or `background` invocation and `none`, `process_local`, or
+  `durable` resumability;
+- optional proven features such as web search, JSON-schema output, or exact
+  profile remote cancellation.
 
-## Config Model
+It must not claim runtime success, citations, correctness, a cost, independent
+corroboration, a timestamp, or a particular account’s consumer experience.
+Those facts belong in a result’s provenance and usage records after execution.
 
-Custom providers are configured in `~/.config/librarium/config.json` and/or `.librarium.json`.
+## Execution contract
 
-```json
-{
-  "customProviders": {
-    "my-provider": {
-      "type": "script",
-      "command": "node",
-      "args": ["./scripts/provider.mjs"]
-    }
-  },
-  "trustedProviderIds": ["my-provider"],
-  "providers": {
-    "my-provider": {
-      "enabled": true
-    }
-  }
-}
-```
+An inline profile executes once and has `resumability: "none"`.
 
-Load rules:
+A `background/durable` profile has a cross-process durable handle. A
+`background/process-local` profile may submit and finish only while its local
+owner survives. More specifically, a background profile is either:
 
-- Provider ID must be present in `trustedProviderIds`
-- Built-in IDs are reserved and cannot be overridden
-- Project and global configs merge; project `customProviders` override same IDs from global
+- `process_local`: it may submit and finish while its local owner survives, but
+  must not be documented as a cross-process durable job; or
+- `durable`: it has a `DurableHandle` containing an opaque local handle ID,
+  public provider task ID, exact provider identity, timestamps, and status.
 
-## Package and CLI Boundary
+Durable work follows `submit` → `poll` → `retrieve`:
 
-Librarium exposes three deliberate package entries (see README "Library
-Usage"). The boundary matters for provider development:
+1. `submit` returns a non-terminal handle (`pending` or `running`).
+2. `poll` returns progress or a terminal handle. It does not invent a result.
+3. `retrieve` accepts only a successful durable handle and returns the terminal
+   result.
 
-- **Built-in adapters** are internal runtime modules. They must remain portable:
-  fetch-based HTTP only, no `node:*` imports, and no direct `process.env`
-  access. API keys resolve through the injected `CredentialContext`; a workerd
-  CI suite imports these modules directly even though their constructors are
-  not public package exports.
-- **`librarium`** exposes canonical request/terminal-result schemas and the
-  static provider capability catalog, plus pure strict v2 configuration
-  validation/migration. It never initializes adapters.
-- **`librarium/core`** exposes Worker-safe provider interfaces and injected
-  catalog/planning/transport/execution ports. It has no concrete adapter
-  classes, dispatcher convenience, or global provider registry.
-- **`librarium/node`** exposes `loadCustomProviders()` for explicitly trusted
-  npm modules and scripts. It returns provider instances without registering
-  them. It also owns explicit config-file load/save: loads never rewrite and
-  `saveConfigV2()` validates before an atomic owner-only write. Unix uses a
-  verified `0600` mode. Windows creates the temporary file with a protected
-  DACL containing one full-control rule for the current process user and keeps
-  that creation handle through write, verification, and replacement; missing
-  ACL support fails closed.
-  Complete configured runs still go through the `librarium` CLI while the v2
-  high-level library runner is finalized.
+Do not add a cancel method unless the exact profile can perform remote
+cancellation. Otherwise validation and recovery must use `reconcile_only`.
+The current catalog advertises exact-profile remote cancellation only for
+`valyu/research`.
 
-> **Security:** an allowed npm module or script executes arbitrary code with
-> the Librarium process's permissions and inherited environment.
-> `trustedProviderIds` is an execution allowlist, not a sandbox. Load only code
-> you explicitly trust.
+## Custom providers
 
-## Provider Interface Contract
-
-Your provider must match librarium's `Provider` shape:
-
-- Required fields:
-  - `id` (must equal the config key)
-  - `displayName`
-  - `tier` (`deep-research`, `ai-grounded`, `raw-search`, `llm`)
-  - `envVar` (string, may be empty only when `requiresApiKey` is `false`)
-  - `execution`: either `inline` or `background`
-  - `execute(query, options)`
-- `test()` is optional
-
-Execution contracts are discriminated:
-
-- `execution: "inline"` completes work in `execute()` and must not expose
-  task lifecycle hooks.
-- `execution: "background"` still implements `execute()` for synchronous
-  callers, and must also implement all of `submit(query, options)`,
-  `poll(handle)`, and `retrieve(handle)`. Librarium never accepts a partial
-  background lifecycle.
-- Optional metadata:
-  - `requiresApiKey` (defaults to `true`)
-
-Notes:
-
-- If `requiresApiKey` is `true`, empty `envVar` is rejected.
-- `source` is set by librarium (`npm` or `script`).
-
-## NPM Providers
-
-### Resolution Order
-
-`module` is resolved in this order:
-
-1. Current project (`process.cwd()` context)
-2. Librarium runtime install context
-
-In standalone/Homebrew install modes, npm custom providers are skipped with a warning.
-
-### Export Patterns
-
-You can export either:
-
-- A provider object
-- A factory function returning a provider object
-
-Factory function receives:
-
-```ts
-import type { CustomProviderRuntimeConfig } from 'librarium/node';
-
-{
-  id: string;
-  config?: CustomProviderRuntimeConfig;
-  sourceOptions: Record<string, unknown>;
-}
-```
-
-`sourceOptions` is `customProviders.<id>.options`.
-
-## Script Providers
-
-### Execution Model
-
-Librarium spawns one process per operation:
-
-- `describe`
-- `execute`
-- `submit`
-- `poll`
-- `retrieve`
-- `test`
-
-Process settings:
-
-- stdin: one JSON request envelope
-- stdout: one JSON response envelope
-- stderr: optional debug/error text
-- env: `process.env` merged with `customProviders.<id>.env`
-- cwd:
-  - if `cwd` is set, it is resolved relative to current working directory
-  - otherwise uses current working directory
-
-### Request Envelope
+The v2 configuration accepts an npm or script source and can include an
+`execution_profile` declaration:
 
 ```json
 {
-  "protocolVersion": 1,
-  "operation": "execute",
-  "providerId": "my-provider",
-  "query": "topic",
-  "options": { "timeout": 30 },
-  "providerConfig": { "enabled": true },
-  "sourceOptions": {}
-}
-```
-
-### Response Envelope
-
-Success:
-
-```json
-{
-  "ok": true,
-  "data": {}
-}
-```
-
-Failure:
-
-```json
-{
-  "ok": false,
-  "error": "message"
-}
-```
-
-### `describe` Response
-
-`describe` must return provider metadata and capabilities.
-
-```json
-{
-  "ok": true,
-  "data": {
-    "id": "my-provider",
-    "displayName": "My Provider",
-    "tier": "raw-search",
-    "execution": "inline",
-    "envVar": "MY_PROVIDER_API_KEY",
-    "requiresApiKey": true,
-    "capabilities": {
-      "execute": true,
-      "submit": false,
-      "poll": false,
-      "retrieve": false,
-      "test": true
+  "type": "npm",
+  "module": "@acme/librarium-provider",
+  "execution_profile": {
+    "binding_id": "acme.search.v1",
+    "profile": {
+      "identity": {
+        "provider_id": "acme",
+        "profile_id": "search",
+        "target": { "primary": { "model_selection": "not_applicable" } }
+      },
+      "result_kind": "search_results",
+      "observation_mode": "api_output",
+      "corpora": ["web"],
+      "retrieval_method": "search_endpoint",
+      "access_mode": "direct",
+      "operator_id": "acme",
+      "invocation": "inline",
+      "resumability": "none"
     }
   }
 }
 ```
 
-Rules:
+Custom code loads only when its public provider ID appears in
+`trusted_provider_ids`. This is an allowlist, not isolation. npm modules and
+scripts can execute arbitrary code with the calling process permissions and
+environment. Never treat it as a sandbox or grant trust during automatic
+migration.
 
-- `displayName` and `tier` are required
-- `execution` must be either `inline` or `background`
-- `capabilities.execute` must be `true`
-- Background scripts must declare `submit`, `poll`, and `retrieve` as `true`;
-  inline scripts must not declare those hooks
-- If `id` is returned, it must match the configured provider ID
+The custom-provider wire protocol is `1.0.0`. It uses strict JSON envelopes
+for `execute`, `submit`, `poll`, and `retrieve`. An inline `execute` request
+requires an inline profile; `submit` requires a durable background profile;
+`retrieve` requires a successful handle. Responses must preserve matching
+request and attempt IDs. Validate every exchange with the exported schemas
+before admitting it.
 
-### Operation Data Shapes
+## Collection and provenance
 
-- `execute` and `retrieve`: `ProviderResult`
-  - includes `provider`, `tier`, `content`, `citations`, `durationMs`
-  - optionally `model`, `tokenUsage`, and `usage` (return `usage` to report cost/tokens -- see [Metering and Cost](#metering-and-cost))
-- `submit`: `AsyncTaskHandle`
-- `poll`: `AsyncPollResult`
-- `test`: `{ ok: boolean; error?: string }`
+For direct API output, set `access_mode: "direct"` and identify the API
+operator. For a consumer surface obtained through another collector, use
+`access_mode: "collected"`, `observation_mode: "surface_snapshot"`,
+`retrieval_method: "surface_collector"`, and name both the collector and
+surface. Unknown account and personalization context must remain `unknown`.
 
-All responses are validated. Invalid payloads fail the operation.
+Do not describe a collected consumer observation as an official vendor API, a
+logged-in-user result, or independent corroboration. Several profiles can
+share one collector; their agreement is correlated evidence unless their
+provenance says otherwise.
 
-### Timeouts
+## Price, credentials, and options
 
-- `execute`: uses `options.timeout` seconds (minimum 1s)
-- `submit`: uses `options.timeout` seconds (minimum 1s)
-- `describe`, `poll`, `test`: 30s default
-- `retrieve`: 120s default
+Use the descriptor’s credential family. Never expose an API key, durable
+resume credential, authorization value, raw response, or secret-shaped field
+in public metadata. `provider_meta` is for allowlisted, public JSON-safe data;
+the schema rejects obvious credential and raw-response names but cannot detect
+every hidden secret.
 
-## Metering and Cost
+Expose a pre-dispatch estimate only when the reviewed pricing definition makes
+it exact. Unknown, token-priced, API-unit, and account-specific prices are not
+zero. Validate model and option overrides before adapter construction. A bad
+configuration blocks new `execute`, `submit`, and `test` work before HTTP but
+must leave safe `poll` and `retrieve` available for existing durable work.
 
-Librarium tracks per-provider cost through a `metering` object on every result (`kind`, an optional pre-dispatch `estimate`, and an `actual` lane). How a provider participates depends on whether it is custom or built-in.
+## Required checks
 
-### Custom providers
+Run the focused catalog/config/custom-provider tests and the Worker suite. A
+catalog change also needs the public documentation drift test because the
+README roster and workflow facts are intentionally checked against source.
 
-- **Report cost via `usage`.** If your `execute`/`retrieve` `ProviderResult` includes a `usage` object with `costUsd` (and/or `inputTokens`/`outputTokens`/`totalTokens`), librarium surfaces it as `metering.actual` with `source: "provider_reported"`, counts it toward the reported-cost `--max-cost` budget, and aggregates it in `librarium usage`. This is taken from your response, never estimated.
-- **Custom providers are `manual_unmetered`.** Metering *kind* and the network-free pre-dispatch *estimate* are a built-in registry concept (`src/core/metering.ts`). Custom providers have no registry entry, so their `metering.kind` is always `manual_unmetered`, they produce no estimate, and they reserve `0` against `--max-estimated-cost` (never skipped by it).
-
-### Built-in adapters
-
-A built-in adapter declares its pricing model in its provider descriptor. The metering kinds are: `native_cost`, `native_tokens`, `request_priced`, `credit_priced`, `api_unit_priced`, `manual_unmetered`. Request- and credit-priced kinds can carry a network-free default estimate (request-priced may include a flat USD figure; plan-dependent credit/unit kinds emit unit metadata only, with a USD figure appearing only when the user configures pricing via provider `options`). Estimates never set `usage.costUsd`.
-
-## Adding a Built-in Adapter
-
-Built-in adapters live in the internal Worker-safe adapter layer and must stay runtime-portable (fetch-only HTTP, no `node:*`, no direct `process.env`; a workerd CI suite enforces this). Each built-in has one typed runtime descriptor composed from:
-
-- `src/core/provider-descriptor.ts`: portable metadata, aliases, credential name, tier, display/catalog copy, default model, metering, option schema, and discriminated execution capabilities
-- `src/adapters/provider-descriptors.ts`: the adapter factory for each metadata definition
-
-Runtime registration, constants, aliases, onboarding catalog, and metering are derived from these descriptors. Legacy CLI grouping remains internal until the configuration and runtime cutover work lands. The v2 workflow source of truth is provider profiles plus curated `quick`/`visibility` policy and capability-derived `deep`/`all` membership.
-
-To add one:
-
-1. **Adapter** -- `src/adapters/<id>.ts`, extending `BaseProvider` for inline execution or `BackgroundBaseProvider` for a complete remote-task lifecycle. Implement `execute` in both cases; background adapters also implement `submit`/`poll`/`retrieve`. Return `usage` when the API reports cost/tokens.
-2. **Descriptor definition** -- add the portable metadata entry in `src/core/provider-descriptor.ts`, including its metering declaration and an appropriate Zod schema for the supported `options`.
-3. **Factory** -- add the constructor mapping in `src/adapters/provider-descriptors.ts`. The internal Node registry validates configured options, constructs adapters from this descriptor list, and checks that runtime adapters match their declared ID, tier, execution mode, display name, and credential. Invalid options warn but do not remove the adapter: Librarium blocks new `execute`, `submit`, and `test` work before HTTP while retaining `poll`/`retrieve` for existing background tasks and preserving reserved built-in IDs.
-4. **Workflow policy** -- declare eligible curated workflow membership on the
-   profile in `src/core/provider-profiles.ts` and update
-   `src/core/builtin-workflows.ts` only when the profile belongs in the curated
-   `quick` or `visibility` roster. `deep` and `all` are derived from profile
-   capabilities and must not be manually enumerated.
-5. **Capability catalog** -- add or update the corresponding audited profile in
-   `src/core/provider-profiles.ts` and its binding in
-   `src/core/profile-bindings.ts`. Do not add the concrete adapter constructor
-   to a public package entry.
-6. **README** -- bump the "N built-in provider adapters" count; the README-drift test (`tests/readme-drift.test.ts`) tripwires on the provider count, tiers, and group names.
-
-Run `npm run test` (it includes the metering lockstep and README-drift guards) and `npm run test:workers` (the runtime-portability suite) before opening a PR.
-
-## Error Handling and Loading Behavior
-
-- Untrusted provider ID: skipped with warning
-- Built-in ID collision: skipped with warning
-- Module resolution failure: skipped with warning
-- Script startup / JSON parse / schema validation failure: skipped with warning or operation failure
-- Script `ok: false`: surfaced as operation error
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `not trusted` warning | ID missing from `trustedProviderIds` | Add provider ID to trust list |
-| `conflicts with a built-in` warning | Custom ID matches built-in ID | Rename custom provider ID |
-| `Cannot resolve npm module` | Module not installed in project/runtime | Install package or fix `module` name |
-| `describe id ... does not match` | Script reported different ID | Return matching ID or omit `id` |
-| `returned invalid JSON` | Script wrote non-JSON to stdout | Write only one JSON envelope to stdout |
-| `returned invalid ... payload` | Shape mismatch for operation data | Return correct schema for that operation |
-| `timed out` | Operation exceeded timeout | Optimize provider or raise timeout for execute/submit |
+```bash
+npm test -- --run tests/provider-catalog.test.ts tests/config-v2.test.ts tests/custom-providers.test.ts tests/public-documentation-drift.test.ts
+npm run test:workers
+```

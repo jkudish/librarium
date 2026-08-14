@@ -1,7 +1,7 @@
 {
   "name": "librarium",
   "version": "1.4.1",
-  "description": "Fan out research queries to multiple search and deep-research APIs in parallel",
+  "description": "Evidence-aware multi-provider research with explicit profile provenance",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -92,6 +92,9 @@
     "search",
     "deep-research",
     "multi-provider",
+    "evidence",
+    "provenance",
+    "mcp",
     "perplexity",
     "brave",
     "exa",
