@@ -541,14 +541,22 @@ jobs:
           HOMEBREW_NO_ANALYTICS: 1
           HOMEBREW_NO_ENV_HINTS: 1
         run: |
+          TAP_NAME=librarium/rc-proof
+          FORMULA_NAME=librarium-rc-proof
           cleanup_brew() {
-            if brew list --formula librarium-rc-proof >/dev/null 2>&1; then
-              brew uninstall --formula librarium-rc-proof >/dev/null
+            if brew list --formula "$FORMULA_NAME" >/dev/null 2>&1; then
+              brew uninstall --formula "$FORMULA_NAME" >/dev/null
+            fi
+            if brew --repository "$TAP_NAME" >/dev/null 2>&1; then
+              brew untap "$TAP_NAME" >/dev/null
             fi
           }
           trap cleanup_brew EXIT
-          brew install --formula "$RUNNER_TEMP/distribution-proof/librarium-rc-proof.rb"
-          BREW_BIN="$(brew --prefix librarium-rc-proof)/bin/librarium"
+          brew tap-new "$TAP_NAME"
+          TAP_ROOT="$(brew --repository "$TAP_NAME")"
+          cp "$RUNNER_TEMP/distribution-proof/librarium-rc-proof.rb" "$TAP_ROOT/Formula/$FORMULA_NAME.rb"
+          brew install --formula "$TAP_NAME/$FORMULA_NAME"
+          BREW_BIN="$(brew --prefix "$FORMULA_NAME")/bin/librarium"
           EXPECTED_VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/distribution-proof/proof.json")"
           EXPECTED_SHA="$(jq -r '.homebrew.selections[] | select(.platform == "darwin" and .arch == "arm64") | .sha256' "$RUNNER_TEMP/distribution-proof/proof.json")"
           test "$(shasum -a 256 "$BREW_BIN" | awk '{print "sha256:" $1}')" = "$EXPECTED_SHA"
@@ -563,6 +571,8 @@ jobs:
             --binary "$BREW_BIN"
           test -f "$RUNNER_TEMP/distribution-proof/homebrew-result.json"
           test ! -e "$BREW_BIN"
+          brew untap "$TAP_NAME"
+          ! brew --repository "$TAP_NAME" >/dev/null 2>&1
           trap - EXIT
 
       - name: Exercise installer rollback fixtures
