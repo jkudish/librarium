@@ -23,9 +23,7 @@ import { resolveSnapshotWritePath } from './contract-snapshot-path.js';
 const root =
   process.env.LIBRARIUM_CONTRACTS_OUTPUT ??
   join(process.cwd(), 'contracts', 'v1');
-const packageVersion = JSON.parse(
-  readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
-) as { version: string };
+const TYPESCRIPT_FIXTURE_GENERATOR_VERSION = '1.4.1';
 
 function isRecognizedSnapshotManifest(path: string): boolean {
   try {
@@ -166,7 +164,7 @@ const result = {
 };
 const success = {
   generator: 'jkudish/librarium',
-  generator_version: packageVersion.version,
+  generator_version: TYPESCRIPT_FIXTURE_GENERATOR_VERSION,
   request_id: 'request-terminal-1',
   status: 'succeeded',
   completed_at: '2026-08-09T12:00:02Z',
