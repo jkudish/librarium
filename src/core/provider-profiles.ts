@@ -616,7 +616,11 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       best_for: 'A Brave-backed synthesized answer layer.',
       setup_url: BRAVE_SETUP_URL,
     },
-    credential: { env_var: 'BRAVE_API_KEY', required: true, auto_enable: true },
+    credential: {
+      env_var: 'BRAVE_ANSWERS_API_KEY',
+      required: true,
+      auto_enable: true,
+    },
     profiles: [
       declare({
         profile_id: 'grounded',

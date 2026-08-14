@@ -708,7 +708,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     id: 'brave-answers',
     registrationOrder: 10,
     tier: 'ai-grounded',
-    envVar: 'BRAVE_API_KEY',
+    envVar: 'BRAVE_ANSWERS_API_KEY',
     defaultModel: 'brave',
     display: {
       family: 'Brave',

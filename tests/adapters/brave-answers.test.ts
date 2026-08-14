@@ -34,7 +34,7 @@ function streamEvent(content: string, model = 'brave'): string {
 
 function provider(): BraveAnswersProvider {
   return new BraveAnswersProvider({
-    credentials: { env: { BRAVE_API_KEY: 'mock-brave-key' } },
+    credentials: { env: { BRAVE_ANSWERS_API_KEY: 'mock-brave-key' } },
   });
 }
 
