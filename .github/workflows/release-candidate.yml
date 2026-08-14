@@ -418,7 +418,7 @@ jobs:
 
   distribution-proof:
     needs: [preflight, assemble-candidate]
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
       - name: Checkout validated candidate
@@ -460,6 +460,28 @@ jobs:
           --repository "$GITHUB_WORKSPACE"
           --candidate "$RUNNER_TEMP/candidate"
           --output "$RUNNER_TEMP/distribution-proof"
+
+      - name: Exercise exact local Homebrew formula and upgrade branch
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ANALYTICS: 1
+          HOMEBREW_NO_ENV_HINTS: 1
+        run: |
+          cleanup_brew() {
+            if brew list --formula librarium-rc-proof >/dev/null 2>&1; then
+              brew uninstall --formula librarium-rc-proof >/dev/null
+            fi
+          }
+          trap cleanup_brew EXIT
+          brew install --formula "$RUNNER_TEMP/distribution-proof/librarium-rc-proof.rb"
+          BREW_BIN="$(brew --prefix librarium-rc-proof)/bin/librarium"
+          EXPECTED_VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/distribution-proof/proof.json")"
+          EXPECTED_SHA="$(jq -r '.homebrew.selections[] | select(.platform == "darwin" and .arch == "arm64") | .sha256' "$RUNNER_TEMP/distribution-proof/proof.json")"
+          test "$(shasum -a 256 "$BREW_BIN" | awk '{print "sha256:" $1}')" = "$EXPECTED_SHA"
+          test "$("$BREW_BIN" --version)" = "$EXPECTED_VERSION"
+          "$BREW_BIN" --help >/dev/null
+          "$BREW_BIN" upgrade --dry-run --target "$EXPECTED_VERSION" | grep 'via homebrew'
+          brew test librarium-rc-proof
 
       - name: Exercise installer rollback fixtures
         run: npx vitest run tests/install-script.test.ts tests/commands/upgrade.test.ts tests/release-candidate-workflow.test.ts

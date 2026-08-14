@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { arch, platform, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
   releaseCandidateInternals,
   verifyReleaseCandidate,
@@ -25,6 +26,7 @@ interface HomebrewInput {
   readonly arch: FormulaArch;
   readonly name: string;
   readonly sha256: string;
+  readonly url?: string;
 }
 
 function fail(message: string): never {
@@ -74,7 +76,7 @@ export function renderLocalHomebrewFormula(input: {
   const linuxArm = homebrewInputFor(input.rows, 'linux', 'arm64');
   const linuxX64 = homebrewInputFor(input.rows, 'linux', 'x64');
   const branch = (row: HomebrewInput, indentation: string) =>
-    `${indentation}url ${rubyString(`file:///candidate/sea/${row.name}`)}\n` +
+    `${indentation}url ${rubyString(row.url ?? `file:///candidate/sea/${row.name}`)}\n` +
     `${indentation}sha256 ${rubyString(row.sha256.slice(7))}\n`;
   return (
     `class LibrariumRcProof < Formula\n` +
@@ -263,6 +265,8 @@ export async function createReleaseCandidateDistributionProof(input: {
         arch: row.arch,
         name: row.name,
         sha256: row.sha256,
+        url: pathToFileURL(join(input.candidate_root, ...row.path.split('/')))
+          .href,
       }));
     for (const platform_ of ['darwin', 'linux'] as const) {
       for (const arch_ of ['arm64', 'x64'] as const) {
