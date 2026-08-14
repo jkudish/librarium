@@ -253,6 +253,49 @@ function legacyUsage(
   return Object.keys(usage).length === 0 ? undefined : UsageSchema.parse(usage);
 }
 
+function meteringEvidence(
+  result: z.infer<typeof LegacyProviderResultSchema>,
+): Record<string, unknown> | undefined {
+  const source =
+    result.metering?.actual?.source ??
+    (result.usage?.costUsd !== undefined ? 'provider_reported' : undefined);
+  if (!source) return undefined;
+  const units =
+    result.metering?.actual?.billableUnits ?? result.usage?.billableUnits;
+  const unit = result.metering?.estimate?.unit ?? result.usage?.unit;
+  const complete =
+    source === 'provider_reported' || source === 'account_usage_delta'
+      ? 'complete'
+      : units !== undefined && unit !== undefined
+        ? 'complete'
+        : 'partial';
+  return {
+    actual_cost_source: source,
+    source_class:
+      source === 'provider_reported'
+        ? 'provider_reported'
+        : source === 'account_usage_delta'
+          ? 'account_usage_delta'
+          : 'computed',
+    actual_completeness: complete,
+    actual_evidence:
+      source === 'provider_reported'
+        ? result.metering?.actual?.costUsd !== undefined ||
+          result.usage?.costUsd !== undefined
+          ? 'provider_reported_cost'
+          : 'provider_reported_units'
+        : source === 'account_usage_delta'
+          ? 'account_usage_delta'
+          : 'computed_billable_units',
+    ...(units !== undefined && { billable_units: units }),
+    ...(unit !== undefined && { billable_unit: unit }),
+    ...(complete === 'partial' && {
+      missing_units:
+        unit === undefined ? ['billable_unit'] : ['billable_units'],
+    }),
+  };
+}
+
 function nonEmpty(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -302,9 +345,7 @@ export function normalizeProviderAttemptOutput(
         ...(legacy.metering.pricingVersion && {
           pricing_version: legacy.metering.pricingVersion,
         }),
-        ...(legacy.metering.actual && {
-          actual_cost_source: legacy.metering.actual.source,
-        }),
+        ...meteringEvidence(legacy),
       },
     }),
   });

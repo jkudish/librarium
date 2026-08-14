@@ -86,6 +86,8 @@ export interface ExecutionRuntimeDependencies {
   ) => Promise<VersionedExecutionSuccess>;
   /** Load and resume an existing durable request instead of creating it. */
   readonly resume_existing?: boolean;
+  /** Persist the initial canonical state without advancing or dispatching it. */
+  readonly materialize_only?: boolean;
   /** One bounded custody observation for already terminal local requests. */
   readonly reconcile_terminal_custody?: boolean;
   readonly persist_custody_observation?: (
@@ -170,6 +172,12 @@ export async function runPreparedExecution(
   }
   if (initial) await effectiveDependencies.store.create(initial);
   const outputs = new Map<string, unknown>();
+  if (initial && effectiveDependencies.materialize_only) {
+    return {
+      state: initial,
+      outputs_by_attempt: Object.freeze({}),
+    };
+  }
 
   const persistLaunchDispatch = async (
     launch: AttemptLaunch,

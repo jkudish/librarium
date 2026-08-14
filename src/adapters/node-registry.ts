@@ -31,6 +31,8 @@ export interface InitializeProvidersOptions {
    * available for legacy read compatibility.
    */
   customProviderIds?: Iterable<string>;
+  /** Restrict built-in construction to exact admitted adapters. */
+  builtinAdapterIds?: Iterable<string>;
 }
 
 function expectedTier(
@@ -99,7 +101,9 @@ export async function initializeProviders(
   config: ProviderInitConfig = {},
   options: InitializeProvidersOptions = {},
 ): Promise<ProviderInitResult> {
-  const builtinResult = await initializeBuiltinProviders(config);
+  const builtinResult = await initializeBuiltinProviders(config, {
+    builtinAdapterIds: options.builtinAdapterIds,
+  });
   const configuredCustomProviders = config.customProviders ?? {};
   const privateCollision = Object.keys(configuredCustomProviders).find((id) =>
     INTERNAL_ADAPTER_ID_SET.has(id),

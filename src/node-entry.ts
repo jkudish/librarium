@@ -13,6 +13,21 @@ import { RESERVED_BUILTIN_PROVIDER_IDS } from './core/reserved-provider-ids.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
 export type {
+  ApprovalGate,
+  FrozenCanonicalExecutor,
+  FrozenExecutionOutcome,
+  FrozenExecutionState,
+  LiveValidationApproval,
+} from './commands/live-validation.js';
+export {
+  approvalFingerprint,
+  assertLiveValidationGate,
+  continueFrozenValidationProtocol,
+  executeFrozenValidationProtocol,
+  productionLiveValidationBindingUnavailable,
+  readLiveValidationApproval,
+} from './commands/live-validation.js';
+export type {
   ActualCostSource,
   AdapterBindingIdentity,
   AdmittedSelectedProfile,
@@ -172,6 +187,7 @@ export {
   VERSION,
   validateConfigV2,
 } from './core-entry.js';
+export { materializeCanonicalPreparedExecution } from './node-canonical-run.js';
 export type {
   LoadConfigV2Options,
   SaveConfigV2Options,
@@ -183,6 +199,35 @@ export {
   saveConfigV2,
 } from './node-config-v2.js';
 export { createNodeCredentialContext } from './node-credentials.js';
+export type {
+  CanonicalValidationCheckpoint,
+  CanonicalValidationCostAdmission,
+  CanonicalValidationExecutor,
+  CanonicalValidationMatrix,
+  CanonicalValidationPins,
+  CanonicalValidationProviderConfig,
+  CanonicalValidationTarget,
+  FrozenAttemptReference,
+} from './node-live-validation.js';
+export {
+  assertCanonicalTargetDispatchable,
+  assertCanonicalValidationPins,
+  assertCanonicalValidationPreparedExecution,
+  buildCanonicalValidationMatrix,
+  CanonicalLiveValidationError,
+  CanonicalValidationCheckpointRepository,
+  createCanonicalPreparedValidationExecutor,
+  deterministicReceiptSensibility,
+  executeCanonicalValidationLane,
+  executeWithCanonicalValidationAbort,
+  interruptCanonicalValidation,
+  quoteCanonicalValidationTarget,
+  readPrivateRawEvidence,
+  sanitizeCanonicalReceipt,
+  writePrivateRawEvidence,
+  writeSanitizedCanonicalReceipt,
+} from './node-live-validation.js';
+export { createFilesystemCandidateAuthority } from './node-live-validation-binding.js';
 
 export interface LoadCustomProvidersOptions {
   /** Additional IDs which custom providers may not claim. */

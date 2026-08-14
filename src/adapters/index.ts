@@ -216,6 +216,7 @@ export function getProviderMeta(
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
+  options: { readonly builtinAdapterIds?: Iterable<string> } = {},
 ): Promise<ProviderInitResult> {
   providers.clear();
   const providerConfig = config.providers ?? {};
@@ -224,13 +225,19 @@ export async function initializeProviders(
   const httpStreamClient = config.httpStreamClient;
   const warnings: string[] = [];
 
+  const admittedBuiltinIds = options.builtinAdapterIds
+    ? new Set(options.builtinAdapterIds)
+    : undefined;
   const descriptors = [
     ...BUILTIN_PROVIDER_DESCRIPTORS,
     ...INTERNAL_ADAPTER_IDS.flatMap((id) => {
       const descriptor = getInternalBuiltInProviderDescriptor(id);
       return descriptor ? [descriptor] : [];
     }),
-  ];
+  ].filter(
+    (descriptor) =>
+      admittedBuiltinIds === undefined || admittedBuiltinIds.has(descriptor.id),
+  );
   for (const descriptor of descriptors) {
     // Research profiles share the established public provider configuration,
     // while their background adapters retain distinct internal ids.
