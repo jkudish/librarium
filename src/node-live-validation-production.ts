@@ -15,8 +15,13 @@ import {
   frozenRequestFingerprint,
   type LiveValidationApproval,
 } from './commands/live-validation.js';
-import { loadConfig, loadProjectConfig, mergeConfigs } from './core/config.js';
-import { buildProviderCatalog } from './core/profile-catalog.js';
+import {
+  configGroupProvenance,
+  loadConfig,
+  loadProjectConfig,
+  mergeConfigs,
+} from './core/config.js';
+import { mapConfiguration } from './core/configuration-mapping.js';
 import { getBuiltinProviderDefinition } from './core/provider-descriptor.js';
 import { INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS } from './internal-adapter-ids.js';
 import {
@@ -97,11 +102,8 @@ function exactInput(
   };
 }
 
-/** Build the config-aware public matrix before any credential context exists. */
-export function productionValidationMatrix(config: Config) {
+function normalizedProductionProviders(config: Config): Config['providers'] {
   const expected = buildCanonicalValidationMatrix();
-  // A paid matrix is a complete fixed audit. An explicit disabled public
-  // family must fail admission; it must never silently remove that family.
   for (const target of expected.targets) {
     if (config.providers[publicConfigId(target)]?.enabled === false) {
       throw new CanonicalLiveValidationError(
@@ -114,14 +116,28 @@ export function productionValidationMatrix(config: Config) {
     const id = publicConfigId(target);
     providers[id] = { ...providers[id], enabled: true };
   }
-  const catalog = buildProviderCatalog({
-    providerConfigs: providers,
-    groups: config.groups,
+  return providers;
+}
+
+/** Build the config-aware public matrix before any credential context exists. */
+export function productionValidationMatrix(config: Config) {
+  const expected = buildCanonicalValidationMatrix();
+  // A paid matrix is a complete fixed audit. An explicit disabled public
+  // family must fail admission; it must never silently remove that family.
+  const providers = normalizedProductionProviders(config);
+  const normalizedConfig = { ...config, providers };
+  const mapped = mapConfiguration(normalizedConfig, {
+    authoredGroups: configGroupProvenance(normalizedConfig),
     assumeCredentialAvailability: true,
   });
+  if (mapped.preflight.issues.length > 0) {
+    throw new CanonicalLiveValidationError(
+      'Production paid validation configuration cannot build a canonical catalog.',
+    );
+  }
   const matrix = buildCanonicalValidationMatrix({
     provider_config: providers,
-    catalog_authority: catalog,
+    catalog_authority: mapped.catalog,
   });
   const expectedInventory = expected.targets.map(
     (target) => `${target.key}:${target.binding_id}:${target.adapter_id}`,
@@ -198,6 +214,7 @@ export function createProductionFrozenCanonicalExecutor(
   config: Config,
   dependencies: ProductionLiveValidationDependencies = {},
 ): FrozenCanonicalExecutor {
+  const productionProviders = normalizedProductionProviders(config);
   const initialize = dependencies.initializeProviders ?? initializeProviders;
   const resolveProvider = dependencies.resolveExactProvider ?? getExactProvider;
   const createDirectory = dependencies.createRunDirectory ?? createRunDir;
@@ -235,9 +252,9 @@ export function createProductionFrozenCanonicalExecutor(
     const configured: Config = {
       ...config,
       providers: {
-        ...config.providers,
+        ...productionProviders,
         [publicConfigId(target)]: {
-          ...config.providers[publicConfigId(target)],
+          ...productionProviders[publicConfigId(target)],
           enabled: true,
           options: protocol.options,
         },

@@ -18,7 +18,10 @@ import {
   canonicalJson,
   catalogFingerprint,
 } from './core/catalog-fingerprint.js';
-import type { PreparedResearchExecution } from './core/execution-plan.js';
+import {
+  type PreparedResearchExecution,
+  profileIdentityKey,
+} from './core/execution-plan.js';
 import { safeWriteFile } from './core/fs-utils.js';
 import {
   budgetEstimateFromQuote,
@@ -1288,9 +1291,7 @@ export function assertCanonicalValidationPreparedExecution(
     );
   }
   const plan =
-    prepared.profile_plans_by_identity[
-      `${profile.identity.provider_id}/${profile.identity.profile_id}`
-    ];
+    prepared.profile_plans_by_identity[profileIdentityKey(profile.identity)];
   if (
     !plan ||
     plan.binding.adapter_id !== target.adapter_id ||

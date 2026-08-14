@@ -9,8 +9,12 @@ import {
   type LiveValidationApproval,
   registerLiveValidationCommand,
 } from '../src/commands/live-validation.js';
+import { loadConfig } from '../src/core/config.js';
 import type { CredentialContext } from '../src/core/credentials.js';
-import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
+import {
+  type PreparedResearchExecution,
+  profileIdentityKey,
+} from '../src/core/execution-plan.js';
 import { buildCanonicalValidationMatrix } from '../src/node-live-validation.js';
 import {
   createProductionFrozenCanonicalExecutor,
@@ -68,13 +72,12 @@ function prepared(target: Target): PreparedResearchExecution {
     },
     catalog: { digest: target.catalog_digest },
     profile_plans_by_identity: {
-      [`${target.expected_effective_identity.provider_id}/${target.expected_effective_identity.profile_id}`]:
-        {
-          binding: {
-            adapter_id: target.adapter_id,
-            binding_id: target.binding_id,
-          },
+      [profileIdentityKey(target.expected_effective_identity)]: {
+        binding: {
+          adapter_id: target.adapter_id,
+          binding_id: target.binding_id,
         },
+      },
     },
   } as unknown as PreparedResearchExecution;
 }
@@ -243,6 +246,37 @@ describe('production live-validation binding (injected, offline)', () => {
     });
   });
 
+  it('uses the same all-enabled catalog authority for the frozen matrix and exact structural preflight', async () => {
+    const config = loadConfig(
+      join(tmpdir(), 'librarium-missing-live-validation-config.json'),
+    );
+    const target = productionValidationMatrix(config).targets[0]!;
+    const observed = counters();
+    const injected = executorDependencies(target, observed);
+    const {
+      preflightStructure: _useProductionStructuralPreflight,
+      ...dependencies
+    } = injected;
+    const binding = createProductionFrozenCanonicalExecutor(
+      {
+        raw_root: mkdtempSync(join(tmpdir(), 'librarium-binding-')),
+      } as LiveValidationApproval,
+      config,
+      dependencies,
+    );
+
+    await expect(
+      binding.prepare(target, protocol(target)),
+    ).resolves.toMatchObject({
+      catalog_digest: target.catalog_digest,
+    });
+    expect(observed).toMatchObject({
+      credential: 1,
+      initialize: 1,
+      materialize: 1,
+    });
+  });
+
   it('initializes only a private durable adapter while retaining its public configuration authority', async () => {
     const target = buildCanonicalValidationMatrix().targets.find(
       (candidate) => candidate.key === 'exa/research',
@@ -263,7 +297,7 @@ describe('production live-validation binding (injected, offline)', () => {
       {
         raw_root: mkdtempSync(join(tmpdir(), 'librarium-binding-')),
       } as LiveValidationApproval,
-      { providers: { exa: { enabled: false } } } as Config,
+      { providers: { exa: { enabled: true } } } as Config,
       dependencies,
     );
     await binding.prepare(target, protocol(target));
@@ -372,7 +406,9 @@ describe('production live-validation binding (injected, offline)', () => {
 
 describe('production paid matrix and candidate attribution', () => {
   it('requires the exact canonical 42-target binding inventory', () => {
-    const matrix = productionValidationMatrix({ providers: {} } as Config);
+    const matrix = productionValidationMatrix(
+      loadConfig(join(tmpdir(), 'librarium-missing-matrix-config.json')),
+    );
     expect(matrix.targets).toHaveLength(42);
     expect(matrix.targets.map((target) => target.key)).toStrictEqual(
       buildCanonicalValidationMatrix().targets.map((target) => target.key),
@@ -380,10 +416,17 @@ describe('production paid matrix and candidate attribution', () => {
   });
 
   it('rejects an explicitly disabled canonical family before provider construction', () => {
+    const config = loadConfig(
+      join(tmpdir(), 'librarium-missing-disabled-config.json'),
+    );
     expect(() =>
       productionValidationMatrix({
-        providers: { exa: { enabled: false } },
-      } as Config),
+        ...config,
+        providers: {
+          ...config.providers,
+          exa: { ...config.providers.exa, enabled: false },
+        },
+      }),
     ).toThrow('disabled canonical provider');
   });
 
