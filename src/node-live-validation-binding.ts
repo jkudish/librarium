@@ -181,9 +181,12 @@ export function readTrustedFrozenReferenceManifest(
       );
     }
   } else if (phase === 'resume') {
-    const terminalCustody = ['succeeded', 'failed', 'cancelled'].includes(
-      manifest.coordination_state.status,
-    );
+    const terminalCustody = [
+      'succeeded',
+      'unsuccessful',
+      'cancelled',
+      'failed',
+    ].includes(manifest.coordination_state.status);
     const activeCustody =
       manifest.coordination_state.status === 'running' && attempts.length > 0;
     const undispatched =
@@ -194,9 +197,12 @@ export function readTrustedFrozenReferenceManifest(
       );
     }
   } else if (phase === 'active' || phase === 'cancellable') {
-    const terminalCustody = ['succeeded', 'failed', 'cancelled'].includes(
-      manifest.coordination_state.status,
-    );
+    const terminalCustody = [
+      'succeeded',
+      'unsuccessful',
+      'cancelled',
+      'failed',
+    ].includes(manifest.coordination_state.status);
     if (
       !terminalCustody &&
       (manifest.coordination_state.status !== 'running' ||
@@ -208,7 +214,7 @@ export function readTrustedFrozenReferenceManifest(
     }
   } else if (
     !manifest.terminal_response ||
-    !['succeeded', 'failed', 'cancelled'].includes(
+    !['succeeded', 'unsuccessful', 'cancelled', 'failed'].includes(
       manifest.coordination_state.status,
     )
   ) {
