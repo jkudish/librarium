@@ -245,9 +245,9 @@ main() {
     HAD_PRIOR=1
   fi
 
+  REPLACED=1
   privileged mv -f "$STAGE_FILE" "$DESTINATION"
   STAGE_FILE=""
-  REPLACED=1
 
   installed_version=$("$DESTINATION" --version 2>/dev/null || true)
   if [ "$installed_version" != "$VERSION" ]; then

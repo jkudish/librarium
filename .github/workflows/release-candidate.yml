@@ -26,16 +26,36 @@ jobs:
       artifact-prefix: ${{ steps.authority.outputs.artifact_prefix }}
     env:
       CANDIDATE_SHA: ${{ inputs.git_sha }}
+      GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
 
     steps:
+      - name: Validate dispatch context before candidate code
+        shell: bash
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+
       - name: Checkout protected main
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Fetch protected main authority
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Validate Git authority before candidate code
+        shell: bash
+        run: |
+          test "$(git cat-file -t "$CANDIDATE_SHA")" = commit
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -43,16 +63,11 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Fetch protected main authority
-        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-
       - name: Validate workflow policy
         run: node scripts/rc-workflow.mjs policy --workflow .github/workflows/release-candidate.yml
 
       - name: Validate exact protected-main candidate
         id: authority
-        env:
-          GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
         run: >-
           node scripts/rc-workflow.mjs preflight
           --repository "$GITHUB_WORKSPACE"
@@ -66,14 +81,14 @@ jobs:
 
     steps:
       - name: Checkout validated candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -147,7 +162,7 @@ jobs:
           --protected-ref refs/remotes/origin/main
 
       - name: Upload immutable frozen package
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
           path: ${{ runner.temp }}/frozen-package
@@ -166,14 +181,14 @@ jobs:
 
     steps:
       - name: Checkout validated candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -182,7 +197,7 @@ jobs:
         run: npm ci
 
       - name: Download immutable frozen package
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
           path: ${{ runner.temp }}/frozen-package
@@ -212,20 +227,29 @@ jobs:
           --repository "$GITHUB_WORKSPACE"
           --package "$RUNNER_TEMP/frozen-package"
 
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
   below-floor:
     needs: [preflight, freeze-package]
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout validated candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup build Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -234,7 +258,7 @@ jobs:
         run: npm ci
 
       - name: Download immutable frozen package
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
           path: ${{ runner.temp }}/frozen-package
@@ -253,7 +277,7 @@ jobs:
           --github-output
 
       - name: Setup Node.js 22.11.0
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22.11.0
 
@@ -265,7 +289,7 @@ jobs:
           --sha256 "${{ steps.package-input.outputs.sha256 }}"
 
       - name: Restore verification Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
 
@@ -274,6 +298,15 @@ jobs:
           npm run rc:verify-package --
           --repository "$GITHUB_WORKSPACE"
           --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
   build-sea:
     needs: preflight
@@ -295,14 +328,14 @@ jobs:
 
     steps:
       - name: Checkout validated candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -330,8 +363,17 @@ jobs:
           BEFORE: ${{ steps.sea-before.outputs.sha256 }}
         run: test "$BEFORE" = "$(node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')"
 
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
       - name: Upload immutable native SEA
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-sea-${{ matrix.target }}
           path: dist/${{ matrix.target }}
@@ -346,14 +388,14 @@ jobs:
 
     steps:
       - name: Checkout validated candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -362,13 +404,13 @@ jobs:
         run: npm ci
 
       - name: Download immutable frozen package
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
           path: ${{ runner.temp }}/frozen-package
 
       - name: Download exact SEA set
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           pattern: librarium-rc-${{ needs.preflight.outputs.sha }}-sea-*
           path: ${{ runner.temp }}/sea
@@ -406,8 +448,17 @@ jobs:
           --repository "$GITHUB_WORKSPACE"
           --candidate "$RUNNER_TEMP/candidate"
 
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
       - name: Upload immutable assembled candidate
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-candidate
           path: ${{ runner.temp }}/candidate.tar.gz
@@ -422,14 +473,14 @@ jobs:
 
     steps:
       - name: Checkout validated candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Setup Node.js 24
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -438,7 +489,7 @@ jobs:
         run: npm ci
 
       - name: Download immutable assembled candidate
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-candidate
           path: ${{ runner.temp }}/candidate-archive
@@ -482,6 +533,14 @@ jobs:
           "$BREW_BIN" --help >/dev/null
           "$BREW_BIN" upgrade --dry-run --target "$EXPECTED_VERSION" | grep 'via homebrew'
           brew test librarium-rc-proof
+          node scripts/rc-distribution-proof.mjs finalize-homebrew \
+            --repository "$GITHUB_WORKSPACE" \
+            --candidate "$RUNNER_TEMP/candidate" \
+            --output "$RUNNER_TEMP/distribution-proof" \
+            --binary "$BREW_BIN"
+          test -f "$RUNNER_TEMP/distribution-proof/homebrew-result.json"
+          test ! -e "$BREW_BIN"
+          trap - EXIT
 
       - name: Exercise installer rollback fixtures
         run: npx vitest run tests/install-script.test.ts tests/commands/upgrade.test.ts tests/release-candidate-workflow.test.ts
@@ -492,8 +551,17 @@ jobs:
           --repository "$GITHUB_WORKSPACE"
           --candidate "$RUNNER_TEMP/candidate"
 
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
       - name: Upload immutable distribution proof
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-distribution-proof
           path: ${{ runner.temp }}/distribution-proof

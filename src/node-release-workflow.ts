@@ -193,7 +193,7 @@ function uploadArtifactNames(source: string): string[] {
   const names: string[] = [];
   const blocks = source.split(/\n\s*- name:/);
   for (const block of blocks) {
-    if (!/uses:\s*actions\/upload-artifact@v\d+/.test(block)) continue;
+    if (!/uses:\s*actions\/upload-artifact@[0-9a-f]{40}/.test(block)) continue;
     const name = /\n\s+name:\s*([^\n#]+)/.exec(block)?.[1]?.trim();
     if (!name) fail('Every artifact upload must have an explicit name.');
     names.push(name);
@@ -211,11 +211,23 @@ export function assertReleaseCandidateWorkflowPolicy(source: string): void {
   for (const [pattern, label] of FORBIDDEN_WORKFLOW_PATTERNS) {
     if (pattern.test(source)) fail(`RC workflow contains forbidden ${label}.`);
   }
+  const actionUses = source.match(/^\s*uses:\s*actions\/[^\s#]+/gm) ?? [];
+  if (actionUses.length === 0) {
+    fail('RC workflow must use pinned GitHub Actions.');
+  }
+  for (const actionUse of actionUses) {
+    if (!/@[0-9a-f]{40}$/.test(actionUse.trim())) {
+      fail('Every GitHub Action must be pinned to a full commit SHA.');
+    }
+  }
   const required = [
     'workflow_dispatch:',
     'git_sha:',
     'permissions:\n  contents: read',
     'github.ref_protected',
+    'Validate dispatch context before candidate code',
+    'Validate Git authority before candidate code',
+    'Reject source mutation',
     'refs/remotes/origin/main',
     'npm run rc:package --',
     'npm run rc:verify-package --',

@@ -77,6 +77,13 @@ function expectNoTransactionFiles(root: string): void {
 describe.skipIf(process.platform === 'win32')(
   'standalone installer local candidate',
   () => {
+    it('marks the transaction replaced before the atomic move', () => {
+      const source = readFileSync(installer, 'utf8');
+      expect(source.indexOf('  REPLACED=1\n')).toBeLessThan(
+        source.indexOf('  privileged mv -f "$STAGE_FILE" "$DESTINATION"\n'),
+      );
+    });
+
     it('installs only the exact checksum and version', () => {
       const root = fixtureRoot();
       const candidate = join(root, 'candidate');

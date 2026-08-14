@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { arch, platform, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   releaseCandidateInternals,
@@ -35,6 +35,15 @@ function fail(message: string): never {
 
 function sha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function realRegularFile(path: string, label: string): string {
+  const absolute = resolve(path);
+  const metadata = lstatSync(absolute, { throwIfNoEntry: false });
+  if (!metadata?.isFile() || metadata.isSymbolicLink()) {
+    fail(`${label} must be a real regular file.`);
+  }
+  return realpathSync(absolute);
 }
 
 function outputDirectory(path: string): string {
@@ -319,6 +328,7 @@ export async function createReleaseCandidateDistributionProof(input: {
         formula: 'librarium-rc-proof.rb',
         syntax_verified: true,
         selections: homebrewRows,
+        result: 'homebrew-result.json',
       },
       publication_side_effects: [],
     };
@@ -336,6 +346,166 @@ export async function createReleaseCandidateDistributionProof(input: {
   }
 }
 
+export async function finalizeReleaseCandidateHomebrewProof(input: {
+  readonly repository_root: string;
+  readonly candidate_root: string;
+  readonly output_root: string;
+  readonly binary_path: string;
+}): Promise<Record<string, unknown>> {
+  const manifest = await verifyReleaseCandidate({
+    repository_root: input.repository_root,
+    candidate_root: input.candidate_root,
+  });
+  const output = realpathSync(resolve(input.output_root));
+  const proofPath = realRegularFile(
+    join(output, 'proof.json'),
+    'Distribution proof',
+  );
+  const formulaPath = realRegularFile(
+    join(output, 'librarium-rc-proof.rb'),
+    'Local Homebrew formula',
+  );
+  const resultPath = join(output, 'homebrew-result.json');
+  if (lstatSync(resultPath, { throwIfNoEntry: false })) {
+    fail('Homebrew proof refuses to clobber its result.');
+  }
+
+  const proofSource = readFileSync(proofPath, 'utf8');
+  let proof: Record<string, unknown>;
+  try {
+    proof = JSON.parse(proofSource) as Record<string, unknown>;
+  } catch {
+    fail('Distribution proof must be valid JSON.');
+  }
+  if (proofSource !== releaseCandidateInternals.canonicalText(proof)) {
+    fail('Distribution proof must use canonical JSON.');
+  }
+  const proofCandidate = proof.candidate as Record<string, unknown> | undefined;
+  if (
+    proofCandidate?.git_sha !== manifest.candidate.git_sha ||
+    proofCandidate.git_tree !== manifest.candidate.git_tree ||
+    proofCandidate.version !== manifest.candidate.version ||
+    proofCandidate.fingerprint !== manifest.candidate.fingerprint
+  ) {
+    fail('Distribution proof candidate identity drifted.');
+  }
+
+  const currentPlatform = platform();
+  const currentArch = arch();
+  if (
+    (currentPlatform !== 'darwin' && currentPlatform !== 'linux') ||
+    (currentArch !== 'arm64' && currentArch !== 'x64')
+  ) {
+    fail(`Homebrew proof is unsupported on ${currentPlatform}/${currentArch}.`);
+  }
+  const seaName =
+    currentPlatform === 'darwin'
+      ? `librarium-macos-${currentArch}`
+      : `librarium-linux-${currentArch}`;
+  const seaRow = manifest.sea.rows.find((row) => row.name === seaName);
+  if (!seaRow) fail(`Candidate is missing Homebrew SEA input ${seaName}.`);
+
+  const binary = realRegularFile(
+    input.binary_path,
+    'Installed Homebrew binary',
+  );
+  const expectedPrefix = run('brew', ['--prefix', 'librarium-rc-proof'], {
+    cwd: output,
+    capture: true,
+  }).trim();
+  if (dirname(dirname(binary)) !== realpathSync(expectedPrefix)) {
+    fail('Installed Homebrew binary is outside the proof formula prefix.');
+  }
+
+  let observedVersion = '';
+  let upgradeDryRun = '';
+  let cleaned = false;
+  try {
+    const observedSha = `sha256:${sha256(binary)}`;
+    if (observedSha !== seaRow.sha256) {
+      fail('Installed Homebrew binary checksum does not match the candidate.');
+    }
+    observedVersion = run(binary, ['--version'], {
+      cwd: output,
+      capture: true,
+    }).trim();
+    if (observedVersion !== manifest.candidate.version) {
+      fail('Installed Homebrew binary returned the wrong version.');
+    }
+    run(binary, ['--help'], { cwd: output, capture: true });
+    upgradeDryRun = run(
+      binary,
+      ['upgrade', '--dry-run', '--target', manifest.candidate.version],
+      { cwd: output, capture: true },
+    );
+    if (!upgradeDryRun.includes('via homebrew')) {
+      fail('Installed binary did not detect the Homebrew upgrade branch.');
+    }
+    run('brew', ['test', 'librarium-rc-proof'], {
+      cwd: output,
+      capture: true,
+    });
+  } finally {
+    run('brew', ['uninstall', '--formula', 'librarium-rc-proof'], {
+      cwd: output,
+      capture: true,
+    });
+    const listed = spawnSync(
+      'brew',
+      ['list', '--formula', 'librarium-rc-proof'],
+      {
+        cwd: output,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    if (listed.status !== 1) {
+      fail('Homebrew proof formula remained installed after cleanup.');
+    }
+    cleaned = true;
+  }
+
+  await verifyReleaseCandidate({
+    repository_root: input.repository_root,
+    candidate_root: input.candidate_root,
+  });
+  const result = {
+    schema_version: 1,
+    kind: 'local_homebrew_install_proof',
+    candidate: {
+      git_sha: manifest.candidate.git_sha,
+      git_tree: manifest.candidate.git_tree,
+      version: manifest.candidate.version,
+      fingerprint: manifest.candidate.fingerprint,
+    },
+    formula: {
+      path: 'librarium-rc-proof.rb',
+      sha256: `sha256:${sha256(formulaPath)}`,
+    },
+    installed: {
+      artifact: seaRow.path,
+      expected_sha256: seaRow.sha256,
+      observed_sha256: seaRow.sha256,
+      observed_version: observedVersion,
+      help: true,
+    },
+    upgrade: {
+      explicit_target: manifest.candidate.version,
+      latest_fetch_used: false,
+      dry_run: true,
+      detected_method: 'homebrew',
+    },
+    brew_test: true,
+    cleanup_confirmed: cleaned,
+    publication_side_effects: [],
+  };
+  writeFileSync(resultPath, releaseCandidateInternals.canonicalText(result), {
+    flag: 'wx',
+    mode: 0o644,
+  });
+  return result;
+}
+
 function option(name: string): string {
   const flag = `--${name}`;
   const indexes = process.argv.flatMap((value, index) =>
@@ -348,6 +518,16 @@ function option(name: string): string {
 }
 
 export async function runReleaseCandidateDistributionProofCli(): Promise<void> {
+  if (process.argv[2] === 'finalize-homebrew') {
+    const result = await finalizeReleaseCandidateHomebrewProof({
+      repository_root: option('repository'),
+      candidate_root: option('candidate'),
+      output_root: option('output'),
+      binary_path: option('binary'),
+    });
+    process.stdout.write(`${JSON.stringify(result.candidate)}\n`);
+    return;
+  }
   const proof = await createReleaseCandidateDistributionProof({
     repository_root: option('repository'),
     candidate_root: option('candidate'),

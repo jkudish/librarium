@@ -111,6 +111,14 @@ describe('release-candidate workflow policy', () => {
           '      version:\n        description: mutable\n        required: true\n      git_sha:\n',
         ),
     ],
+    [
+      'movable action reference',
+      (source: string) =>
+        source.replace(
+          'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+          'actions/checkout@v6',
+        ),
+    ],
   ])('rejects %s policy mutation', (_label, mutate) => {
     const source = readFileSync(workflowPath, 'utf8');
     expect(() =>
@@ -120,9 +128,35 @@ describe('release-candidate workflow policy', () => {
 
   it('rejects duplicate artifact output templates', () => {
     const source = readFileSync(workflowPath, 'utf8');
-    const duplicate = `${source}\n  duplicate-proof:\n    steps:\n      - name: duplicate\n        uses: actions/upload-artifact@v6\n        with:\n          name: librarium-rc-\${{ needs.preflight.outputs.sha }}-package\n          overwrite: false\n`;
+    const duplicate = `${source}\n  duplicate-proof:\n    steps:\n      - name: duplicate\n        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f\n        with:\n          name: librarium-rc-\${{ needs.preflight.outputs.sha }}-package\n          overwrite: false\n`;
     expect(() => assertReleaseCandidateWorkflowPolicy(duplicate)).toThrow(
       'duplicate artifact output names',
+    );
+  });
+
+  it('validates dispatch and Git authority before setup or dependency execution', () => {
+    const source = readFileSync(workflowPath, 'utf8');
+    const dispatch = source.indexOf(
+      'Validate dispatch context before candidate code',
+    );
+    const gitAuthority = source.indexOf(
+      'Validate Git authority before candidate code',
+    );
+    const setup = source.indexOf('Setup Node.js 24');
+    const install = source.indexOf('Install locked dependencies');
+    expect(dispatch).toBeGreaterThan(0);
+    expect(gitAuthority).toBeGreaterThan(dispatch);
+    expect(setup).toBeGreaterThan(gitAuthority);
+    expect(install).toBeGreaterThan(setup);
+    expect(source.match(/- name: Reject source mutation/g)).toHaveLength(5);
+  });
+
+  it('records the real Homebrew install result after local execution', () => {
+    const source = readFileSync(workflowPath, 'utf8');
+    expect(source).toContain('finalize-homebrew');
+    expect(source).toContain('homebrew-result.json');
+    expect(source.indexOf('brew install --formula')).toBeLessThan(
+      source.indexOf('finalize-homebrew'),
     );
   });
 });

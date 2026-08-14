@@ -27,6 +27,37 @@ function assertReleaseVersion(value: string, label: string): string {
   return value;
 }
 
+interface ParsedReleaseVersion {
+  readonly major: bigint;
+  readonly minor: bigint;
+  readonly patch: bigint;
+  readonly rc: bigint | null;
+}
+
+function parseReleaseVersion(value: string): ParsedReleaseVersion {
+  assertReleaseVersion(value, 'Release version');
+  const [core, prerelease] = value.split('-rc.');
+  const [major, minor, patch] = core!.split('.').map(BigInt);
+  return {
+    major: major!,
+    minor: minor!,
+    patch: patch!,
+    rc: prerelease === undefined ? null : BigInt(prerelease),
+  };
+}
+
+function compareReleaseVersions(left: string, right: string): number {
+  const a = parseReleaseVersion(left);
+  const b = parseReleaseVersion(right);
+  for (const key of ['major', 'minor', 'patch'] as const) {
+    if (a[key] !== b[key]) return a[key] < b[key] ? -1 : 1;
+  }
+  if (a.rc === b.rc) return 0;
+  if (a.rc === null) return 1;
+  if (b.rc === null) return -1;
+  return a.rc < b.rc ? -1 : 1;
+}
+
 function fetchLatestVersion(): string | null {
   try {
     const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
@@ -151,11 +182,21 @@ export function registerUpgradeCommand(
         }
         const target = assertReleaseVersion(fetched, 'Target version');
 
-        if (!opts.force && target === current && !explicitTarget) {
-          console.log(
-            `Already on latest version (${current}). Installed via ${method}.`,
-          );
-          return;
+        if (!opts.force && !explicitTarget) {
+          const comparison = compareReleaseVersions(target, current);
+          if (comparison === 0) {
+            console.log(
+              `Already on latest version (${current}). Installed via ${method}.`,
+            );
+            return;
+          }
+          if (comparison < 0) {
+            console.error(
+              `Refusing to downgrade librarium: installed ${current}, fetched ${target}. Use --force only if this downgrade is intentional.`,
+            );
+            process.exitCode = 1;
+            return;
+          }
         }
 
         if (opts.check) {
@@ -218,6 +259,7 @@ export function registerUpgradeCommand(
 
 export const upgradeInternals = {
   assertReleaseVersion,
+  compareReleaseVersions,
   displayInvocation,
   runUpgrade,
   upgradeInvocation,

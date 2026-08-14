@@ -138,4 +138,52 @@ describe('upgrade command', () => {
       upgradeInternals.upgradeInvocation('sea-standalone', '2.0.0-rc.1'),
     ).toBeNull();
   });
+
+  it.each([
+    ['1.9.9', '1.10.0', -1],
+    ['2.0.0-rc.1', '2.0.0-rc.2', -1],
+    ['2.0.0-rc.2', '2.0.0', -1],
+    ['2.0.0', '2.0.0-rc.2', 1],
+    ['2.0.0-rc.2', '2.0.0-rc.2', 0],
+    ['9007199254740993.0.0', '9007199254740992.999.999', 1],
+  ])('compares release versions: %s versus %s', (left, right, expected) => {
+    expect(upgradeInternals.compareReleaseVersions(left, right)).toBe(expected);
+  });
+
+  it('rejects a fetched downgrade without executing it', async () => {
+    const program = command();
+    const runCommand = vi.fn();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    registerUpgradeCommand(program, {
+      current_version: '2.0.0-rc.1',
+      detect_install_method: () => 'npm',
+      fetch_latest_version: () => '1.4.1',
+      run_command: runCommand,
+    });
+    await program.parseAsync(['node', 'test', 'upgrade']);
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      'Refusing to downgrade librarium: installed 2.0.0-rc.1, fetched 1.4.1. Use --force only if this downgrade is intentional.',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('accepts a fetched newer RC and executes with argument arrays', async () => {
+    const program = command();
+    const runCommand = vi.fn();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    registerUpgradeCommand(program, {
+      current_version: '2.0.0-rc.1',
+      detect_install_method: () => 'npm',
+      fetch_latest_version: () => '2.0.0-rc.2',
+      run_command: runCommand,
+    });
+    await program.parseAsync(['node', 'test', 'upgrade']);
+    expect(runCommand).toHaveBeenCalledWith('npm', [
+      'install',
+      '-g',
+      'librarium@2.0.0-rc.2',
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
 });
