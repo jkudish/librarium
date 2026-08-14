@@ -142,7 +142,7 @@
     {
       "id": "brave-answers",
       "tier": "ai-grounded",
-      "envVar": "BRAVE_API_KEY",
+      "envVar": "BRAVE_ANSWERS_API_KEY",
       "estimatedCostUsd": 0.012,
       "costConfidence": "estimated",
       "pricingVersion": "2026-08"

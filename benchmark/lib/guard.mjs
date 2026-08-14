@@ -4,6 +4,7 @@ import net from 'node:net';
 
 export const secretEnvironmentVariables = [
   'ANTHROPIC_API_KEY',
+  'BRAVE_ANSWERS_API_KEY',
   'BRAVE_API_KEY',
   'EXA_API_KEY',
   'FIRECRAWL_API_KEY',

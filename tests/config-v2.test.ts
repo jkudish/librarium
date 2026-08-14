@@ -115,6 +115,70 @@ function nestedObjects(count: number): Record<string, unknown> {
 }
 
 describe('public v2 configuration migration', () => {
+  it.each([
+    ['$BRAVE_API_KEY', '$BRAVE_ANSWERS_API_KEY'],
+    ['keychain:BRAVE_API_KEY', 'keychain:BRAVE_ANSWERS_API_KEY'],
+  ])(
+    'migrates the legacy Brave Answers credential reference %s',
+    (reference, expected) => {
+      const result = migrateConfig({
+        global: v1({
+          providers: {
+            'brave-answers': { enabled: true, apiKey: reference },
+            'brave-search': { enabled: true, apiKey: reference },
+          },
+        }),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.providers['brave-answers']?.api_key).toBe(expected);
+      expect(result.config.providers['brave-search']?.api_key).toBe(reference);
+      expect(result.notices).toContainEqual(
+        expect.objectContaining({
+          code: 'config_credential_reference_migrated',
+          path: '/global/providers/brave-answers/apiKey',
+        }),
+      );
+    },
+  );
+
+  it('migrates the exact old Brave Answers reference in native v2 config only', () => {
+    const result = migrateConfig({
+      global: v2({
+        providers: {
+          'brave-answers': {
+            enabled: true,
+            api_key: 'keychain:BRAVE_API_KEY',
+          },
+          'brave-search': {
+            enabled: true,
+            api_key: 'keychain:BRAVE_API_KEY',
+          },
+          exa: { enabled: true, api_key: 'keychain:custom-exa-key' },
+        },
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.providers['brave-answers']?.api_key).toBe(
+      'keychain:BRAVE_ANSWERS_API_KEY',
+    );
+    expect(result.config.providers['brave-search']?.api_key).toBe(
+      'keychain:BRAVE_API_KEY',
+    );
+    expect(result.config.providers.exa?.api_key).toBe(
+      'keychain:custom-exa-key',
+    );
+    expect(result.notices).toContainEqual(
+      expect.objectContaining({
+        code: 'config_credential_reference_migrated',
+        path: '/global/providers/brave-answers/api_key',
+      }),
+    );
+  });
+
   it('never grants trust to custom providers during v1 migration', () => {
     const custom = customSource('acme');
     const source = v1({

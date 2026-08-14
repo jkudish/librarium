@@ -37,7 +37,7 @@ describe('BaseProvider error helpers', () => {
     it('adds hint for 401', () => {
       const result = provider.testFormatError(401, { error: 'unauthorized' });
       expect(result).toContain('401');
-      expect(result).toContain('BRAVE_API_KEY');
+      expect(result).toContain('BRAVE_ANSWERS_API_KEY');
       expect(result).toContain('set and valid');
     });
 

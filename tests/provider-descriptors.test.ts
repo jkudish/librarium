@@ -17,6 +17,7 @@ import {
 import type { HttpStreamClient } from '../src/core/http-client.js';
 import { getMeteringKind } from '../src/core/metering.js';
 import { PROVIDER_CATALOG } from '../src/core/provider-catalog.js';
+import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
 import { RETIRED_PROVIDER_REPLACEMENTS } from '../src/core/retired-provider-ids.js';
 import { searchApiOptionsSchema } from '../src/core/searchapi.js';
 import {
@@ -153,6 +154,41 @@ describe('built-in provider descriptors', () => {
         ({ id }) => id === 'perplexity-sonar-pro',
       )?.credential.autoEnable,
     ).toBe(true);
+  });
+
+  it('keeps Brave Answers and Brave Search credentials distinct', () => {
+    expect(PROVIDER_ENV_VARS['brave-answers']).toBe('BRAVE_ANSWERS_API_KEY');
+    expect(PROVIDER_ENV_VARS['brave-search']).toBe('BRAVE_API_KEY');
+    expect(
+      BUILTIN_PROVIDER_CATALOG.find(
+        ({ provider_id }) => provider_id === 'brave-answers',
+      )?.credential.env_var,
+    ).toBe(PROVIDER_ENV_VARS['brave-answers']);
+    expect(
+      BUILTIN_PROVIDER_CATALOG.find(
+        ({ provider_id }) => provider_id === 'brave-search',
+      )?.credential.env_var,
+    ).toBe(PROVIDER_ENV_VARS['brave-search']);
+
+    const answerOnly = computeInitProviderChoices({
+      BRAVE_ANSWERS_API_KEY: 'answers-fixture-key',
+    }).filter(({ id }) => id.startsWith('brave-'));
+    const searchOnly = computeInitProviderChoices({
+      BRAVE_API_KEY: 'search-fixture-key',
+    }).filter(({ id }) => id.startsWith('brave-'));
+
+    expect(
+      answerOnly.map(({ id, enableByDefault }) => ({ id, enableByDefault })),
+    ).toEqual([
+      { id: 'brave-answers', enableByDefault: true },
+      { id: 'brave-search', enableByDefault: false },
+    ]);
+    expect(
+      searchOnly.map(({ id, enableByDefault }) => ({ id, enableByDefault })),
+    ).toEqual([
+      { id: 'brave-answers', enableByDefault: false },
+      { id: 'brave-search', enableByDefault: true },
+    ]);
   });
 
   it('keeps every Parallel profile opt-in when its shared key is present', () => {

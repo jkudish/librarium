@@ -822,15 +822,47 @@ function legacyProviderLayer(
         ),
       );
     }
+    const apiKey = migrateBraveAnswersCredentialReference(
+      canonical,
+      provider.apiKey,
+      appendPointer(basePath, id, 'apiKey'),
+      notices,
+    );
     result.set(canonical, {
       ...(provider.enabled !== undefined && { enabled: provider.enabled }),
-      ...(provider.apiKey !== undefined && { api_key: provider.apiKey }),
+      ...(apiKey !== undefined && { api_key: apiKey }),
       ...(provider.model !== undefined && { model: provider.model }),
       ...(provider.options !== undefined && { options: provider.options }),
       ...(fallback !== undefined && { fallback }),
     });
   }
   return Object.fromEntries(result);
+}
+
+function migrateBraveAnswersCredentialReference(
+  providerId: string,
+  reference: string | undefined,
+  path: string,
+  notices: PreparationNotice[],
+): string | undefined {
+  if (providerId !== 'brave-answers' || reference === undefined) {
+    return reference;
+  }
+  const migrated =
+    reference === '$BRAVE_API_KEY'
+      ? '$BRAVE_ANSWERS_API_KEY'
+      : reference === 'keychain:BRAVE_API_KEY'
+        ? 'keychain:BRAVE_ANSWERS_API_KEY'
+        : undefined;
+  if (migrated === undefined) return reference;
+  notices.push(
+    notice(
+      'config_credential_reference_migrated',
+      path,
+      `Brave Answers credential reference was migrated from "${reference}" to "${migrated}".`,
+    ),
+  );
+  return migrated;
 }
 
 function legacyExecutionDefaults(
@@ -933,11 +965,29 @@ function normalizeLegacy(
 
 function normalizeV2(
   input: LibrariumConfigV2 | LibrariumProjectConfigV2,
+  prefix: 'global' | 'project',
 ): NormalizedLayer {
+  const notices: PreparationNotice[] = [];
+  const providers = Object.fromEntries(
+    Object.entries(input.providers ?? {}).map(([id, provider]) => [
+      id,
+      {
+        ...provider,
+        ...(provider.api_key !== undefined && {
+          api_key: migrateBraveAnswersCredentialReference(
+            id,
+            provider.api_key,
+            `/${prefix}/providers/${id}/api_key`,
+            notices,
+          ),
+        }),
+      },
+    ]),
+  );
   return {
     version: 2,
     execution_defaults: input.execution_defaults,
-    providers: input.providers ?? {},
+    providers,
     custom_providers: input.custom_providers ?? {},
     trusted_provider_ids: [...(input.trusted_provider_ids ?? [])],
     groups: Object.fromEntries(
@@ -947,7 +997,7 @@ function normalizeV2(
       ]),
     ),
     runtime: input.runtime,
-    notices: [],
+    notices,
   };
 }
 
@@ -1000,7 +1050,10 @@ function parseLayer(
         prefix,
         issues,
       )
-    : normalizeV2(parsed.data as LibrariumConfigV2 | LibrariumProjectConfigV2);
+    : normalizeV2(
+        parsed.data as LibrariumConfigV2 | LibrariumProjectConfigV2,
+        prefix,
+      );
 }
 
 function mergeObject<T extends object>(base: T, override?: Partial<T>): T {
