@@ -272,6 +272,415 @@ function sha256Bytes(value: Uint8Array | string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
+const RC_RECORD_NAMES = [
+  'declarations',
+  'npm_tarball',
+  'package_inventory',
+  'provenance',
+  'sea_manifest',
+] as const;
+
+function rcRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new CanonicalLiveValidationError(`${label} must be a JSON object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function rcCanonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(rcCanonicalJson).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, child]) => `${JSON.stringify(key)}:${rcCanonicalJson(child)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function rcArtifactReference(
+  value: unknown,
+  label: string,
+): { readonly path: string; readonly sha256: string; readonly size: number } {
+  const reference = rcRecord(value, label);
+  if (
+    Object.keys(reference).sort().join(',') !== 'path,sha256,size' ||
+    typeof reference.path !== 'string' ||
+    typeof reference.sha256 !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(reference.sha256) ||
+    !Number.isSafeInteger(reference.size) ||
+    (reference.size as number) < 0
+  ) {
+    throw new CanonicalLiveValidationError(`${label} is invalid.`);
+  }
+  return reference as {
+    readonly path: string;
+    readonly sha256: string;
+    readonly size: number;
+  };
+}
+
+function verifyRcReferencedFile(
+  root: string,
+  reference: {
+    readonly path: string;
+    readonly sha256: string;
+    readonly size: number;
+  },
+): void {
+  const path = regularContainedFile(root, reference.path);
+  const bytes = readFileSync(path);
+  if (
+    bytes.byteLength !== reference.size ||
+    sha256Bytes(bytes) !== reference.sha256
+  ) {
+    throw new CanonicalLiveValidationError(
+      `Candidate transitive artifact bytes drifted: ${reference.path}.`,
+    );
+  }
+}
+
+function exactRcArtifactMap(
+  artifacts: Readonly<Record<string, string>>,
+): boolean {
+  const names = Object.keys(artifacts).sort();
+  return (
+    JSON.stringify(names) === JSON.stringify([...RC_RECORD_NAMES].sort()) &&
+    RC_RECORD_NAMES.every((name) => artifacts[name] === `records/${name}.json`)
+  );
+}
+
+function verifyRcCandidateTree(
+  artifactRoot: string,
+  artifacts: Readonly<Record<string, string>>,
+):
+  | false
+  | {
+      readonly packageJsonSha256: string;
+      readonly packageLockSha256: string;
+      readonly contractsFingerprint: string;
+    } {
+  const candidatePath = resolve(artifactRoot, 'candidate.json');
+  const candidateStat = lstatSync(candidatePath, { throwIfNoEntry: false });
+  const exactMap = exactRcArtifactMap(artifacts);
+  if (!candidateStat && !exactMap) return false;
+  if (
+    !candidateStat ||
+    candidateStat.isSymbolicLink() ||
+    !candidateStat.isFile() ||
+    !exactMap
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate authority requires candidate.json and the exact five record paths.',
+    );
+  }
+  const paths: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entry.name)) {
+        throw new CanonicalLiveValidationError(
+          'RC candidate tree contains an unsafe artifact name.',
+        );
+      }
+      const path = resolve(directory, entry.name);
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
+        throw new CanonicalLiveValidationError(
+          'RC candidate tree contains a symlink or special artifact.',
+        );
+      }
+      if (stat.isDirectory()) visit(path);
+      else paths.push(relative(artifactRoot, path).split(sep).join('/'));
+    }
+  };
+  visit(artifactRoot);
+  paths.sort();
+  const checksumPath = resolve(artifactRoot, 'SHA256SUMS');
+  const checksumStat = lstatSync(checksumPath, { throwIfNoEntry: false });
+  if (
+    !checksumStat ||
+    checksumStat.isSymbolicLink() ||
+    !checksumStat.isFile()
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate authority requires SHA256SUMS.',
+    );
+  }
+  const lines = readFileSync(checksumPath, 'utf8').split('\n');
+  if (lines.pop() !== '' || lines.length === 0) {
+    throw new CanonicalLiveValidationError('RC SHA256SUMS is malformed.');
+  }
+  const checksums = new Map<string, string>();
+  for (const line of lines) {
+    const match = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
+    if (
+      !match?.[2] ||
+      match[2].startsWith('/') ||
+      match[2].includes('\\') ||
+      match[2]
+        .split('/')
+        .some(
+          (segment) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(segment),
+        ) ||
+      checksums.has(match[2])
+    ) {
+      throw new CanonicalLiveValidationError('RC SHA256SUMS is malformed.');
+    }
+    checksums.set(match[2], `sha256:${match[1]}`);
+  }
+  const checksummedPaths = [...checksums.keys()];
+  if (
+    JSON.stringify(checksummedPaths) !==
+      JSON.stringify([...checksummedPaths].sort()) ||
+    JSON.stringify(checksummedPaths) !==
+      JSON.stringify(paths.filter((path) => path !== 'SHA256SUMS'))
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC SHA256SUMS inventory is missing, extra, or unsorted.',
+    );
+  }
+  for (const path of checksummedPaths) {
+    if (
+      sha256Bytes(readFileSync(resolve(artifactRoot, ...path.split('/')))) !==
+      checksums.get(path)
+    ) {
+      throw new CanonicalLiveValidationError(`RC SHA256SUMS drifted: ${path}.`);
+    }
+  }
+  let candidate: Record<string, unknown>;
+  try {
+    candidate = rcRecord(
+      JSON.parse(readFileSync(candidatePath, 'utf8')),
+      'RC candidate manifest',
+    );
+  } catch (error) {
+    if (error instanceof CanonicalLiveValidationError) throw error;
+    throw new CanonicalLiveValidationError(
+      'RC candidate manifest is invalid JSON.',
+    );
+  }
+  const source = rcRecord(candidate.source_metadata, 'RC source metadata');
+  const npm = rcRecord(candidate.npm, 'RC npm metadata');
+  const contracts = rcRecord(candidate.contracts_v1, 'RC contracts metadata');
+  const sea = rcRecord(candidate.sea, 'RC SEA metadata');
+  const live = rcRecord(
+    candidate.live_validation,
+    'RC live-validation metadata',
+  );
+  if (!Array.isArray(contracts.files) || !Array.isArray(sea.rows)) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate manifest inventories are invalid.',
+    );
+  }
+  if (
+    typeof contracts.fingerprint !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(contracts.fingerprint) ||
+    sha256Bytes(rcCanonicalJson(contracts.files)) !== contracts.fingerprint
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC contracts fingerprint is invalid.',
+    );
+  }
+  const packageJsonReference = rcArtifactReference(
+    source.package_json,
+    'RC package.json reference',
+  );
+  const packageLockValue = rcRecord(
+    source.package_lock,
+    'RC package-lock reference',
+  );
+  const packageLockReference = rcArtifactReference(
+    {
+      path: packageLockValue.path,
+      sha256: packageLockValue.sha256,
+      size: packageLockValue.size,
+    },
+    'RC package-lock reference',
+  );
+  const references = [
+    packageJsonReference,
+    packageLockReference,
+    rcArtifactReference(npm.tarball, 'RC npm tarball reference'),
+    ...contracts.files.map((value, index) =>
+      rcArtifactReference(value, `RC contract reference ${index}`),
+    ),
+    ...sea.rows.map((value, index) => {
+      const row = rcRecord(value, `RC SEA reference ${index}`);
+      return rcArtifactReference(
+        { path: row.path, sha256: row.sha256, size: row.size },
+        `RC SEA reference ${index}`,
+      );
+    }),
+  ];
+  const liveRecords = rcRecord(live.records, 'RC live-validation record map');
+  for (const name of RC_RECORD_NAMES) {
+    references.push(
+      rcArtifactReference(liveRecords[name], `RC ${name} record reference`),
+    );
+  }
+  for (const reference of references) {
+    verifyRcReferencedFile(artifactRoot, reference);
+  }
+  const expectedPaths = [
+    'candidate.json',
+    ...references.map((reference) => reference.path),
+  ].sort();
+  if (
+    new Set(expectedPaths).size !== expectedPaths.length ||
+    JSON.stringify(expectedPaths) !==
+      JSON.stringify(paths.filter((path) => path !== 'SHA256SUMS'))
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate manifest has a missing, duplicate, or extra artifact.',
+    );
+  }
+  return {
+    packageJsonSha256: packageJsonReference.sha256,
+    packageLockSha256: packageLockReference.sha256,
+    contractsFingerprint: contracts.fingerprint,
+  };
+}
+
+/** Verify the exact five RC records before they become live-validation authority. */
+function verifyRcTransitiveRecords(
+  artifactRoot: string,
+  artifacts: Readonly<Record<string, string>>,
+): void {
+  const candidateFacts = verifyRcCandidateTree(artifactRoot, artifacts);
+  if (!candidateFacts) return;
+  const names = Object.keys(artifacts).sort();
+  if (JSON.stringify(names) !== JSON.stringify([...RC_RECORD_NAMES].sort())) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate authority requires the exact five transitive records.',
+    );
+  }
+  const records = Object.fromEntries(
+    RC_RECORD_NAMES.map((name) => {
+      if (artifacts[name] !== `records/${name}.json`) {
+        throw new CanonicalLiveValidationError(
+          `RC candidate record path drifted: ${name}.`,
+        );
+      }
+      const path = regularContainedFile(artifactRoot, artifacts[name]!);
+      try {
+        return [name, JSON.parse(readFileSync(path, 'utf8'))];
+      } catch {
+        throw new CanonicalLiveValidationError(
+          `RC candidate record is invalid JSON: ${name}.`,
+        );
+      }
+    }),
+  ) as Record<(typeof RC_RECORD_NAMES)[number], unknown>;
+  const npm = rcRecord(records.npm_tarball, 'RC npm_tarball record');
+  if (npm.schema_version !== 1 || npm.kind !== 'npm_tarball') {
+    throw new CanonicalLiveValidationError('RC npm_tarball record is invalid.');
+  }
+  const tarball = rcArtifactReference(npm.artifact, 'RC npm tarball artifact');
+  if (
+    npm.package_json_sha256 !== candidateFacts.packageJsonSha256 ||
+    npm.package_lock_sha256 !== candidateFacts.packageLockSha256
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC source metadata drifted from the approved npm record.',
+    );
+  }
+  verifyRcReferencedFile(artifactRoot, tarball);
+  for (const name of ['declarations', 'package_inventory'] as const) {
+    const record = rcRecord(records[name], `RC ${name} record`);
+    if (
+      record.schema_version !== 1 ||
+      record.kind !== name ||
+      JSON.stringify(record.npm_tarball) !== JSON.stringify(tarball) ||
+      !Array.isArray(record.files)
+    ) {
+      throw new CanonicalLiveValidationError(`RC ${name} record is invalid.`);
+    }
+  }
+  const sea = rcRecord(records.sea_manifest, 'RC sea_manifest record');
+  if (
+    sea.schema_version !== 1 ||
+    sea.kind !== 'sea_manifest' ||
+    !Array.isArray(sea.rows) ||
+    sea.rows.length !== 5
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC sea_manifest record is invalid.',
+    );
+  }
+  const seaArtifacts = sea.rows.map((row, index) => {
+    const value = rcRecord(row, `RC SEA row ${index}`);
+    const reference = rcArtifactReference(
+      { path: value.path, sha256: value.sha256, size: value.size },
+      `RC SEA row ${index}`,
+    );
+    verifyRcReferencedFile(artifactRoot, reference);
+    return reference;
+  });
+  const provenance = rcRecord(records.provenance, 'RC provenance record');
+  if (!Array.isArray(provenance.subject) || provenance.subject.length !== 6) {
+    throw new CanonicalLiveValidationError(
+      'RC provenance subject set is invalid.',
+    );
+  }
+  const expectedSubjects = [tarball, ...seaArtifacts]
+    .map((reference) => ({
+      name: reference.path,
+      digest: { sha256: reference.sha256.slice('sha256:'.length) },
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const subjectPairs = provenance.subject.map((value, index) => {
+    const subject = rcRecord(value, `RC provenance subject ${index}`);
+    const digest = rcRecord(
+      subject.digest,
+      `RC provenance subject ${index} digest`,
+    );
+    return [subject.name, digest.sha256];
+  });
+  const expectedPairs = expectedSubjects.map((subject) => [
+    subject.name,
+    subject.digest.sha256,
+  ]);
+  if (JSON.stringify(subjectPairs) !== JSON.stringify(expectedPairs)) {
+    throw new CanonicalLiveValidationError(
+      'RC provenance subject set drifted from transitive artifact bytes.',
+    );
+  }
+  const predicate = rcRecord(provenance.predicate, 'RC provenance predicate');
+  const definition = rcRecord(
+    predicate.buildDefinition,
+    'RC provenance build definition',
+  );
+  if (!Array.isArray(definition.resolvedDependencies)) {
+    throw new CanonicalLiveValidationError(
+      'RC provenance dependencies are invalid.',
+    );
+  }
+  const dependencyDigests = new Map(
+    definition.resolvedDependencies.map((value, index) => {
+      const dependency = rcRecord(value, `RC provenance dependency ${index}`);
+      const digest = rcRecord(
+        dependency.digest,
+        `RC provenance dependency ${index} digest`,
+      );
+      return [dependency.uri, digest.sha256];
+    }),
+  );
+  if (
+    dependencyDigests.get('file:source/package.json') !==
+      candidateFacts.packageJsonSha256.slice('sha256:'.length) ||
+    dependencyDigests.get('file:source/package-lock.json') !==
+      candidateFacts.packageLockSha256.slice('sha256:'.length) ||
+    dependencyDigests.get('file:contracts/v1') !==
+      candidateFacts.contractsFingerprint.slice('sha256:'.length)
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC provenance dependencies drifted from candidate source bytes.',
+    );
+  }
+}
+
 interface FrozenFileIdentity {
   readonly real: string;
   readonly dev: number;
@@ -384,6 +793,8 @@ export function createFilesystemCandidateAuthority(
     );
   }
   const artifactRoot = realpathSync(artifactRootLexical);
+  const artifactRootStat = statSync(artifactRoot);
+  verifyRcTransitiveRecords(artifactRoot, options.artifacts);
   const paths = new Map(
     names.map((name) => [
       name,
@@ -401,6 +812,7 @@ export function createFilesystemCandidateAuthority(
   );
   const packageIdentity = freezeFile(repositoryRoot, packageReference);
   const frozenTree = treeSnapshot(repositoryRoot);
+  const frozenArtifactTree = treeSnapshot(artifactRoot);
   const packageBytesHash = sha256Bytes(readFileSync(packagePath));
   const fingerprint = sha256Bytes(
     JSON.stringify({
@@ -422,7 +834,9 @@ export function createFilesystemCandidateAuthority(
       realpathSync(resolve(options.artifact_root)) !== artifactRoot ||
       lstatSync(resolve(options.artifact_root)).isSymbolicLink() ||
       statSync(repositoryRoot).dev !== repositoryStat.dev ||
-      statSync(repositoryRoot).ino !== repositoryStat.ino
+      statSync(repositoryRoot).ino !== repositoryStat.ino ||
+      statSync(artifactRoot).dev !== artifactRootStat.dev ||
+      statSync(artifactRoot).ino !== artifactRootStat.ino
     ) {
       throw new CanonicalLiveValidationError(
         'Candidate source or package bytes drifted.',
@@ -445,6 +859,11 @@ export function createFilesystemCandidateAuthority(
     if (treeSnapshot(repositoryRoot) !== frozenTree) {
       throw new CanonicalLiveValidationError(
         'Candidate source or package bytes drifted.',
+      );
+    }
+    if (treeSnapshot(artifactRoot) !== frozenArtifactTree) {
+      throw new CanonicalLiveValidationError(
+        'Candidate transitive artifact tree drifted.',
       );
     }
   };
