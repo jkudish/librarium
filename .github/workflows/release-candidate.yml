@@ -318,7 +318,7 @@ jobs:
             target: librarium-linux-x64
           - os: ubuntu-24.04-arm
             target: librarium-linux-arm64
-          - os: macos-14-large
+          - os: macos-15-intel
             target: librarium-macos-x64
           - os: macos-latest
             target: librarium-macos-arm64
