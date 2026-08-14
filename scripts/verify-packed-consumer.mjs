@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
@@ -20,6 +21,29 @@ import { resolveNativeTypeScript7Compiler } from './typescript-toolchain.mjs';
 const expectEngineRejection = process.argv.includes(
   '--expect-engine-rejection',
 );
+function option(name) {
+  const flag = `--${name}`;
+  const indexes = process.argv.flatMap((value, index) =>
+    value === flag ? [index] : [],
+  );
+  if (indexes.length > 1) throw new Error(`Duplicate option: ${flag}`);
+  const index = indexes[0];
+  if (index === undefined) return undefined;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+const suppliedTarball = option('tarball');
+const suppliedSha256 = option('sha256');
+if ((suppliedTarball === undefined) !== (suppliedSha256 === undefined)) {
+  throw new Error('--tarball and --sha256 must be supplied together');
+}
+if (suppliedSha256 && !/^[0-9a-f]{64}$/.test(suppliedSha256)) {
+  throw new Error('--sha256 must be exactly 64 lowercase hexadecimal characters');
+}
 const root = process.cwd();
 const workspace = mkdtempSync(join(tmpdir(), 'librarium-packed-consumer-'));
 const packDirectory = join(workspace, 'pack');
@@ -273,7 +297,7 @@ function verifyImportSideEffects() {
   }
 }
 
-function verifyDeclarations() {
+function verifyDeclarations(installedPackageRoot) {
   const compilers = [
     {
       label: 'TypeScript 7',
@@ -534,7 +558,7 @@ function verifyDeclarations() {
   typecheck(nodeConfigPath);
 
   const nodeDeclaration = readFileSync(
-    join(root, 'dist/node-entry.d.ts'),
+    join(installedPackageRoot, 'dist/node-entry.d.ts'),
     'utf8',
   )
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -544,7 +568,7 @@ function verifyDeclarations() {
   }
 }
 
-async function verifyWorkerSafeGraph() {
+async function verifyWorkerSafeGraph(installedPackageRoot) {
   const scan = await esbuild({
     entryPoints: [join(root, 'src/index.ts'), join(root, 'src/core-entry.ts')],
     outdir: join(workspace, 'worker-scan'),
@@ -583,7 +607,10 @@ async function verifyWorkerSafeGraph() {
     }
   }
 
-  const distEntries = [join(root, 'dist/index.js'), join(root, 'dist/core.js')];
+  const distEntries = [
+    join(installedPackageRoot, 'dist/index.js'),
+    join(installedPackageRoot, 'dist/core.js'),
+  ];
   const visited = new Set();
   const visit = (path) => {
     if (visited.has(path)) return;
@@ -611,27 +638,39 @@ try {
   mkdirSync(packDirectory);
   mkdirSync(consumerDirectory);
 
-  const packOutput = execFileSync(
-    npmCommand(),
-    ['pack', '--json', '--pack-destination', packDirectory],
-    {
-      cwd: root,
-      encoding: 'utf8',
-      env: npmEnvironment,
-      stdio: ['ignore', 'pipe', 'inherit'],
-    },
-  );
-  const [packResult] = JSON.parse(packOutput);
-  if (!packResult) throw new Error('npm pack did not return a package result');
-
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   if (pkg.engines?.node !== '>=22.12.0') {
     throw new Error(
       `Expected package engines.node to be >=22.12.0, received ${String(pkg.engines?.node)}`,
     );
   }
-  verifyTarballInventory(packResult);
-  const tarball = resolve(packDirectory, packResult.filename);
+  let tarball;
+  if (suppliedTarball) {
+    tarball = resolve(suppliedTarball);
+    const actualSha256 = createHash('sha256')
+      .update(readFileSync(tarball))
+      .digest('hex');
+    if (actualSha256 !== suppliedSha256) {
+      throw new Error(
+        `Supplied tarball SHA-256 mismatch: expected ${suppliedSha256}, received ${actualSha256}`,
+      );
+    }
+  } else {
+    const packOutput = execFileSync(
+      npmCommand(),
+      ['pack', '--json', '--pack-destination', packDirectory],
+      {
+        cwd: root,
+        encoding: 'utf8',
+        env: npmEnvironment,
+        stdio: ['ignore', 'pipe', 'inherit'],
+      },
+    );
+    const [packResult] = JSON.parse(packOutput);
+    if (!packResult) throw new Error('npm pack did not return a package result');
+    verifyTarballInventory(packResult);
+    tarball = resolve(packDirectory, packResult.filename);
+  }
 
   execFileSync(npmCommand(), ['init', '--yes'], {
     cwd: consumerDirectory,
@@ -689,10 +728,15 @@ try {
       );
     }
 
-    await verifyWorkerSafeGraph();
+    const installedPackageRoot = join(
+      consumerDirectory,
+      'node_modules',
+      'librarium',
+    );
+    await verifyWorkerSafeGraph(installedPackageRoot);
     verifyExports();
     verifyImportSideEffects();
-    verifyDeclarations();
+    verifyDeclarations(installedPackageRoot);
     runNode([
       '--input-type=module',
       '--eval',

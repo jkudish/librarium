@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { Command } from 'commander';
 import { VERSION } from '../constants.js';
 import {
@@ -7,18 +7,33 @@ import {
 } from '../core/install-method.js';
 
 const GITHUB_REPO = 'jkudish/librarium';
+const RELEASE_VERSION_PATTERN =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?$/;
 
-/**
- * Fetch the latest version from GitHub Releases API.
- * Works regardless of install method (unlike npm view).
- */
+interface UpgradeDependencies {
+  readonly current_version: string;
+  readonly detect_install_method: () => InstallMethod;
+  readonly fetch_latest_version: () => string | null;
+  readonly run_command: (
+    executable: string,
+    arguments_: readonly string[],
+  ) => void;
+}
+
+function assertReleaseVersion(value: string, label: string): string {
+  if (!RELEASE_VERSION_PATTERN.test(value)) {
+    throw new Error(`${label} must use X.Y.Z or X.Y.Z-rc.N syntax.`);
+  }
+  return value;
+}
+
 function fetchLatestVersion(): string | null {
   try {
     const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
-    const response = execSync(`curl -fsSL "${url}"`, {
+    const response = execFileSync('curl', ['-fsSL', url], {
       encoding: 'utf-8',
       timeout: 15_000,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const match = response.match(/"tag_name"\s*:\s*"v?([^"]+)"/);
     return match ? match[1] : null;
@@ -27,77 +42,116 @@ function fetchLatestVersion(): string | null {
   }
 }
 
-/**
- * Run the upgrade command for the given install method.
- */
-function runUpgrade(method: InstallMethod, latest: string): void {
+function executeCommand(
+  executable: string,
+  arguments_: readonly string[],
+): void {
+  execFileSync(executable, [...arguments_], {
+    encoding: 'utf-8',
+    timeout: 120_000,
+    stdio: 'inherit',
+  });
+}
+
+function upgradeInvocation(
+  method: InstallMethod,
+  target: string,
+): {
+  readonly executable: string;
+  readonly arguments_: readonly string[];
+} | null {
   switch (method) {
     case 'homebrew':
-      console.log('Running: brew upgrade librarium');
-      execSync('brew upgrade librarium', {
-        encoding: 'utf-8',
-        timeout: 120_000,
-        stdio: 'inherit',
-      });
-      break;
-
+      return { executable: 'brew', arguments_: ['upgrade', 'librarium'] };
     case 'pnpm':
-      console.log('Running: pnpm update -g librarium');
-      execSync('pnpm update -g librarium', {
-        encoding: 'utf-8',
-        timeout: 120_000,
-        stdio: 'inherit',
-      });
-      break;
-
+      return {
+        executable: 'pnpm',
+        arguments_: ['update', '-g', `librarium@${target}`],
+      };
     case 'yarn':
-      console.log(`Running: yarn global upgrade librarium@${latest}`);
-      execSync(`yarn global upgrade librarium@${latest}`, {
-        encoding: 'utf-8',
-        timeout: 120_000,
-        stdio: 'inherit',
-      });
-      break;
-
+      return {
+        executable: 'yarn',
+        arguments_: ['global', 'upgrade', `librarium@${target}`],
+      };
     case 'sea-standalone':
-      console.log(
-        'Standalone binary cannot self-replace while running.\n' +
-          'To upgrade, re-run the installer:\n\n' +
-          '  curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh\n',
-      );
-      return;
-
+      return null;
     default:
-      console.log('Running: npm install -g librarium@latest');
-      execSync('npm install -g librarium@latest', {
-        encoding: 'utf-8',
-        timeout: 120_000,
-        stdio: 'inherit',
-      });
-      break;
+      return {
+        executable: 'npm',
+        arguments_: ['install', '-g', `librarium@${target}`],
+      };
   }
 }
 
-export function registerUpgradeCommand(program: Command): void {
+function displayInvocation(
+  invocation: NonNullable<ReturnType<typeof upgradeInvocation>>,
+): string {
+  return [invocation.executable, ...invocation.arguments_].join(' ');
+}
+
+function runUpgrade(
+  method: InstallMethod,
+  target: string,
+  runCommand: UpgradeDependencies['run_command'],
+): void {
+  const invocation = upgradeInvocation(method, target);
+  if (!invocation) {
+    console.log(
+      'Standalone binary cannot self-replace while running.\n' +
+        'To upgrade, re-run the installer with an exact version and checksum.\n',
+    );
+    return;
+  }
+  console.log(`Running: ${displayInvocation(invocation)}`);
+  runCommand(invocation.executable, invocation.arguments_);
+}
+
+const defaultDependencies: UpgradeDependencies = {
+  current_version: VERSION,
+  detect_install_method: detectInstallMethod,
+  fetch_latest_version: fetchLatestVersion,
+  run_command: executeCommand,
+};
+
+export function registerUpgradeCommand(
+  program: Command,
+  dependencies: Partial<UpgradeDependencies> = {},
+): void {
+  const resolved = { ...defaultDependencies, ...dependencies };
   program
     .command('upgrade')
     .description('Check for and install librarium updates')
     .option('--check', 'Check for updates without installing')
     .option('--dry-run', 'Show what would happen without upgrading')
     .option('--force', 'Skip version comparison and force reinstall')
+    .option(
+      '--target <version>',
+      'Use an exact local/fixture target (requires --dry-run)',
+    )
     .action((opts) => {
       try {
-        const current = VERSION;
-        const method = detectInstallMethod();
+        const current = assertReleaseVersion(
+          resolved.current_version,
+          'Installed version',
+        );
+        const method = resolved.detect_install_method();
+        const explicitTarget = opts.target as string | undefined;
+        if (explicitTarget && !opts.dryRun) {
+          throw new Error('--target is allowed only with --dry-run.');
+        }
+        if (explicitTarget && opts.check) {
+          throw new Error('--target cannot be combined with --check.');
+        }
 
-        const latest = fetchLatestVersion();
-        if (!latest) {
+        const fetched = explicitTarget ?? resolved.fetch_latest_version();
+        if (!fetched) {
           console.error('Could not check for updates. Are you online?');
           process.exitCode = 1;
           return;
         }
+        const target = assertReleaseVersion(fetched, 'Target version');
 
-        if (!opts.force && latest === current) {
+        if (!opts.force && target === current && !explicitTarget) {
           console.log(
             `Already on latest version (${current}). Installed via ${method}.`,
           );
@@ -105,40 +159,43 @@ export function registerUpgradeCommand(program: Command): void {
         }
 
         if (opts.check) {
-          if (latest !== current) {
-            console.log(
-              `Update available: ${current} → ${latest} (installed via ${method})`,
-            );
-          } else {
-            console.log(
-              `Already on latest version (${current}). Installed via ${method}.`,
-            );
-          }
+          console.log(
+            `Update available: ${current} → ${target} (installed via ${method})`,
+          );
           return;
         }
 
         if (opts.dryRun) {
           console.log(
-            `Would upgrade librarium: ${current} → ${latest} via ${method}`,
+            `Would upgrade librarium: ${current} → ${target} via ${method}`,
           );
+          const invocation = upgradeInvocation(method, target);
+          if (invocation) {
+            console.log(`Would run: ${displayInvocation(invocation)}`);
+          } else {
+            console.log(
+              'Would re-run install.sh with the exact candidate path, version, and SHA-256.',
+            );
+          }
           return;
         }
 
         console.log(
-          `Upgrading librarium: ${current} → ${latest} via ${method}...`,
+          `Upgrading librarium: ${current} → ${target} via ${method}...`,
         );
 
         try {
-          runUpgrade(method, latest);
+          runUpgrade(method, target, resolved.run_command);
           if (method !== 'sea-standalone') {
-            console.log(`Successfully upgraded to ${latest}.`);
+            console.log(`Successfully upgraded to ${target}.`);
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (/EACCES|permission denied/i.test(msg)) {
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          if (/EACCES|permission denied/i.test(message)) {
             if (method === 'npm') {
               console.error(
-                'Permission denied. Try: sudo npm install -g librarium@latest',
+                `Permission denied. Try: sudo npm install -g librarium@${target}`,
               );
             } else {
               console.error(
@@ -152,9 +209,16 @@ export function registerUpgradeCommand(program: Command): void {
           }
           process.exitCode = 1;
         }
-      } catch (e) {
-        console.error(e instanceof Error ? e.message : String(e));
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
       }
     });
 }
+
+export const upgradeInternals = {
+  assertReleaseVersion,
+  displayInvocation,
+  runUpgrade,
+  upgradeInvocation,
+};
