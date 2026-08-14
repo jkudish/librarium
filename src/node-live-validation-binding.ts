@@ -280,11 +280,51 @@ const RC_RECORD_NAMES = [
   'sea_manifest',
 ] as const;
 
+const RC_SEA_TARGETS = [
+  { platform: 'darwin', arch: 'arm64', name: 'librarium-macos-arm64' },
+  { platform: 'darwin', arch: 'x64', name: 'librarium-macos-x64' },
+  { platform: 'linux', arch: 'arm64', name: 'librarium-linux-arm64' },
+  { platform: 'linux', arch: 'x64', name: 'librarium-linux-x64' },
+  { platform: 'win32', arch: 'x64', name: 'librarium-windows-x64.exe' },
+] as const;
+
+interface RcArtifactReference {
+  readonly path: string;
+  readonly sha256: string;
+  readonly size: number;
+}
+
+interface RcAuthoritySource {
+  readonly repositoryRoot: string;
+  readonly head: string;
+  readonly tree: string;
+  readonly packageName: string;
+  readonly packageVersion: string;
+  readonly packageJsonSha256: string;
+}
+
 function rcRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CanonicalLiveValidationError(`${label} must be a JSON object.`);
   }
   return value as Record<string, unknown>;
+}
+
+function rcExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  label: string,
+): void {
+  if (
+    JSON.stringify(Object.keys(value).sort()) !==
+    JSON.stringify([...expected].sort())
+  ) {
+    throw new CanonicalLiveValidationError(`${label} fields are invalid.`);
+  }
+}
+
+function rcCompareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function rcCanonicalJson(value: unknown): string {
@@ -300,10 +340,14 @@ function rcCanonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function rcCanonicalText(value: unknown): string {
+  return `${rcCanonicalJson(value)}\n`;
+}
+
 function rcArtifactReference(
   value: unknown,
   label: string,
-): { readonly path: string; readonly sha256: string; readonly size: number } {
+): RcArtifactReference {
   const reference = rcRecord(value, label);
   if (
     Object.keys(reference).sort().join(',') !== 'path,sha256,size' ||
@@ -315,11 +359,7 @@ function rcArtifactReference(
   ) {
     throw new CanonicalLiveValidationError(`${label} is invalid.`);
   }
-  return reference as {
-    readonly path: string;
-    readonly sha256: string;
-    readonly size: number;
-  };
+  return reference as unknown as RcArtifactReference;
 }
 
 function verifyRcReferencedFile(
@@ -352,15 +392,182 @@ function exactRcArtifactMap(
   );
 }
 
+function verifyRcInstalledMatrix(value: unknown): void {
+  const matrix = rcRecord(value, 'RC installed-package matrix');
+  rcExactKeys(
+    matrix,
+    [
+      'catalog_digest',
+      'matrix_fingerprint',
+      'pricing_snapshot_fingerprint',
+      'target_count',
+      'targets',
+    ],
+    'RC installed-package matrix',
+  );
+  if (
+    matrix.target_count !== 42 ||
+    typeof matrix.catalog_digest !== 'string' ||
+    !/^fnv1a64\.1:[0-9a-f]{16}$/.test(matrix.catalog_digest) ||
+    typeof matrix.pricing_snapshot_fingerprint !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(matrix.pricing_snapshot_fingerprint) ||
+    typeof matrix.matrix_fingerprint !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(matrix.matrix_fingerprint) ||
+    !Array.isArray(matrix.targets) ||
+    matrix.targets.length !== 42
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC installed-package matrix identity is invalid.',
+    );
+  }
+  const keys = matrix.targets.map((value, index) => {
+    const target = rcRecord(value, `RC installed-package target ${index}`);
+    rcExactKeys(
+      target,
+      [
+        'adapter_id',
+        'binding_id',
+        'catalog_digest',
+        'credential_family',
+        'expected_effective_identity',
+        'key',
+        'pricing_snapshot_fingerprint',
+        'requested_identity',
+      ],
+      `RC installed-package target ${index}`,
+    );
+    if (
+      typeof target.key !== 'string' ||
+      !target.key ||
+      typeof target.adapter_id !== 'string' ||
+      !target.adapter_id ||
+      typeof target.binding_id !== 'string' ||
+      !target.binding_id ||
+      typeof target.credential_family !== 'string' ||
+      !target.credential_family ||
+      target.catalog_digest !== matrix.catalog_digest ||
+      target.pricing_snapshot_fingerprint !==
+        matrix.pricing_snapshot_fingerprint
+    ) {
+      throw new CanonicalLiveValidationError(
+        `RC installed-package target ${index} is invalid.`,
+      );
+    }
+    rcRecord(
+      target.requested_identity,
+      `RC installed-package target ${index} requested identity`,
+    );
+    rcRecord(
+      target.expected_effective_identity,
+      `RC installed-package target ${index} effective identity`,
+    );
+    return target.key;
+  });
+  if (
+    new Set(keys).size !== 42 ||
+    JSON.stringify(keys) !== JSON.stringify([...keys].sort(rcCompareText)) ||
+    sha256Bytes(
+      rcCanonicalJson({
+        schema_version: 1,
+        catalog_digest: matrix.catalog_digest,
+        pricing_snapshot_fingerprint: matrix.pricing_snapshot_fingerprint,
+        targets: matrix.targets,
+      }),
+    ) !== matrix.matrix_fingerprint
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC installed-package matrix fingerprint is invalid.',
+    );
+  }
+}
+
+function rcSourceContracts(repositoryRoot: string): {
+  readonly fingerprint: string;
+  readonly files: readonly RcArtifactReference[];
+} {
+  const sourceRoot = resolve(repositoryRoot, 'contracts', 'v1');
+  const files: RcArtifactReference[] = [];
+  const visit = (directory: string): void => {
+    const entries = (() => {
+      try {
+        return readdirSync(directory, { withFileTypes: true });
+      } catch {
+        throw new CanonicalLiveValidationError(
+          'RC source contracts/v1 inventory is missing.',
+        );
+      }
+    })();
+    for (const entry of entries.sort((left, right) =>
+      rcCompareText(left.name, right.name),
+    )) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entry.name)) {
+        throw new CanonicalLiveValidationError(
+          'RC source contracts/v1 contains an unsafe name.',
+        );
+      }
+      const path = resolve(directory, entry.name);
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
+        throw new CanonicalLiveValidationError(
+          'RC source contracts/v1 contains a symlink or special file.',
+        );
+      }
+      if (stat.isDirectory()) visit(path);
+      else {
+        const bytes = readFileSync(path);
+        files.push({
+          path: `contracts/v1/${relative(sourceRoot, path).split(sep).join('/')}`,
+          sha256: sha256Bytes(bytes),
+          size: bytes.byteLength,
+        });
+      }
+    }
+  };
+  visit(sourceRoot);
+  files.sort((left, right) => rcCompareText(left.path, right.path));
+  if (
+    !files.some((row) => row.path === 'contracts/v1/manifest.json') ||
+    !files.some((row) => row.path === 'contracts/v1/checksums.sha256') ||
+    !files.some(
+      (row) => row.path === 'contracts/v1/schema/interchange.schema.json',
+    )
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC source contracts/v1 inventory is incomplete.',
+    );
+  }
+  return { files, fingerprint: sha256Bytes(rcCanonicalJson(files)) };
+}
+
 function verifyRcCandidateTree(
   artifactRoot: string,
   artifacts: Readonly<Record<string, string>>,
 ):
   | false
   | {
+      readonly candidate: {
+        readonly name: string;
+        readonly version: string;
+        readonly gitSha: string;
+        readonly gitTree: string;
+        readonly fingerprint: string;
+      };
       readonly packageJsonSha256: string;
       readonly packageLockSha256: string;
+      readonly tarball: RcArtifactReference;
+      readonly npmInventory: unknown;
+      readonly declarations: unknown;
+      readonly installedPackage: unknown;
       readonly contractsFingerprint: string;
+      readonly contractFiles: unknown;
+      readonly seaRows: readonly unknown[];
+      readonly provenance: {
+        readonly path: string;
+        readonly sha256: string;
+        readonly subjectCount: number;
+      };
+      readonly liveRecords: Readonly<Record<string, RcArtifactReference>>;
+      readonly artifactHashes: Readonly<Record<string, string>>;
     } {
   const candidatePath = resolve(artifactRoot, 'candidate.json');
   const candidateStat = lstatSync(candidatePath, { throwIfNoEntry: false });
@@ -451,15 +658,65 @@ function verifyRcCandidateTree(
   }
   let candidate: Record<string, unknown>;
   try {
-    candidate = rcRecord(
-      JSON.parse(readFileSync(candidatePath, 'utf8')),
-      'RC candidate manifest',
-    );
+    const sourceText = readFileSync(candidatePath, 'utf8');
+    candidate = rcRecord(JSON.parse(sourceText), 'RC candidate manifest');
+    if (rcCanonicalText(candidate) !== sourceText) {
+      throw new CanonicalLiveValidationError(
+        'RC candidate manifest is not canonical JSON.',
+      );
+    }
   } catch (error) {
     if (error instanceof CanonicalLiveValidationError) throw error;
     throw new CanonicalLiveValidationError(
       'RC candidate manifest is invalid JSON.',
     );
+  }
+  rcExactKeys(
+    candidate,
+    [
+      'candidate',
+      'checksum_index',
+      'contract',
+      'contracts_v1',
+      'installed_package',
+      'live_validation',
+      'npm',
+      'provenance',
+      'schema_version',
+      'sea',
+      'source_metadata',
+    ],
+    'RC candidate manifest',
+  );
+  if (
+    candidate.schema_version !== 1 ||
+    candidate.contract !== 'librarium-release-candidate'
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate manifest contract is invalid.',
+    );
+  }
+  const identity = rcRecord(candidate.candidate, 'RC candidate identity');
+  rcExactKeys(
+    identity,
+    ['fingerprint', 'git_sha', 'git_tree', 'name', 'version'],
+    'RC candidate identity',
+  );
+  if (
+    typeof identity.name !== 'string' ||
+    !identity.name ||
+    typeof identity.version !== 'string' ||
+    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/.test(
+      identity.version,
+    ) ||
+    typeof identity.git_sha !== 'string' ||
+    !/^[0-9a-f]{40}$/.test(identity.git_sha) ||
+    typeof identity.git_tree !== 'string' ||
+    !/^[0-9a-f]{40}$/.test(identity.git_tree) ||
+    typeof identity.fingerprint !== 'string' ||
+    !/^sha256:[0-9a-f]{64}$/.test(identity.fingerprint)
+  ) {
+    throw new CanonicalLiveValidationError('RC candidate identity is invalid.');
   }
   const source = rcRecord(candidate.source_metadata, 'RC source metadata');
   const npm = rcRecord(candidate.npm, 'RC npm metadata');
@@ -469,7 +726,34 @@ function verifyRcCandidateTree(
     candidate.live_validation,
     'RC live-validation metadata',
   );
-  if (!Array.isArray(contracts.files) || !Array.isArray(sea.rows)) {
+  const provenance = rcRecord(candidate.provenance, 'RC provenance metadata');
+  const checksumIndex = rcRecord(
+    candidate.checksum_index,
+    'RC checksum metadata',
+  );
+  rcExactKeys(source, ['package_json', 'package_lock'], 'RC source metadata');
+  rcExactKeys(npm, ['declarations', 'inventory', 'tarball'], 'RC npm metadata');
+  rcExactKeys(contracts, ['files', 'fingerprint'], 'RC contracts metadata');
+  rcExactKeys(sea, ['rows'], 'RC SEA metadata');
+  rcExactKeys(
+    live,
+    ['artifact_hashes', 'record_names', 'records'],
+    'RC live-validation metadata',
+  );
+  rcExactKeys(
+    provenance,
+    ['path', 'sha256', 'subject_count'],
+    'RC provenance metadata',
+  );
+  rcExactKeys(checksumIndex, ['algorithm', 'path'], 'RC checksum metadata');
+  if (
+    !Array.isArray(npm.inventory) ||
+    !Array.isArray(npm.declarations) ||
+    !Array.isArray(contracts.files) ||
+    !Array.isArray(sea.rows) ||
+    checksumIndex.algorithm !== 'sha256' ||
+    checksumIndex.path !== 'SHA256SUMS'
+  ) {
     throw new CanonicalLiveValidationError(
       'RC candidate manifest inventories are invalid.',
     );
@@ -491,6 +775,11 @@ function verifyRcCandidateTree(
     source.package_lock,
     'RC package-lock reference',
   );
+  rcExactKeys(
+    packageLockValue,
+    ['lockfile_version', 'path', 'sha256', 'size'],
+    'RC package-lock reference',
+  );
   const packageLockReference = rcArtifactReference(
     {
       path: packageLockValue.path,
@@ -499,27 +788,102 @@ function verifyRcCandidateTree(
     },
     'RC package-lock reference',
   );
+  const tarball = rcArtifactReference(npm.tarball, 'RC npm tarball reference');
+  if (
+    packageJsonReference.path !== 'source/package.json' ||
+    packageLockReference.path !== 'source/package-lock.json' ||
+    !Number.isSafeInteger(packageLockValue.lockfile_version) ||
+    tarball.path !== `npm/${identity.name}-${identity.version}.tgz`
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate manifest uses a noncanonical source or npm path.',
+    );
+  }
+  const seaRows = sea.rows.map((value, index) => {
+    const row = rcRecord(value, `RC SEA reference ${index}`);
+    rcExactKeys(
+      row,
+      ['arch', 'name', 'path', 'platform', 'sha256', 'size'],
+      `RC SEA reference ${index}`,
+    );
+    const expected = RC_SEA_TARGETS[index];
+    const reference = rcArtifactReference(
+      { path: row.path, sha256: row.sha256, size: row.size },
+      `RC SEA reference ${index}`,
+    );
+    if (
+      !expected ||
+      row.platform !== expected.platform ||
+      row.arch !== expected.arch ||
+      row.name !== expected.name ||
+      reference.path !== `sea/${expected.name}`
+    ) {
+      throw new CanonicalLiveValidationError(
+        'RC candidate SEA rows differ from the exact five targets.',
+      );
+    }
+    return { value: row, reference };
+  });
+  if (seaRows.length !== RC_SEA_TARGETS.length) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate SEA rows differ from the exact five targets.',
+    );
+  }
+  if (
+    !Array.isArray(live.record_names) ||
+    JSON.stringify(live.record_names) !== JSON.stringify(RC_RECORD_NAMES)
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate live-validation record names are invalid.',
+    );
+  }
+  const liveRecordsValue = rcRecord(
+    live.records,
+    'RC live-validation record map',
+  );
+  const artifactHashesValue = rcRecord(
+    live.artifact_hashes,
+    'RC live-validation hash map',
+  );
+  rcExactKeys(liveRecordsValue, RC_RECORD_NAMES, 'RC record map');
+  rcExactKeys(artifactHashesValue, RC_RECORD_NAMES, 'RC artifact hash map');
+  const liveRecords = Object.fromEntries(
+    RC_RECORD_NAMES.map((name) => {
+      const reference = rcArtifactReference(
+        liveRecordsValue[name],
+        `RC ${name} record reference`,
+      );
+      if (
+        reference.path !== `records/${name}.json` ||
+        artifactHashesValue[name] !== reference.sha256
+      ) {
+        throw new CanonicalLiveValidationError(
+          `RC ${name} record mapping is invalid.`,
+        );
+      }
+      return [name, reference];
+    }),
+  ) as Record<string, RcArtifactReference>;
+  if (
+    provenance.path !== liveRecords.provenance!.path ||
+    provenance.sha256 !== liveRecords.provenance!.sha256 ||
+    provenance.subject_count !== 6
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC provenance metadata differs from its approved record.',
+    );
+  }
+  verifyRcInstalledMatrix(candidate.installed_package);
   const references = [
     packageJsonReference,
     packageLockReference,
-    rcArtifactReference(npm.tarball, 'RC npm tarball reference'),
+    tarball,
     ...contracts.files.map((value, index) =>
       rcArtifactReference(value, `RC contract reference ${index}`),
     ),
-    ...sea.rows.map((value, index) => {
-      const row = rcRecord(value, `RC SEA reference ${index}`);
-      return rcArtifactReference(
-        { path: row.path, sha256: row.sha256, size: row.size },
-        `RC SEA reference ${index}`,
-      );
-    }),
+    ...seaRows.map((row) => row.reference),
+    ...RC_RECORD_NAMES.map((name) => liveRecords[name]!),
   ];
-  const liveRecords = rcRecord(live.records, 'RC live-validation record map');
-  for (const name of RC_RECORD_NAMES) {
-    references.push(
-      rcArtifactReference(liveRecords[name], `RC ${name} record reference`),
-    );
-  }
   for (const reference of references) {
     verifyRcReferencedFile(artifactRoot, reference);
   }
@@ -537,9 +901,29 @@ function verifyRcCandidateTree(
     );
   }
   return {
+    candidate: {
+      name: identity.name as string,
+      version: identity.version as string,
+      gitSha: identity.git_sha as string,
+      gitTree: identity.git_tree as string,
+      fingerprint: identity.fingerprint as string,
+    },
     packageJsonSha256: packageJsonReference.sha256,
     packageLockSha256: packageLockReference.sha256,
+    tarball,
+    npmInventory: npm.inventory,
+    declarations: npm.declarations,
+    installedPackage: candidate.installed_package,
     contractsFingerprint: contracts.fingerprint,
+    contractFiles: contracts.files,
+    seaRows: sea.rows,
+    provenance: {
+      path: provenance.path as string,
+      sha256: provenance.sha256 as string,
+      subjectCount: provenance.subject_count as number,
+    },
+    liveRecords,
+    artifactHashes: artifactHashesValue as Record<string, string>,
   };
 }
 
@@ -547,9 +931,46 @@ function verifyRcCandidateTree(
 function verifyRcTransitiveRecords(
   artifactRoot: string,
   artifacts: Readonly<Record<string, string>>,
+  source: RcAuthoritySource,
 ): void {
   const candidateFacts = verifyRcCandidateTree(artifactRoot, artifacts);
   if (!candidateFacts) return;
+  const packageLockPath = regularContainedFile(
+    source.repositoryRoot,
+    'package-lock.json',
+  );
+  const packageLockSha256 = sha256Bytes(readFileSync(packageLockPath));
+  const sourceContracts = rcSourceContracts(source.repositoryRoot);
+  const expectedFingerprint = sha256Bytes(
+    JSON.stringify({
+      head: source.head,
+      tree: source.tree,
+      version: source.packageVersion,
+      package: source.packageJsonSha256,
+      artifacts: Object.fromEntries(
+        RC_RECORD_NAMES.map((name) => [
+          name,
+          candidateFacts.artifactHashes[name],
+        ]),
+      ),
+    }),
+  );
+  if (
+    candidateFacts.candidate.name !== source.packageName ||
+    candidateFacts.candidate.version !== source.packageVersion ||
+    candidateFacts.candidate.gitSha !== source.head ||
+    candidateFacts.candidate.gitTree !== source.tree ||
+    candidateFacts.candidate.fingerprint !== expectedFingerprint ||
+    candidateFacts.packageJsonSha256 !== source.packageJsonSha256 ||
+    candidateFacts.packageLockSha256 !== packageLockSha256 ||
+    candidateFacts.contractsFingerprint !== sourceContracts.fingerprint ||
+    rcCanonicalJson(candidateFacts.contractFiles) !==
+      rcCanonicalJson(sourceContracts.files)
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC candidate identity differs from its exact clean source.',
+    );
+  }
   const names = Object.keys(artifacts).sort();
   if (JSON.stringify(names) !== JSON.stringify([...RC_RECORD_NAMES].sort())) {
     throw new CanonicalLiveValidationError(
@@ -565,7 +986,14 @@ function verifyRcTransitiveRecords(
       }
       const path = regularContainedFile(artifactRoot, artifacts[name]!);
       try {
-        return [name, JSON.parse(readFileSync(path, 'utf8'))];
+        const sourceText = readFileSync(path, 'utf8');
+        const value = JSON.parse(sourceText);
+        if (rcCanonicalText(value) !== sourceText) {
+          throw new CanonicalLiveValidationError(
+            `RC candidate record is not canonical JSON: ${name}.`,
+          );
+        }
+        return [name, value];
       } catch {
         throw new CanonicalLiveValidationError(
           `RC candidate record is invalid JSON: ${name}.`,
@@ -574,11 +1002,23 @@ function verifyRcTransitiveRecords(
     }),
   ) as Record<(typeof RC_RECORD_NAMES)[number], unknown>;
   const npm = rcRecord(records.npm_tarball, 'RC npm_tarball record');
+  rcExactKeys(
+    npm,
+    [
+      'artifact',
+      'kind',
+      'package_json_sha256',
+      'package_lock_sha256',
+      'schema_version',
+    ],
+    'RC npm_tarball record',
+  );
   if (npm.schema_version !== 1 || npm.kind !== 'npm_tarball') {
     throw new CanonicalLiveValidationError('RC npm_tarball record is invalid.');
   }
   const tarball = rcArtifactReference(npm.artifact, 'RC npm tarball artifact');
   if (
+    rcCanonicalJson(tarball) !== rcCanonicalJson(candidateFacts.tarball) ||
     npm.package_json_sha256 !== candidateFacts.packageJsonSha256 ||
     npm.package_lock_sha256 !== candidateFacts.packageLockSha256
   ) {
@@ -587,18 +1027,54 @@ function verifyRcTransitiveRecords(
     );
   }
   verifyRcReferencedFile(artifactRoot, tarball);
-  for (const name of ['declarations', 'package_inventory'] as const) {
-    const record = rcRecord(records[name], `RC ${name} record`);
-    if (
-      record.schema_version !== 1 ||
-      record.kind !== name ||
-      JSON.stringify(record.npm_tarball) !== JSON.stringify(tarball) ||
-      !Array.isArray(record.files)
-    ) {
-      throw new CanonicalLiveValidationError(`RC ${name} record is invalid.`);
-    }
+  const declarations = rcRecord(records.declarations, 'RC declarations record');
+  rcExactKeys(
+    declarations,
+    ['files', 'kind', 'npm_tarball', 'schema_version'],
+    'RC declarations record',
+  );
+  if (
+    declarations.schema_version !== 1 ||
+    declarations.kind !== 'declarations' ||
+    rcCanonicalJson(declarations.npm_tarball) !== rcCanonicalJson(tarball) ||
+    !Array.isArray(declarations.files) ||
+    rcCanonicalJson(declarations.files) !==
+      rcCanonicalJson(candidateFacts.declarations)
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC declarations record is invalid.',
+    );
+  }
+  const inventory = rcRecord(
+    records.package_inventory,
+    'RC package_inventory record',
+  );
+  rcExactKeys(
+    inventory,
+    ['files', 'installed_package', 'kind', 'npm_tarball', 'schema_version'],
+    'RC package_inventory record',
+  );
+  verifyRcInstalledMatrix(inventory.installed_package);
+  if (
+    inventory.schema_version !== 1 ||
+    inventory.kind !== 'package_inventory' ||
+    rcCanonicalJson(inventory.npm_tarball) !== rcCanonicalJson(tarball) ||
+    !Array.isArray(inventory.files) ||
+    rcCanonicalJson(inventory.files) !==
+      rcCanonicalJson(candidateFacts.npmInventory) ||
+    rcCanonicalJson(inventory.installed_package) !==
+      rcCanonicalJson(candidateFacts.installedPackage)
+  ) {
+    throw new CanonicalLiveValidationError(
+      'RC package_inventory record is invalid.',
+    );
   }
   const sea = rcRecord(records.sea_manifest, 'RC sea_manifest record');
+  rcExactKeys(
+    sea,
+    ['kind', 'rows', 'schema_version'],
+    'RC sea_manifest record',
+  );
   if (
     sea.schema_version !== 1 ||
     sea.kind !== 'sea_manifest' ||
@@ -607,6 +1083,11 @@ function verifyRcTransitiveRecords(
   ) {
     throw new CanonicalLiveValidationError(
       'RC sea_manifest record is invalid.',
+    );
+  }
+  if (rcCanonicalJson(sea.rows) !== rcCanonicalJson(candidateFacts.seaRows)) {
+    throw new CanonicalLiveValidationError(
+      'RC sea_manifest record drifted from candidate SEA rows.',
     );
   }
   const seaArtifacts = sea.rows.map((row, index) => {
@@ -619,6 +1100,17 @@ function verifyRcTransitiveRecords(
     return reference;
   });
   const provenance = rcRecord(records.provenance, 'RC provenance record');
+  rcExactKeys(
+    provenance,
+    ['_type', 'predicate', 'predicateType', 'subject'],
+    'RC provenance record',
+  );
+  if (
+    provenance._type !== 'https://in-toto.io/Statement/v1' ||
+    provenance.predicateType !== 'https://slsa.dev/provenance/v1'
+  ) {
+    throw new CanonicalLiveValidationError('RC provenance record is invalid.');
+  }
   if (!Array.isArray(provenance.subject) || provenance.subject.length !== 6) {
     throw new CanonicalLiveValidationError(
       'RC provenance subject set is invalid.',
@@ -629,13 +1121,15 @@ function verifyRcTransitiveRecords(
       name: reference.path,
       digest: { sha256: reference.sha256.slice('sha256:'.length) },
     }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => rcCompareText(left.name, right.name));
   const subjectPairs = provenance.subject.map((value, index) => {
     const subject = rcRecord(value, `RC provenance subject ${index}`);
+    rcExactKeys(subject, ['digest', 'name'], `RC provenance subject ${index}`);
     const digest = rcRecord(
       subject.digest,
       `RC provenance subject ${index} digest`,
     );
+    rcExactKeys(digest, ['sha256'], `RC provenance subject ${index} digest`);
     return [subject.name, digest.sha256];
   });
   const expectedPairs = expectedSubjects.map((subject) => [
@@ -648,31 +1142,91 @@ function verifyRcTransitiveRecords(
     );
   }
   const predicate = rcRecord(provenance.predicate, 'RC provenance predicate');
+  rcExactKeys(
+    predicate,
+    ['buildDefinition', 'runDetails'],
+    'RC provenance predicate',
+  );
   const definition = rcRecord(
     predicate.buildDefinition,
     'RC provenance build definition',
   );
-  if (!Array.isArray(definition.resolvedDependencies)) {
+  rcExactKeys(
+    definition,
+    [
+      'buildType',
+      'externalParameters',
+      'internalParameters',
+      'resolvedDependencies',
+    ],
+    'RC provenance build definition',
+  );
+  const external = rcRecord(
+    definition.externalParameters,
+    'RC provenance external parameters',
+  );
+  const internal = rcRecord(
+    definition.internalParameters,
+    'RC provenance internal parameters',
+  );
+  rcExactKeys(
+    external,
+    ['git_sha', 'git_tree', 'version'],
+    'RC provenance external parameters',
+  );
+  rcExactKeys(internal, [], 'RC provenance internal parameters');
+  const runDetails = rcRecord(
+    predicate.runDetails,
+    'RC provenance run details',
+  );
+  rcExactKeys(runDetails, ['builder'], 'RC provenance run details');
+  const builder = rcRecord(runDetails.builder, 'RC provenance builder');
+  rcExactKeys(builder, ['id'], 'RC provenance builder');
+  if (
+    definition.buildType !==
+      'https://librarium.agentsy.build/release-candidate/v1' ||
+    external.git_sha !== candidateFacts.candidate.gitSha ||
+    external.git_tree !== candidateFacts.candidate.gitTree ||
+    external.version !== candidateFacts.candidate.version ||
+    builder.id !==
+      `https://github.com/jkudish/librarium/tree/${candidateFacts.candidate.gitSha}/scripts/rc-artifacts` ||
+    !Array.isArray(definition.resolvedDependencies) ||
+    definition.resolvedDependencies.length !== 4
+  ) {
     throw new CanonicalLiveValidationError(
       'RC provenance dependencies are invalid.',
     );
   }
-  const dependencyDigests = new Map(
+  const dependencyDigests = new Map<string, Record<string, unknown>>(
     definition.resolvedDependencies.map((value, index) => {
       const dependency = rcRecord(value, `RC provenance dependency ${index}`);
+      rcExactKeys(
+        dependency,
+        ['digest', 'uri'],
+        `RC provenance dependency ${index}`,
+      );
       const digest = rcRecord(
         dependency.digest,
         `RC provenance dependency ${index} digest`,
       );
-      return [dependency.uri, digest.sha256];
+      if (typeof dependency.uri !== 'string') {
+        throw new CanonicalLiveValidationError(
+          `RC provenance dependency ${index} URI is invalid.`,
+        );
+      }
+      return [dependency.uri, digest];
     }),
   );
+  const gitUri = `git+https://github.com/jkudish/librarium@${candidateFacts.candidate.gitSha}`;
   if (
-    dependencyDigests.get('file:source/package.json') !==
+    dependencyDigests.size !== 4 ||
+    dependencyDigests.get(gitUri)?.gitTree !==
+      candidateFacts.candidate.gitTree ||
+    dependencyDigests.get('file:source/package.json')?.sha256 !==
       candidateFacts.packageJsonSha256.slice('sha256:'.length) ||
-    dependencyDigests.get('file:source/package-lock.json') !==
+    dependencyDigests.get('file:source/package-lock.json')?.sha256 !==
       candidateFacts.packageLockSha256.slice('sha256:'.length) ||
-    dependencyDigests.get('file:contracts/v1') !==
+    dependencyDigests.get('file:contracts/v1')?.sha256 !==
       candidateFacts.contractsFingerprint.slice('sha256:'.length)
   ) {
     throw new CanonicalLiveValidationError(
@@ -747,6 +1301,7 @@ export function createFilesystemCandidateAuthority(
   const packageReference = relative(repositoryRoot, packageCanonical);
   const packagePath = regularContainedFile(repositoryRoot, packageReference);
   const packageValue = JSON.parse(readFileSync(packagePath, 'utf8')) as {
+    readonly name?: unknown;
     readonly version?: unknown;
   };
   if (typeof packageValue.version !== 'string' || !packageValue.version) {
@@ -794,7 +1349,16 @@ export function createFilesystemCandidateAuthority(
   }
   const artifactRoot = realpathSync(artifactRootLexical);
   const artifactRootStat = statSync(artifactRoot);
-  verifyRcTransitiveRecords(artifactRoot, options.artifacts);
+  const packageBytesHash = sha256Bytes(readFileSync(packagePath));
+  const rcSource: RcAuthoritySource = {
+    repositoryRoot,
+    head: git.head,
+    tree: git.tree,
+    packageName: typeof packageValue.name === 'string' ? packageValue.name : '',
+    packageVersion: packageValue.version,
+    packageJsonSha256: packageBytesHash,
+  };
+  verifyRcTransitiveRecords(artifactRoot, options.artifacts, rcSource);
   const paths = new Map(
     names.map((name) => [
       name,
@@ -813,7 +1377,20 @@ export function createFilesystemCandidateAuthority(
   const packageIdentity = freezeFile(repositoryRoot, packageReference);
   const frozenTree = treeSnapshot(repositoryRoot);
   const frozenArtifactTree = treeSnapshot(artifactRoot);
-  const packageBytesHash = sha256Bytes(readFileSync(packagePath));
+  verifyRcTransitiveRecords(artifactRoot, options.artifacts, rcSource);
+  for (const name of names) {
+    const current = freezeFile(artifactRoot, options.artifacts[name]!);
+    if (JSON.stringify(current) !== JSON.stringify(identities.get(name))) {
+      throw new CanonicalLiveValidationError(
+        `Candidate artifact bytes drifted while freezing: ${name}.`,
+      );
+    }
+  }
+  if (treeSnapshot(artifactRoot) !== frozenArtifactTree) {
+    throw new CanonicalLiveValidationError(
+      'Candidate transitive artifact tree drifted while freezing.',
+    );
+  }
   const fingerprint = sha256Bytes(
     JSON.stringify({
       head: git.head,
@@ -867,6 +1444,7 @@ export function createFilesystemCandidateAuthority(
       );
     }
   };
+  verify();
   return Object.freeze({
     candidate_root: repositoryRoot,
     git_sha: () => git.head,

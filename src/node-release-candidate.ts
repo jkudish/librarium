@@ -341,7 +341,11 @@ function safeExistingDirectory(path: string, label: string): string {
   return realpathSync(lexical);
 }
 
-function assertOutputAvailable(path: string, repositoryRoot?: string): string {
+function assertOutputAvailable(
+  path: string,
+  repositoryRoot?: string,
+  immutableInputRoots: readonly string[] = [],
+): string {
   const lexicalOutput = resolve(path);
   if (lstatSync(lexicalOutput, { throwIfNoEntry: false })) {
     fail('Release output already exists; refusing to clobber it.');
@@ -356,6 +360,9 @@ function assertOutputAvailable(path: string, repositoryRoot?: string): string {
   const output = resolve(parent, basename(lexicalOutput));
   if (repositoryRoot && contained(repositoryRoot, output)) {
     fail('Release output must be outside the candidate repository.');
+  }
+  if (immutableInputRoots.some((root) => contained(root, output))) {
+    fail('Release output must be outside immutable artifact inputs.');
   }
   return output;
 }
@@ -1166,7 +1173,6 @@ function assertPackageInventory(
     fail('npm tarball inventory differs from the exact package inventory.');
   }
   for (const row of tarRows) {
-    if (row.path === 'package.json') continue;
     const sourcePath = join(repositoryRoot, ...row.path.split('/'));
     const stat = lstatSync(sourcePath, { throwIfNoEntry: false });
     if (
@@ -1254,10 +1260,11 @@ export async function freezeReleasePackage(input: {
     'Packed package.json',
   );
   if (
+    !Buffer.from(packedPackage.content).equals(source.metadata.packageJson) ||
     packedMetadata.name !== source.metadata.name ||
     packedMetadata.version !== source.metadata.version
   ) {
-    fail('npm tarball package metadata differs from the candidate source.');
+    fail('npm tarball package.json bytes differ from the candidate source.');
   }
   const sourceMatrix = await (
     dependencies.load_source_matrix ?? defaultLoadSourceMatrix
@@ -1392,6 +1399,12 @@ export async function buildFrozenReleasePackage(input: {
     }
     const row = jsonRecord(result[0], 'npm pack result');
     const filename = boundedString(row.filename, 'npm pack filename', 256);
+    if (
+      filename !== basename(filename) ||
+      !SAFE_SEGMENT_PATTERN.test(filename)
+    ) {
+      fail('npm pack returned an unsafe tarball filename.');
+    }
     return await freezeReleasePackage({
       repository_root: source.root,
       output_root: input.output_root,
@@ -1619,6 +1632,13 @@ async function verifyFrozenPackage(
   const tarballBytes = verifyReference(packageRoot, manifest.npm.tarball);
   const tarRows = parseNpmTarball(tarballBytes);
   assertPackagedInventoryShape(tarRows);
+  const packedPackage = tarRows.find((row) => row.path === 'package.json');
+  if (
+    !packedPackage ||
+    !Buffer.from(packedPackage.content).equals(packageJsonBytes)
+  ) {
+    fail('Frozen npm package.json bytes differ from the clean repository.');
+  }
   if (
     canonicalJson(publicPackageRows(tarRows)) !==
     canonicalJson(manifest.npm.inventory)
@@ -1713,7 +1733,11 @@ function assertSeaBinary(
 ): void {
   const bytes = readBoundedFile(path, MAX_TAR_BYTES);
   const mode = statSync(path).mode;
-  if (platform !== 'win32' && (mode & 0o111) === 0) {
+  if (
+    process.platform !== 'win32' &&
+    platform !== 'win32' &&
+    (mode & 0o111) === 0
+  ) {
     fail(`${label} must have an executable mode.`);
   }
   if (platform === 'linux') {
@@ -1853,14 +1877,20 @@ export async function assembleReleaseCandidate(input: {
     input.repository_root,
     'Candidate repository',
   );
-  const output = assertOutputAvailable(input.output_root, repositoryRoot);
-  const { manifest: frozen } = await verifyFrozenPackage(
+  const packageRoot = safeExistingDirectory(
     input.package_root,
+    'Frozen package root',
+  );
+  const seaRoot = safeExistingDirectory(input.sea_root, 'SEA artifact root');
+  const output = assertOutputAvailable(input.output_root, repositoryRoot, [
+    packageRoot,
+    seaRoot,
+  ]);
+  const { manifest: frozen } = await verifyFrozenPackage(
+    packageRoot,
     repositoryRoot,
     dependencies,
   );
-  const packageRoot = realpathSync(resolve(input.package_root));
-  const seaRoot = realpathSync(resolve(input.sea_root));
   const seaRows = exactSeaRows(seaRoot);
   mkdirSync(output, { mode: 0o755 });
   try {
@@ -1902,6 +1932,7 @@ export async function assembleReleaseCandidate(input: {
         kind: 'package_inventory',
         npm_tarball: frozen.npm.tarball,
         files: frozen.npm.inventory,
+        installed_package: frozen.installed_package,
       },
       provenance: provenanceStatement(frozen, seaRows),
       sea_manifest: {
@@ -2223,6 +2254,13 @@ export async function verifyReleaseCandidate(input: {
   const tarballBytes = verifyReference(root, manifest.npm.tarball);
   const tarRows = parseNpmTarball(tarballBytes);
   assertPackagedInventoryShape(tarRows);
+  const packedPackage = tarRows.find((row) => row.path === 'package.json');
+  if (
+    !packedPackage ||
+    !Buffer.from(packedPackage.content).equals(packageJsonBytes)
+  ) {
+    fail('Release candidate npm package.json differs from its clean source.');
+  }
   const packageRows = publicPackageRows(tarRows);
   if (canonicalJson(packageRows) !== canonicalJson(manifest.npm.inventory)) {
     fail('Release candidate npm inventory drifted.');
@@ -2332,12 +2370,13 @@ export async function verifyReleaseCandidate(input: {
       'package inventory record',
     ),
     'package_inventory',
-    ['files', 'kind', 'npm_tarball', 'schema_version'],
+    ['files', 'installed_package', 'kind', 'npm_tarball', 'schema_version'],
   );
   if (
     canonicalJson(inventoryRecord.npm_tarball) !==
       canonicalJson(manifest.npm.tarball) ||
-    canonicalJson(inventoryRecord.files) !== canonicalJson(packageRows)
+    canonicalJson(inventoryRecord.files) !== canonicalJson(packageRows) ||
+    canonicalJson(inventoryRecord.installed_package) !== canonicalJson(matrix)
   ) {
     fail('Package inventory record drifted from its referenced bytes.');
   }

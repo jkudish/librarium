@@ -25,6 +25,7 @@ import {
   assembleReleaseCandidate,
   assertReleaseCandidateVersion,
   assertReleaseMatrixParity,
+  buildFrozenReleasePackage,
   freezeReleasePackage,
   RELEASE_CANDIDATE_RECORD_NAMES,
   RELEASE_CANDIDATE_SEA_TARGETS,
@@ -411,6 +412,49 @@ describe('release candidate artifact contract', () => {
     expect(() => assertReleaseMatrixParity(trusted, built)).not.toThrow();
   });
 
+  it('builds and freezes one package receipt before npm pack without rebuilding it', async () => {
+    const root = temporaryRoot();
+    const { repository } = fixtureRepository(root);
+    const output = join(root, 'package-stage');
+    const commands: string[][] = [];
+    const frozen = await buildFrozenReleasePackage({
+      repository_root: repository,
+      output_root: output,
+      dependencies: {
+        load_source_matrix: () => matrix(),
+        load_built_matrix: () => matrix(),
+        run: (_executable, args) => {
+          commands.push([...args]);
+          if (args[0] === 'run') return '';
+          const destinationIndex = args.indexOf('--pack-destination');
+          const packRoot = args[destinationIndex + 1];
+          if (!packRoot) throw new Error('missing pack destination');
+          const filename = `librarium-${VERSION}.tgz`;
+          const files: Record<string, Uint8Array> = {
+            LICENSE: readFileSync(join(repository, 'LICENSE')),
+            'README.md': readFileSync(join(repository, 'README.md')),
+            'package.json': readFileSync(join(repository, 'package.json')),
+          };
+          for (const path of allFiles(join(repository, 'dist'))) {
+            files[`dist/${path}`] = readFileSync(
+              join(repository, 'dist', ...path.split('/')),
+            );
+          }
+          writeFileSync(join(packRoot, filename), makeTarball(files));
+          return JSON.stringify([{ filename }]);
+        },
+      },
+    });
+    expect(commands.map((args) => args[0])).toEqual(['run', 'pack']);
+    expect(frozen.installed_package.target_count).toBe(42);
+    expect(frozen.npm.inventory).toContainEqual(
+      expect.objectContaining({ path: 'dist/release-matrix.json' }),
+    );
+    expect(
+      lstatSync(join(output, 'npm', `librarium-${VERSION}.tgz`)).isFile(),
+    ).toBe(true);
+  });
+
   it('builds one deterministic, transitive candidate and existing authority fingerprint', async () => {
     const fixture = await completeFixture();
     const verified = await verifyReleaseCandidate({
@@ -511,6 +555,46 @@ describe('release candidate artifact contract', () => {
     ).rejects.toThrow('refusing to clobber');
   });
 
+  it('rejects a packed package.json that differs from the clean source bytes', async () => {
+    const root = temporaryRoot();
+    const { repository, tarball } = fixtureRepository(root);
+    const packageValue = JSON.parse(
+      readFileSync(join(repository, 'package.json'), 'utf8'),
+    );
+    const alteredPackage = `${JSON.stringify(
+      { ...packageValue, scripts: { preinstall: 'node injected.js' } },
+      null,
+      2,
+    )}\n`;
+    writeFileSync(
+      tarball,
+      makeTarball({
+        LICENSE: readFileSync(join(repository, 'LICENSE')),
+        'README.md': readFileSync(join(repository, 'README.md')),
+        'dist/index.d.ts': readFileSync(join(repository, 'dist/index.d.ts')),
+        'dist/index.d.ts.map': readFileSync(
+          join(repository, 'dist/index.d.ts.map'),
+        ),
+        'dist/index.js': readFileSync(join(repository, 'dist/index.js')),
+        'dist/core-entry.d.ts': readFileSync(
+          join(repository, 'dist/core-entry.d.ts'),
+        ),
+        'dist/node-entry.d.ts': readFileSync(
+          join(repository, 'dist/node-entry.d.ts'),
+        ),
+        'package.json': alteredPackage,
+      }),
+    );
+    await expect(
+      freezeReleasePackage({
+        repository_root: repository,
+        output_root: join(root, 'tampered-package'),
+        tarball,
+        dependencies: fixtureDependencies,
+      }),
+    ).rejects.toThrow('built source: package.json');
+  });
+
   it('rejects a symlinked output parent that resolves inside the repository', async () => {
     const fixture = await completeFixture();
     const alias = join(fixture.root, 'repository-alias');
@@ -524,6 +608,28 @@ describe('release candidate artifact contract', () => {
         dependencies: fixtureDependencies,
       }),
     ).rejects.toThrow('symlink path component');
+  });
+
+  it('keeps assembled output outside frozen package and SEA input roots', async () => {
+    const fixture = await completeFixture();
+    await expect(
+      assembleReleaseCandidate({
+        repository_root: fixture.repository,
+        package_root: fixture.packageRoot,
+        sea_root: fixture.sea,
+        output_root: join(fixture.packageRoot, 'nested-candidate'),
+        dependencies: fixtureDependencies,
+      }),
+    ).rejects.toThrow('outside immutable artifact inputs');
+    await expect(
+      assembleReleaseCandidate({
+        repository_root: fixture.repository,
+        package_root: fixture.packageRoot,
+        sea_root: fixture.sea,
+        output_root: join(fixture.sea, 'nested-candidate'),
+        dependencies: fixtureDependencies,
+      }),
+    ).rejects.toThrow('outside immutable artifact inputs');
   });
 
   it('rejects transitive mutation before live authority construction', async () => {
@@ -851,7 +957,7 @@ describe('release candidate artifact contract', () => {
           ]),
         ),
       }),
-    ).toThrow('approved npm record');
+    ).toThrow('exact clean source');
 
     const contractFixture = await completeFixture();
     const contractPath = join(
@@ -887,7 +993,62 @@ describe('release candidate artifact contract', () => {
           ]),
         ),
       }),
-    ).toThrow('provenance dependencies drifted');
+    ).toThrow('exact clean source');
+  });
+
+  it('binds candidate identity and installed matrix to the approved record set', async () => {
+    const matrixFixture = await completeFixture();
+    mutateCanonical(
+      join(matrixFixture.candidateRoot, 'candidate.json'),
+      (manifest) => {
+        manifest.installed_package.targets[0].adapter_id = 'forged-adapter';
+        manifest.installed_package.matrix_fingerprint = sha256(
+          releaseCandidateInternals.canonicalJson({
+            schema_version: 1,
+            catalog_digest: manifest.installed_package.catalog_digest,
+            pricing_snapshot_fingerprint:
+              manifest.installed_package.pricing_snapshot_fingerprint,
+            targets: manifest.installed_package.targets,
+          }),
+        );
+      },
+    );
+    refreshChecksums(matrixFixture.candidateRoot);
+    expect(() =>
+      createFilesystemCandidateAuthority({
+        repository_root: matrixFixture.repository,
+        package_json: join(matrixFixture.repository, 'package.json'),
+        artifact_root: matrixFixture.candidateRoot,
+        artifacts: Object.fromEntries(
+          RELEASE_CANDIDATE_RECORD_NAMES.map((name) => [
+            name,
+            `records/${name}.json`,
+          ]),
+        ),
+      }),
+    ).toThrow('package_inventory record is invalid');
+
+    const identityFixture = await completeFixture();
+    mutateCanonical(
+      join(identityFixture.candidateRoot, 'candidate.json'),
+      (manifest) => {
+        manifest.candidate.git_sha = 'd'.repeat(40);
+      },
+    );
+    refreshChecksums(identityFixture.candidateRoot);
+    expect(() =>
+      createFilesystemCandidateAuthority({
+        repository_root: identityFixture.repository,
+        package_json: join(identityFixture.repository, 'package.json'),
+        artifact_root: identityFixture.candidateRoot,
+        artifacts: Object.fromEntries(
+          RELEASE_CANDIDATE_RECORD_NAMES.map((name) => [
+            name,
+            `records/${name}.json`,
+          ]),
+        ),
+      }),
+    ).toThrow('exact clean source');
   });
 
   it('rejects manifest-controlled relocation of canonical artifact paths', async () => {
