@@ -159,6 +159,16 @@ describe('release-candidate workflow policy', () => {
       source.indexOf('finalize-homebrew'),
     );
   });
+
+  it('threads tested SEA hashes into assembly before removing receipts', () => {
+    const source = readFileSync(workflowPath, 'utf8');
+    expect(source).toContain('Verify tested SEA byte continuity');
+    expect(source).toContain('dist/${{ matrix.target }}.sha256');
+    expect(source).toContain('test "$ACTUAL" = "$EXPECTED"');
+    expect(source.indexOf('Verify tested SEA byte continuity')).toBeLessThan(
+      source.indexOf('Restore executable SEA modes'),
+    );
+  });
 });
 
 describe('release-candidate protected-main authority', () => {
@@ -286,5 +296,7 @@ describe('Homebrew release-candidate inputs', () => {
     }
     expect(formula).not.toContain('git push');
     expect(formula).not.toContain('brew tap');
+    expect(formula).toContain('bin.install binary_name => "librarium"');
+    expect(formula).not.toContain('Dir["librarium-*"].first');
   });
 });

@@ -351,7 +351,10 @@ jobs:
         shell: bash
         env:
           BINARY: dist/${{ matrix.target }}
-        run: echo "sha256=$(node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')" >> "$GITHUB_OUTPUT"
+        run: |
+          SEA_SHA="$(node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')"
+          printf '%s\n' "$SEA_SHA" > "${BINARY}.sha256"
+          echo "sha256=$SEA_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Verify native SEA without Node on PATH
         run: node scripts/verify-sea.mjs
@@ -376,7 +379,9 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: librarium-rc-${{ needs.preflight.outputs.sha }}-sea-${{ matrix.target }}
-          path: dist/${{ matrix.target }}
+          path: |
+            dist/${{ matrix.target }}
+            dist/${{ matrix.target }}.sha256
           if-no-files-found: error
           overwrite: false
           include-hidden-files: false
@@ -413,8 +418,26 @@ jobs:
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           pattern: librarium-rc-${{ needs.preflight.outputs.sha }}-sea-*
-          path: ${{ runner.temp }}/sea
+          path: ${{ runner.temp }}/sea-artifacts
           merge-multiple: true
+
+      - name: Verify tested SEA byte continuity
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/sea"
+          for TARGET in librarium-linux-x64 librarium-linux-arm64 librarium-macos-x64 librarium-macos-arm64 librarium-windows-x64.exe; do
+            BINARY="$RUNNER_TEMP/sea-artifacts/$TARGET"
+            RECEIPT="${BINARY}.sha256"
+            test -f "$BINARY"
+            test -f "$RECEIPT"
+            EXPECTED="$(cat "$RECEIPT")"
+            [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+            ACTUAL="$(BINARY="$BINARY" node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')"
+            test "$ACTUAL" = "$EXPECTED"
+            mv "$BINARY" "$RUNNER_TEMP/sea/$TARGET"
+          done
+          test -z "$(find "$RUNNER_TEMP/sea-artifacts" -type l -print -quit)"
+          test "$(find "$RUNNER_TEMP/sea-artifacts" -type f | wc -l | tr -d ' ')" = 5
 
       - name: Restore executable SEA modes
         run: chmod 755 "$RUNNER_TEMP/sea/librarium-linux-x64" "$RUNNER_TEMP/sea/librarium-linux-arm64" "$RUNNER_TEMP/sea/librarium-macos-x64" "$RUNNER_TEMP/sea/librarium-macos-arm64"

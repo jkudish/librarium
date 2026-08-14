@@ -107,8 +107,15 @@ export function renderLocalHomebrewFormula(input: {
     branch(linuxX64, '      ') +
     `    end\n` +
     `  end\n\n` +
+    `  def binary_name\n` +
+    `    if OS.mac?\n` +
+    `      Hardware::CPU.arm? ? "librarium-macos-arm64" : "librarium-macos-x64"\n` +
+    `    else\n` +
+    `      Hardware::CPU.arm? ? "librarium-linux-arm64" : "librarium-linux-x64"\n` +
+    `    end\n` +
+    `  end\n\n` +
     `  def install\n` +
-    `    bin.install Dir["librarium-*"].first => "librarium"\n` +
+    `    bin.install binary_name => "librarium"\n` +
     `  end\n\n` +
     `  test do\n` +
     `    assert_match version.to_s, shell_output("#{bin}/librarium --version")\n` +
@@ -418,10 +425,11 @@ export async function finalizeReleaseCandidateHomebrewProof(input: {
   }
 
   let observedVersion = '';
+  let observedSha = '';
   let upgradeDryRun = '';
   let cleaned = false;
   try {
-    const observedSha = `sha256:${sha256(binary)}`;
+    observedSha = `sha256:${sha256(binary)}`;
     if (observedSha !== seaRow.sha256) {
       fail('Installed Homebrew binary checksum does not match the candidate.');
     }
@@ -485,7 +493,7 @@ export async function finalizeReleaseCandidateHomebrewProof(input: {
     installed: {
       artifact: seaRow.path,
       expected_sha256: seaRow.sha256,
-      observed_sha256: seaRow.sha256,
+      observed_sha256: observedSha,
       observed_version: observedVersion,
       help: true,
     },
