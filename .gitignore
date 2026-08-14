@@ -4,4 +4,5 @@ dist/
 *.tgz
 .DS_Store
 agents/
+.agents/
 benchmark/results/

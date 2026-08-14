@@ -1193,6 +1193,7 @@ describe('private request compilation', () => {
       'src/commands/run.ts',
       'src/commands/wizard.ts',
       'src/mcp/research.ts',
+      'src/node-live-validation-production.ts',
     ]);
     const compilationImporters = Object.entries(production.metafile.inputs)
       .filter(([, input]) =>

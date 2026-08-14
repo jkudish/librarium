@@ -41,6 +41,17 @@ package boundary does not yet expose a high-level library runner -- use the
 
 The full docs live at **[librarium.agentsy.build](https://librarium.agentsy.build)**.
 
+Canonical live-validation fixtures can be replayed without credentials or
+network access using a strict local manifest:
+
+```bash
+librarium live-validation --fixture /absolute/path/to/fixture.json
+```
+
+The fixture manifest selects one public `provider/profile`, an `inline` or
+`durable` scenario, and an isolated state root. It cannot select legacy adapter
+IDs or initialize production providers.
+
 ## Quick Start
 
 ```bash
@@ -416,6 +427,27 @@ $ librarium run "postgres pooling best practices"
 ```
 
 Successes are green, failures red with the reason inline, async submissions amber. Durations of 10s or more are highlighted. When a provider's API reports usage, a dim suffix shows it on the line (`· 8.4k tok` or `· $0.012`), and the summary adds a `reported cost` line covering the providers that reported one -- costs are never estimated from pricing tables, only taken from API responses. Piped or CI output degrades to plain append-on-completion lines, and `--json` keeps stdout pure JSON (the table goes to stderr).
+
+### `live-validation`
+
+Prepare the separate canonical-v3 provider validation matrix. This command is
+not the legacy benchmark and does not accept adapter IDs or `--providers`.
+Its default fixture plan is explicitly network-denied and prints the exact
+public `provider_id/profile_id` targets, including profiles backed by private
+durable adapters.
+
+```bash
+librarium live-validation --targets exa/research,tavily/research
+```
+
+Paid execution remains fail-closed. It requires `--paid`, an absolute regular
+preregistration file whose candidate, catalog, pricing, and matrix fingerprints
+all match, `--confirm` with that exact frozen candidate fingerprint, and the
+matching `LIBRARIUM_LIVE_VALIDATION_APPROVED` value. Only then can it construct
+the exact approved provider binding. Use `--continue` only after an interrupted
+matrix has reconciled all active custody and you repeat the same approval.
+Paid validation must run from that approved Git checkout; the standalone SEA
+binary fails closed because it cannot prove the checkout-to-runtime identity.
 
 ### `answer`
 

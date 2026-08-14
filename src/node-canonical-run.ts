@@ -1267,6 +1267,36 @@ export async function runCanonicalPreparedExecution(
   };
 }
 
+/**
+ * Persist the initial canonical v3 run.json without advancing its coordinator
+ * or invoking an attempt bridge. A later resume performs the first dispatch.
+ */
+export async function materializeCanonicalPreparedExecution(
+  prepared: PreparedResearchExecution,
+  dependencies: Omit<
+    RunCanonicalPreparedExecutionDependencies,
+    'attempt_bridge'
+  >,
+): Promise<CanonicalPreparedExecutionResult> {
+  const store = new RunJsonCoordinationStateStore({
+    runs_root: dependencies.runs_root,
+    run_directory: dependencies.run_directory,
+    request: prepared.request,
+  });
+  const runtime = await runPreparedExecution(prepared, {
+    store,
+    coordinator: dependencies.coordinator,
+    attempts: {
+      execute: async () => {
+        throw new Error('Materialization cannot dispatch an attempt.');
+      },
+    },
+    materialize_only: true,
+    max_compare_and_swap_attempts: dependencies.max_compare_and_swap_attempts,
+  });
+  return { runtime, manifest: store.readManifest() };
+}
+
 export interface ResumeCanonicalPreparedExecutionDependencies
   extends Omit<RunCanonicalPreparedExecutionDependencies, 'projection'> {
   readonly projection?: ResearchResponseProjectionOptions;
