@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "fixture_id": "readme-durable-replay",
+  "target": "exa/research",
+  "scenario": "durable",
+  "state_root": "/tmp/librarium-demo-state-replaced-by-driver"
+}
