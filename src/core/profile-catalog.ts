@@ -27,6 +27,12 @@ import type {
   PlanningProfile,
 } from './execution-plan.js';
 import {
+  budgetEstimateFromQuote,
+  type PriceDefinitionInput,
+  PricingCatalog,
+} from './pricing.js';
+import { BUILTIN_PRICING_SNAPSHOT } from './pricing-snapshot.js';
+import {
   buildProfileBindings,
   type ProfileBinding,
 } from './profile-bindings.js';
@@ -99,12 +105,16 @@ export interface CatalogProviderConfig {
   readonly enabled?: boolean;
   readonly model?: string;
   readonly options?: Readonly<Record<string, unknown>>;
+  /** Exact non-secret account/region/billing facts used only for price matching. */
+  readonly pricingConditions?: Readonly<Record<string, string>>;
 }
 
 export interface ProviderCatalogOptions {
   readonly catalog?: readonly ProviderCatalogEntry[];
   /** v1 provider configuration, keyed by adapter id. */
   readonly providerConfigs?: Readonly<Record<string, CatalogProviderConfig>>;
+  /** Reviewed exact account rates. These override the frozen official snapshot. */
+  readonly configuredPricing?: readonly PriceDefinitionInput[];
   readonly credentials?: CredentialContext;
   /**
    * Admission can validate request and configuration semantics before a Node
@@ -196,6 +206,7 @@ function resolveDeclaration(
   declaration: ExecutableProfileDeclaration,
   binding: ProfileBinding | undefined,
   options: ProviderCatalogOptions,
+  pricing: PricingCatalog,
 ): ResolvedCatalogProfile {
   const declared = declaredExecutionProfile(entry.provider_id, declaration);
   const reasons: string[] = [];
@@ -232,7 +243,6 @@ function resolveDeclaration(
     : true;
 
   let profile = declared;
-  let estimate: NetworkFreeEstimate | undefined;
   let configurationValid = true;
   try {
     // The whole provider config is handed over, not just `options`: the
@@ -246,10 +256,18 @@ function resolveDeclaration(
       options: providerConfig?.options ?? {},
     });
     profile = resolution.profile;
-    estimate = resolution.estimate;
   } catch {
     configurationValid = false;
   }
+
+  const quote = pricing.quote({
+    requested_identity: profile.identity,
+    ...(providerConfig?.pricingConditions && {
+      conditions: providerConfig.pricingConditions,
+    }),
+  });
+  const estimate: NetworkFreeEstimate | undefined =
+    budgetEstimateFromQuote(quote);
 
   if (!enabled) reasons.push('profile_disabled');
   if (!credentialValid) reasons.push('credential_missing');
@@ -335,6 +353,10 @@ function resolveCustomProfile(
 export function buildProviderCatalog(
   options: ProviderCatalogOptions = {},
 ): ProviderCatalog {
+  const pricing = new PricingCatalog(
+    BUILTIN_PRICING_SNAPSHOT,
+    options.configuredPricing,
+  );
   const entries = options.catalog ?? BUILTIN_PROVIDER_CATALOG;
   const refs = catalogProfileRefs(entries);
 
@@ -469,6 +491,7 @@ export function buildProviderCatalog(
           catalogProfileKey(entry.provider_id, declaration.profile_id),
         ),
         options,
+        pricing,
       ),
     ),
     ...customProfiles.map((custom, index) =>
@@ -766,6 +789,11 @@ export function buildProviderCatalog(
   );
   const digest = catalogFingerprint({
     revision,
+    pricing: {
+      snapshot_version: pricing.snapshot.version,
+      snapshot_fingerprint: pricing.snapshot.fingerprint,
+      configured_definitions: pricing.configured_definitions,
+    },
     custom_profiles: customProfiles,
     profiles: planningProfiles,
     workflows: BUILTIN_WORKFLOW_IDS.map((id) => ({
