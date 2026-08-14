@@ -436,7 +436,7 @@ describe('paid command gates remain before production composition', () => {
       candidate: {
         git_sha: 'a'.repeat(40),
         fingerprint: `sha256:${'a'.repeat(64)}`,
-        version: 'candidate-v1',
+        version: '2.0.0-rc.1',
         artifact_hashes: Object.fromEntries(
           [
             'declarations',

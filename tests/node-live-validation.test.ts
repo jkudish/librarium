@@ -1307,7 +1307,7 @@ describe('frozen paid protocol (injected, zero-network)', () => {
         git_sha: 'a'.repeat(40),
         fingerprint:
           'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        version: 'candidate-v1',
+        version: '2.0.0-rc.1',
         artifact_hashes: {
           declarations:
             'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
