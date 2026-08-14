@@ -84,6 +84,10 @@ describe('release-candidate workflow policy', () => {
       (source: string) => `${source}\n# git tag -f v2.0.0-rc.1\n`,
     ],
     [
+      'remote Homebrew tap command',
+      (source: string) => `${source}\n# brew tap example/release\n`,
+    ],
+    [
       'overwritable output',
       (source: string) => source.replace('overwrite: false', 'overwrite: true'),
     ],
@@ -153,6 +157,10 @@ describe('release-candidate workflow policy', () => {
 
   it('records the real Homebrew install result after local execution', () => {
     const source = readFileSync(workflowPath, 'utf8');
+    expect(source).toContain('brew tap-new "$TAP_NAME"');
+    expect(source).toContain('"$TAP_ROOT/Formula/$FORMULA_NAME.rb"');
+    expect(source).toContain('"$TAP_NAME/$FORMULA_NAME"');
+    expect(source).toContain('brew untap "$TAP_NAME"');
     expect(source).toContain('finalize-homebrew');
     expect(source).toContain('homebrew-result.json');
     expect(source.indexOf('brew install --formula')).toBeLessThan(

@@ -179,7 +179,7 @@ const FORBIDDEN_WORKFLOW_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bgh\s+release\b/i, 'GitHub release command'],
   [/\bgit\s+tag\b/i, 'Git tag command'],
   [/\bgit\s+push\b/i, 'Git push command'],
-  [/\bbrew\s+tap\b/i, 'Homebrew tap command'],
+  [/\bbrew\s+tap(?!-new)\b/i, 'Homebrew tap command'],
   [/HOMEBREW_TAP_TOKEN/, 'Homebrew tap credential'],
   [/\b--clobber\b/, 'artifact clobber flag'],
   [/\b--force(?:-with-lease)?\b/, 'force flag'],
