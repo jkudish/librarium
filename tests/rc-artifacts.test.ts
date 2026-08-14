@@ -856,7 +856,7 @@ describe('release candidate artifact contract', () => {
     ).toThrow('missing public declaration entrypoint dist/node-entry.d.ts');
   });
 
-  it('rejects wrong SEA formats and missing Unix executable mode', async () => {
+  it('rejects wrong SEA formats', async () => {
     const formatFixture = await completeFixture();
     const linuxPath = join(
       formatFixture.candidateRoot,
@@ -882,20 +882,25 @@ describe('release candidate artifact contract', () => {
         dependencies: fixtureDependencies,
       }),
     ).rejects.toThrow('expected 64-bit ELF binary');
-
-    const modeFixture = await completeFixture();
-    chmodSync(
-      join(modeFixture.candidateRoot, 'sea/librarium-linux-x64'),
-      0o644,
-    );
-    await expect(
-      verifyReleaseCandidate({
-        repository_root: modeFixture.repository,
-        candidate_root: modeFixture.candidateRoot,
-        dependencies: fixtureDependencies,
-      }),
-    ).rejects.toThrow('executable mode');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects missing Unix executable mode',
+    async () => {
+      const modeFixture = await completeFixture();
+      chmodSync(
+        join(modeFixture.candidateRoot, 'sea/librarium-linux-x64'),
+        0o644,
+      );
+      await expect(
+        verifyReleaseCandidate({
+          repository_root: modeFixture.repository,
+          candidate_root: modeFixture.candidateRoot,
+          dependencies: fixtureDependencies,
+        }),
+      ).rejects.toThrow('executable mode');
+    },
+  );
 
   it('rejects self-consistent contract replacement against the exact Git source', async () => {
     const fixture = await completeFixture();
