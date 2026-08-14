@@ -788,6 +788,64 @@ describe('canonical v3 live validation persisted fixture lane', () => {
       readTrustedFrozenReferenceManifest(reference, target, 'terminal').request
         .request_id,
     ).toBe('materialize-only');
+
+    const manifestPath = join(runDirectory, 'run.json');
+    const unsuccessful = JSON.parse(
+      readFileSync(manifestPath, 'utf8'),
+    ) as Record<string, any>;
+    unsuccessful.coordination_state.status = 'unsuccessful';
+    unsuccessful.coordination_state.slots[0].status = 'failed';
+    unsuccessful.coordination_state.attempts[0].status = 'failed';
+    unsuccessful.coordination_state.attempts[0].error = {
+      code: 'provider_reported_error',
+      message: 'The provider returned an error.',
+      category: 'provider',
+      retryable: false,
+      fallback_allowed: false,
+    };
+    unsuccessful.provider_outputs_by_attempt = {};
+    unsuccessful.terminal_response = {
+      ...unsuccessful.terminal_response,
+      status: 'failed',
+      results: [],
+      errors: [
+        {
+          code: 'librarium.provider_reported_error',
+          message: 'The provider returned an error.',
+          profile: target.key,
+        },
+      ],
+    };
+    writeFileSync(manifestPath, `${JSON.stringify(unsuccessful)}\n`);
+    for (const phase of [
+      'resume',
+      'active',
+      'cancellable',
+      'terminal',
+    ] as const) {
+      expect(
+        readTrustedFrozenReferenceManifest(reference, target, phase)
+          .coordination_state.status,
+      ).toBe('unsuccessful');
+    }
+    unsuccessful.coordination_state.status = 'failed';
+    unsuccessful.coordination_state.lifecycle.at(-1).event_kind =
+      'request_failed';
+    unsuccessful.coordination_state.lifecycle.at(-1).data = {
+      error: unsuccessful.coordination_state.attempts[0].error,
+    };
+    writeFileSync(manifestPath, `${JSON.stringify(unsuccessful)}\n`);
+    for (const phase of [
+      'resume',
+      'active',
+      'cancellable',
+      'terminal',
+    ] as const) {
+      expect(
+        readTrustedFrozenReferenceManifest(reference, target, phase)
+          .coordination_state.status,
+      ).toBe('failed');
+    }
   });
 
   it('rejects active and unsettled terminal checkpoints without an exact run reference', () => {
