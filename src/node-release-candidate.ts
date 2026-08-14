@@ -1586,7 +1586,7 @@ function verifyReference(root: string, reference: ArtifactReference): Buffer {
   return bytes;
 }
 
-async function verifyFrozenPackage(
+export async function verifyFrozenReleasePackage(
   packageRootInput: string,
   repositoryRootInput: string,
   dependencies: ReleaseCandidateDependencies,
@@ -1886,7 +1886,7 @@ export async function assembleReleaseCandidate(input: {
     packageRoot,
     seaRoot,
   ]);
-  const { manifest: frozen } = await verifyFrozenPackage(
+  const { manifest: frozen } = await verifyFrozenReleasePackage(
     packageRoot,
     repositoryRoot,
     dependencies,

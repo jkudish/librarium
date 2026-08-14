@@ -1,0 +1,594 @@
+name: Release candidate proof
+run-name: "RC proof run ${{ github.run_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: 'Exact protected-main commit SHA (40 lowercase hex characters)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "release-candidate-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.authority.outputs.sha }}
+      tree: ${{ steps.authority.outputs.tree }}
+      version: ${{ steps.authority.outputs.version }}
+      artifact-prefix: ${{ steps.authority.outputs.artifact_prefix }}
+    env:
+      CANDIDATE_SHA: ${{ inputs.git_sha }}
+      GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
+
+    steps:
+      - name: Validate dispatch context before candidate code
+        shell: bash
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+
+      - name: Checkout protected main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch protected main authority
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Validate Git authority before candidate code
+        shell: bash
+        run: |
+          test "$(git cat-file -t "$CANDIDATE_SHA")" = commit
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate workflow policy
+        run: node scripts/rc-workflow.mjs policy --workflow .github/workflows/release-candidate.yml
+
+      - name: Validate exact protected-main candidate
+        id: authority
+        run: >-
+          node scripts/rc-workflow.mjs preflight
+          --repository "$GITHUB_WORKSPACE"
+          --candidate-sha "$CANDIDATE_SHA"
+          --protected-ref refs/remotes/origin/main
+          --github-output
+
+  freeze-package:
+    needs: preflight
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Fetch protected main authority
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Revalidate source before tests
+        env:
+          GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
+        run: >-
+          node scripts/rc-workflow.mjs preflight
+          --repository "$GITHUB_WORKSPACE"
+          --candidate-sha "${{ needs.preflight.outputs.sha }}"
+          --protected-ref refs/remotes/origin/main
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build and freeze package bytes once
+        run: >-
+          npm run rc:package --
+          --repository "$GITHUB_WORKSPACE"
+          --output "$RUNNER_TEMP/frozen-package"
+
+      - name: Verify frozen package before exact-byte gates
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Declaration consumer fixtures from frozen dist
+        run: |
+          node scripts/run-typescript.mjs --project tsconfig.declaration-fixtures.json
+          node scripts/run-typescript.mjs --project tsconfig.node-declaration-fixtures.json
+
+      - name: Workers compatibility tests from frozen dist
+        run: npx vitest run --config vitest.workers.config.ts
+
+      - name: Integration tests from frozen dist
+        run: npx vitest run --config vitest.integration.config.ts
+
+      - name: PTY tests from frozen dist
+        run: npx vitest run --config vitest.pty.config.ts
+
+      - name: Offline benchmark fixture replay
+        run: npm run benchmark:ci
+
+      - name: Verify frozen package after exact-byte gates
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Revalidate source after tests
+        env:
+          GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
+        run: >-
+          node scripts/rc-workflow.mjs preflight
+          --repository "$GITHUB_WORKSPACE"
+          --candidate-sha "${{ needs.preflight.outputs.sha }}"
+          --protected-ref refs/remotes/origin/main
+
+      - name: Upload immutable frozen package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
+          path: ${{ runner.temp }}/frozen-package
+          if-no-files-found: error
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+
+  package-compatibility:
+    needs: [preflight, freeze-package]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.12.0, 24, 26]
+
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Download immutable frozen package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
+          path: ${{ runner.temp }}/frozen-package
+
+      - name: Verify package bytes before compatibility test
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Resolve exact tarball input
+        id: package-input
+        run: >-
+          node scripts/rc-workflow.mjs package-input
+          --package "$RUNNER_TEMP/frozen-package"
+          --github-output
+
+      - name: Test exact frozen tarball
+        run: >-
+          node scripts/verify-packed-consumer.mjs
+          --tarball "${{ steps.package-input.outputs.tarball }}"
+          --sha256 "${{ steps.package-input.outputs.sha256 }}"
+
+      - name: Verify package bytes after compatibility test
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  below-floor:
+    needs: [preflight, freeze-package]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup build Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Download immutable frozen package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
+          path: ${{ runner.temp }}/frozen-package
+
+      - name: Verify package bytes before below-floor test
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Resolve exact tarball input
+        id: package-input
+        run: >-
+          node scripts/rc-workflow.mjs package-input
+          --package "$RUNNER_TEMP/frozen-package"
+          --github-output
+
+      - name: Setup Node.js 22.11.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.11.0
+
+      - name: Reject exact tarball below runtime floor
+        run: >-
+          node scripts/verify-packed-consumer.mjs
+          --expect-engine-rejection
+          --tarball "${{ steps.package-input.outputs.tarball }}"
+          --sha256 "${{ steps.package-input.outputs.sha256 }}"
+
+      - name: Restore verification Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+
+      - name: Verify package bytes after below-floor test
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+  build-sea:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: librarium-linux-x64
+          - os: ubuntu-24.04-arm
+            target: librarium-linux-arm64
+          - os: macos-14-large
+            target: librarium-macos-x64
+          - os: macos-latest
+            target: librarium-macos-arm64
+          - os: windows-latest
+            target: librarium-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build native SEA once
+        run: npm run build:sea
+
+      - name: Record SEA bytes before execution
+        id: sea-before
+        shell: bash
+        env:
+          BINARY: dist/${{ matrix.target }}
+        run: |
+          SEA_SHA="$(node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')"
+          printf '%s\n' "$SEA_SHA" > "${BINARY}.sha256"
+          echo "sha256=$SEA_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Verify native SEA without Node on PATH
+        run: node scripts/verify-sea.mjs
+
+      - name: Reject SEA byte mutation
+        shell: bash
+        env:
+          BINARY: dist/${{ matrix.target }}
+          BEFORE: ${{ steps.sea-before.outputs.sha256 }}
+        run: test "$BEFORE" = "$(node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')"
+
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable native SEA
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-sea-${{ matrix.target }}
+          path: |
+            dist/${{ matrix.target }}
+            dist/${{ matrix.target }}.sha256
+          if-no-files-found: error
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+
+  assemble-candidate:
+    needs: [preflight, freeze-package, package-compatibility, below-floor, build-sea]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Download immutable frozen package
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-package
+          path: ${{ runner.temp }}/frozen-package
+
+      - name: Download exact SEA set
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          pattern: librarium-rc-${{ needs.preflight.outputs.sha }}-sea-*
+          path: ${{ runner.temp }}/sea-artifacts
+          merge-multiple: true
+
+      - name: Verify tested SEA byte continuity
+        shell: bash
+        run: |
+          mkdir "$RUNNER_TEMP/sea"
+          for TARGET in librarium-linux-x64 librarium-linux-arm64 librarium-macos-x64 librarium-macos-arm64 librarium-windows-x64.exe; do
+            BINARY="$RUNNER_TEMP/sea-artifacts/$TARGET"
+            RECEIPT="${BINARY}.sha256"
+            test -f "$BINARY"
+            test -f "$RECEIPT"
+            EXPECTED="$(cat "$RECEIPT")"
+            [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
+            ACTUAL="$(BINARY="$BINARY" node -e 'const fs=require("node:fs"),c=require("node:crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.env.BINARY)).digest("hex"))')"
+            test "$ACTUAL" = "$EXPECTED"
+            mv "$BINARY" "$RUNNER_TEMP/sea/$TARGET"
+          done
+          test -z "$(find "$RUNNER_TEMP/sea-artifacts" -type l -print -quit)"
+          test "$(find "$RUNNER_TEMP/sea-artifacts" -type f | wc -l | tr -d ' ')" = 5
+
+      - name: Restore executable SEA modes
+        run: chmod 755 "$RUNNER_TEMP/sea/librarium-linux-x64" "$RUNNER_TEMP/sea/librarium-linux-arm64" "$RUNNER_TEMP/sea/librarium-macos-x64" "$RUNNER_TEMP/sea/librarium-macos-arm64"
+
+      - name: Verify frozen package before assembly
+        run: >-
+          npm run rc:verify-package --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+
+      - name: Assemble exact candidate once
+        run: >-
+          npm run rc:assemble --
+          --repository "$GITHUB_WORKSPACE"
+          --package "$RUNNER_TEMP/frozen-package"
+          --sea "$RUNNER_TEMP/sea"
+          --output "$RUNNER_TEMP/candidate"
+
+      - name: Verify manifest records checksums and provenance
+        run: >-
+          npm run rc:verify --
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+
+      - name: Archive candidate with executable modes
+        run: tar -czf "$RUNNER_TEMP/candidate.tar.gz" -C "$RUNNER_TEMP/candidate" .
+
+      - name: Verify candidate after archive
+        run: >-
+          npm run rc:verify --
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable assembled candidate
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-candidate
+          path: ${{ runner.temp }}/candidate.tar.gz
+          if-no-files-found: error
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+
+  distribution-proof:
+    needs: [preflight, assemble-candidate]
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout validated candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Download immutable assembled candidate
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-candidate
+          path: ${{ runner.temp }}/candidate-archive
+
+      - name: Extract exact candidate
+        run: |
+          mkdir "$RUNNER_TEMP/candidate"
+          tar -xzf "$RUNNER_TEMP/candidate-archive/candidate.tar.gz" -C "$RUNNER_TEMP/candidate"
+
+      - name: Verify candidate before distribution proof
+        run: >-
+          npm run rc:verify --
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+
+      - name: Exercise exact local npm SEA Homebrew and upgrade paths
+        run: >-
+          node scripts/rc-distribution-proof.mjs
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+          --output "$RUNNER_TEMP/distribution-proof"
+
+      - name: Exercise exact local Homebrew formula and upgrade branch
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ANALYTICS: 1
+          HOMEBREW_NO_ENV_HINTS: 1
+        run: |
+          cleanup_brew() {
+            if brew list --formula librarium-rc-proof >/dev/null 2>&1; then
+              brew uninstall --formula librarium-rc-proof >/dev/null
+            fi
+          }
+          trap cleanup_brew EXIT
+          brew install --formula "$RUNNER_TEMP/distribution-proof/librarium-rc-proof.rb"
+          BREW_BIN="$(brew --prefix librarium-rc-proof)/bin/librarium"
+          EXPECTED_VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/distribution-proof/proof.json")"
+          EXPECTED_SHA="$(jq -r '.homebrew.selections[] | select(.platform == "darwin" and .arch == "arm64") | .sha256' "$RUNNER_TEMP/distribution-proof/proof.json")"
+          test "$(shasum -a 256 "$BREW_BIN" | awk '{print "sha256:" $1}')" = "$EXPECTED_SHA"
+          test "$("$BREW_BIN" --version)" = "$EXPECTED_VERSION"
+          "$BREW_BIN" --help >/dev/null
+          "$BREW_BIN" upgrade --dry-run --target "$EXPECTED_VERSION" | grep 'via homebrew'
+          brew test librarium-rc-proof
+          node scripts/rc-distribution-proof.mjs finalize-homebrew \
+            --repository "$GITHUB_WORKSPACE" \
+            --candidate "$RUNNER_TEMP/candidate" \
+            --output "$RUNNER_TEMP/distribution-proof" \
+            --binary "$BREW_BIN"
+          test -f "$RUNNER_TEMP/distribution-proof/homebrew-result.json"
+          test ! -e "$BREW_BIN"
+          trap - EXIT
+
+      - name: Exercise installer rollback fixtures
+        run: npx vitest run tests/install-script.test.ts tests/commands/upgrade.test.ts tests/release-candidate-workflow.test.ts
+
+      - name: Verify candidate after distribution proof
+        run: >-
+          npm run rc:verify --
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+
+      - name: Reject source mutation
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Upload immutable distribution proof
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: librarium-rc-${{ needs.preflight.outputs.sha }}-distribution-proof
+          path: ${{ runner.temp }}/distribution-proof
+          if-no-files-found: error
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30

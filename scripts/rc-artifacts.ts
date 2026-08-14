@@ -3,12 +3,13 @@ import {
   assembleReleaseCandidate,
   buildFrozenReleasePackage,
   releaseCandidateArtifactArguments,
+  verifyFrozenReleasePackage,
   verifyReleaseCandidate,
 } from '../src/node-release-candidate.js';
 
 function usage(): never {
   throw new Error(
-    'Usage: rc-artifacts <package|assemble|verify> --repository <clean-checkout> --output <new-dir> [--package <frozen-package-dir> --sea <five-binary-dir> | --candidate <candidate-dir>]',
+    'Usage: rc-artifacts <package|verify-package|assemble|verify> --repository <clean-checkout> [--output <new-dir> | --package <frozen-package-dir> --sea <five-binary-dir> | --candidate <candidate-dir>]',
   );
 }
 
@@ -70,6 +71,24 @@ async function main(): Promise<void> {
         git_sha: manifest.candidate.git_sha,
         version: manifest.candidate.version,
         artifact_arguments: releaseCandidateArtifactArguments(manifest),
+      })}\n`,
+    );
+    return;
+  }
+  if (command === 'verify-package') {
+    const { manifest } = await verifyFrozenReleasePackage(
+      localPath('package'),
+      localPath('repository'),
+      {},
+    );
+    process.stdout.write(
+      `${JSON.stringify({
+        verified: true,
+        git_sha: manifest.candidate.git_sha,
+        git_tree: manifest.candidate.git_tree,
+        version: manifest.candidate.version,
+        tarball: manifest.npm.tarball.path,
+        tarball_sha256: manifest.npm.tarball.sha256,
       })}\n`,
     );
     return;
