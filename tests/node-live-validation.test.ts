@@ -130,7 +130,7 @@ describe('canonical v3 live validation matrix', () => {
       },
       catalog: { digest: target.catalog_digest },
       profile_plans_by_identity: {
-        [target.key]: {
+        [profileIdentityKey(target.expected_effective_identity)]: {
           binding: {
             adapter_id: target.adapter_id,
             binding_id: target.binding_id,
@@ -945,7 +945,7 @@ describe('canonical v3 live validation persisted fixture lane', () => {
       },
       catalog: { digest: target.catalog_digest },
       profile_plans_by_identity: {
-        [target.key]: {
+        [profileIdentityKey(target.expected_effective_identity)]: {
           binding: {
             adapter_id: target.adapter_id,
             binding_id: target.binding_id,
