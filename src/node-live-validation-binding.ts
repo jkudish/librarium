@@ -16,6 +16,7 @@ import {
   CanonicalLiveValidationError,
   type CanonicalValidationTarget,
   type FrozenAttemptReference,
+  LIVE_VALIDATION_CONTRACT_EXTENSION_KEY,
 } from './node-live-validation.js';
 import { RUN_JSON_FILE } from './node-run-json-lock.js';
 
@@ -134,9 +135,8 @@ export function readTrustedFrozenReferenceManifest(
   if (
     requestHash !== reference.request_fingerprint ||
     (reference.persisted_protocol_contract === true &&
-      manifest.request.extensions?.[
-        'librarium:live_validation_contract_sha256'
-      ] !== reference.protocol_contract_hash) ||
+      manifest.request.extensions?.[LIVE_VALIDATION_CONTRACT_EXTENSION_KEY] !==
+        reference.protocol_contract_hash) ||
     manifest.coordination_state.request_deadline_at <=
       manifest.coordination_state.created_at
   ) {

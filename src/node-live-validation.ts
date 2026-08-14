@@ -60,6 +60,10 @@ export interface CanonicalValidationProviderConfig {
   readonly options?: unknown;
 }
 
+/** Namespaced canonical request extension binding a run to its frozen live protocol. */
+export const LIVE_VALIDATION_CONTRACT_EXTENSION_KEY =
+  'build.librarium:liveValidationContractSha256';
+
 export interface CanonicalValidationTarget {
   readonly key: string;
   readonly adapter_id: string;
