@@ -186,6 +186,43 @@
         }
       ],
       "completed_at": "2026-08-09T12:00:01Z"
+    },
+    {
+      "id": "result-surface-observation",
+      "content_format": "markdown",
+      "content": "# Result",
+      "requested_profile": "deep-research",
+      "provider": "example-provider",
+      "profile": "deep-research-v2",
+      "provenance": {
+        "result_kind": "surface_observation",
+        "retrieval_methods": [
+          "surface_collector"
+        ],
+        "corpora": [
+          "web"
+        ],
+        "observed_at": "2026-08-09T12:00:00Z",
+        "observation_mode": "surface_snapshot",
+        "collector": "searchapi",
+        "surface": "chatgpt",
+        "context": {
+          "authentication": "unknown",
+          "personalization": "unknown"
+        }
+      },
+      "citations": [
+        {
+          "id": "citation-1",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "web_page",
+            "url": "https://example.com/research",
+            "title": "Research"
+          }
+        }
+      ],
+      "completed_at": "2026-08-09T12:00:01Z"
     }
   ],
   "errors": []

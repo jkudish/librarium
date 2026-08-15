@@ -338,6 +338,22 @@ const valid = {
         id: 'result-model-answer',
         provenance: { ...provenance, result_kind: 'model_answer' },
       },
+      {
+        ...result,
+        id: 'result-surface-observation',
+        provenance: {
+          ...provenance,
+          result_kind: 'surface_observation',
+          retrieval_methods: ['surface_collector'],
+          observation_mode: 'surface_snapshot',
+          collector: 'searchapi',
+          surface: 'chatgpt',
+          context: {
+            authentication: 'unknown',
+            personalization: 'unknown',
+          },
+        },
+      },
     ],
   },
   'empty-retrieval-and-corpora': {
@@ -360,6 +376,9 @@ const valid = {
               ...result,
               provenance: {
                 ...provenance,
+                result_kind: 'surface_observation',
+                retrieval_methods: ['surface_collector'],
+                observation_mode: 'surface_snapshot',
                 collector: 'searchapi',
                 surface: 'google_ai_mode',
                 context: {
@@ -367,6 +386,7 @@ const valid = {
                   country: 'CA',
                   device: 'desktop',
                   authentication,
+                  personalization: 'unknown',
                 },
               },
             },
@@ -611,6 +631,22 @@ const invalid = {
     ...success,
     results: [{ ...result, provenance: { ...provenance, surface: 'google' } }],
   },
+  'provenance-surface-snapshot-wrong-result': {
+    ...success,
+    results: [
+      {
+        ...result,
+        provenance: {
+          ...provenance,
+          result_kind: 'grounded_answer',
+          retrieval_methods: ['surface_collector'],
+          observation_mode: 'surface_snapshot',
+          collector: 'searchapi',
+          surface: 'chatgpt',
+        },
+      },
+    ],
+  },
   'invalid-enum': {
     ...success,
     results: [
@@ -674,6 +710,8 @@ const semanticRuleForFixture: Record<string, string> = {
   'usage-cost-no-currency': 'usage.cost_requires_currency',
   'provenance-surface-no-collector':
     'result_provenance.surface_requires_collector',
+  'provenance-surface-snapshot-wrong-result':
+    'result_provenance.surface_snapshot_boundary',
   'provider-meta-secret': 'provider_meta.safe_metadata',
   'provider-meta-raw': 'provider_meta.safe_metadata',
   'provider-meta-fused-api-key': 'provider_meta.safe_metadata',
@@ -723,6 +761,11 @@ const manifest = {
     {
       rule_id: 'result_provenance.surface_requires_collector',
       description: 'A surface requires a collector.',
+    },
+    {
+      rule_id: 'result_provenance.surface_snapshot_boundary',
+      description:
+        'A surface snapshot requires a surface observation, collector retrieval, and collector identity.',
     },
     {
       rule_id: 'provider_meta.safe_metadata',

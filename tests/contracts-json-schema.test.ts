@@ -66,7 +66,7 @@ describe('published terminal interchange snapshot', () => {
       ).not.toThrow();
   });
 
-  it('separates structural rejection from the five stable semantic rules', () => {
+  it('separates structural rejection from the six stable semantic rules', () => {
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     addFormats(ajv);
     ajv.addSchema(schema);
@@ -87,6 +87,7 @@ describe('published terminal interchange snapshot', () => {
       'provider_meta.safe_metadata',
       'research_response.terminal_shape',
       'result_provenance.surface_requires_collector',
+      'result_provenance.surface_snapshot_boundary',
       'source.locator_required',
       'usage.cost_requires_currency',
     ]);

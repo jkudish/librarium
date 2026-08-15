@@ -76,7 +76,8 @@
                           "search_results",
                           "grounded_answer",
                           "research_report",
-                          "model_answer"
+                          "model_answer",
+                          "surface_observation"
                         ]
                       },
                       "retrieval_methods": {
@@ -87,7 +88,8 @@
                             "search_endpoint",
                             "model_search_tool",
                             "research_agent",
-                            "model_only"
+                            "model_only",
+                            "surface_collector"
                           ]
                         }
                       },
@@ -103,6 +105,13 @@
                             "places"
                           ]
                         }
+                      },
+                      "observation_mode": {
+                        "type": "string",
+                        "enum": [
+                          "api_output",
+                          "surface_snapshot"
+                        ]
                       },
                       "observed_at": {
                         "type": "string",
@@ -144,6 +153,14 @@
                               "anonymous",
                               "authenticated",
                               "managed",
+                              "unknown"
+                            ]
+                          },
+                          "personalization": {
+                            "type": "string",
+                            "enum": [
+                              "present",
+                              "absent",
                               "unknown"
                             ]
                           }
@@ -369,7 +386,8 @@
                           "search_results",
                           "grounded_answer",
                           "research_report",
-                          "model_answer"
+                          "model_answer",
+                          "surface_observation"
                         ]
                       },
                       "retrieval_methods": {
@@ -380,7 +398,8 @@
                             "search_endpoint",
                             "model_search_tool",
                             "research_agent",
-                            "model_only"
+                            "model_only",
+                            "surface_collector"
                           ]
                         }
                       },
@@ -396,6 +415,13 @@
                             "places"
                           ]
                         }
+                      },
+                      "observation_mode": {
+                        "type": "string",
+                        "enum": [
+                          "api_output",
+                          "surface_snapshot"
+                        ]
                       },
                       "observed_at": {
                         "type": "string",
@@ -437,6 +463,14 @@
                               "anonymous",
                               "authenticated",
                               "managed",
+                              "unknown"
+                            ]
+                          },
+                          "personalization": {
+                            "type": "string",
+                            "enum": [
+                              "present",
+                              "absent",
                               "unknown"
                             ]
                           }
@@ -662,7 +696,8 @@
                           "search_results",
                           "grounded_answer",
                           "research_report",
-                          "model_answer"
+                          "model_answer",
+                          "surface_observation"
                         ]
                       },
                       "retrieval_methods": {
@@ -673,7 +708,8 @@
                             "search_endpoint",
                             "model_search_tool",
                             "research_agent",
-                            "model_only"
+                            "model_only",
+                            "surface_collector"
                           ]
                         }
                       },
@@ -689,6 +725,13 @@
                             "places"
                           ]
                         }
+                      },
+                      "observation_mode": {
+                        "type": "string",
+                        "enum": [
+                          "api_output",
+                          "surface_snapshot"
+                        ]
                       },
                       "observed_at": {
                         "type": "string",
@@ -730,6 +773,14 @@
                               "anonymous",
                               "authenticated",
                               "managed",
+                              "unknown"
+                            ]
+                          },
+                          "personalization": {
+                            "type": "string",
+                            "enum": [
+                              "present",
+                              "absent",
                               "unknown"
                             ]
                           }
@@ -1154,7 +1205,8 @@
                     "search_results",
                     "grounded_answer",
                     "research_report",
-                    "model_answer"
+                    "model_answer",
+                    "surface_observation"
                   ]
                 },
                 "retrieval_methods": {
@@ -1165,7 +1217,8 @@
                       "search_endpoint",
                       "model_search_tool",
                       "research_agent",
-                      "model_only"
+                      "model_only",
+                      "surface_collector"
                     ]
                   }
                 },
@@ -1181,6 +1234,13 @@
                       "places"
                     ]
                   }
+                },
+                "observation_mode": {
+                  "type": "string",
+                  "enum": [
+                    "api_output",
+                    "surface_snapshot"
+                  ]
                 },
                 "observed_at": {
                   "type": "string",
@@ -1222,6 +1282,14 @@
                         "anonymous",
                         "authenticated",
                         "managed",
+                        "unknown"
+                      ]
+                    },
+                    "personalization": {
+                      "type": "string",
+                      "enum": [
+                        "present",
+                        "absent",
                         "unknown"
                       ]
                     }
@@ -1447,7 +1515,8 @@
                     "search_results",
                     "grounded_answer",
                     "research_report",
-                    "model_answer"
+                    "model_answer",
+                    "surface_observation"
                   ]
                 },
                 "retrieval_methods": {
@@ -1458,7 +1527,8 @@
                       "search_endpoint",
                       "model_search_tool",
                       "research_agent",
-                      "model_only"
+                      "model_only",
+                      "surface_collector"
                     ]
                   }
                 },
@@ -1474,6 +1544,13 @@
                       "places"
                     ]
                   }
+                },
+                "observation_mode": {
+                  "type": "string",
+                  "enum": [
+                    "api_output",
+                    "surface_snapshot"
+                  ]
                 },
                 "observed_at": {
                   "type": "string",
@@ -1515,6 +1592,14 @@
                         "anonymous",
                         "authenticated",
                         "managed",
+                        "unknown"
+                      ]
+                    },
+                    "personalization": {
+                      "type": "string",
+                      "enum": [
+                        "present",
+                        "absent",
                         "unknown"
                       ]
                     }
@@ -1740,7 +1825,8 @@
                     "search_results",
                     "grounded_answer",
                     "research_report",
-                    "model_answer"
+                    "model_answer",
+                    "surface_observation"
                   ]
                 },
                 "retrieval_methods": {
@@ -1751,7 +1837,8 @@
                       "search_endpoint",
                       "model_search_tool",
                       "research_agent",
-                      "model_only"
+                      "model_only",
+                      "surface_collector"
                     ]
                   }
                 },
@@ -1767,6 +1854,13 @@
                       "places"
                     ]
                   }
+                },
+                "observation_mode": {
+                  "type": "string",
+                  "enum": [
+                    "api_output",
+                    "surface_snapshot"
+                  ]
                 },
                 "observed_at": {
                   "type": "string",
@@ -1808,6 +1902,14 @@
                         "anonymous",
                         "authenticated",
                         "managed",
+                        "unknown"
+                      ]
+                    },
+                    "personalization": {
+                      "type": "string",
+                      "enum": [
+                        "present",
+                        "absent",
                         "unknown"
                       ]
                     }
@@ -2260,7 +2362,8 @@
             "search_results",
             "grounded_answer",
             "research_report",
-            "model_answer"
+            "model_answer",
+            "surface_observation"
           ]
         },
         "retrieval_methods": {
@@ -2271,7 +2374,8 @@
               "search_endpoint",
               "model_search_tool",
               "research_agent",
-              "model_only"
+              "model_only",
+              "surface_collector"
             ]
           }
         },
@@ -2287,6 +2391,13 @@
               "places"
             ]
           }
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": [
+            "api_output",
+            "surface_snapshot"
+          ]
         },
         "observed_at": {
           "type": "string",
@@ -2328,6 +2439,14 @@
                 "anonymous",
                 "authenticated",
                 "managed",
+                "unknown"
+              ]
+            },
+            "personalization": {
+              "type": "string",
+              "enum": [
+                "present",
+                "absent",
                 "unknown"
               ]
             }

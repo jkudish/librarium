@@ -13,21 +13,23 @@
       "provider": "example-provider",
       "profile": "deep-research-v2",
       "provenance": {
-        "result_kind": "grounded_answer",
+        "result_kind": "surface_observation",
         "retrieval_methods": [
-          "research_agent"
+          "surface_collector"
         ],
         "corpora": [
           "web"
         ],
         "observed_at": "2026-08-09T12:00:00Z",
+        "observation_mode": "surface_snapshot",
         "collector": "searchapi",
         "surface": "google_ai_mode",
         "context": {
           "locale": "en-CA",
           "country": "CA",
           "device": "desktop",
-          "authentication": "unknown"
+          "authentication": "unknown",
+          "personalization": "unknown"
         }
       },
       "citations": [

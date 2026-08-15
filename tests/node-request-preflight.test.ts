@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertAdmittedAdaptersRegistered,
+  assertPreparedResearchResponseProjectable,
   emitRequestPreflightNotices,
   formatRequestDiagnosticCodes,
   preflightProductionRequest,
+  preflightProductionRequestStructure,
   RequestPreflightError,
 } from '../src/node-request-preflight.js';
 import type { Config } from '../src/types.js';
@@ -52,6 +54,46 @@ describe('Node production request preflight', () => {
     ).toThrow(RequestPreflightError);
 
     expect(createCredentials).not.toHaveBeenCalled();
+  });
+
+  it('structurally admits all SearchAPI surfaces without reading credentials', () => {
+    const profiles = [
+      'searchapi-chatgpt/surface',
+      'searchapi-gemini/surface',
+      'searchapi-perplexity/surface',
+      'searchapi-google-ai-mode/surface',
+      'searchapi-bing-copilot/surface',
+      'searchapi-google-ai-overview/surface',
+    ];
+    const result = preflightProductionRequestStructure({
+      config: config({
+        providers: Object.fromEntries(
+          profiles.map((profile) => [
+            profile.replace('/surface', ''),
+            { enabled: true },
+          ]),
+        ),
+      }),
+      transport: {
+        kind: 'cli',
+        input: { query: 'surface observations', providers: profiles },
+      },
+    });
+
+    expect(result.prepared.request.slots).toHaveLength(6);
+    expect(
+      result.prepared.request.slots.map((slot) => slot.primary.result_kind),
+    ).toEqual(Array(6).fill('surface_observation'));
+  });
+
+  it('rejects a future unprojectable profile at the structural boundary', () => {
+    const result = preflightProductionRequestStructure(request(config()));
+    const prepared = structuredClone(result.prepared);
+    prepared.request.slots[0]!.primary.result_kind = 'future_result' as never;
+
+    expect(() => assertPreparedResearchResponseProjectable(prepared)).toThrow(
+      /profile_not_projectable/,
+    );
   });
 
   it('rejects an invalid mode before constructing credentials', () => {

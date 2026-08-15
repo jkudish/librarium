@@ -17,6 +17,9 @@ import {
 } from '../src/core/coordinator.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { profileIdentityKey } from '../src/core/execution-plan.js';
+import { BUILTIN_PROFILE_BINDING_SPECS } from '../src/core/profile-bindings.js';
+import { buildProviderCatalog } from '../src/core/profile-catalog.js';
+import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
 import { RunManifestError, readRunManifest } from '../src/core/run-manifest.js';
 import { checkAsyncTasks } from '../src/mcp/async.js';
 import { readRunResults, resolveRunDir } from '../src/mcp/shaping.js';
@@ -76,6 +79,37 @@ function profile(
     invocation,
     resumability: invocation === 'inline' ? 'none' : 'durable',
   };
+}
+
+function surfaceProfiles(): readonly ExecutionProfile[] {
+  const providerConfigs = Object.fromEntries(
+    BUILTIN_PROFILE_BINDING_SPECS.map((spec) => [
+      spec.adapter_id,
+      { enabled: true },
+    ]),
+  );
+  const env = Object.fromEntries(
+    BUILTIN_PROVIDER_CATALOG.map((entry) => [
+      entry.credential.env_var,
+      'test-credential',
+    ]),
+  );
+  const catalog = buildProviderCatalog({
+    providerConfigs,
+    credentials: { env },
+  });
+  return [
+    'searchapi-chatgpt',
+    'searchapi-gemini',
+    'searchapi-perplexity',
+    'searchapi-google-ai-mode',
+    'searchapi-bing-copilot',
+    'searchapi-google-ai-overview',
+  ].map((providerId) => {
+    const resolved = catalog.get(providerId, 'surface');
+    if (!resolved) throw new Error(`missing surface ${providerId}`);
+    return resolved.profile;
+  });
 }
 
 function prepared(
@@ -921,6 +955,55 @@ describe('canonical v3 run.json', () => {
       },
     });
     expect(result.response?.results[0]?.provenance.corpora).toEqual([]);
+  });
+
+  it('truthfully projects every SearchAPI surface profile to terminal provenance', async () => {
+    const { root, runDirectory } = directories();
+    const selected = surfaceProfiles();
+    const providers = Object.fromEntries(
+      selected.map((item) => {
+        const id = `adapter-${item.identity.provider_id}`;
+        return [
+          id,
+          {
+            id,
+            displayName: item.identity.provider_id,
+            tier: 'ai-grounded' as const,
+            envVar: '',
+            execution: 'inline' as const,
+            execute: async () => success(id),
+          },
+        ];
+      }),
+    );
+
+    const result = await runCanonicalPreparedExecution(prepared(selected), {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings(selected, providers),
+    });
+
+    expect(result.response?.status).toBe('succeeded');
+    expect(result.response?.results).toHaveLength(6);
+    for (const profile of selected) {
+      const projected = result.response?.results.find(
+        (item) => item.provider === profile.identity.provider_id,
+      );
+      expect(projected?.provenance).toEqual({
+        result_kind: 'surface_observation',
+        retrieval_methods: ['surface_collector'],
+        corpora: [...profile.corpora],
+        observation_mode: 'surface_snapshot',
+        observed_at: new Date(START).toISOString(),
+        collector: profile.collector_id,
+        surface: profile.surface_id,
+        context: {
+          authentication: profile.surface_context?.account_context,
+          personalization: profile.surface_context?.personalization,
+        },
+      });
+    }
   });
 
   it('projects specialized-only Valyu research without widening public corpora', async () => {
