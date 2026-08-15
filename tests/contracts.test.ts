@@ -105,6 +105,17 @@ describe('terminal interchange schemas', () => {
       { 'com.example:public': { openaiapikey: 'x' } },
       { 'com.example:public': { githubaccesstoken: 'x' } },
       { 'com.example:public': { providerrawresponse: 'x' } },
+      { 'com.example:public': { openaiApiKeyValue: 'x' } },
+      { 'com.example:public': { credentialsBlob: 'x' } },
+      { 'com.example:public': { providerRawResponseData: 'x' } },
+      { 'com.example:public': { vendorSessionTokenValue: 'x' } },
+      { 'com.example:public': { binaryPayloadData: 'x' } },
+      { 'com.example:public': { openaiapikeyvalue: 'x' } },
+      { 'com.example:public': { vendorsessiontokenvalue: 'x' } },
+      { 'com.example:public': { prompttokenvalue: 'x' } },
+      { 'com.example:public': { tokenResponseData: 'x' } },
+      { 'com.example:public': { cookieJar: 'x' } },
+      { 'com.example:openaiApiKeyValue': 'x' },
       {
         'com.example:public': {
           response: { headers: { 'x-request-id': '1' }, status: 200 },
@@ -118,7 +129,15 @@ describe('terminal interchange schemas', () => {
         }).success,
       ).toBe(false);
     }
-    for (const key of ['prompt_tokens', 'token_count', 'binary_classifier']) {
+    for (const key of [
+      'prompt_tokens',
+      'token_count',
+      'binary_classifier',
+      'session_tokens_count',
+      'secret_count',
+      'password_policy',
+      'credentials_guide_url',
+    ]) {
       expect(
         ResearchResultSchema.safeParse({
           ...baseResult,
