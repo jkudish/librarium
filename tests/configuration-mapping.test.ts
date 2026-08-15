@@ -703,31 +703,146 @@ describe('configuration mapping', () => {
     });
   });
 
-  it('materializes defaults.llmWebSearch only for chat adapters lacking an explicit option', () => {
-    const defaultsOff = map(
-      config({
-        defaults: { llmWebSearch: false },
-        providers: { 'openrouter-chat': { enabled: true } },
-      }),
-      { requestDeadlineMs: 2_000_000, credentials: credentials() },
-    );
-    expect(
-      defaultsOff.catalog.get('openrouter', 'chat')?.profile.result_kind,
-    ).toBe('model_answer');
+  it.each([true, false])(
+    'does not inject llmWebSearch=%s into Parallel Chat',
+    (llmWebSearch) => {
+      const mapped = map(
+        config({
+          defaults: { llmWebSearch },
+          providers: { 'parallel-chat': { enabled: true } },
+        }),
+        { requestDeadlineMs: 2_000_000, credentials: credentials() },
+      );
 
-    const providerOverride = map(
-      config({
-        defaults: { llmWebSearch: false },
-        providers: {
-          'openrouter-chat': { enabled: true, options: { webSearch: true } },
+      const parallelChat = mapped.catalog.get('parallel', 'chat');
+      expect(parallelChat?.availability.configuration_valid).toBe(true);
+      expect(parallelChat?.profile.result_kind).toBe('grounded_answer');
+    },
+  );
+
+  it.each([true, false])(
+    'still rejects an explicit unsupported Parallel Chat webSearch=%s option',
+    (webSearch) => {
+      const mapped = map(
+        config({
+          providers: {
+            'parallel-chat': { enabled: true, options: { webSearch } },
+          },
+        }),
+        { requestDeadlineMs: 2_000_000, credentials: credentials() },
+      );
+
+      const parallelChat = mapped.catalog.get('parallel', 'chat');
+      expect(parallelChat?.availability.configuration_valid).toBe(false);
+      expect(parallelChat?.availability.reasons).toContain(
+        'configuration_invalid',
+      );
+    },
+  );
+
+  it.each([
+    ['claude', 'claude'],
+    ['openai-chat', 'openai-chat'],
+    ['gemini-chat', 'gemini-chat'],
+    ['openrouter-chat', 'openrouter'],
+  ] as const)(
+    'preserves llmWebSearch defaults and overrides for %s',
+    (adapterId, providerId) => {
+      const defaultsOff = map(
+        config({
+          defaults: { llmWebSearch: false },
+          providers: { [adapterId]: { enabled: true } },
+        }),
+        { requestDeadlineMs: 2_000_000, credentials: credentials() },
+      );
+      expect(
+        defaultsOff.catalog.get(providerId, 'chat')?.profile.result_kind,
+      ).toBe('model_answer');
+
+      const defaultsOn = map(
+        config({
+          defaults: { llmWebSearch: true },
+          providers: { [adapterId]: { enabled: true } },
+        }),
+        { requestDeadlineMs: 2_000_000, credentials: credentials() },
+      );
+      expect(
+        defaultsOn.catalog.get(providerId, 'chat')?.profile.result_kind,
+      ).toBe('grounded_answer');
+
+      const providerOverrideOn = map(
+        config({
+          defaults: { llmWebSearch: false },
+          providers: {
+            [adapterId]: { enabled: true, options: { webSearch: true } },
+          },
+        }),
+        { requestDeadlineMs: 2_000_000, credentials: credentials() },
+      );
+      expect(
+        providerOverrideOn.catalog.get(providerId, 'chat')?.profile.result_kind,
+      ).toBe('grounded_answer');
+
+      const providerOverrideOff = map(
+        config({
+          defaults: { llmWebSearch: true },
+          providers: {
+            [adapterId]: { enabled: true, options: { webSearch: false } },
+          },
+        }),
+        { requestDeadlineMs: 2_000_000, credentials: credentials() },
+      );
+      expect(
+        providerOverrideOff.catalog.get(providerId, 'chat')?.profile
+          .result_kind,
+      ).toBe('model_answer');
+    },
+  );
+
+  it.each([true, false])(
+    'does not inject built-in llmWebSearch=%s behavior into a custom chat provider',
+    (llmWebSearch) => {
+      const source = customProviderConfig({
+        defaults: { llmWebSearch },
+      });
+      const custom = source.customProviders['acme-adapter'];
+      if (!custom?.executionProfile) throw new Error('missing custom fixture');
+      source.customProviders['acme-adapter'] = {
+        ...custom,
+        executionProfile: {
+          ...custom.executionProfile,
+          bindingId: 'acme.chat.v1',
+          profile: {
+            ...custom.executionProfile.profile,
+            identity: {
+              ...custom.executionProfile.profile.identity,
+              profile_id: 'chat',
+              target: {
+                primary: {
+                  model_selection: 'provider_managed',
+                  kind: 'model',
+                },
+              },
+            },
+            result_kind: 'model_answer',
+            grounding_policy: 'none',
+            corpora: [],
+            retrieval_method: 'model_only',
+          },
         },
-      }),
-      { requestDeadlineMs: 2_000_000, credentials: credentials() },
-    );
-    expect(
-      providerOverride.catalog.get('openrouter', 'chat')?.profile.result_kind,
-    ).toBe('grounded_answer');
-  });
+      };
+
+      const mapped = map(source, { requestDeadlineMs: 2_000_000 });
+      const customChat = mapped.catalog.get('acme-provider', 'chat');
+      expect(customChat?.availability.configuration_valid).toBe(true);
+      expect(customChat?.profile).toMatchObject({
+        result_kind: 'model_answer',
+        grounding_policy: 'none',
+        corpora: [],
+        retrieval_method: 'model_only',
+      });
+    },
+  );
 
   it('flattens and deduplicates valid fallback edges in declaration order', () => {
     const mapped = map(

@@ -23,7 +23,10 @@ import {
   type CustomCatalogProfile,
   type ProviderCatalog,
 } from './profile-catalog.js';
-import { BUILTIN_PROVIDER_DEFINITIONS } from './provider-descriptor.js';
+import {
+  BUILTIN_PROVIDER_DEFINITIONS,
+  getBuiltinProviderDefinition,
+} from './provider-descriptor.js';
 import {
   BUILTIN_PROVIDER_CATALOG,
   type ProviderCatalogEntry,
@@ -618,17 +621,20 @@ function materializeProviderConfigs(config: Config): {
   notices: PreparationNotice[];
 } {
   const byAdapter = safeRecord<ProviderConfig>();
-  const bindings = adapterProfileBindings();
   const normalized = canonicalizeProviderConfigs(config.providers);
 
   for (const [adapterId, providerConfig] of Object.entries(
     normalized.providerConfigs,
   )) {
-    const binding = bindings.get(adapterId);
+    const definition = getBuiltinProviderDefinition(adapterId);
     const options = { ...(providerConfig.options ?? {}) };
-    // v1 applies this global only to LLM/chat providers, and only when the
-    // provider did not make an explicit per-provider choice.
-    if (binding?.profile_id === 'chat' && options.webSearch === undefined) {
+    // v1 applies this global only to adapters whose descriptor declares web
+    // search configurable, and only when the provider made no explicit choice.
+    // A `chat` profile may instead have always-on search and a strict option bag.
+    if (
+      definition?.capabilities.webSearch === 'optional' &&
+      options.webSearch === undefined
+    ) {
       options.webSearch = config.defaults.llmWebSearch;
     }
     byAdapter[adapterId] = {
