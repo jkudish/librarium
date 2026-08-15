@@ -147,6 +147,23 @@ export interface Citation {
 }
 
 // Result from any provider execution
+export type ProviderFailureKind =
+  | 'authentication'
+  | 'plan_required'
+  | 'billing'
+  | 'rate_limit'
+  | 'invalid_request'
+  | 'network'
+  | 'timeout'
+  | 'provider';
+
+/** Bounded, non-secret facts about a provider failure. */
+export interface ProviderFailureDiagnostic {
+  kind: ProviderFailureKind;
+  /** Valid HTTP response status (100-599), when a response was received. */
+  httpStatus?: number;
+}
+
 export interface ProviderResult {
   provider: string;
   tier: ProviderTier;
@@ -160,6 +177,8 @@ export interface ProviderResult {
   /** Safe, allowlisted provider facts projected into canonical provider_meta. */
   providerMeta?: Record<string, unknown>;
   error?: string;
+  /** Safe diagnostic only. Never include provider payloads or raw errors. */
+  failureDiagnostic?: ProviderFailureDiagnostic;
   /** Fail closed when this result must not trigger a configured fallback. */
   preventFallback?: true;
 }

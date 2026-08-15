@@ -7,7 +7,13 @@ import {
   ExecutionProfileSchema,
   executionProfilesEqual,
 } from '../contracts/domain/index.js';
-import type { AsyncTaskHandle, Provider, ProviderResult } from '../types.js';
+import type {
+  AsyncTaskHandle,
+  Provider,
+  ProviderFailureDiagnostic,
+  ProviderFailureKind,
+  ProviderResult,
+} from '../types.js';
 import type { AttemptLaunch } from './coordinator.js';
 import type { AdapterBindingIdentity } from './execution-plan.js';
 import type {
@@ -53,6 +59,100 @@ function providerFailure(
     category,
     retryable,
     fallback_allowed: fallbackAllowed,
+  };
+}
+
+const PROVIDER_FAILURE_KINDS = new Set<ProviderFailureKind>([
+  'authentication',
+  'plan_required',
+  'billing',
+  'rate_limit',
+  'invalid_request',
+  'network',
+  'timeout',
+  'provider',
+]);
+
+function validatedFailureDiagnostic(
+  value: unknown,
+): ProviderFailureDiagnostic | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.kind !== 'string' ||
+    !PROVIDER_FAILURE_KINDS.has(candidate.kind as ProviderFailureKind)
+  ) {
+    return undefined;
+  }
+  const httpStatus = candidate.httpStatus;
+  return {
+    kind: candidate.kind as ProviderFailureKind,
+    ...(typeof httpStatus === 'number' &&
+      Number.isInteger(httpStatus) &&
+      httpStatus >= 100 &&
+      httpStatus <= 599 && { httpStatus }),
+  };
+}
+
+function diagnosedProviderFailure(
+  diagnostic: ProviderFailureDiagnostic | undefined,
+  fallbackAllowed: boolean,
+): StructuredError {
+  const mapped: Record<
+    ProviderFailureKind,
+    Pick<StructuredError, 'code' | 'category' | 'retryable'>
+  > = {
+    authentication: {
+      code: 'provider_authentication_failed',
+      category: 'authentication',
+      retryable: false,
+    },
+    plan_required: {
+      code: 'provider_plan_required',
+      category: 'authorization',
+      retryable: false,
+    },
+    billing: {
+      code: 'provider_billing_failed',
+      category: 'budget',
+      retryable: false,
+    },
+    rate_limit: {
+      code: 'provider_rate_limited',
+      category: 'rate_limit',
+      retryable: true,
+    },
+    invalid_request: {
+      code: 'provider_invalid_request',
+      category: 'validation',
+      retryable: false,
+    },
+    network: {
+      code: 'provider_network_failed',
+      category: 'network',
+      retryable: true,
+    },
+    timeout: {
+      code: 'provider_timeout',
+      category: 'timeout',
+      retryable: true,
+    },
+    provider: {
+      code: 'provider_reported_error',
+      category: 'provider',
+      retryable: true,
+    },
+  };
+  const selected = mapped[diagnostic?.kind ?? 'provider'];
+  return {
+    ...selected,
+    message: 'The provider returned an error.',
+    fallback_allowed: fallbackAllowed,
+    ...(diagnostic?.httpStatus !== undefined && {
+      provider_code: `http_${diagnostic.httpStatus}`,
+    }),
   };
 }
 
@@ -115,13 +215,13 @@ function resultOutcome(
   completedHandle?: DurableHandle,
 ): AttemptExecutionResult {
   if (result.error) {
+    const diagnostic = validatedFailureDiagnostic(result.failureDiagnostic);
     return {
       kind: 'finished',
       finished: {
         outcome: 'failed',
-        error: providerFailure(
-          'provider_reported_error',
-          'The provider returned an error.',
+        error: diagnosedProviderFailure(
+          diagnostic,
           result.preventFallback !== true,
         ),
         ...(completedHandle && { durable_handle: completedHandle }),
