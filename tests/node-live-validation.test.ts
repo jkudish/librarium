@@ -557,6 +557,46 @@ describe('canonical v3 live validation evidence boundary', () => {
     ).toThrow('prohibited material');
   });
 
+  it('admits only frozen provider-namespaced pricing units', () => {
+    const target = buildCanonicalValidationMatrix().targets.find(
+      (candidate) => candidate.key === 'exa/research',
+    );
+    if (!target) throw new Error('missing Exa research target');
+    const base = {
+      target,
+      candidate_fingerprint:
+        'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      request_id: 'request-1',
+      account: 'reviewed-account',
+      region: 'us',
+      lifecycle: 'succeeded' as const,
+    };
+
+    expect(
+      sanitizeCanonicalReceipt({
+        ...base,
+        pricing_quote: { missing_units: ['exa:agent_compute_units'] },
+      }),
+    ).toMatchObject({
+      pricing_quote: { missing_units: ['exa:agent_compute_units'] },
+    });
+
+    for (const unsafeUnit of [
+      'secret:value',
+      'https://example.com/unit',
+      '/private/tmp/unit',
+      'exa:unknown_unit',
+      'unknown:unit',
+    ]) {
+      expect(() =>
+        sanitizeCanonicalReceipt({
+          ...base,
+          pricing_quote: { missing_units: [unsafeUnit] },
+        }),
+      ).toThrow('prohibited material');
+    }
+  });
+
   it('uses deterministic sensibility checks and never treats semantic judgment as a gate', () => {
     const target = buildCanonicalValidationMatrix().targets[0];
     if (!target) throw new Error('missing fixture target');
@@ -2361,7 +2401,7 @@ describe('frozen paid protocol (injected, zero-network)', () => {
     const { gate: frozen, matrix, candidateAuthority } = gate();
     const target = matrix.targets[0]!;
     const protocol = frozen.approval.targets[0]!;
-    const rawManifest = await canonicalManifest(
+    await canonicalManifest(
       target,
       frozen.approval.raw_root,
       'evidence-recovery',
@@ -2396,7 +2436,8 @@ describe('frozen paid protocol (injected, zero-network)', () => {
             protocol.pricing.reserved_microusd ??
             protocol.pricing.approved_maximum_microusd,
           request_fingerprint: frozenRequestFingerprint(target, protocol),
-          evidence_state: 'pending',
+          evidence_state: 'failed',
+          evidence_error: 'evidence_write_failed',
           reference: attemptReference(
             target,
             protocol,
@@ -2431,19 +2472,18 @@ describe('frozen paid protocol (injected, zero-network)', () => {
         },
         reconcile: async () => {
           reconciles += 1;
-          return {
-            status: 'terminal',
-            lifecycle: 'succeeded',
-            request_id: 'evidence-recovery',
-            raw_manifest: rawManifest,
-          };
+          throw new Error('must not reconcile terminal custody');
         },
       },
     });
     expect(prepares).toBe(0);
     expect(executes).toBe(0);
-    expect(reconciles).toBe(1);
-    expect(repository.read()?.attempts[0]?.evidence_state).toBe('complete');
+    expect(reconciles).toBe(0);
+    expect(repository.read()?.attempts[0]).toMatchObject({
+      status: 'succeeded',
+      evidence_state: 'complete',
+    });
+    expect(repository.read()?.attempts[0]?.evidence_error).toBeUndefined();
     expect(
       readPrivateRawEvidence(
         frozen.approval.raw_root,

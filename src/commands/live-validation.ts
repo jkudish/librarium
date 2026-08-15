@@ -1489,28 +1489,43 @@ export async function executeFrozenValidationProtocol(input: {
       }
     }
   }
-  // A prior process can crash after terminal custody is persisted but before
-  // public/private evidence finishes. Reconcile again (never submit) and
-  // regenerate deterministic evidence before scheduling or continuation.
+  // A prior process can crash, or a local evidence write can fail, after
+  // terminal custody is persisted. Rebuild only from the verified terminal
+  // manifest; recovery must never enter a credential-capable executor seam.
   for (const pending of checkpoint.attempts.filter(
     (attempt) =>
       ['succeeded', 'failed', 'cancelled'].includes(attempt.status) &&
-      attempt.evidence_state === 'pending',
+      (attempt.evidence_state === 'pending' ||
+        attempt.evidence_state === 'failed'),
   )) {
     const target = byKey.get(pending.target_key);
     const protocol = protocolByKey.get(pending.target_key);
     if (!target || !protocol || !pending.reference) {
       throw new CanonicalLiveValidationError(
-        'Pending evidence lacks its exact frozen canonical reference.',
+        'Recoverable evidence lacks its exact frozen canonical reference.',
       );
     }
-    referenceAuthority.read(pending.reference, target, 'active');
+    const manifest = referenceAuthority.read(
+      pending.reference,
+      target,
+      'terminal',
+    );
     verifyCandidate();
     const terminal = trustedTerminalOutcome(
       target,
       protocol,
       pending.reference,
-      await input.executor.reconcile(target, protocol, pending.reference),
+      {
+        status: 'terminal',
+        lifecycle:
+          manifest.coordination_state.status === 'succeeded'
+            ? 'succeeded'
+            : manifest.coordination_state.status === 'cancelled'
+              ? 'cancelled'
+              : 'failed',
+        request_id: manifest.request.request_id,
+        raw_manifest: JSON.stringify(manifest),
+      },
       referenceAuthority,
     );
     const quality = frozenEvidenceQuality(target, terminal);
@@ -1555,6 +1570,7 @@ export async function executeFrozenValidationProtocol(input: {
                 validation_failure_reason: 'deterministic_sensibility_failed',
               }),
               evidence_state: 'complete' as const,
+              evidence_error: undefined,
             }
           : attempt,
       ),
