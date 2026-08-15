@@ -1391,8 +1391,16 @@ const FORBIDDEN_RECEIPT_TEXT =
 
 const SAFE_RECEIPT_STRING =
   /^(?:USD|[a-z][a-z0-9._-]{0,127}(?:\/[a-z][a-z0-9._-]{0,127})?|(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.(?:0|[1-9]\d*)|(?:0|[1-9]\d*)(?:\.\d{1,36})?|[a-f0-9]{40}|sha256:[a-f0-9]{64}|fnv1a64\.1:[a-f0-9]{16})$/;
+const SAFE_PROVIDER_PRICING_UNIT =
+  /^[a-z][a-z0-9-]{0,62}:[a-z][a-z0-9_]{0,62}$/;
+const PRICING_UNIT_RECEIPT_PATH =
+  /^receipt\.pricing_quote\.missing_units\[\d+\]$/;
 
-function assertSafeReceiptValue(value: unknown, path = 'receipt'): void {
+function assertSafeReceiptValue(
+  value: unknown,
+  path = 'receipt',
+  frozenPricingUnits: ReadonlySet<string> = new Set(),
+): void {
   if (
     value === null ||
     typeof value === 'boolean' ||
@@ -1401,9 +1409,13 @@ function assertSafeReceiptValue(value: unknown, path = 'receipt'): void {
     return;
   }
   if (typeof value === 'string') {
+    const isFrozenProviderPricingUnit =
+      PRICING_UNIT_RECEIPT_PATH.test(path) &&
+      SAFE_PROVIDER_PRICING_UNIT.test(value) &&
+      frozenPricingUnits.has(value);
     if (
       value.length > 256 ||
-      !SAFE_RECEIPT_STRING.test(value) ||
+      (!SAFE_RECEIPT_STRING.test(value) && !isFrozenProviderPricingUnit) ||
       FORBIDDEN_RECEIPT_TEXT.test(value)
     ) {
       throw new CanonicalLiveValidationError(
@@ -1419,7 +1431,7 @@ function assertSafeReceiptValue(value: unknown, path = 'receipt'): void {
       );
     }
     value.forEach((item, index) => {
-      assertSafeReceiptValue(item, `${path}[${index}]`);
+      assertSafeReceiptValue(item, `${path}[${index}]`, frozenPricingUnits);
     });
     return;
   }
@@ -1443,7 +1455,7 @@ function assertSafeReceiptValue(value: unknown, path = 'receipt'): void {
         `Public receipt has a prohibited field at ${path}.`,
       );
     }
-    assertSafeReceiptValue(child, `${path}.${key}`);
+    assertSafeReceiptValue(child, `${path}.${key}`, frozenPricingUnits);
   }
 }
 
@@ -1521,6 +1533,9 @@ export function sanitizeCanonicalReceipt(input: {
     quality: input.quality,
   };
   const serialized = canonicalJson(receipt);
-  assertSafeReceiptValue(JSON.parse(serialized));
+  const frozenPricingUnits = new Set(
+    quoteCanonicalValidationTarget(input.target).quote.missing_units,
+  );
+  assertSafeReceiptValue(JSON.parse(serialized), 'receipt', frozenPricingUnits);
   return JSON.parse(serialized) as Record<string, unknown>;
 }
