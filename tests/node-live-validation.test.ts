@@ -2,6 +2,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -26,7 +27,9 @@ import {
   frozenRequestFingerprint,
   installOfflineNetworkGuard,
   installOfflineValidationSigint,
+  rebuildFrozenValidationEvidence,
   registerLiveValidationCommand,
+  terminalValidationCertification,
 } from '../src/commands/live-validation.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { profileIdentityKey } from '../src/core/execution-plan.js';
@@ -1175,6 +1178,27 @@ describe('canonical live-validation CLI protocol', () => {
         ?.options.map((option) => option.long),
     ).not.toContain('--providers');
   });
+
+  it('rejects continuation before entering unpaid offline mode', async () => {
+    let guarded = 0;
+    const program = new Command();
+    program.exitOverride();
+    registerLiveValidationCommand(program, {
+      installNetworkGuard: () => {
+        guarded += 1;
+        return () => {};
+      },
+    });
+    await expect(
+      program.parseAsync([
+        'node',
+        'librarium',
+        'live-validation',
+        '--continue',
+      ]),
+    ).rejects.toThrow('--continue requires explicit --paid');
+    expect(guarded).toBe(0);
+  });
 });
 
 describe('frozen paid protocol (injected, zero-network)', () => {
@@ -1449,6 +1473,40 @@ describe('frozen paid protocol (injected, zero-network)', () => {
           )
         : ({} as ReturnType<typeof CanonicalRunManifestV3Schema.parse>),
   };
+
+  it('reports terminal certification with success-only completed results', () => {
+    expect(
+      terminalValidationCertification(
+        {
+          completed: ['provider-a/profile'],
+          failed: ['provider-b/profile'],
+          cancelled: ['provider-c/profile'],
+          reserved_microusd: '123',
+        },
+        3,
+      ),
+    ).toStrictEqual({
+      mode: 'paid',
+      certification: 'failed',
+      target_count: 3,
+      succeeded: ['provider-a/profile'],
+      failed: ['provider-b/profile'],
+      cancelled: ['provider-c/profile'],
+      reserved_microusd: '123',
+    });
+    expect(
+      terminalValidationCertification(
+        {
+          completed: ['provider-a/profile'],
+          failed: [],
+          cancelled: [],
+          active: 'provider-b/profile',
+          reserved_microusd: '1',
+        },
+        2,
+      ),
+    ).toBeUndefined();
+  });
 
   it('performs every structural/drift/budget gate before the credential-capable prepare seam', async () => {
     const { gate: frozen, matrix, candidateAuthority } = gate();
@@ -2441,6 +2499,407 @@ describe('frozen paid protocol (injected, zero-network)', () => {
       status: 'failed',
       evidence_state: 'complete',
     });
+  });
+
+  it('continues past settled terminal receipts without resubmitting them', async () => {
+    const { gate: frozen, matrix, candidateAuthority } = gate();
+    const [succeeded, failed, cancelled, next] = matrix.targets;
+    const [succeededProtocol, failedProtocol, cancelledProtocol] =
+      frozen.approval.targets;
+    if (
+      !succeeded ||
+      !failed ||
+      !cancelled ||
+      !next ||
+      !succeededProtocol ||
+      !failedProtocol ||
+      !cancelledProtocol
+    ) {
+      throw new Error('missing continuation fixtures');
+    }
+    await canonicalManifest(
+      succeeded,
+      frozen.approval.raw_root,
+      'settled-succeeded',
+    );
+    await canonicalManifest(
+      failed,
+      frozen.approval.raw_root,
+      'settled-failed',
+      'failed',
+    );
+    const cancelledRaw = JSON.parse(
+      await canonicalManifest(
+        cancelled,
+        frozen.approval.raw_root,
+        'settled-cancelled',
+        'failed',
+      ),
+    );
+    cancelledRaw.coordination_state.status = 'cancelled';
+    fixtureManifests.set('settled-cancelled', JSON.stringify(cancelledRaw));
+    const settledReferenceAuthority = {
+      read: (
+        reference: { readonly request_id: string },
+        _target: unknown,
+        phase: string,
+      ) =>
+        (phase === 'terminal'
+          ? JSON.parse(fixtureManifests.get(reference.request_id)!)
+          : {}) as ReturnType<typeof CanonicalRunManifestV3Schema.parse>,
+    };
+    const terminalAttempt = (
+      target: typeof succeeded,
+      protocol: typeof succeededProtocol,
+      status: 'succeeded' | 'failed' | 'cancelled',
+      requestId: string,
+    ) => ({
+      target_key: target.key,
+      credential_family: protocol.credential_reference,
+      status,
+      reserved_microusd:
+        protocol.pricing.reserved_microusd ??
+        protocol.pricing.approved_maximum_microusd,
+      request_fingerprint: frozenRequestFingerprint(target, protocol),
+      reference: attemptReference(
+        target,
+        protocol,
+        frozen.approval.raw_root,
+        requestId,
+      ),
+      evidence_state: 'complete' as const,
+      raw_evidence_name: `${target.key.replace('/', '-')}.manifest`,
+      receipt_evidence_name: `${target.key.replace('/', '-')}.json`,
+    });
+    const settledAttempts = [
+      terminalAttempt(
+        succeeded,
+        succeededProtocol,
+        'succeeded',
+        'settled-succeeded',
+      ),
+      terminalAttempt(failed, failedProtocol, 'failed', 'settled-failed'),
+      terminalAttempt(
+        cancelled,
+        cancelledProtocol,
+        'cancelled',
+        'settled-cancelled',
+      ),
+    ];
+    for (const [attempt, target, protocol, raw] of [
+      [
+        settledAttempts[0]!,
+        succeeded,
+        succeededProtocol,
+        fixtureManifests.get('settled-succeeded')!,
+      ],
+      [
+        settledAttempts[1]!,
+        failed,
+        failedProtocol,
+        fixtureManifests.get('settled-failed')!,
+      ],
+      [
+        settledAttempts[2]!,
+        cancelled,
+        cancelledProtocol,
+        fixtureManifests.get('settled-cancelled')!,
+      ],
+    ] as const) {
+      const evidence = rebuildFrozenValidationEvidence(
+        frozen,
+        target,
+        protocol,
+        {
+          status: 'terminal',
+          lifecycle: attempt.status,
+          request_id: attempt.reference.request_id,
+          raw_manifest: raw,
+          manifest: JSON.parse(raw),
+        },
+        attempt.status,
+      );
+      writeFileSync(
+        join(frozen.approval.raw_root, attempt.raw_evidence_name),
+        raw,
+      );
+      writeFileSync(
+        join(frozen.approval.receipt_root, attempt.receipt_evidence_name),
+        JSON.stringify(evidence.receipt),
+      );
+    }
+    const repository = new CanonicalValidationCheckpointRepository(
+      frozen.approval.raw_root,
+    );
+    repository.create({
+      schema_version: 1,
+      pins: {
+        matrix_fingerprint: matrix.fingerprint,
+        catalog_digest: matrix.catalog_digest,
+        pricing_snapshot_fingerprint: matrix.pricing_snapshot_fingerprint,
+        candidate_fingerprint: frozen.approval.candidate.fingerprint,
+        approval_fingerprint: frozen.fingerprint,
+        target_protocols_digest: approvalTargetProtocolsDigest(frozen.approval),
+      },
+      target_order: frozen.approval.targets.map((target) => target.key),
+      attempts: settledAttempts,
+      interrupted: false,
+    });
+    const prepared: string[] = [];
+    const executed: string[] = [];
+    const executor = {
+      prepare: async (
+        target: typeof succeeded,
+        protocol: typeof succeededProtocol,
+      ) => {
+        prepared.push(target.key);
+        return attemptReference(target, protocol, frozen.approval.raw_root);
+      },
+      execute: async (target: typeof succeeded) => {
+        executed.push(target.key);
+        return {
+          status: 'reconcile' as const,
+          request_id: `request-${target.key.replace('/', '-')}`,
+          raw_manifest: '',
+        };
+      },
+      reconcile: async () => {
+        throw new Error('must not reconcile settled attempts');
+      },
+    };
+
+    await expect(
+      executeFrozenValidationProtocol({
+        gate: frozen,
+        matrix,
+        candidate_authority: candidateAuthority,
+        reference_manifest_authority: settledReferenceAuthority,
+        repository,
+        executor,
+      }),
+    ).rejects.toThrow(`stopped by terminal state: ${failed.key}`);
+    expect({ prepared, executed }).toStrictEqual({
+      prepared: [],
+      executed: [],
+    });
+
+    const failedReceiptPath = join(
+      frozen.approval.receipt_root,
+      settledAttempts[1]!.receipt_evidence_name,
+    );
+    const failedReceipt = readFileSync(failedReceiptPath, 'utf8');
+    writeFileSync(failedReceiptPath, '{}');
+    expect(() =>
+      continueFrozenValidationProtocol(
+        repository,
+        frozen,
+        matrix,
+        frozen.fingerprint,
+        candidateAuthority,
+        settledReferenceAuthority,
+      ),
+    ).toThrow(`Continuation evidence drifted: ${failed.key}`);
+    expect(repository.read()?.attempts[1]).not.toHaveProperty(
+      'continuation_acknowledged',
+    );
+    writeFileSync(failedReceiptPath, failedReceipt);
+    writeFileSync(
+      failedReceiptPath,
+      JSON.stringify({ ...JSON.parse(failedReceipt), unexpected: true }),
+    );
+    expect(() =>
+      continueFrozenValidationProtocol(
+        repository,
+        frozen,
+        matrix,
+        frozen.fingerprint,
+        candidateAuthority,
+        settledReferenceAuthority,
+      ),
+    ).toThrow(`Continuation evidence drifted: ${failed.key}`);
+    writeFileSync(failedReceiptPath, failedReceipt);
+    rmSync(failedReceiptPath);
+    expect(() =>
+      continueFrozenValidationProtocol(
+        repository,
+        frozen,
+        matrix,
+        frozen.fingerprint,
+        candidateAuthority,
+        settledReferenceAuthority,
+      ),
+    ).toThrow('sanitized receipt evidence is missing or invalid');
+    writeFileSync(failedReceiptPath, failedReceipt);
+
+    continueFrozenValidationProtocol(
+      repository,
+      frozen,
+      matrix,
+      frozen.fingerprint,
+      candidateAuthority,
+      settledReferenceAuthority,
+    );
+    expect(repository.read()?.attempts[1]).toMatchObject({
+      status: 'failed',
+      continuation_acknowledged: true,
+    });
+    expect(repository.read()?.attempts[2]).not.toHaveProperty(
+      'continuation_acknowledged',
+    );
+    await expect(
+      executeFrozenValidationProtocol({
+        gate: frozen,
+        matrix,
+        candidate_authority: candidateAuthority,
+        reference_manifest_authority: settledReferenceAuthority,
+        repository,
+        executor,
+      }),
+    ).rejects.toThrow(`stopped by terminal state: ${cancelled.key}`);
+    expect({ prepared, executed }).toStrictEqual({
+      prepared: [],
+      executed: [],
+    });
+
+    continueFrozenValidationProtocol(
+      repository,
+      frozen,
+      matrix,
+      frozen.fingerprint,
+      candidateAuthority,
+      settledReferenceAuthority,
+    );
+    const result = await executeFrozenValidationProtocol({
+      gate: frozen,
+      matrix,
+      candidate_authority: candidateAuthority,
+      reference_manifest_authority: settledReferenceAuthority,
+      repository,
+      executor,
+    });
+    expect({ prepared, executed }).toStrictEqual({
+      prepared: [next.key],
+      executed: [next.key],
+    });
+    expect(result.completed).toContain(succeeded.key);
+    expect(result.active).toBe(next.key);
+    expect(repository.read()?.attempts.slice(0, 3)).toStrictEqual([
+      settledAttempts[0],
+      { ...settledAttempts[1], continuation_acknowledged: true },
+      { ...settledAttempts[2], continuation_acknowledged: true },
+    ]);
+  });
+
+  it.each([
+    ['running', 'running', undefined],
+    ['ambiguous', 'ambiguous', undefined],
+    ['pending terminal evidence', 'failed', 'pending'],
+    ['failed terminal evidence', 'failed', 'failed'],
+  ] as const)(
+    'blocks explicit continuation for %s state',
+    (_label, status, evidenceState) => {
+      const { gate: frozen, matrix, candidateAuthority } = gate();
+      const target = matrix.targets[0]!;
+      const protocol = frozen.approval.targets[0]!;
+      const repository = new CanonicalValidationCheckpointRepository(
+        frozen.approval.raw_root,
+      );
+      repository.create({
+        schema_version: 1,
+        pins: {
+          matrix_fingerprint: matrix.fingerprint,
+          catalog_digest: matrix.catalog_digest,
+          pricing_snapshot_fingerprint: matrix.pricing_snapshot_fingerprint,
+          candidate_fingerprint: frozen.approval.candidate.fingerprint,
+          approval_fingerprint: frozen.fingerprint,
+          target_protocols_digest: approvalTargetProtocolsDigest(
+            frozen.approval,
+          ),
+        },
+        target_order: frozen.approval.targets.map((entry) => entry.key),
+        attempts: [
+          {
+            target_key: target.key,
+            credential_family: protocol.credential_reference,
+            status,
+            reserved_microusd:
+              protocol.pricing.reserved_microusd ??
+              protocol.pricing.approved_maximum_microusd,
+            request_fingerprint: frozenRequestFingerprint(target, protocol),
+            reference: attemptReference(
+              target,
+              protocol,
+              frozen.approval.raw_root,
+              `blocked-${status}`,
+            ),
+            ...(evidenceState && {
+              evidence_state: evidenceState,
+              raw_evidence_name: `${target.key.replace('/', '-')}.manifest`,
+              receipt_evidence_name: `${target.key.replace('/', '-')}.json`,
+              ...(evidenceState === 'failed' && {
+                evidence_error: 'fixture_evidence_failed',
+              }),
+            }),
+          },
+        ],
+        interrupted: false,
+      });
+      expect(() =>
+        continueFrozenValidationProtocol(
+          repository,
+          frozen,
+          matrix,
+          frozen.fingerprint,
+          candidateAuthority,
+        ),
+      ).toThrow(
+        evidenceState
+          ? 'Complete terminal evidence is required'
+          : status === 'ambiguous'
+            ? 'Ambiguous billable submission requires exact reconciliation'
+            : 'Exact reconciliation is required',
+      );
+    },
+  );
+
+  it('blocks explicit continuation when approval continuity drifts', () => {
+    const { gate: frozen, matrix, candidateAuthority } = gate();
+    const repository = new CanonicalValidationCheckpointRepository(
+      frozen.approval.raw_root,
+    );
+    repository.create({
+      schema_version: 1,
+      pins: {
+        matrix_fingerprint: matrix.fingerprint,
+        catalog_digest: matrix.catalog_digest,
+        pricing_snapshot_fingerprint: matrix.pricing_snapshot_fingerprint,
+        candidate_fingerprint: frozen.approval.candidate.fingerprint,
+        approval_fingerprint: frozen.fingerprint,
+        target_protocols_digest: approvalTargetProtocolsDigest(frozen.approval),
+      },
+      target_order: frozen.approval.targets.map((target) => target.key),
+      attempts: [],
+      interrupted: false,
+    });
+    const approval = {
+      ...frozen.approval,
+      targets: frozen.approval.targets.map((target, index) =>
+        index === 0 ? { ...target, query: 'drifted query' } : target,
+      ),
+    };
+    const drifted = {
+      approval,
+      fingerprint: approvalFingerprint(approval),
+    };
+    expect(() =>
+      continueFrozenValidationProtocol(
+        repository,
+        drifted,
+        matrix,
+        drifted.fingerprint,
+        candidateAuthority,
+      ),
+    ).toThrow('approval protocol continuity drifted');
   });
 
   it('fails closed on a stale checkpoint CAS before the execute seam', async () => {

@@ -344,6 +344,8 @@ export interface CanonicalValidationAttempt {
   readonly raw_evidence_name?: string;
   readonly receipt_evidence_name?: string;
   readonly validation_failure_reason?: string;
+  /** Explicit durable operator acknowledgement of a settled non-success. */
+  readonly continuation_acknowledged?: true;
   readonly reference?: FrozenAttemptReference;
 }
 
@@ -458,6 +460,7 @@ const CheckpointSchema = z
             .regex(/^[a-z0-9._-]{1,128}$/)
             .optional(),
           validation_failure_reason: z.string().min(1).max(128).optional(),
+          continuation_acknowledged: z.literal(true).optional(),
           reference: z
             .strictObject({
               runs_root: z.string().min(1).max(512),
@@ -521,6 +524,18 @@ const CheckpointSchema = z
               message:
                 'Terminal evidence state, names, and failure reason are inconsistent',
               path: ['evidence_state'],
+            });
+          }
+          if (
+            attempt.continuation_acknowledged &&
+            (!['failed', 'cancelled'].includes(attempt.status) ||
+              attempt.evidence_state !== 'complete')
+          ) {
+            ctx.addIssue({
+              code: 'custom',
+              message:
+                'Continuation acknowledgement requires settled failed or cancelled evidence',
+              path: ['continuation_acknowledged'],
             });
           }
         })

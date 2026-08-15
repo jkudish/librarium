@@ -22,6 +22,7 @@ import {
   type FrozenAttemptReference,
   type FrozenCanonicalRequestContract,
   quoteCanonicalValidationTarget,
+  readPrivateRawEvidence,
   sanitizeCanonicalReceipt,
   validateCanonicalValidationCheckpoint,
   writePrivateRawEvidence,
@@ -666,13 +667,16 @@ export function installOfflineValidationSigint(
   return () => processLike.removeListener('SIGINT', onSignal);
 }
 
-/** Explicit human continuation after an interrupted run has no unsettled work. */
+/** Explicit human continuation after a run has no unsettled work. */
 export function continueFrozenValidationProtocol(
   repository: CanonicalValidationCheckpointRepository,
   gate: ApprovalGate,
   matrix: ReturnType<typeof buildCanonicalValidationMatrix>,
   confirmation: string,
   candidateAuthority: FrozenCandidateAuthority,
+  referenceAuthority: FrozenReferenceManifestAuthority = Object.freeze({
+    read: readTrustedFrozenReferenceManifest,
+  }),
 ): void {
   const checkpoint = repository.read();
   if (!checkpoint) {
@@ -711,6 +715,12 @@ export function continueFrozenValidationProtocol(
     checkpoint,
     matrix,
     gate.approval.candidate.fingerprint,
+    {
+      approved_unknown_targets: gate.approval.targets
+        .filter((target) => target.pricing.unknown_approved)
+        .map((target) => target.key),
+      aggregate_budget_microusd: gate.approval.aggregate_budget_microusd,
+    },
   );
   if (
     checkpoint.attempts.some((attempt) =>
@@ -721,13 +731,125 @@ export function continueFrozenValidationProtocol(
       'Exact reconciliation is required before continuation.',
     );
   }
-  if (!checkpoint.interrupted) return;
   if (
-    !repository.compareAndSwap(checkpoint, {
-      ...checkpoint,
-      interrupted: false,
-    })
+    checkpoint.attempts.some(
+      (attempt) =>
+        ['succeeded', 'failed', 'cancelled'].includes(attempt.status) &&
+        attempt.evidence_state !== 'complete',
+    )
   ) {
+    throw new CanonicalLiveValidationError(
+      'Complete terminal evidence is required before continuation.',
+    );
+  }
+  const byKey = new Map(matrix.targets.map((target) => [target.key, target]));
+  const protocolByKey = new Map(
+    gate.approval.targets.map((target) => [target.key, target]),
+  );
+  for (const attempt of checkpoint.attempts) {
+    if (!['succeeded', 'failed', 'cancelled'].includes(attempt.status))
+      continue;
+    const target = byKey.get(attempt.target_key);
+    const protocol = protocolByKey.get(attempt.target_key);
+    if (
+      !target ||
+      !protocol ||
+      !attempt.reference ||
+      !attempt.raw_evidence_name ||
+      !attempt.receipt_evidence_name
+    ) {
+      throw new CanonicalLiveValidationError(
+        'Continuation terminal evidence is incomplete.',
+      );
+    }
+    const manifest = referenceAuthority.read(
+      attempt.reference,
+      target,
+      'terminal',
+    );
+    const terminal = trustedTerminalOutcome(
+      target,
+      protocol,
+      attempt.reference,
+      {
+        status: 'terminal',
+        lifecycle:
+          manifest.coordination_state.status === 'succeeded'
+            ? 'succeeded'
+            : manifest.coordination_state.status === 'cancelled'
+              ? 'cancelled'
+              : 'failed',
+        request_id: manifest.request.request_id,
+        raw_manifest: JSON.stringify(manifest),
+      },
+      referenceAuthority,
+    );
+    const quality = frozenEvidenceQuality(target, terminal);
+    const expectedStatus =
+      terminal.lifecycle === 'succeeded' && quality.passed !== true
+        ? 'failed'
+        : terminal.lifecycle;
+    const rawEvidence = readPrivateRawEvidence(
+      gate.approval.raw_root,
+      attempt.raw_evidence_name,
+    );
+    let receipt: Record<string, unknown>;
+    try {
+      const receiptRoot = safeExistingDirectory(
+        gate.approval.receipt_root,
+        'Sanitized receipt root',
+      );
+      const receiptPath = resolve(receiptRoot, attempt.receipt_evidence_name);
+      const stat = lstatSync(receiptPath);
+      if (stat.isSymbolicLink() || !stat.isFile()) throw new Error('unsafe');
+      receipt = JSON.parse(readFileSync(receiptPath, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      throw new CanonicalLiveValidationError(
+        'Continuation sanitized receipt evidence is missing or invalid.',
+      );
+    }
+    const rebuilt = rebuildFrozenValidationEvidence(
+      gate,
+      target,
+      protocol,
+      { ...terminal, raw_manifest: rawEvidence },
+      expectedStatus,
+    );
+    if (
+      attempt.status !== expectedStatus ||
+      canonicalJson(JSON.parse(rawEvidence)) !== canonicalJson(manifest) ||
+      canonicalJson(receipt) !== canonicalJson(rebuilt.receipt) ||
+      canonicalJson(quality) !== canonicalJson(rebuilt.quality)
+    ) {
+      throw new CanonicalLiveValidationError(
+        `Continuation evidence drifted: ${attempt.target_key}.`,
+      );
+    }
+  }
+  const blocker = gate.approval.targets
+    .map((target) =>
+      checkpoint.attempts.find((attempt) => attempt.target_key === target.key),
+    )
+    .find(
+      (attempt) =>
+        attempt !== undefined &&
+        ['failed', 'cancelled'].includes(attempt.status) &&
+        !attempt.continuation_acknowledged,
+    );
+  if (!blocker && !checkpoint.interrupted) return;
+  const nextCheckpoint = {
+    ...checkpoint,
+    interrupted: false,
+    attempts: checkpoint.attempts.map((attempt) =>
+      blocker && attempt.target_key === blocker.target_key
+        ? { ...attempt, continuation_acknowledged: true as const }
+        : attempt,
+    ),
+  };
+  if (!repository.compareAndSwap(checkpoint, nextCheckpoint)) {
     throw new CanonicalLiveValidationError(
       'Checkpoint changed during continuation.',
     );
@@ -736,8 +858,41 @@ export function continueFrozenValidationProtocol(
 
 export interface FrozenExecutionState {
   readonly completed: readonly string[];
+  readonly failed: readonly string[];
+  readonly cancelled: readonly string[];
   readonly active?: string;
   readonly reserved_microusd: string;
+}
+
+export function terminalValidationCertification(
+  state: FrozenExecutionState,
+  targetCount: number,
+):
+  | undefined
+  | {
+      readonly mode: 'paid';
+      readonly certification: 'passed' | 'failed';
+      readonly target_count: number;
+      readonly succeeded: readonly string[];
+      readonly failed: readonly string[];
+      readonly cancelled: readonly string[];
+      readonly reserved_microusd: string;
+    } {
+  const settled =
+    state.completed.length + state.failed.length + state.cancelled.length;
+  if (state.active || settled !== targetCount) return undefined;
+  return Object.freeze({
+    mode: 'paid',
+    certification:
+      state.failed.length === 0 && state.cancelled.length === 0
+        ? 'passed'
+        : 'failed',
+    target_count: targetCount,
+    succeeded: state.completed,
+    failed: state.failed,
+    cancelled: state.cancelled,
+    reserved_microusd: state.reserved_microusd,
+  });
 }
 
 interface TrustedTerminalOutcome {
@@ -978,13 +1133,16 @@ function canonicalMeteringMetadata(
   return value as unknown as SafeCanonicalMetering;
 }
 
-function writeFrozenEvidence(
+export function rebuildFrozenValidationEvidence(
   gate: ApprovalGate,
   target: CanonicalValidationTarget,
   protocol: LiveValidationApproval['targets'][number],
   result: TrustedTerminalOutcome,
   lifecycleOverride?: 'succeeded' | 'failed' | 'cancelled',
-): { readonly passed: boolean; readonly reason?: string } {
+): {
+  readonly quality: Readonly<Record<string, boolean>>;
+  readonly receipt: Record<string, unknown>;
+} {
   const response = result.manifest.terminal_response;
   if (!response) {
     throw new CanonicalLiveValidationError(
@@ -1026,6 +1184,114 @@ function writeFrozenEvidence(
   const canonicalMetering = canonicalMeteringMetadata(providerMeta);
   const actualSource = canonicalMetering?.actual_cost_source ?? 'unknown';
   const quality = frozenEvidenceQuality(target, result);
+  const receipt = sanitizeCanonicalReceipt({
+    target,
+    candidate_fingerprint: gate.approval.candidate.fingerprint,
+    candidate_git_sha: gate.approval.candidate.git_sha,
+    candidate_version: gate.approval.candidate.version,
+    artifact_hashes: gate.approval.candidate.artifact_hashes,
+    pricing_quote: {
+      status: protocol.pricing.status,
+      reserved_microusd: protocol.pricing.reserved_microusd ?? '0',
+      ...(protocol.pricing.approved_maximum_microusd && {
+        approved_maximum_microusd: protocol.pricing.approved_maximum_microusd,
+      }),
+      currency: quote.currency,
+      completeness: quote.status,
+      missing_units: quote.missing_units,
+      source_class: quote.provenance?.source_class ?? 'unknown',
+      snapshot_fingerprint: quote.snapshot_fingerprint,
+    },
+    request_fingerprint: frozenRequestFingerprint(target, protocol),
+    run_evidence_sha256: `sha256:${createHash('sha256')
+      .update(result.raw_manifest)
+      .digest('hex')}`,
+    request_id: result.request_id,
+    account: protocol.account,
+    region: protocol.region,
+    lifecycle: lifecycleOverride ?? result.lifecycle,
+    response: {
+      content: resultBodies.join('\n'),
+      citations,
+    },
+    usage: response.usage,
+    // Namespaced canonical metering is authoritative even when a provider
+    // has no token/USD usage object. Unit-priced, token-computed, and
+    // account-delta evidence must survive the public receipt boundary.
+    metering:
+      primary?.usage || canonicalMetering
+        ? {
+            ...(canonicalMetering && { kind: canonicalMetering.kind }),
+            ...(canonicalMetering?.pricing_version && {
+              pricing_version: canonicalMetering.pricing_version,
+            }),
+            ...(primary?.usage?.actual_cost !== undefined && {
+              actual_cost: primary.usage.actual_cost,
+            }),
+            ...(primary?.usage?.estimated_cost !== undefined && {
+              estimated_cost: primary.usage.estimated_cost,
+            }),
+            ...(primary?.usage?.currency && {
+              currency: primary.usage.currency,
+            }),
+            source: actualSource,
+            source_class: canonicalMetering?.source_class ?? 'unknown',
+            completeness: canonicalMetering?.actual_completeness ?? 'unknown',
+            missing_units: canonicalMetering?.missing_units ?? [],
+            ...(canonicalMetering?.billable_units !== undefined && {
+              billable_units: canonicalMetering.billable_units,
+            }),
+            ...(canonicalMetering?.billable_unit && {
+              billable_unit: canonicalMetering.billable_unit,
+            }),
+            evidence_source: canonicalMetering
+              ? (canonicalMetering.actual_evidence ?? 'librarium_metering')
+              : 'unknown',
+            ...(primary?.usage?.prompt_tokens !== undefined && {
+              prompt_tokens: primary.usage.prompt_tokens,
+            }),
+            ...(primary?.usage?.completion_tokens !== undefined && {
+              completion_tokens: primary.usage.completion_tokens,
+            }),
+          }
+        : { completeness: 'unknown' },
+    provenance: provenance
+      ? {
+          result_kind: provenance.result_kind,
+          retrieval_methods_sha256: `sha256:${createHash('sha256')
+            .update(canonicalJson(provenance.retrieval_methods))
+            .digest('hex')}`,
+          corpora_sha256: `sha256:${createHash('sha256')
+            .update(canonicalJson(provenance.corpora))
+            .digest('hex')}`,
+          access_mode: profile?.access_mode ?? 'unverified',
+          operator_id: profile?.operator_id ?? 'unverified',
+          evidence_source: 'effective_profile',
+          ...(profile?.collector_id && {
+            collector_id: profile.collector_id,
+          }),
+          ...(profile?.surface_id && { surface_id: profile.surface_id }),
+        }
+      : undefined,
+    quality,
+  });
+  return { quality, receipt };
+}
+
+function writeFrozenEvidence(
+  gate: ApprovalGate,
+  target: CanonicalValidationTarget,
+  protocol: LiveValidationApproval['targets'][number],
+  result: TrustedTerminalOutcome,
+  lifecycleOverride?: 'succeeded' | 'failed' | 'cancelled',
+): { readonly passed: boolean; readonly reason?: string } {
+  const built = rebuildFrozenValidationEvidence(
+    gate,
+    target,
+    protocol,
+    result,
+    lifecycleOverride,
+  );
   writePrivateRawEvidence(
     gate.approval.raw_root,
     `${target.key.replace('/', '-')}.manifest`,
@@ -1034,99 +1300,9 @@ function writeFrozenEvidence(
   writeSanitizedCanonicalReceipt(
     gate.approval.receipt_root,
     `${target.key.replace('/', '-')}.json`,
-    sanitizeCanonicalReceipt({
-      target,
-      candidate_fingerprint: gate.approval.candidate.fingerprint,
-      candidate_git_sha: gate.approval.candidate.git_sha,
-      candidate_version: gate.approval.candidate.version,
-      artifact_hashes: gate.approval.candidate.artifact_hashes,
-      pricing_quote: {
-        status: protocol.pricing.status,
-        reserved_microusd: protocol.pricing.reserved_microusd ?? '0',
-        ...(protocol.pricing.approved_maximum_microusd && {
-          approved_maximum_microusd: protocol.pricing.approved_maximum_microusd,
-        }),
-        currency: quote.currency,
-        completeness: quote.status,
-        missing_units: quote.missing_units,
-        source_class: quote.provenance?.source_class ?? 'unknown',
-        snapshot_fingerprint: quote.snapshot_fingerprint,
-      },
-      request_fingerprint: frozenRequestFingerprint(target, protocol),
-      run_evidence_sha256: `sha256:${createHash('sha256')
-        .update(result.raw_manifest)
-        .digest('hex')}`,
-      request_id: result.request_id,
-      account: protocol.account,
-      region: protocol.region,
-      lifecycle: lifecycleOverride ?? result.lifecycle,
-      response: {
-        content: resultBodies.join('\n'),
-        citations,
-      },
-      usage: response.usage,
-      // Namespaced canonical metering is authoritative even when a provider
-      // has no token/USD usage object. Unit-priced, token-computed, and
-      // account-delta evidence must survive the public receipt boundary.
-      metering:
-        primary?.usage || canonicalMetering
-          ? {
-              ...(canonicalMetering && { kind: canonicalMetering.kind }),
-              ...(canonicalMetering?.pricing_version && {
-                pricing_version: canonicalMetering.pricing_version,
-              }),
-              ...(primary?.usage?.actual_cost !== undefined && {
-                actual_cost: primary.usage.actual_cost,
-              }),
-              ...(primary?.usage?.estimated_cost !== undefined && {
-                estimated_cost: primary.usage.estimated_cost,
-              }),
-              ...(primary?.usage?.currency && {
-                currency: primary.usage.currency,
-              }),
-              source: actualSource,
-              source_class: canonicalMetering?.source_class ?? 'unknown',
-              completeness: canonicalMetering?.actual_completeness ?? 'unknown',
-              missing_units: canonicalMetering?.missing_units ?? [],
-              ...(canonicalMetering?.billable_units !== undefined && {
-                billable_units: canonicalMetering.billable_units,
-              }),
-              ...(canonicalMetering?.billable_unit && {
-                billable_unit: canonicalMetering.billable_unit,
-              }),
-              evidence_source: canonicalMetering
-                ? (canonicalMetering.actual_evidence ?? 'librarium_metering')
-                : 'unknown',
-              ...(primary?.usage?.prompt_tokens !== undefined && {
-                prompt_tokens: primary.usage.prompt_tokens,
-              }),
-              ...(primary?.usage?.completion_tokens !== undefined && {
-                completion_tokens: primary.usage.completion_tokens,
-              }),
-            }
-          : { completeness: 'unknown' },
-      provenance: provenance
-        ? {
-            result_kind: provenance.result_kind,
-            retrieval_methods_sha256: `sha256:${createHash('sha256')
-              .update(canonicalJson(provenance.retrieval_methods))
-              .digest('hex')}`,
-            corpora_sha256: `sha256:${createHash('sha256')
-              .update(canonicalJson(provenance.corpora))
-              .digest('hex')}`,
-            access_mode: profile?.access_mode ?? 'unverified',
-            operator_id: profile?.operator_id ?? 'unverified',
-            evidence_source: 'effective_profile',
-            ...(profile?.collector_id && {
-              collector_id: profile.collector_id,
-            }),
-            ...(profile?.surface_id && { surface_id: profile.surface_id }),
-          }
-        : undefined,
-      quality,
-    }),
+    built.receipt,
   );
-  return quality.passed === true
+  return built.quality.passed === true
     ? { passed: true }
     : { passed: false, reason: 'deterministic_sensibility_failed' };
 }
@@ -1216,6 +1392,8 @@ export async function executeFrozenValidationProtocol(input: {
   )?.target_key;
   let state: FrozenExecutionState = {
     completed: [],
+    failed: [],
+    cancelled: [],
     ...(activeFromCheckpoint && { active: activeFromCheckpoint }),
     reserved_microusd: checkpoint.attempts
       .reduce(
@@ -1288,20 +1466,26 @@ export async function executeFrozenValidationProtocol(input: {
         referenceAuthority,
       );
       const quality = frozenEvidenceQuality(target, terminal);
+      const expectedStatus =
+        terminal.lifecycle === 'succeeded' && quality.passed !== true
+          ? 'failed'
+          : terminal.lifecycle;
       if (
         attempt.evidence_state === 'complete' &&
-        (attempt.status !== terminal.lifecycle ||
-          (attempt.status === 'succeeded' && quality.passed !== true))
+        attempt.status !== expectedStatus
       ) {
         throw new CanonicalLiveValidationError(
           `Terminal checkpoint differs from canonical lifecycle or quality: ${target.key}.`,
         );
       }
-      if (
-        attempt.status === 'succeeded' &&
-        attempt.evidence_state === 'complete'
-      ) {
-        state = { ...state, completed: [...state.completed, target.key] };
+      if (attempt.evidence_state === 'complete') {
+        if (attempt.status === 'succeeded') {
+          state = { ...state, completed: [...state.completed, target.key] };
+        } else if (attempt.status === 'failed') {
+          state = { ...state, failed: [...state.failed, target.key] };
+        } else if (attempt.status === 'cancelled') {
+          state = { ...state, cancelled: [...state.cancelled, target.key] };
+        }
       }
     }
   }
@@ -1553,7 +1737,7 @@ export async function executeFrozenValidationProtocol(input: {
   }
   const stopped = checkpoint.attempts.find(
     (attempt) =>
-      attempt.status !== 'succeeded' ||
+      (attempt.status !== 'succeeded' && !attempt.continuation_acknowledged) ||
       attempt.evidence_state === 'failed' ||
       (attempt.status === 'succeeded' && attempt.evidence_state !== 'complete'),
   );
@@ -1587,8 +1771,19 @@ export async function executeFrozenValidationProtocol(input: {
     checkpoint = interrupted;
     return { ...state };
   };
+  const settledTargetKeys = new Set(
+    checkpoint.attempts
+      .filter(
+        (attempt) =>
+          ['succeeded', 'failed', 'cancelled'].includes(attempt.status) &&
+          attempt.evidence_state === 'complete' &&
+          (attempt.status === 'succeeded' ||
+            attempt.continuation_acknowledged === true),
+      )
+      .map((attempt) => attempt.target_key),
+  );
   for (const protocol of input.gate.approval.targets) {
-    if (state.completed.includes(protocol.key)) continue;
+    if (settledTargetKeys.has(protocol.key)) continue;
     const target = byKey.get(protocol.key);
     if (!target)
       throw new CanonicalLiveValidationError(
@@ -1863,7 +2058,7 @@ export function registerLiveValidationCommand(
     .option('--paid', 'request execution of a frozen paid preregistration')
     .option(
       '--continue',
-      'continue an interrupted settled validation after repeating its approval',
+      'acknowledge one settled failure or continue an interrupted validation',
     )
     .option('--candidate-root <absolute-dir>', 'immutable candidate checkout')
     .option(
@@ -1891,6 +2086,11 @@ export function registerLiveValidationCommand(
         artifactRoot?: string;
         artifact?: string[];
       }) => {
+        if (options.continue && !options.paid) {
+          throw new CanonicalLiveValidationError(
+            '--continue requires explicit --paid validation mode.',
+          );
+        }
         if (!options.paid) {
           const restoreNetwork = (
             dependencies.installNetworkGuard ?? installOfflineNetworkGuard
@@ -2001,13 +2201,21 @@ export function registerLiveValidationCommand(
         const controller = new AbortController();
         const dispose = installOfflineValidationSigint(process, controller);
         try {
-          await executeFrozenValidationProtocol({
+          const state = await executeFrozenValidationProtocol({
             gate,
             matrix,
             executor,
             candidate_authority: candidateAuthority,
             signal: controller.signal,
           });
+          const certification = terminalValidationCertification(
+            state,
+            matrix.targets.length,
+          );
+          if (certification) {
+            process.stdout.write(`${JSON.stringify(certification, null, 2)}\n`);
+            if (certification.certification === 'failed') process.exitCode = 1;
+          }
         } finally {
           dispose();
         }
