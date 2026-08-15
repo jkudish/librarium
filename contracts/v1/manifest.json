@@ -301,6 +301,41 @@
       ]
     },
     {
+      "path": "fixtures/invalid/provider-meta-wrapped-api-key.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/provider-meta-wrapped-credentials.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/provider-meta-wrapped-raw-response.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/provider-meta-wrapped-session-token.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/provider-meta-wrapped-binary-payload.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
       "path": "fixtures/invalid/error-rich.json",
       "role": "fixture",
       "areas": [

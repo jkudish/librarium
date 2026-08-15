@@ -524,6 +524,61 @@ const invalid = {
       },
     ],
   },
+  'provider-meta-wrapped-api-key': {
+    ...success,
+    results: [
+      {
+        ...result,
+        provider_meta: {
+          'com.example:public': { openaiApiKeyValue: 'secret' },
+        },
+      },
+    ],
+  },
+  'provider-meta-wrapped-credentials': {
+    ...success,
+    results: [
+      {
+        ...result,
+        provider_meta: {
+          'com.example:public': { credentialsBlob: 'secret' },
+        },
+      },
+    ],
+  },
+  'provider-meta-wrapped-raw-response': {
+    ...success,
+    results: [
+      {
+        ...result,
+        provider_meta: {
+          'com.example:public': { providerRawResponseData: { status: 200 } },
+        },
+      },
+    ],
+  },
+  'provider-meta-wrapped-session-token': {
+    ...success,
+    results: [
+      {
+        ...result,
+        provider_meta: {
+          'com.example:public': { vendorSessionTokenValue: 'secret' },
+        },
+      },
+    ],
+  },
+  'provider-meta-wrapped-binary-payload': {
+    ...success,
+    results: [
+      {
+        ...result,
+        provider_meta: {
+          'com.example:public': { binaryPayloadData: 'secret' },
+        },
+      },
+    ],
+  },
   'error-rich': {
     ...success,
     status: 'failed',
@@ -624,6 +679,11 @@ const semanticRuleForFixture: Record<string, string> = {
   'provider-meta-fused-api-key': 'provider_meta.safe_metadata',
   'provider-meta-fused-access-token': 'provider_meta.safe_metadata',
   'provider-meta-fused-raw-response': 'provider_meta.safe_metadata',
+  'provider-meta-wrapped-api-key': 'provider_meta.safe_metadata',
+  'provider-meta-wrapped-credentials': 'provider_meta.safe_metadata',
+  'provider-meta-wrapped-raw-response': 'provider_meta.safe_metadata',
+  'provider-meta-wrapped-session-token': 'provider_meta.safe_metadata',
+  'provider-meta-wrapped-binary-payload': 'provider_meta.safe_metadata',
 };
 const fixtureIndexPath = write('fixtures/index.json', {
   fixtures: fixtureEntries.map((entry) => ({

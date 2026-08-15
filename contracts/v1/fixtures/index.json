@@ -340,6 +340,56 @@
       "semantic_rule_id": "provider_meta.safe_metadata"
     },
     {
+      "id": "provider-meta-wrapped-api-key",
+      "path": "fixtures/invalid/provider-meta-wrapped-api-key.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-credentials",
+      "path": "fixtures/invalid/provider-meta-wrapped-credentials.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-raw-response",
+      "path": "fixtures/invalid/provider-meta-wrapped-raw-response.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-session-token",
+      "path": "fixtures/invalid/provider-meta-wrapped-session-token.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-binary-payload",
+      "path": "fixtures/invalid/provider-meta-wrapped-binary-payload.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
       "id": "error-rich",
       "path": "fixtures/invalid/error-rich.json",
       "valid": false,
