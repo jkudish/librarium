@@ -1458,4 +1458,79 @@ describe('private prepared execution runtime', () => {
     );
     expect(JSON.stringify(result.state)).not.toContain('secret-token');
   });
+
+  it('maps only allowlisted provider failure diagnostics into canonical state', async () => {
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: vi.fn(async () => ({
+        ...successfulResult('adapter-primary'),
+        error: 'Bearer secret-token raw response body',
+        failureDiagnostic: {
+          kind: 'authentication',
+          httpStatus: 422,
+          providerCode: 'SUBSCRIPTION_TOKEN_INVALID',
+          body: 'https://private.example Bearer secret-token',
+        },
+      })),
+    } as Provider;
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: () => resolvedBinding('primary', provider),
+        now: () => start,
+      }),
+    });
+
+    expect(result.state.attempts[0]?.error).toEqual({
+      code: 'provider_authentication_failed',
+      message: 'The provider returned an error.',
+      category: 'authentication',
+      retryable: false,
+      fallback_allowed: true,
+      provider_code: 'http_422',
+    });
+    expect(JSON.stringify(result.state)).not.toMatch(
+      /Bearer|secret-token|raw response body|SUBSCRIPTION_TOKEN_INVALID|private\.example/,
+    );
+  });
+
+  it('drops invalid provider failure diagnostic values', async () => {
+    const provider: Provider = {
+      id: 'adapter-primary',
+      displayName: 'Primary',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: vi.fn(async () => ({
+        ...successfulResult('adapter-primary'),
+        error: 'failed',
+        failureDiagnostic: {
+          kind: 'Bearer secret-token',
+          httpStatus: 999,
+        },
+      })),
+    } as Provider;
+    const result = await runPreparedExecution(prepared([profile('primary')]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: () => resolvedBinding('primary', provider),
+        now: () => start,
+      }),
+    });
+
+    expect(result.state.attempts[0]?.error).toEqual({
+      code: 'provider_reported_error',
+      message: 'The provider returned an error.',
+      category: 'provider',
+      retryable: true,
+      fallback_allowed: true,
+    });
+    expect(JSON.stringify(result.state)).not.toContain('secret-token');
+  });
 });

@@ -2,6 +2,7 @@ import { MAX_RESPONSE_SIZE } from '../constants.js';
 import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type {
   Citation,
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -49,6 +50,7 @@ export class BraveAnswersProvider extends BaseProvider {
       options.timeout * 1000,
     );
     const abortFromCaller = () => controller.abort();
+    let requestStarted = false;
 
     if (options.signal) {
       if (options.signal.aborted) controller.abort();
@@ -61,6 +63,7 @@ export class BraveAnswersProvider extends BaseProvider {
 
     try {
       const apiKey = this.getApiKey();
+      requestStarted = true;
       const response = await fetch(BRAVE_ANSWERS_URL, {
         method: 'POST',
         headers: {
@@ -121,7 +124,12 @@ export class BraveAnswersProvider extends BaseProvider {
         content: '',
         citations: [],
         durationMs: Math.round(performance.now() - start),
-        error: this.formatCatchError(err),
+        error: 'Brave Answers request failed.',
+        failureDiagnostic: this.catchDiagnostic(
+          err,
+          controller.signal.aborted,
+          requestStarted,
+        ),
       };
     } finally {
       clearTimeout(timeoutId);
@@ -148,7 +156,13 @@ export class BraveAnswersProvider extends BaseProvider {
       content: '',
       citations: [],
       durationMs,
-      error: this.formatBraveError(status, body),
+      error: 'Brave Answers request failed.',
+      failureDiagnostic: {
+        kind: this.classifyBraveFailure(status, body),
+        ...(this.validHttpStatus(status) !== undefined && {
+          httpStatus: status,
+        }),
+      },
     };
   }
 
@@ -546,42 +560,45 @@ export class BraveAnswersProvider extends BaseProvider {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
   }
 
-  private formatBraveError(status: number, body: unknown): string {
-    const detail = this.braveErrorDetail(body);
-    const base = `Brave Answers API returned ${status}: ${detail}`;
-
+  private classifyBraveFailure(
+    status: number,
+    body: unknown,
+  ): ProviderFailureDiagnostic['kind'] {
     // Live-verified: Brave reports an invalid key as 422 and a key whose plan
-    // lacks the Answers option as 400, so route hints by error code first.
+    // lacks the Answers option as 400, so classify by code first. The code is
+    // inspected in memory but is never returned or persisted.
     const code = this.braveErrorCode(body);
     if (code === 'SUBSCRIPTION_TOKEN_INVALID') {
-      return `${base} — check that ${this.envVar} is a valid Brave Search API key`;
+      return 'authentication';
     }
     if (code === 'OPTION_NOT_IN_PLAN') {
-      return `${base} — your Brave plan does not include the Answers API; upgrade at https://api-dashboard.search.brave.com`;
+      return 'plan_required';
     }
+    if (status === 401 || status === 403) return 'authentication';
+    if (status === 402) return 'billing';
+    if (status === 408 || status === 504) return 'timeout';
+    if (status === 429) return 'rate_limit';
+    if (status >= 400 && status < 500) return 'invalid_request';
+    return 'provider';
+  }
 
-    if (status === 401) {
-      return `${base} — check that ${this.envVar} is valid and enabled for the Brave Answers plan`;
+  private catchDiagnostic(
+    err: unknown,
+    aborted: boolean,
+    requestStarted: boolean,
+  ): ProviderFailureDiagnostic {
+    if (!requestStarted) return { kind: 'authentication' };
+    if (aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+      return { kind: 'timeout' };
     }
-    if (status === 402) {
-      return `${base} — Payment Required; check your Brave billing and Answers plan`;
-    }
-    if (status === 403) {
-      return `${base} — API key may lack permission for the Answers API`;
-    }
-    if (status === 404) {
-      return `${base} — confirm the Brave Answers API endpoint is available for your plan`;
-    }
-    if (status === 422) {
-      return `${base} — request validation failed; review the request and try a shorter query`;
-    }
-    if (status === 429) {
-      return `${base} — rate limit reached; reduce request rate and retry`;
-    }
-    if (status === 400) {
-      return `${base} — check the request parameters`;
-    }
-    return base;
+    if (err instanceof TypeError) return { kind: 'network' };
+    return { kind: 'provider' };
+  }
+
+  private validHttpStatus(status: number): number | undefined {
+    return Number.isInteger(status) && status >= 100 && status <= 599
+      ? status
+      : undefined;
   }
 
   private braveErrorCode(body: unknown): string | undefined {
@@ -589,32 +606,6 @@ export class BraveAnswersProvider extends BaseProvider {
     const error = body.error;
     if (!this.isRecord(error)) return undefined;
     return this.firstString(error.code);
-  }
-
-  private braveErrorDetail(body: unknown): string {
-    if (this.isRecord(body)) {
-      const error = body.error;
-      if (this.isRecord(error)) {
-        const detail = this.firstString(error.detail);
-        if (detail) return detail;
-        const code = this.firstString(error.code);
-        if (code) return code;
-      }
-      const type = this.firstString(body.type);
-      if (type) return type;
-      if (typeof error === 'string' && error.trim()) return error;
-    }
-    return this.truncateBody(body);
-  }
-
-  private truncateBody(body: unknown): string {
-    let serialized: string;
-    try {
-      serialized = typeof body === 'string' ? body : JSON.stringify(body);
-    } catch {
-      serialized = String(body);
-    }
-    return (serialized || 'unknown error response').slice(0, 200);
   }
 
   private isRecord(value: unknown): value is JsonRecord {

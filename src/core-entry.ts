@@ -183,6 +183,8 @@ export type {
   MeteringKind,
   Provider,
   ProviderCommon,
+  ProviderFailureDiagnostic,
+  ProviderFailureKind,
   ProviderMetering,
   ProviderOptions,
   ProviderResult,

@@ -323,7 +323,7 @@ describe('Brave Answers provider', () => {
     expect(result.usage).toBeUndefined();
   });
 
-  it('normalizes 401 errors from the nested Brave error envelope', async () => {
+  it('classifies 401 errors without retaining the Brave error envelope', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       errorResponse(401, {
         error: { code: 'SUBSCRIPTION_TOKEN_INVALID', detail: 'Token rejected' },
@@ -332,9 +332,13 @@ describe('Brave Answers provider', () => {
 
     const result = await provider().execute('auth failure', { timeout: 10 });
 
-    expect(result.error).toContain('401');
-    expect(result.error).toContain('Token rejected');
-    expect(result.error).toContain('valid Brave Search API key');
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'authentication',
+      httpStatus: 401,
+    });
+    expect(JSON.stringify(result)).not.toContain('Token rejected');
+    expect(JSON.stringify(result)).not.toContain('SUBSCRIPTION_TOKEN_INVALID');
   });
 
   it('gives the key hint for a live-shaped 422 invalid-token rejection', async () => {
@@ -353,9 +357,11 @@ describe('Brave Answers provider', () => {
 
     const result = await provider().execute('bad key', { timeout: 10 });
 
-    expect(result.error).toContain('422');
-    expect(result.error).toContain('valid Brave Search API key');
-    expect(result.error).not.toContain('shorter query');
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'authentication',
+      httpStatus: 422,
+    });
   });
 
   it('gives the plan-upgrade hint for a live-shaped 400 option-not-in-plan rejection', async () => {
@@ -376,9 +382,13 @@ describe('Brave Answers provider', () => {
 
     const result = await provider().execute('no plan', { timeout: 10 });
 
-    expect(result.error).toContain('400');
-    expect(result.error).toContain('not subscribed');
-    expect(result.error).toContain('does not include the Answers API');
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'plan_required',
+      httpStatus: 400,
+    });
+    expect(JSON.stringify(result)).not.toContain('not subscribed');
+    expect(JSON.stringify(result)).not.toContain('api-dashboard');
   });
 
   it('normalizes 402 errors from the top-level Brave error envelope', async () => {
@@ -391,9 +401,12 @@ describe('Brave Answers provider', () => {
 
     const result = await provider().execute('billing failure', { timeout: 10 });
 
-    expect(result.error).toContain('402');
-    expect(result.error).toContain('payment_required');
-    expect(result.error).toContain('Payment Required');
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'billing',
+      httpStatus: 402,
+    });
+    expect(JSON.stringify(result)).not.toContain('Billing needed');
   });
 
   it('does not truncate a long query and normalizes a 422 validation rejection', async () => {
@@ -410,9 +423,11 @@ describe('Brave Answers provider', () => {
     expect(
       JSON.parse(fetchMock.mock.calls[0][1].body as string).messages[0],
     ).toEqual({ role: 'user', content: longQuery });
-    expect(result.error).toContain('422');
-    expect(result.error).toContain('VALIDATION');
-    expect(result.error).toContain('shorter query');
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'invalid_request',
+      httpStatus: 422,
+    });
   });
 
   it('normalizes 429 errors from the top-level Brave error envelope', async () => {
@@ -425,9 +440,11 @@ describe('Brave Answers provider', () => {
 
     const result = await provider().execute('rate limited', { timeout: 10 });
 
-    expect(result.error).toContain('429');
-    expect(result.error).toContain('rate_limit_exceeded');
-    expect(result.error).toContain('rate limit');
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'rate_limit',
+      httpStatus: 429,
+    });
   });
 
   it('returns a normalized result for network errors', async () => {
@@ -439,8 +456,30 @@ describe('Brave Answers provider', () => {
 
     expect(result.content).toBe('');
     expect(result.citations).toEqual([]);
-    expect(result.error).toContain(
-      'Network error connecting to Brave AI Answers',
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({ kind: 'network' });
+  });
+
+  it('does not retain secrets or arbitrary provider failure text', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      errorResponse(500, {
+        error: {
+          code: 'Bearer secret-token',
+          detail: 'raw response body https://private.example/token',
+        },
+        authorization: 'X-Subscription-Token secret-token',
+      }),
+    );
+
+    const result = await provider().execute('safe failure', { timeout: 10 });
+    const serialized = JSON.stringify(result);
+
+    expect(result).toMatchObject({
+      error: 'Brave Answers request failed.',
+      failureDiagnostic: { kind: 'provider', httpStatus: 500 },
+    });
+    expect(serialized).not.toMatch(
+      /Bearer|secret-token|raw response body|private\.example|X-Subscription-Token/,
     );
   });
 
@@ -568,7 +607,8 @@ describe('Brave Answers provider — stream robustness', () => {
 
     const result = await provider().execute('q', { timeout: 10 });
 
-    expect(result.error).toMatch(/exceeds/i);
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({ kind: 'provider' });
     expect(result.content).toBe('');
   });
 
@@ -594,7 +634,8 @@ describe('Brave Answers provider — stream robustness', () => {
       signal: abortController.signal,
     });
 
-    expect(result.error).toMatch(/abort/i);
+    expect(result.error).toBe('Brave Answers request failed.');
+    expect(result.failureDiagnostic).toEqual({ kind: 'timeout' });
     expect(result.content).toBe('');
   });
 });
