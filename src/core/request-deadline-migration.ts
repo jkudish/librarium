@@ -118,6 +118,7 @@ export const V1_BACKGROUND_TRANSPORT_OVERHEAD_BY_PROFILE: Readonly<
 > = Object.freeze({
   'openai-research/research': OPENAI_BACKGROUND_TRANSPORT,
   'gemini-deep/research': GEMINI_BACKGROUND_TRANSPORT,
+  'perplexity-deep-research/research': PERPLEXITY_BACKGROUND_TRANSPORT,
   'perplexity-sonar-deep/research': PERPLEXITY_BACKGROUND_TRANSPORT,
 });
 

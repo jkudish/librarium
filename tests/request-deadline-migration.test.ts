@@ -536,6 +536,15 @@ describe('v1 total request-deadline migration', () => {
         retrieve_ceiling_ms: 210_000,
         total_ms: 390_000,
       },
+      'perplexity-deep-research/research': {
+        submit_timeout_ms: 30_000,
+        final_poll_sleep_ms: 0,
+        poll_attempt_timeout_ms: 15_000,
+        poll_ceiling_ms: 150_000,
+        retrieve_attempt_timeout_ms: 30_000,
+        retrieve_ceiling_ms: 210_000,
+        total_ms: 390_000,
+      },
     });
     for (const policy of Object.values(
       V1_BACKGROUND_TRANSPORT_OVERHEAD_BY_PROFILE,
@@ -595,11 +604,9 @@ describe('v1 total request-deadline migration', () => {
       'parallel-search',
       'perplexity-sonar-deep',
       'perplexity-deep-research',
-      'perplexity-advanced-deep',
       'openai-research',
       'gemini-deep',
       'perplexity-sonar-pro',
-      'perplexity-pro-search',
       'gemini-grounded',
       'grok',
       'grok-x-only',
@@ -636,7 +643,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(42);
+    expect(new Set(expectedAdapterIds).size).toBe(40);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

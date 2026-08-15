@@ -11,7 +11,7 @@ triggers:
 # Librarium -- Multi-Provider Deep Research
 
 Run research queries through Librarium’s v2 public provider/profile catalog.
-There are 35 built-in providers and 42 implemented profiles. Preserve the
+There are 33 built-in providers and 40 implemented profiles. Preserve the
 profile and collection provenance when reporting results; do not turn source
 counts or agreement into a confidence claim.
 
@@ -113,8 +113,7 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 
 | Tier | Providers | Speed | Depth |
 |------|-----------|-------|-------|
-| background/durable | Exa, Tavily, OpenAI Research, Gemini Deep, Perplexity Sonar Deep, Parallel, Valyu, and You Research profiles | Minutes to longer | Persisted handles that can be polled and retrieved |
-| background/process-local | Perplexity Deep Research and Advanced Deep Research profiles | Minutes to longer | Do not claim cross-process resumption |
+| background/durable | Exa, Tavily, OpenAI Research, Gemini Deep, Perplexity Deep Research (Agent medium), Perplexity Sonar Deep (Agent high), Parallel, Valyu, and You Research profiles | Minutes to longer | Persisted handles that can be polled and retrieved |
 | inline | Search, grounded, collected surface, and chat profiles | Usually seconds | Immediate response; no durable handle |
 
 ### Visibility and privacy boundary

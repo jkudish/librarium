@@ -449,6 +449,8 @@ describe('configuration mapping', () => {
   it.each([
     ['perplexity-sonar/grounded', 'perplexity-sonar-pro/grounded'],
     ['perplexity-deep/research', 'perplexity-sonar-deep/research'],
+    ['perplexity-pro-search/grounded', 'perplexity-sonar-pro/grounded'],
+    ['perplexity-advanced-deep/research', 'perplexity-sonar-deep/research'],
     ['openai-deep/research', 'openai-research/research'],
     ['openai-deep-o3/research', 'openai-research/research'],
   ])('preserves qualified retired suffixes for %s', (token, replacement) => {
@@ -832,12 +834,12 @@ describe('configuration mapping', () => {
       mapped.catalog.get('openai-research', 'research')?.availability.enabled,
     ).toBe(true);
     expect(keys(mapped.reserve)).toEqual([
-      'brave-search/search',
       'perplexity-sonar-pro/grounded',
+      'brave-search/search',
     ]);
     expect(mapped.reserve_only_adapter_ids).toEqual([
-      'brave-search',
       'perplexity-sonar-pro',
+      'brave-search',
     ]);
     expect(mapped.preflight.notices).toContainEqual(
       expect.objectContaining({ code: 'configuration_provider_id_migrated' }),

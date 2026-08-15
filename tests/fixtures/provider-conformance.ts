@@ -34,15 +34,11 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
   Record<string, ProviderConformanceEvidence>
 > = {
   'perplexity-sonar-deep/research': {
-    evidence: ['tests/adapters/perplexity-async.test.ts'],
+    evidence: ['tests/adapters/perplexity-agent.test.ts'],
     lanes: background,
   },
   'perplexity-deep-research/research': {
-    evidence: ['tests/adapters/perplexity-async.test.ts'],
-    lanes: background,
-  },
-  'perplexity-advanced-deep/research': {
-    evidence: ['tests/adapters/perplexity-async.test.ts'],
+    evidence: ['tests/adapters/perplexity-agent.test.ts'],
     lanes: background,
   },
   'openai-research/research': {
@@ -74,12 +70,8 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     lanes: configurableBackground,
   },
   'perplexity-sonar-pro/grounded': {
-    evidence: ['tests/adapters/grounded-providers.test.ts'],
+    evidence: ['tests/adapters/perplexity-agent.test.ts'],
     lanes: grounded,
-  },
-  'perplexity-pro-search/grounded': {
-    evidence: ['tests/adapters/perplexity-pro-search.test.ts'],
-    lanes: configurable,
   },
   'gemini-grounded/grounded': {
     evidence: ['tests/adapters/grounded-providers.test.ts'],

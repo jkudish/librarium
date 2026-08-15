@@ -5,25 +5,16 @@ import {
   initializeProviders,
   registerProvider,
 } from '../../src/adapters/index.js';
-import { PerplexityProSearchProvider } from '../../src/adapters/perplexity-pro-search.js';
 import { PerplexitySearchProvider } from '../../src/adapters/perplexity-search.js';
 import { SearchApiProvider } from '../../src/adapters/searchapi.js';
 import { dispatch } from '../../src/core/dispatcher.js';
-import type {
-  HttpClient,
-  HttpStreamClient,
-} from '../../src/core/http-client.js';
+import type { HttpClient } from '../../src/core/http-client.js';
 import type {
   Config,
   Provider,
   ProviderOptions,
   ProviderResult,
 } from '../../src/types.js';
-import {
-  PRO_SEARCH_CONTENT,
-  splitEveryByte,
-  streamResponse,
-} from '../fixtures/perplexity-pro-search.js';
 
 function makeConfig(): Config {
   return {
@@ -158,39 +149,6 @@ describe('internal adapters in workerd', () => {
     expect(url.searchParams.get('zero_retention')).toBe('true');
     expect(request.options.headers).toEqual({
       Authorization: 'Bearer worker-searchapi-synthetic-key',
-    });
-  });
-
-  it('streams Perplexity Pro Search through an injected transport', async () => {
-    const calls: Array<{ url: string; options: Record<string, unknown> }> = [];
-    const httpStreamClient: HttpStreamClient = async (url, options = {}) => {
-      calls.push({ url, options });
-      return streamResponse(splitEveryByte());
-    };
-    const provider = new PerplexityProSearchProvider({
-      apiKey: 'worker-perplexity-synthetic-key',
-      httpStreamClient,
-    });
-
-    await expect(
-      provider.execute('worker Pro Search', { timeout: 5 }),
-    ).resolves.toMatchObject({
-      provider: 'perplexity-pro-search',
-      content: PRO_SEARCH_CONTENT,
-      model: 'sonar-pro',
-      usage: { costUsd: 0.014138 },
-    });
-    expect(calls[0]).toMatchObject({
-      url: 'https://api.perplexity.ai/v1/sonar',
-      options: {
-        body: {
-          model: 'sonar-pro',
-          stream: true,
-          stream_mode: 'concise',
-          web_search_options: { search_type: 'pro' },
-        },
-        retry: { mode: 'never' },
-      },
     });
   });
 });

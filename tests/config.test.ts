@@ -32,7 +32,6 @@ const CUSTOM_EXECUTION_PROFILE = {
 const PRIOR_COMPREHENSIVE = [
   'perplexity-sonar-deep',
   'perplexity-deep-research',
-  'perplexity-advanced-deep',
   'openai-research',
   'gemini-deep',
   'perplexity-sonar-pro',
@@ -250,6 +249,59 @@ describe('loadConfig', () => {
     }
   });
 
+  it('migrates retired Perplexity identities with canonical collision precedence', () => {
+    const configPath = join(tmpDir, 'perplexity-collisions.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        defaults: {
+          outputDir: './agents/librarium',
+          maxParallel: 1,
+          timeout: 30,
+          asyncTimeout: 1800,
+          asyncPollInterval: 10,
+          mode: 'sync',
+        },
+        providers: {
+          'perplexity-pro-search': {
+            enabled: false,
+            apiKey: '$LEGACY_PERPLEXITY_API_KEY',
+            fallback: 'perplexity-pro-search',
+          },
+          'perplexity-sonar-pro': {
+            enabled: true,
+            apiKey: '$PERPLEXITY_API_KEY',
+          },
+          'perplexity-advanced-deep': { enabled: false },
+          'perplexity-sonar-deep': { enabled: true },
+        },
+        groups: {
+          legacy: [
+            'perplexity-pro-search/grounded',
+            'perplexity-sonar-pro/grounded',
+            'perplexity-advanced-deep/research',
+          ],
+        },
+      }),
+    );
+
+    const config = loadConfig(configPath);
+    expect(config.providers['perplexity-sonar-pro']).toMatchObject({
+      enabled: true,
+      apiKey: '$PERPLEXITY_API_KEY',
+    });
+    expect(config.providers['perplexity-sonar-deep']).toEqual({
+      enabled: true,
+    });
+    expect(config.providers['perplexity-pro-search']).toBeUndefined();
+    expect(config.providers['perplexity-advanced-deep']).toBeUndefined();
+    expect(config.groups.legacy).toEqual([
+      'perplexity-sonar-pro/grounded',
+      'perplexity-sonar-deep/research',
+    ]);
+  });
+
   it('migrates only exact stored prior comprehensive and all rosters', () => {
     const configPath = join(tmpDir, 'config.json');
     writeFileSync(
@@ -319,7 +371,7 @@ describe('loadConfig', () => {
     );
 
     expect(loadConfig(configPath).groups.comprehensive).toEqual(
-      PRIOR_COMPREHENSIVE,
+      DEFAULT_GROUPS.comprehensive,
     );
   });
 

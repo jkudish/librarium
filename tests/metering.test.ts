@@ -28,7 +28,7 @@ describe('metering registry: kinds', () => {
     expect(getMeteringKind('searchapi-google-ai-overview')).toBe(
       'request_priced',
     );
-    expect(getMeteringKind('perplexity-pro-search')).toBe('native_cost');
+    expect(getMeteringKind('perplexity-pro-search')).toBe('manual_unmetered');
     expect(getMeteringKind('tavily')).toBe('credit_priced');
     expect(getMeteringKind('firecrawl-search')).toBe('credit_priced');
     expect(getMeteringKind('jina-search')).toBe('api_unit_priced');

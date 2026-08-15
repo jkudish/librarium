@@ -1014,6 +1014,8 @@ describe('public v2 configuration migration', () => {
     for (const alias of [
       'perplexity-sonar',
       'perplexity-deep',
+      'perplexity-pro-search',
+      'perplexity-advanced-deep',
       'openai-deep',
       'openai-deep-o3',
     ]) {
@@ -1033,6 +1035,8 @@ describe('public v2 configuration migration', () => {
     const replacements = {
       'perplexity-sonar': 'perplexity-sonar-pro',
       'perplexity-deep': 'perplexity-sonar-deep',
+      'perplexity-pro-search': 'perplexity-sonar-pro',
+      'perplexity-advanced-deep': 'perplexity-sonar-deep',
       'openai-deep': 'openai-research',
       'openai-deep-o3': 'openai-research',
     } as const;
@@ -1053,17 +1057,32 @@ describe('public v2 configuration migration', () => {
           expect.objectContaining({
             code: 'config_provider_alias_removed',
             path: `/providers/${alias}`,
-            message: expect.stringContaining(`use "${replacement}"`),
+            message:
+              alias === 'perplexity-pro-search'
+                ? expect.stringContaining(
+                    'legacy search_type "pro" now uses Agent preset "low"',
+                  )
+                : expect.stringContaining(`use "${replacement}"`),
           }),
           expect.objectContaining({
             code: 'config_fallback_alias_removed',
             path: '/providers/openai-research/fallback',
-            message: expect.stringContaining(`use "${replacement}"`),
+            message:
+              alias === 'perplexity-pro-search'
+                ? expect.stringContaining(
+                    'legacy search_type "pro" now uses Agent preset "low"',
+                  )
+                : expect.stringContaining(`use "${replacement}"`),
           }),
           expect.objectContaining({
             code: 'config_group_member_alias_removed',
             path: '/groups/custom:retired/0',
-            message: expect.stringContaining(`use "${replacement}"`),
+            message:
+              alias === 'perplexity-pro-search'
+                ? expect.stringContaining(
+                    'legacy search_type "pro" now uses Agent preset "low"',
+                  )
+                : expect.stringContaining(`use "${replacement}"`),
           }),
         ]),
       );
@@ -1077,7 +1096,12 @@ describe('public v2 configuration migration', () => {
         expect.objectContaining({
           code: 'config_group_member_alias_removed',
           path: '/groups/custom:retired/0',
-          message: expect.stringContaining(`use "${replacement}"`),
+          message:
+            alias === 'perplexity-pro-search'
+              ? expect.stringContaining(
+                  'legacy search_type "pro" now uses Agent preset "low"',
+                )
+              : expect.stringContaining(`use "${replacement}"`),
         }),
       );
       expect(migrated.issues).not.toContainEqual(
@@ -1093,6 +1117,8 @@ describe('public v2 configuration migration', () => {
     const replacements = {
       'perplexity-sonar/grounded': 'perplexity-sonar-pro/grounded',
       'perplexity-deep/research': 'perplexity-sonar-deep/research',
+      'perplexity-pro-search/grounded': 'perplexity-sonar-pro/grounded',
+      'perplexity-advanced-deep/research': 'perplexity-sonar-deep/research',
       'openai-deep/research': 'openai-research/research',
       'openai-deep-o3/research': 'openai-research/research',
     } as const;
@@ -1106,7 +1132,12 @@ describe('public v2 configuration migration', () => {
         expect.objectContaining({
           code: 'config_group_member_alias_removed',
           path: '/groups/custom:retired/0',
-          message: expect.stringContaining(`use "${replacement}"`),
+          message:
+            alias === 'perplexity-pro-search/grounded'
+              ? expect.stringContaining(
+                  'legacy search_type "pro" now uses Agent preset "low"',
+                )
+              : expect.stringContaining(`use "${replacement}"`),
         }),
       );
       expect(result.issues).not.toContainEqual(

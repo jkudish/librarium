@@ -11,6 +11,8 @@ describe('retired provider tombstones', () => {
     expect(RETIRED_PROVIDER_REPLACEMENTS).toEqual({
       'perplexity-sonar': 'perplexity-sonar-pro',
       'perplexity-deep': 'perplexity-sonar-deep',
+      'perplexity-pro-search': 'perplexity-sonar-pro',
+      'perplexity-advanced-deep': 'perplexity-sonar-deep',
       'openai-deep': 'openai-research',
       'openai-deep-o3': 'openai-research',
     });

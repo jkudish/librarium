@@ -3,6 +3,7 @@ import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Corpus, ExecutionProfile } from '../contracts/domain/index.js';
 import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
 import type { NetworkFreeEstimate } from './execution-plan.js';
+import { normalizedPerplexityAgentUnderlyingModel } from './perplexity-agent-target.js';
 import {
   getBuiltinProviderDefinition,
   type ProviderMeteringDescriptor,
@@ -89,6 +90,15 @@ function normalizedConfiguredModel(
   return normalized || undefined;
 }
 
+function executableConfiguredModel(
+  adapterId: string,
+  model: string | undefined,
+): string | undefined {
+  return adapterId === 'perplexity-deep-research'
+    ? normalizedPerplexityAgentUnderlyingModel(model)
+    : normalizedConfiguredModel(model);
+}
+
 /**
  * Apply the one model-selection policy shared by catalog resolution and both
  * configuration ingress paths. It deliberately validates only a selected
@@ -99,7 +109,7 @@ function validateConfiguredModel(
   adapterId: string,
   model: string | undefined,
 ): void {
-  const configured = normalizedConfiguredModel(model);
+  const configured = executableConfiguredModel(adapterId, model);
   if (!configured) return;
 
   // Valyu chooses its documented research preset through validated provider
@@ -234,7 +244,7 @@ function configuredTargetProjection(
   configuredModel: string | undefined,
 ): ExecutionProfile {
   validateConfiguredModel(profile, adapterId, configuredModel);
-  const targetId = normalizedConfiguredModel(configuredModel);
+  const targetId = executableConfiguredModel(adapterId, configuredModel);
   if (!targetId) return profile;
 
   const target = profile.identity.target;
@@ -473,11 +483,6 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     adapter_id: 'perplexity-deep-research',
   },
   {
-    provider_id: 'perplexity-advanced-deep',
-    profile_id: 'research',
-    adapter_id: 'perplexity-advanced-deep',
-  },
-  {
     provider_id: 'openai-research',
     profile_id: 'research',
     adapter_id: 'openai-research',
@@ -491,11 +496,6 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     provider_id: 'perplexity-sonar-pro',
     profile_id: 'grounded',
     adapter_id: 'perplexity-sonar-pro',
-  },
-  {
-    provider_id: 'perplexity-pro-search',
-    profile_id: 'grounded',
-    adapter_id: 'perplexity-pro-search',
   },
   {
     provider_id: 'gemini-grounded',

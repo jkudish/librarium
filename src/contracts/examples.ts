@@ -22,8 +22,8 @@ export const groundedPrimaryProfile: ExecutionProfile = {
     target: {
       primary: {
         model_selection: 'fixed',
-        kind: 'model',
-        target_id: 'sonar-pro',
+        kind: 'preset',
+        target_id: 'low',
       },
     },
   },
@@ -96,7 +96,7 @@ export const perplexityPresetResearchProfile: ExecutionProfile = {
       primary: {
         model_selection: 'fixed',
         kind: 'preset',
-        target_id: 'deep-research',
+        target_id: 'medium',
       },
       underlying: {
         model_selection: 'provider_managed',

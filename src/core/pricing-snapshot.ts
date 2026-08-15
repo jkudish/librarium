@@ -124,59 +124,27 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
   ),
 
   // Perplexity
-  definition('perplexity-sonar-deep', 'research', {
-    target: { kind: 'model', target_id: 'sonar-deep-research' },
-    expected: [
-      ...tokenUnits,
-      'reasoning_tokens',
-      'searches',
-      'perplexity:citation_tokens',
-    ],
-    rates: [
-      rate('uncached_input_tokens', '2', '1000000'),
-      rate('output_tokens', '8', '1000000'),
-      rate('reasoning_tokens', '3', '1000000'),
-      rate('searches', '5', '1000'),
-      rate('perplexity:citation_tokens', '2', '1000000'),
-    ],
-    reference: 'official:docs.perplexity.ai/docs/getting-started/pricing',
-  }),
+  unavailable(
+    'perplexity-sonar-deep',
+    'research',
+    ['research_requests'],
+    'Agent presets are dynamic and the completed request quantities are provider-controlled.',
+    'official:docs.perplexity.ai/docs/getting-started/pricing',
+  ),
   unavailable(
     'perplexity-deep-research',
     'research',
     ['research_requests'],
-    routedReason,
+    'Agent presets are dynamic and the completed request quantities are provider-controlled.',
     'official:docs.perplexity.ai/docs/getting-started/pricing',
   ),
   unavailable(
-    'perplexity-advanced-deep',
-    'research',
-    ['research_requests'],
-    routedReason,
+    'perplexity-sonar-pro',
+    'grounded',
+    ['requests'],
+    'Agent presets are dynamic and the completed request quantities are provider-controlled.',
     'official:docs.perplexity.ai/docs/getting-started/pricing',
   ),
-  definition('perplexity-sonar-pro', 'grounded', {
-    target: { kind: 'model', target_id: 'sonar-pro' },
-    expected: [...tokenUnits, 'requests'],
-    fixed: { requests: '1' },
-    rates: [
-      rate('uncached_input_tokens', '3', '1000000'),
-      rate('output_tokens', '15', '1000000'),
-      rate('requests', '6', '1000'),
-    ],
-    reference: 'official:docs.perplexity.ai/docs/getting-started/pricing',
-  }),
-  definition('perplexity-pro-search', 'grounded', {
-    target: { kind: 'model', target_id: 'sonar-pro' },
-    expected: [...tokenUnits, 'requests'],
-    fixed: { requests: '1' },
-    rates: [
-      rate('uncached_input_tokens', '3', '1000000'),
-      rate('output_tokens', '15', '1000000'),
-      rate('requests', '14', '1000'),
-    ],
-    reference: 'official:docs.perplexity.ai/docs/sonar/pro-search/quickstart',
-  }),
   definition('perplexity-search', 'search', {
     expected: ['requests'],
     fixed: { requests: '1' },
@@ -470,6 +438,6 @@ export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:0a12e0c17f3d42ba5f4ba99ac919304d99f8b2e6bad48686cca8f582cb9dd00f',
+      'sha256:62ede14e769f22b86c9f50c98ba7c343dd988042176be4e8347fd02d30df8810',
     definitions: DEFINITIONS,
   });

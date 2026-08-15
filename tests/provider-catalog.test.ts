@@ -100,7 +100,6 @@ function refKey(providerId: string, profileId: string): string {
 const IMPLEMENTED_MATRIX = [
   ['perplexity-sonar-deep', 'research'],
   ['perplexity-deep-research', 'research'],
-  ['perplexity-advanced-deep', 'research'],
   ['openai-research', 'research'],
   ['gemini-deep', 'research'],
   ['parallel', 'research'],
@@ -109,7 +108,6 @@ const IMPLEMENTED_MATRIX = [
   ['tavily', 'research'],
   ['you-research', 'research'],
   ['perplexity-sonar-pro', 'grounded'],
-  ['perplexity-pro-search', 'grounded'],
   ['gemini-grounded', 'grounded'],
   ['grok', 'web'],
   ['grok-x-only', 'x'],
@@ -950,7 +948,6 @@ describe('provider catalog -- built-in workflows', () => {
     expect(keysOf(catalog().workflow('deep').members)).toEqual([
       'perplexity-sonar-deep/research',
       'perplexity-deep-research/research',
-      'perplexity-advanced-deep/research',
       'openai-research/research',
       'gemini-deep/research',
       'parallel/research',
@@ -988,7 +985,6 @@ describe('provider catalog -- built-in workflows', () => {
     const built = buildProviderCatalog({
       providerConfigs: enabledConfigs({
         exa: { enabled: false },
-        'perplexity-pro-search': { options: { unexpected: true } },
       }),
       credentials: {
         env: Object.fromEntries(
@@ -1003,11 +999,10 @@ describe('provider catalog -- built-in workflows', () => {
     expect(members).not.toContain('exa/search');
     expect(members).not.toContain('exa/research');
     expect(members).not.toContain('kagi-fastgpt/grounded');
-    expect(members).not.toContain('perplexity-pro-search/grounded');
     for (const [providerId, profileId] of PLANNED_MATRIX) {
       expect(members).not.toContain(refKey(providerId, profileId));
     }
-    expect(members).toHaveLength(IMPLEMENTED_MATRIX.length - 4);
+    expect(members).toHaveLength(IMPLEMENTED_MATRIX.length - 3);
 
     const omitted = built.workflow('all').omitted;
     expect(omitted).toContainEqual({
@@ -1021,10 +1016,6 @@ describe('provider catalog -- built-in workflows', () => {
     expect(omitted).toContainEqual({
       profile_key: 'kagi-fastgpt/grounded',
       reason: 'credential_missing',
-    });
-    expect(omitted).toContainEqual({
-      profile_key: 'perplexity-pro-search/grounded',
-      reason: 'configuration_invalid',
     });
   });
 
@@ -1157,7 +1148,7 @@ describe('provider catalog -- target selection', () => {
     ).toEqual({
       model_selection: 'fixed',
       kind: 'preset',
-      target_id: 'deep-research',
+      target_id: 'medium',
     });
     expect(
       built.get('perplexity-deep-research', 'research')?.profile.identity.target
@@ -1255,10 +1246,10 @@ describe('provider catalog -- configuration-driven resolution', () => {
   it('marks an invalid provider configuration as unselectable', () => {
     const resolved = buildProviderCatalog({
       providerConfigs: enabledConfigs({
-        'perplexity-pro-search': { options: { nope: 1 } },
+        grok: { options: { nope: 1 } },
       }),
       credentials: allCredentials(),
-    }).get('perplexity-pro-search', 'grounded');
+    }).get('grok', 'web');
     expect(resolved?.availability.configuration_valid).toBe(false);
     expect(resolved?.availability.selectable).toBe(false);
     expect(resolved?.availability.reasons).toContain('configuration_invalid');
@@ -1557,7 +1548,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     ).not.toContain('exa/search');
   });
 
-  it('requires durable resumability for async selection', () => {
+  it('accepts durable Perplexity Agent research for async selection', () => {
     const result = prepare({
       mode: 'async',
       selector: {
@@ -1567,11 +1558,7 @@ describe('provider catalog -- explicit and capability selection', () => {
         ],
       },
     });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.issues).toContainEqual(
-      expect.objectContaining({ code: 'async_requires_durable_profile' }),
-    );
+    expect(result.ok).toBe(true);
   });
 
   it('accepts a durable profile for async selection', () => {
@@ -1900,7 +1887,7 @@ describe('provider catalog -- configured target fidelity', () => {
       primary: {
         model_selection: 'fixed',
         kind: 'preset',
-        target_id: 'deep-research',
+        target_id: 'medium',
       },
       underlying: { model_selection: 'provider_managed', kind: 'model' },
     });
@@ -2086,13 +2073,23 @@ describe('provider catalog -- configured target fidelity', () => {
       primary: {
         model_selection: 'fixed',
         kind: 'preset',
-        target_id: 'deep-research',
+        target_id: 'medium',
       },
       underlying: { model_selection: 'provider_managed', kind: 'model' },
     });
-    const configured = buildProviderCatalog({
+    const legacyConfigured = buildProviderCatalog({
       providerConfigs: enabledConfigs({
         'perplexity-deep-research': { model: 'sonar-pro' },
+      }),
+      credentials: allCredentials(),
+    }).get('perplexity-deep-research', 'research');
+    expect(legacyConfigured?.profile.identity.target).toEqual(
+      unresolved?.profile.identity.target,
+    );
+
+    const configured = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        'perplexity-deep-research': { model: 'openai/gpt-5.6-sol' },
       }),
       credentials: allCredentials(),
     }).get('perplexity-deep-research', 'research');
@@ -2100,12 +2097,12 @@ describe('provider catalog -- configured target fidelity', () => {
       primary: {
         model_selection: 'fixed',
         kind: 'preset',
-        target_id: 'deep-research',
+        target_id: 'medium',
       },
       underlying: {
         model_selection: 'configurable',
         kind: 'model',
-        target_id: 'sonar-pro',
+        target_id: 'openai/gpt-5.6-sol',
       },
     });
   });

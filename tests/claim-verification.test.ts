@@ -836,10 +836,17 @@ describe('claim verification boundaries', () => {
         if (!next) throw new Error('unexpected LLM call');
         return new Response(
           JSON.stringify({
-            choices: [{ message: { content: next.content } }],
+            id: 'verification-agent',
+            status: 'completed',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: next.content }],
+              },
+            ],
             usage: {
-              prompt_tokens: next.input,
-              completion_tokens: next.output,
+              input_tokens: next.input,
+              output_tokens: next.output,
               total_tokens: next.input + next.output,
               cost: { total_cost: next.cost },
             },

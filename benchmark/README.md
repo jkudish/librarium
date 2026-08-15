@@ -77,10 +77,10 @@ to the unchanged configuration fingerprint and the remaining operations. The
 benchmark invokes Librarium with configured fallbacks disabled and rejects any
 fallback-marked or out-of-matrix provider artifact.
 
-Deep-research targets run in synchronous completion mode. The artifact parser
-also refuses any manifest that still contains `async-pending` reports or
-unretrieved async tasks, so incomplete deep-research output cannot be scored as
-if it were comparable.
+The benchmark runner forces synchronous mode. Durable submit, resume, poll,
+retrieve, and cancellation behavior is covered by the separate canonical live
+validation lane. Benchmark scoring still refuses any manifest that contains
+pending or unretrieved async work.
 
 ## Scoring and reporting
 

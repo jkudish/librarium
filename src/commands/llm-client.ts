@@ -1,3 +1,7 @@
+import {
+  parseAgentResponse,
+  redactPerplexityError,
+} from '../adapters/perplexity-agent-base.js';
 import { PROVIDER_ENV_VARS } from '../constants.js';
 import {
   type CredentialContext,
@@ -41,7 +45,7 @@ const CLIENT_DEFAULTS: Record<LlmProvider, { envVar: string; model: string }> =
   {
     openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
     gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-2.5-flash' },
-    perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'sonar' },
+    perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'low' },
   };
 
 /**
@@ -155,9 +159,10 @@ export function formatLlmHttpError(
     const message = String(err?.message ?? parsed.message ?? '');
     detail = [code, message ? `(${message})` : ''].filter(Boolean).join(' ');
   } catch {
-    detail = body;
+    detail = body.trim() ? '[unparseable provider error]' : '';
   }
   detail = detail.replace(/\s+/g, ' ').trim();
+  detail = redactPerplexityError(detail);
   if (detail.length > 120) detail = `${detail.slice(0, 119)}…`;
   return `${label} ${action} call failed: HTTP ${status}${detail ? ` ${detail}` : ''}`;
 }
@@ -315,41 +320,73 @@ async function callPerplexity(
   prompt: string,
   ctx: CallContext,
 ): Promise<LlmHttpResponse> {
-  const response = await fetch('https://api.perplexity.ai/chat/completions', {
+  const target = perplexityAgentTarget(client.model);
+  const response = await fetch('https://api.perplexity.ai/v1/agent', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${client.apiKey}`,
     },
-    body: JSON.stringify({
-      model: client.model,
-      messages: [{ role: 'user', content: prompt }],
-    }),
+    body: JSON.stringify({ input: prompt, ...target }),
     signal: AbortSignal.timeout(ctx.timeoutMs),
   });
   if (!response.ok) {
     throw new Error(
-      formatLlmHttpError(
-        'Perplexity',
-        ctx.action,
-        response.status,
-        await safeBody(response),
+      formatLlmHttpError('Perplexity', ctx.action, response.status, ''),
+    );
+  }
+  const data = parseAgentResponse(await response.json());
+  if (data.status !== 'completed') {
+    throw new Error(
+      redactPerplexityError(
+        data.error?.message ??
+          `Perplexity Agent response was not completed (status: ${data.status}).`,
       ),
     );
   }
-  const data = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    usage?: unknown;
-  };
   return {
-    text: data.choices?.[0]?.message?.content ?? '',
-    usage: normalizedUsage(data.usage, {
-      input: 'prompt_tokens',
-      output: 'completion_tokens',
-      total: 'total_tokens',
-      nestedCost: true,
-    }),
+    text: data.messages.join(''),
+    usage: data.usage
+      ? {
+          ...(data.usage.inputTokens === undefined
+            ? {}
+            : { inputTokens: data.usage.inputTokens }),
+          ...(data.usage.outputTokens === undefined
+            ? {}
+            : { outputTokens: data.usage.outputTokens }),
+          ...(data.usage.totalTokens === undefined
+            ? {}
+            : { totalTokens: data.usage.totalTokens }),
+          ...(data.usage.costUsd === undefined
+            ? {}
+            : { costUsd: data.usage.costUsd }),
+          raw: data.usage.raw,
+        }
+      : undefined,
   };
+}
+
+const PERPLEXITY_AGENT_PRESETS: Readonly<Record<string, string>> = {
+  'fast-search': 'fast',
+  'pro-search': 'low',
+  sonar: 'fast',
+  'sonar-pro': 'low',
+  'sonar-reasoning-pro': 'medium',
+  'deep-research': 'medium',
+  'advanced-deep-research': 'high',
+  'sonar-deep-research': 'high',
+  ultra: 'xhigh',
+};
+
+function perplexityAgentTarget(
+  model: string,
+): { readonly preset: string } | { readonly model: string } {
+  const preset = PERPLEXITY_AGENT_PRESETS[model];
+  if (preset !== undefined) return { preset };
+  if (['fast', 'low', 'medium', 'high', 'xhigh'].includes(model)) {
+    return { preset: model };
+  }
+  return { model };
 }
 
 function callClient(

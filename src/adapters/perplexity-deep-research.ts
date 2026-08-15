@@ -1,14 +1,9 @@
-import { getBuiltinProviderDefaultModel } from '../core/provider-descriptor.js';
 import type { ProviderTier } from '../types.js';
 import { PerplexityAgentBaseProvider } from './perplexity-agent-base.js';
 
-/**
- * Perplexity Agent API — deep-research preset.
- * Multi-step reasoning with web_search + fetch_url tools.
- * Tier: deep-research (async capable)
- */
+/** Canonical Perplexity research profile: durable Agent preset medium. */
 export class PerplexityDeepResearchProvider extends PerplexityAgentBaseProvider {
   readonly id = 'perplexity-deep-research';
   readonly tier: ProviderTier = 'deep-research';
-  readonly preset = getBuiltinProviderDefaultModel('perplexity-deep-research');
+  readonly preset = 'medium';
 }

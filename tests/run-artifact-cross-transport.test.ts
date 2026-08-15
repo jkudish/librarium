@@ -127,6 +127,7 @@ describe('run artifact cross-transport projection', () => {
         provider: providerId as string,
         url: 'https://example.test/first',
         title: 'First source',
+        providerReference: '1',
       },
       {
         provider: providerId as string,
@@ -208,6 +209,7 @@ describe('run artifact cross-transport projection', () => {
     );
     const artifact = snapshot.providerArtifacts[providerId as string];
     expect(artifact?.content).toBe(content);
+    expect(artifact?.meta?.citations[0]?.providerReference).toBe('1');
     const expectedFacts = providerFacts(
       report as Readonly<ProviderReport>,
       content,

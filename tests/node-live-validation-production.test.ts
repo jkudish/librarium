@@ -415,11 +415,11 @@ describe('production live-validation binding (injected, offline)', () => {
 });
 
 describe('production paid matrix and candidate attribution', () => {
-  it('requires the exact canonical 42-target binding inventory', () => {
+  it('requires the exact canonical 40-target binding inventory', () => {
     const matrix = productionValidationMatrix(
       loadConfig(join(tmpdir(), 'librarium-missing-matrix-config.json')),
     );
-    expect(matrix.targets).toHaveLength(42);
+    expect(matrix.targets).toHaveLength(40);
     expect(matrix.targets.map((target) => target.key)).toStrictEqual(
       buildCanonicalValidationMatrix().targets.map((target) => target.key),
     );

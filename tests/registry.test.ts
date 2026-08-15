@@ -169,15 +169,14 @@ describe('registry', () => {
     expect(meta[0].hasApiKey).toBe(true);
   });
 
-  it('initializeProviders registers all 38 providers', async () => {
+  it('initializeProviders registers all active providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(39);
+    expect(all).toHaveLength(37);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
     expect(ids).toContain('perplexity-deep-research');
-    expect(ids).toContain('perplexity-advanced-deep');
     expect(ids).toContain('openai-research');
     expect(ids).not.toContain('openai-deep');
     expect(ids).not.toContain('openai-deep-o3');
@@ -210,7 +209,6 @@ describe('registry', () => {
     expect(ids).toContain('searchapi-google-ai-mode');
     expect(ids).toContain('searchapi-bing-copilot');
     expect(ids).toContain('searchapi-google-ai-overview');
-    expect(ids).toContain('perplexity-pro-search');
     expect(ids).toContain('parallel-research');
     expect(ids).toContain('parallel-chat');
     expect(ids).toContain('parallel-search');
@@ -230,14 +228,13 @@ describe('registry', () => {
       'gemini-deep',
       'openai-research',
       'parallel-research',
-      'perplexity-advanced-deep',
       'perplexity-deep-research',
       'perplexity-sonar-deep',
       'valyu-research',
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(32);
+    ).toHaveLength(31);
   });
 
   it('injects credentials into every background built-in', async () => {
@@ -262,10 +259,6 @@ describe('registry', () => {
     const expectedHeaders: Record<string, [string, string]> = {
       'gemini-deep': ['x-goog-api-key', 'gemini-sentinel'],
       'openai-research': ['authorization', 'Bearer openai-sentinel'],
-      'perplexity-advanced-deep': [
-        'authorization',
-        'Bearer perplexity-sentinel',
-      ],
       'perplexity-deep-research': [
         'authorization',
         'Bearer perplexity-sentinel',
@@ -423,22 +416,25 @@ describe('registry', () => {
   it('reports configured target selection without claiming an observed model', async () => {
     await initializeProviders({
       providers: {
-        'perplexity-deep-research': { model: 'sonar-pro' },
+        'perplexity-deep-research': { model: 'openai/gpt-5.6-sol' },
       },
     });
     const meta = getProviderMeta({
-      'perplexity-deep-research': { enabled: true, model: 'sonar-pro' },
+      'perplexity-deep-research': {
+        enabled: true,
+        model: 'openai/gpt-5.6-sol',
+      },
     }).find((provider) => provider.id === 'perplexity-deep-research');
     expect(meta?.target).toEqual({
       primary: {
         model_selection: 'fixed',
         kind: 'preset',
-        target_id: 'deep-research',
+        target_id: 'medium',
       },
       underlying: {
         model_selection: 'configurable',
         kind: 'model',
-        target_id: 'sonar-pro',
+        target_id: 'openai/gpt-5.6-sol',
       },
     });
   });
