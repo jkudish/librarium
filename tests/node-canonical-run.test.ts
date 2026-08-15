@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
 import {
+  advanceCoordination,
   cancelCoordination,
   createCoordinatorState,
 } from '../src/core/coordinator.js';
@@ -1293,6 +1294,11 @@ describe('canonical v3 run.json', () => {
         ).toISOString();
       },
       (value) => {
+        value.coordination_state.attempts[0].finished_at = new Date(
+          START + 1,
+        ).toISOString();
+      },
+      (value) => {
         value.provider_outputs_by_attempt.unknown_attempt = structuredClone(
           Object.values(value.provider_outputs_by_attempt)[0],
         );
@@ -1308,6 +1314,52 @@ describe('canonical v3 run.json', () => {
         false,
       );
     }
+  });
+
+  it('binds an unstarted timeout finish to the terminal request observation', async () => {
+    const { root, runDirectory } = directories();
+    const plan = prepared([profile('unstarted-timeout')]);
+    const pending = advanceCoordination(
+      createCoordinatorState(plan, coordinator('initial-')),
+      coordinator('launch-'),
+    ).state;
+    expect(pending.attempts[0]?.status).toBe('dispatch_pending');
+    expect(pending.attempts[0]).not.toHaveProperty('started_at');
+    const expired = advanceCoordination(pending, {
+      ...coordinator('expired-'),
+      clock: { now: () => START + 60_001 },
+    }).state;
+    const attempt = expired.attempts[0];
+    const terminal = expired.lifecycle.at(-1);
+    expect(attempt).toMatchObject({
+      status: 'timed_out',
+      finished_at: terminal?.occurred_at,
+    });
+    expect(attempt).not.toHaveProperty('started_at');
+    expect(
+      expired.lifecycle.some(
+        (event) =>
+          event.event_kind === 'attempt_finished' &&
+          event.attempt_id === attempt?.attempt_id,
+      ),
+    ).toBe(false);
+
+    const store = new RunJsonCoordinationStateStore({
+      runs_root: root,
+      run_directory: runDirectory,
+      request: plan.request,
+    });
+    await store.create(expired);
+    const manifest = store.readManifest();
+    expect(CanonicalRunManifestV3Schema.safeParse(manifest).success).toBe(true);
+
+    const impossible = structuredClone(manifest);
+    impossible.coordination_state.attempts[0]!.finished_at = new Date(
+      Date.parse(terminal?.occurred_at ?? '') + 1,
+    ).toISOString();
+    expect(CanonicalRunManifestV3Schema.safeParse(impossible).success).toBe(
+      false,
+    );
   });
 
   it('rejects symlinked roots, run directories, and run.json files', async () => {

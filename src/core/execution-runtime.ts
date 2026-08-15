@@ -27,6 +27,8 @@ import {
 import type { PreparedResearchExecution } from './execution-plan.js';
 import { profileIdentityKey } from './execution-plan.js';
 
+const TERMINAL_CUSTODY_OBSERVATION_MS = 30_000;
+
 /**
  * The Worker-safe execution port. It receives a launch that was already
  * selected and bound by preparation/coordinator code; implementors must never
@@ -47,6 +49,8 @@ export interface AttemptExecutionPort {
 
 export interface AttemptExecutionContext {
   readonly mode: 'sync' | 'async';
+  /** Observe an already terminal durable handle without submit or retrieval. */
+  readonly custody_only?: boolean;
   readonly poll_interval_ms: number;
   submissionAccepted(
     handle: DurableHandle,
@@ -244,6 +248,7 @@ export async function runPreparedExecution(
       observedBeforeExecution?.state.status !== 'running';
     const context: AttemptExecutionContext = {
       mode: custodyOnly ? 'async' : prepared.request.mode,
+      ...(custodyOnly && { custody_only: true }),
       poll_interval_ms: prepared.policy.limits.poll_interval_ms,
       submissionAccepted: async (handle, adapterStateRef) => {
         const persisted = await transition(
@@ -566,7 +571,18 @@ export async function runPreparedExecution(
               binding: plan.binding,
               catalog_digest: state.catalog_digest,
               query: attempt.query,
-              deadline_at: attempt.deadline_at,
+              // Terminal custody gets one bounded GET-only observation window.
+              // This ephemeral launch value never changes the persisted attempt
+              // deadline or terminal lifecycle.
+              deadline_at:
+                effectiveDependencies.reconcile_terminal_custody &&
+                (attempt.status === 'cancelled' ||
+                  attempt.status === 'timed_out')
+                  ? new Date(
+                      effectiveDependencies.coordinator.clock.now() +
+                        TERMINAL_CUSTODY_OBSERVATION_MS,
+                    ).toISOString()
+                  : attempt.deadline_at,
               // Resume never re-enters delivery claiming. This stable private
               // value satisfies AttemptLaunch's execution-port shape only.
               delivery_lease_id: 'durable-resume',

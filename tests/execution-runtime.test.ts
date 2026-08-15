@@ -883,6 +883,92 @@ describe('private prepared execution runtime', () => {
     expect(durable.retrieve).not.toHaveBeenCalled();
   });
 
+  it('retains accepted custody after a diagnosed transient poll failure', async () => {
+    const submit = vi.fn(async () => ({
+      provider: 'adapter-durable',
+      taskId: 'accepted-task',
+      query: 'runtime query',
+      submittedAt: start,
+      status: 'pending' as const,
+    }));
+    const poll = vi.fn(async () => {
+      throw Object.assign(new Error('raw provider detail'), {
+        failureDiagnostic: { kind: 'authentication', httpStatus: 401 },
+      });
+    });
+    const retrieve = vi.fn();
+    const reserveExecute = vi.fn(async () =>
+      successfulResult('adapter-reserve'),
+    );
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit,
+      poll,
+      retrieve,
+    };
+    const reserve: Provider = {
+      id: 'adapter-reserve',
+      displayName: 'Reserve',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: reserveExecute,
+    };
+    const plan = prepared(
+      [profile('durable', 'background')],
+      [profile('reserve')],
+      'async',
+    );
+    const store = new InMemoryCoordinationStateStore();
+    const bridge = createProviderAttemptBridge({
+      resolveExactBinding: (binding) =>
+        binding.adapter_id === 'adapter-durable'
+          ? resolvedBinding('durable', durable)
+          : binding.adapter_id === 'adapter-reserve'
+            ? resolvedBinding('reserve', reserve)
+            : undefined,
+      now: () => start,
+    });
+
+    await runPreparedExecution(plan, {
+      store,
+      coordinator: coordinatorDependencies(),
+      attempts: bridge,
+    });
+    const resumed = await runPreparedExecution(plan, {
+      store,
+      coordinator: coordinatorDependencies(),
+      attempts: bridge,
+      resume_existing: true,
+    });
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(poll).toHaveBeenCalledOnce();
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(reserveExecute).not.toHaveBeenCalled();
+    expect(resumed.state.status).toBe('running');
+    expect(resumed.state.attempts).toHaveLength(1);
+    expect(resumed.state.attempts[0]).toMatchObject({
+      status: 'submitted',
+      durable_handle: {
+        provider_task_id: 'accepted-task',
+        status: 'pending',
+      },
+      transient_poll_error: {
+        code: 'provider_authentication_failed',
+        category: 'authentication',
+        provider_code: 'http_401',
+        fallback_allowed: false,
+      },
+    });
+    expect(JSON.stringify(resumed.state)).not.toContain('raw provider detail');
+  });
+
   it('retrieves an already-completed durable submission in async mode', async () => {
     const durable: Provider = {
       id: 'adapter-durable',

@@ -170,6 +170,27 @@ function durableProviderFailure(
       );
 }
 
+function transientProviderFailure(error: unknown): StructuredError {
+  const diagnostic =
+    typeof error === 'object' && error !== null && 'failureDiagnostic' in error
+      ? validatedFailureDiagnostic(
+          (error as { readonly failureDiagnostic?: unknown }).failureDiagnostic,
+        )
+      : undefined;
+  return diagnostic
+    ? {
+        ...diagnosedProviderFailure(diagnostic, false),
+        // The remote task remains accepted. Retrying the GET observation is
+        // safe even when the observed cause would forbid a new submission.
+        retryable: true,
+      }
+    : providerFailure(
+        'adapter_poll_failed',
+        'The durable provider status check failed.',
+        false,
+      );
+}
+
 type DeadlineResult<T> =
   | { readonly kind: 'value'; readonly value: T }
   | { readonly kind: 'error'; readonly error: unknown }
@@ -428,6 +449,9 @@ export function createProviderAttemptBridge(
       }
       const task = taskFromDurableHandle(launch, handle, provider.id);
       if (handle.status === 'succeeded') {
+        if (context.custody_only) {
+          return { kind: 'accepted', durable_handle: handle };
+        }
         return retrieveCompletedTask(provider, task, launch, handle, now);
       }
       let latestHandle = handle;
@@ -455,11 +479,7 @@ export function createProviderAttemptBridge(
         }
         if (polled.kind === 'error') {
           await context.transientPollFailure(
-            providerFailure(
-              'adapter_poll_failed',
-              'The durable provider status check failed.',
-              false,
-            ),
+            transientProviderFailure(polled.error),
           );
           if (context.mode === 'async') {
             return { kind: 'accepted', durable_handle: latestHandle };
@@ -471,6 +491,12 @@ export function createProviderAttemptBridge(
         }
         const poll = polled.value;
         if (poll.status === 'completed') {
+          if (context.custody_only) {
+            return {
+              kind: 'accepted',
+              durable_handle: observedHandle(latestHandle, 'succeeded', now),
+            };
+          }
           return retrieveCompletedTask(
             provider,
             task,
@@ -727,11 +753,7 @@ export function createProviderAttemptBridge(
         }
         if (polled.kind === 'error') {
           await context.transientPollFailure(
-            providerFailure(
-              'adapter_poll_failed',
-              'The durable provider status check failed.',
-              false,
-            ),
+            transientProviderFailure(polled.error),
           );
           await wait(
             Math.min(context.poll_interval_ms, timeoutFor(launch, now)),

@@ -4,6 +4,7 @@ import type {
   AsyncPollResult,
   AsyncTaskHandle,
   Citation,
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -17,9 +18,24 @@ export interface TavilyResearchProviderOptions extends BaseProviderOptions {
 }
 
 const TavilyId = z.string().trim().min(1).max(255);
+const CredentialFreeHttpUrl = z
+  .string()
+  .url()
+  .refine((value) => {
+    try {
+      const parsed = new globalThis.URL(value);
+      return (
+        (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+        parsed.username === '' &&
+        parsed.password === ''
+      );
+    } catch {
+      return false;
+    }
+  });
 const TavilySource = z.object({
   title: z.string().min(1).optional(),
-  url: z.string().url(),
+  url: CredentialFreeHttpUrl,
   favicon: z.string().url().optional(),
 });
 type TavilySource = z.infer<typeof TavilySource>;
@@ -59,6 +75,30 @@ type TavilyTerminal =
   | z.infer<typeof TavilyFailed>;
 
 const URL = 'https://api.tavily.com/research';
+const SUBMISSION_FAILED =
+  'Tavily Research submission failed before a valid handle was returned.';
+const POLL_FAILED = 'Tavily Research status check failed.';
+const RETRIEVAL_FAILED = 'Tavily Research retrieval failed.';
+const EXECUTION_FAILED = 'Tavily Research execution failed.';
+
+class TavilyResearchSubmissionError extends UnsafeToRetrySubmissionError {
+  readonly failureDiagnostic: ProviderFailureDiagnostic;
+
+  constructor(failureDiagnostic: ProviderFailureDiagnostic) {
+    super(SUBMISSION_FAILED);
+    this.failureDiagnostic = failureDiagnostic;
+  }
+}
+
+class TavilyResearchLifecycleError extends Error {
+  readonly failureDiagnostic: ProviderFailureDiagnostic;
+
+  constructor(message: string, failureDiagnostic: ProviderFailureDiagnostic) {
+    super(message);
+    this.name = 'TavilyResearchLifecycleError';
+    this.failureDiagnostic = failureDiagnostic;
+  }
+}
 
 /** Durable Tavily Research adapter bound only to `tavily/research`. */
 export class TavilyResearchProvider extends BackgroundBaseProvider {
@@ -90,6 +130,7 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
           return this.error(
             start,
             'Tavily research task timed out locally; the remote task may still be running.',
+            { kind: 'timeout' },
           );
         await wait(Math.min(1_000, deadline - Date.now()), options.signal);
         const next = await this.poll(handle);
@@ -97,13 +138,22 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         if (next.status === 'failed' || next.status === 'cancelled')
           return this.error(
             start,
-            next.message ?? `Tavily research task ${next.status}`,
+            next.message ?? 'Tavily Research task ended without a result.',
+            { kind: 'provider' },
           );
       }
       const result = await this.retrieve(handle);
       return { ...result, durationMs: Math.round(performance.now() - start) };
     } catch (error) {
-      return this.error(start, this.formatCatchError(error));
+      return error instanceof TavilyResearchSubmissionError
+        ? this.error(start, error.message, error.failureDiagnostic)
+        : error instanceof TavilyResearchLifecycleError
+          ? this.error(start, error.message, error.failureDiagnostic)
+          : this.error(
+              start,
+              EXECUTION_FAILED,
+              this.catchDiagnostic(error, options.signal),
+            );
     }
   }
 
@@ -132,13 +182,13 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         signal: options.signal,
       });
     } catch (error) {
-      throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+      throw new TavilyResearchSubmissionError(
+        this.catchDiagnostic(error, options.signal),
       );
     }
     if (response.status !== 201) {
-      throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+      throw new TavilyResearchSubmissionError(
+        this.httpDiagnostic(response.status, response.data),
       );
     }
     const parsed = TavilyPending.safeParse(response.data);
@@ -147,15 +197,16 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         (response.data as { request_id?: unknown })?.request_id,
       );
       if (!id.success)
-        throw new UnsafeToRetrySubmissionError(
-          'Tavily returned an invalid research handle',
-        );
+        throw new TavilyResearchSubmissionError({
+          kind: 'provider',
+          httpStatus: 201,
+        });
       return {
         provider: this.id,
         taskId: id.data,
         query,
         submittedAt: Date.now(),
-        status: 'failed',
+        status: 'pending',
         providerStatus: 'invalid_response',
         lastPollError: 'Tavily returned a malformed create response',
       };
@@ -171,45 +222,47 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
   }
 
   async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
-    const response = await this.task(handle.taskId, 15_000);
+    let response;
+    try {
+      response = await this.task(handle.taskId, 15_000);
+    } catch (error) {
+      throw new TavilyResearchLifecycleError(
+        POLL_FAILED,
+        this.catchDiagnostic(error),
+      );
+    }
     if (response.status === 202) {
       const parsed = TavilyInProgress.safeParse(response.data);
-      return parsed.success
-        ? { status: 'running', rawStatus: 'in_progress' }
-        : {
-            status: 'failed',
-            rawStatus: 'invalid_response',
-            message: 'Tavily returned a malformed in-progress response',
-          };
+      if (!parsed.success) {
+        throw new TavilyResearchLifecycleError(POLL_FAILED, {
+          kind: 'provider',
+          httpStatus: 202,
+        });
+      }
+      return { status: 'running', rawStatus: 'in_progress' };
     }
     if (response.status !== 200) {
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      )
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      return {
-        status: 'failed',
-        rawStatus: `http_${response.status}`,
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new TavilyResearchLifecycleError(
+        POLL_FAILED,
+        this.httpDiagnostic(response.status, response.data),
+      );
     }
     const parsed = z
       .union([TavilyCompleted, TavilyFailed])
       .safeParse(response.data);
-    if (!parsed.success)
-      return {
-        status: 'failed',
-        rawStatus: 'invalid_response',
-        message: 'Tavily returned a malformed terminal response',
-      };
+    if (!parsed.success) {
+      throw new TavilyResearchLifecycleError(POLL_FAILED, {
+        kind: 'provider',
+        httpStatus: 200,
+      });
+    }
     return parsed.data.status === 'completed'
       ? { status: 'completed', rawStatus: 'completed' }
       : {
           status: 'failed',
           rawStatus: 'failed',
-          message: message(parsed.data.error),
+          message: 'Tavily Research task failed.',
+          failureDiagnostic: { kind: 'provider' },
         };
   }
 
@@ -220,19 +273,23 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
       if (response.status !== 200)
         return this.error(
           start,
-          `Retrieve failed with HTTP ${response.status}`,
+          RETRIEVAL_FAILED,
+          this.httpDiagnostic(response.status, response.data),
         );
       const parsed = z
         .union([TavilyCompleted, TavilyFailed])
         .safeParse(response.data);
       if (!parsed.success)
-        return this.error(
-          start,
-          'Tavily returned a malformed terminal response',
-        );
+        return this.error(start, RETRIEVAL_FAILED, {
+          kind: 'provider',
+          httpStatus: 200,
+        });
       const task: TavilyTerminal = parsed.data;
       if (task.status !== 'completed')
-        return this.error(start, message(task.error));
+        return this.error(start, RETRIEVAL_FAILED, {
+          kind: 'provider',
+          httpStatus: 200,
+        });
       const content = task.content;
       return {
         provider: this.id,
@@ -247,7 +304,7 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         durationMs: Math.round(performance.now() - start),
       };
     } catch (error) {
-      return this.error(start, this.formatCatchError(error));
+      return this.error(start, RETRIEVAL_FAILED, this.catchDiagnostic(error));
     }
   }
 
@@ -263,7 +320,11 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
     });
   }
 
-  private error(start: number, error: string): ProviderResult {
+  private error(
+    start: number,
+    error: string,
+    failureDiagnostic?: ProviderFailureDiagnostic,
+  ): ProviderResult {
     return {
       provider: this.id,
       tier: this.tier,
@@ -271,8 +332,106 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
       citations: [],
       durationMs: Math.round(performance.now() - start),
       error,
+      ...(failureDiagnostic && { failureDiagnostic }),
     };
   }
+
+  private httpDiagnostic(
+    status: number,
+    body: unknown,
+  ): ProviderFailureDiagnostic {
+    const httpStatus =
+      Number.isInteger(status) && status >= 100 && status <= 599
+        ? status
+        : undefined;
+    const detail = submissionFailureText(body);
+    const kind: ProviderFailureDiagnostic['kind'] =
+      status === 429
+        ? 'rate_limit'
+        : status === 432
+          ? 'plan_required'
+          : status === 433
+            ? 'billing'
+            : status === 401
+              ? 'authentication'
+              : status === 403
+                ? looksPlanRestricted(detail)
+                  ? 'plan_required'
+                  : 'authentication'
+                : status === 402
+                  ? 'billing'
+                  : status === 408 || status === 504
+                    ? 'timeout'
+                    : status >= 400 && status < 500
+                      ? 'invalid_request'
+                      : 'provider';
+    return { kind, ...(httpStatus !== undefined && { httpStatus }) };
+  }
+
+  private catchDiagnostic(
+    error: unknown,
+    signal?: AbortSignal,
+  ): ProviderFailureDiagnostic {
+    if (
+      signal?.aborted ||
+      (error instanceof DOMException &&
+        (error.name === 'AbortError' || error.name === 'TimeoutError'))
+    ) {
+      return { kind: 'timeout' };
+    }
+    const detail = error instanceof Error ? error.message : '';
+    if (/API key not found/i.test(detail)) return { kind: 'authentication' };
+    if (
+      error instanceof TypeError ||
+      /fetch failed|failed to fetch|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(
+        detail,
+      )
+    ) {
+      return { kind: 'network' };
+    }
+    return { kind: 'provider' };
+  }
+}
+
+function submissionFailureText(value: unknown): string {
+  if (typeof value === 'string') return value.slice(0, 512).toLowerCase();
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return '';
+  }
+  const record = value as Record<string, unknown>;
+  const nested =
+    typeof record.error === 'object' &&
+    record.error !== null &&
+    !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  const nestedDetail =
+    typeof record.detail === 'object' &&
+    record.detail !== null &&
+    !Array.isArray(record.detail)
+      ? (record.detail as Record<string, unknown>)
+      : undefined;
+  return [
+    record.message,
+    record.detail,
+    typeof record.error === 'string' ? record.error : undefined,
+    nested?.message,
+    nested?.detail,
+    nested?.code,
+    nestedDetail?.message,
+    nestedDetail?.detail,
+    nestedDetail?.code,
+    typeof nestedDetail?.error === 'string' ? nestedDetail.error : undefined,
+  ]
+    .filter((item): item is string => typeof item === 'string')
+    .join(' ')
+    .slice(0, 512)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ');
+}
+
+function looksPlanRestricted(detail: string): boolean {
+  return /\b(plan|subscription|upgrade|quota|credit limit)\b/i.test(detail);
 }
 
 function citations(
@@ -286,10 +445,6 @@ function citations(
       title: source.title,
       provider,
     }));
-}
-
-function message(error: z.infer<typeof TavilyFailed>['error']): string {
-  return typeof error === 'string' ? error : error?.message;
 }
 
 function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
