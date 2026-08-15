@@ -150,6 +150,7 @@ const ContextSchema = z.strictObject({
   authentication: z
     .enum(['anonymous', 'authenticated', 'managed', 'unknown'])
     .optional(),
+  personalization: z.enum(['present', 'absent', 'unknown']).optional(),
 });
 
 export const ResultProvenanceSchema = z
@@ -159,6 +160,7 @@ export const ResultProvenanceSchema = z
       'grounded_answer',
       'research_report',
       'model_answer',
+      'surface_observation',
     ]),
     retrieval_methods: z.array(
       z.enum([
@@ -166,9 +168,11 @@ export const ResultProvenanceSchema = z
         'model_search_tool',
         'research_agent',
         'model_only',
+        'surface_collector',
       ]),
     ),
     corpora: z.array(z.enum(['web', 'news', 'x', 'files', 'places'])),
+    observation_mode: z.enum(['api_output', 'surface_snapshot']).optional(),
     observed_at: Rfc3339UtcSchema,
     collector: OpenStringSchema.optional(),
     surface: OpenStringSchema.optional(),
@@ -181,6 +185,39 @@ export const ResultProvenanceSchema = z
         message: 'Surface requires collector',
         path: ['collector'],
       });
+    }
+    if (
+      provenance.result_kind === 'surface_observation' &&
+      !provenance.surface
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Surface observations require surface identity',
+        path: ['surface'],
+      });
+    }
+    if (provenance.observation_mode === 'surface_snapshot') {
+      if (provenance.result_kind !== 'surface_observation') {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Surface snapshots must produce surface observations',
+          path: ['result_kind'],
+        });
+      }
+      if (!provenance.retrieval_methods.includes('surface_collector')) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Surface observations require surface_collector retrieval',
+          path: ['retrieval_methods'],
+        });
+      }
+      if (!provenance.collector) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Surface snapshots require collector identity',
+          path: ['collector'],
+        });
+      }
     }
   });
 

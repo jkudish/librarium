@@ -204,6 +204,7 @@ describe('terminal interchange schemas', () => {
       'model_answer',
       'research_report',
       'search_results',
+      'surface_observation',
     ]);
     expect(provenance[0].retrieval_methods).toEqual([
       'search_endpoint',
@@ -218,5 +219,16 @@ describe('terminal interchange schemas', () => {
       'files',
       'places',
     ]);
+    expect(provenance[4]).toMatchObject({
+      result_kind: 'surface_observation',
+      retrieval_methods: ['surface_collector'],
+      observation_mode: 'surface_snapshot',
+      collector: 'searchapi',
+      surface: 'chatgpt',
+      context: {
+        authentication: 'unknown',
+        personalization: 'unknown',
+      },
+    });
   });
 });

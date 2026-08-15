@@ -391,12 +391,14 @@ const SUPPORTED_RESULT_KINDS = new Set([
   'grounded_answer',
   'research_report',
   'model_answer',
+  'surface_observation',
 ]);
 const SUPPORTED_RETRIEVAL_METHODS = new Set([
   'search_endpoint',
   'model_search_tool',
   'research_agent',
   'model_only',
+  'surface_collector',
 ]);
 const SUPPORTED_CORPORA = new Set([
   'web',
@@ -449,6 +451,7 @@ function terminalProvenance(
           device: profile.surface_context.device,
         }),
         authentication: profile.surface_context.account_context,
+        personalization: profile.surface_context.personalization,
       }
     : undefined;
   return {
@@ -461,6 +464,9 @@ function terminalProvenance(
       (corpus): corpus is ResearchResult['provenance']['corpora'][number] =>
         corpus !== 'specialized',
     ),
+    ...(profile.result_kind === 'surface_observation' && {
+      observation_mode: profile.observation_mode,
+    }),
     observed_at: output.observed_at,
     ...(profile.collector_id && { collector: profile.collector_id }),
     ...(profile.surface_id && { surface: profile.surface_id }),

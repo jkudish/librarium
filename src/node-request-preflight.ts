@@ -12,6 +12,7 @@ import type {
   PreparationIssue,
   PreparationNotice,
 } from './core/research-request.js';
+import { assertResearchResponseProjectableProfile } from './core/research-response-projector.js';
 import { createNodeCredentialContext } from './node-credentials.js';
 
 type ProductionRequestInput = Omit<
@@ -142,6 +143,41 @@ export function admittedAdapterIds(
   ];
 }
 
+/** Reject plans that cannot reach the public terminal contract without touching credentials. */
+export function assertPreparedResearchResponseProjectable(
+  prepared: PreparedResearchExecution,
+): void {
+  const profiles = [
+    ...prepared.request.slots.map((slot, index) => ({
+      profile: slot.primary,
+      path: `/slots/${index}/primary`,
+    })),
+    ...prepared.request.fallback_reserve.map((candidate, index) => ({
+      profile: candidate.profile,
+      path: `/fallback_reserve/${index}/profile`,
+    })),
+  ];
+  const issues: PreparationIssue[] = [];
+  for (const { profile, path } of profiles) {
+    try {
+      assertResearchResponseProjectableProfile(profile);
+    } catch (error) {
+      issues.push({
+        code: 'profile_not_projectable',
+        phase: 'compilation',
+        path,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'The selected profile cannot reach the terminal response contract.',
+      });
+    }
+  }
+  if (issues.length > 0) {
+    throw new RequestPreflightError(issues, prepared.notices);
+  }
+}
+
 /**
  * Factories can still reject a malformed adapter during initialization.
  * Check that every admitted adapter was actually registered before refinement,
@@ -193,6 +229,7 @@ export function preflightProductionRequestStructure(
         preparation: requestPreparation(),
       }),
     );
+    assertPreparedResearchResponseProjectable(prepared);
     return {
       prepared,
       notices: prepared.notices,

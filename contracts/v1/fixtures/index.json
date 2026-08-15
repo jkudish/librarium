@@ -464,6 +464,16 @@
       "semantic_rule_id": "result_provenance.surface_requires_collector"
     },
     {
+      "id": "provenance-surface-snapshot-wrong-result",
+      "path": "fixtures/invalid/provenance-surface-snapshot-wrong-result.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "result_provenance.surface_snapshot_boundary"
+    },
+    {
       "id": "invalid-enum",
       "path": "fixtures/invalid/invalid-enum.json",
       "valid": false,

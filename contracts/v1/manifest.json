@@ -22,6 +22,10 @@
       "description": "A surface requires a collector."
     },
     {
+      "rule_id": "result_provenance.surface_snapshot_boundary",
+      "description": "A surface snapshot requires a surface observation, collector retrieval, and collector identity."
+    },
+    {
       "rule_id": "provider_meta.safe_metadata",
       "description": "Provider metadata excludes obvious credentials and raw responses."
     }
@@ -386,6 +390,13 @@
     },
     {
       "path": "fixtures/invalid/provenance-surface-no-collector.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/provenance-surface-snapshot-wrong-result.json",
       "role": "fixture",
       "areas": [
         "interchange"

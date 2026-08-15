@@ -13,7 +13,7 @@
       "provider": "example-provider",
       "profile": "deep-research-v2",
       "provenance": {
-        "result_kind": "surface_observation",
+        "result_kind": "grounded_answer",
         "retrieval_methods": [
           "surface_collector"
         ],
@@ -23,14 +23,7 @@
         "observed_at": "2026-08-09T12:00:00Z",
         "observation_mode": "surface_snapshot",
         "collector": "searchapi",
-        "surface": "google_ai_mode",
-        "context": {
-          "locale": "en-CA",
-          "country": "CA",
-          "device": "desktop",
-          "authentication": "managed",
-          "personalization": "unknown"
-        }
+        "surface": "chatgpt"
       },
       "citations": [
         {
