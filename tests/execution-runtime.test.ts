@@ -985,6 +985,117 @@ describe('private prepared execution runtime', () => {
     },
   );
 
+  it.each([
+    [
+      'authentication',
+      'provider_authentication_failed',
+      'authentication',
+      false,
+    ],
+    ['billing', 'provider_billing_failed', 'budget', false],
+    ['rate_limit', 'provider_rate_limited', 'rate_limit', true],
+    ['invalid_request', 'provider_invalid_request', 'validation', false],
+  ] as const)(
+    'classifies an immediate durable %s failure through the canonical mapper',
+    async (kind, code, category, retryable) => {
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-durable',
+          taskId: `immediate-${kind}`,
+          query: 'runtime query',
+          submittedAt: start,
+          status: 'failed' as const,
+          failureDiagnostic: { kind },
+        })),
+        poll: vi.fn(),
+        retrieve: vi.fn(),
+      };
+
+      const result = await runPreparedExecution(
+        prepared([profile('durable', 'background')], [], 'async'),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: coordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: () => resolvedBinding('durable', durable),
+            now: () => start,
+          }),
+        },
+      );
+
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'failed',
+        error: { code, category, retryable },
+        durable_handle: { status: 'failed' },
+      });
+      expect(durable.poll).not.toHaveBeenCalled();
+      expect(durable.retrieve).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      'authentication',
+      'provider_authentication_failed',
+      'authentication',
+      false,
+    ],
+    ['billing', 'provider_billing_failed', 'budget', false],
+    ['rate_limit', 'provider_rate_limited', 'rate_limit', true],
+    ['invalid_request', 'provider_invalid_request', 'validation', false],
+  ] as const)(
+    'classifies a polled durable %s failure through the canonical mapper',
+    async (kind, code, category, retryable) => {
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-durable',
+          taskId: `polled-${kind}`,
+          query: 'runtime query',
+          submittedAt: start,
+          status: 'pending' as const,
+        })),
+        poll: vi.fn(async () => ({
+          status: 'failed' as const,
+          failureDiagnostic: { kind },
+        })),
+        retrieve: vi.fn(),
+      };
+
+      const result = await runPreparedExecution(
+        prepared([profile('durable', 'background')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: coordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: () => resolvedBinding('durable', durable),
+            now: () => start,
+            wait: async () => {},
+          }),
+        },
+      );
+
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'failed',
+        error: { code, category, retryable },
+        durable_handle: { status: 'failed' },
+      });
+      expect(durable.poll).toHaveBeenCalledOnce();
+      expect(durable.retrieve).not.toHaveBeenCalled();
+    },
+  );
+
   it('retains accepted durable work after a local execution exception', async () => {
     const result = await runPreparedExecution(
       prepared([profile('durable', 'background')], [], 'async'),

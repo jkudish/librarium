@@ -156,6 +156,20 @@ function diagnosedProviderFailure(
   };
 }
 
+function durableProviderFailure(
+  diagnostic: unknown,
+  fallbackAllowed: boolean,
+): StructuredError {
+  const validated = validatedFailureDiagnostic(diagnostic);
+  return validated
+    ? diagnosedProviderFailure(validated, fallbackAllowed)
+    : providerFailure(
+        'provider_task_failed',
+        'The durable provider task failed.',
+        fallbackAllowed,
+      );
+}
+
 type DeadlineResult<T> =
   | { readonly kind: 'value'; readonly value: T }
   | { readonly kind: 'error'; readonly error: unknown }
@@ -470,11 +484,7 @@ export function createProviderAttemptBridge(
             kind: 'finished',
             finished: {
               outcome: 'failed',
-              error: providerFailure(
-                'provider_task_failed',
-                'The durable provider task failed.',
-                true,
-              ),
+              error: durableProviderFailure(poll.failureDiagnostic, true),
               durable_handle: observedHandle(latestHandle, 'failed', now),
             },
           };
@@ -650,11 +660,7 @@ export function createProviderAttemptBridge(
           kind: 'finished',
           finished: {
             outcome: 'failed',
-            error: providerFailure(
-              'provider_task_failed',
-              'The durable provider task failed.',
-              true,
-            ),
+            error: durableProviderFailure(task.failureDiagnostic, true),
             durable_handle: observedHandle(handle, 'failed', now),
           },
         };
@@ -751,11 +757,7 @@ export function createProviderAttemptBridge(
             kind: 'finished',
             finished: {
               outcome: 'failed',
-              error: providerFailure(
-                'provider_task_failed',
-                'The durable provider task failed.',
-                true,
-              ),
+              error: durableProviderFailure(poll.failureDiagnostic, true),
               durable_handle: observedHandle(latestHandle, 'failed', now),
             },
           };

@@ -838,6 +838,7 @@ describe('claim verification boundaries', () => {
           JSON.stringify({
             id: 'verification-agent',
             status: 'completed',
+            model: 'openai/gpt-5.6-luna',
             output: [
               {
                 type: 'message',

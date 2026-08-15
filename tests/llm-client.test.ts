@@ -267,6 +267,7 @@ describe('callWithCascade', () => {
             JSON.stringify({
               id: 'agent-llm-test',
               status: 'completed',
+              model: 'openai/gpt-5.6-luna',
               output: [
                 {
                   type: 'message',

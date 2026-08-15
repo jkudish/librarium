@@ -1,10 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseAgentResponse } from '../../src/adapters/perplexity-agent-base.js';
+import {
+  buildAgentRequest,
+  parseAgentResponse,
+  redactPerplexityError,
+} from '../../src/adapters/perplexity-agent-base.js';
 import { PerplexityDeepResearchProvider } from '../../src/adapters/perplexity-deep-research.js';
 import { PerplexitySonarDeepProvider } from '../../src/adapters/perplexity-sonar-deep.js';
 import { PerplexitySonarProProvider } from '../../src/adapters/perplexity-sonar-pro.js';
 import { UnsafeToRetrySubmissionError } from '../../src/core/errors.js';
-import type { HttpClient, HttpResponse } from '../../src/core/http-client.js';
+import {
+  type HttpClient,
+  HttpRequestAbortedError,
+  type HttpResponse,
+} from '../../src/core/http-client.js';
 import type { AsyncTaskHandle } from '../../src/types.js';
 
 function response<T>(data: unknown, status = 200): HttpResponse<T> {
@@ -31,11 +39,15 @@ function queuedClient(values: Array<{ data: unknown; status?: number }>): {
   return { client, calls };
 }
 
-function completed(id: string, text = 'Agent answer [web:1]') {
+function completed(
+  id: string,
+  text = 'Agent answer [web:1]',
+  model = 'openai/gpt-5.6-luna',
+) {
   return {
     id,
     status: 'completed',
-    model: 'agent-model',
+    model,
     output: [
       {
         type: 'search_results',
@@ -70,6 +82,12 @@ function completed(id: string, text = 'Agent answer [web:1]') {
         name: 'documented_but_not_persisted',
         arguments: '{}',
       },
+      { type: 'finance_results', results: [] },
+      { type: 'people_search_results', results: [] },
+      { type: 'sandbox_results', results: [] },
+      { type: 'mcp_list_tools', tools: [] },
+      { type: 'mcp_call', output: null },
+      { type: 'tool_search', tools: [] },
       {
         type: 'message',
         content: [
@@ -102,6 +120,17 @@ function handle(taskId: string): AsyncTaskHandle {
   };
 }
 
+function failed(id: string, code: string) {
+  return {
+    id,
+    status: 'failed',
+    error: {
+      code,
+      message: 'Bearer secret-value https://private.example.test/error',
+    },
+  };
+}
+
 describe('Perplexity Agent API adapters', () => {
   it('uses the strict low preset request and preserves typed evidence and reported usage', async () => {
     const { client, calls } = queuedClient([{ data: completed('inline-1') }]);
@@ -116,7 +145,7 @@ describe('Perplexity Agent API adapters', () => {
       provider: 'perplexity-sonar-pro',
       tier: 'ai-grounded',
       content: 'Agent answer [web:1]',
-      model: 'agent-model',
+      model: 'openai/gpt-5.6-luna',
       tokenUsage: { input: 10, output: 20 },
       usage: {
         inputTokens: 10,
@@ -159,6 +188,37 @@ describe('Perplexity Agent API adapters', () => {
     });
   });
 
+  it.each(['fast', 'low', 'medium', 'high', 'xhigh'])(
+    'accepts the documented dynamic %s preset without pinning a model',
+    (preset) => {
+      expect(buildAgentRequest('question', preset, undefined, false)).toEqual({
+        input: 'question',
+        preset,
+      });
+    },
+  );
+
+  it.each(['openai/gpt-5.6-luna', 'openai/gpt-5.6-sol', 'xai/grok-4.6'])(
+    'accepts the current bounded provider/model identifier %s',
+    (model) => {
+      expect(
+        parseAgentResponse(completed('model-task', 'Answer [1]', model)).model,
+      ).toBe(model);
+    },
+  );
+
+  it('preserves numeric search-result ids while projecting string citation references', async () => {
+    const parsed = parseAgentResponse(completed('numeric-id'));
+    expect(parsed.searchResults[0]?.id).toBe(1);
+
+    const result = await new PerplexitySonarProProvider({
+      apiKey: 'synthetic-perplexity-key',
+      httpClient: queuedClient([{ data: completed('numeric-provider') }])
+        .client,
+    }).execute('question', { timeout: 10 });
+    expect(result.citations[0]?.providerReference).toBe('1');
+  });
+
   it('submits medium background work, polls, retrieves, and never resubmits on retrieval', async () => {
     const { client, calls } = queuedClient([
       { data: { id: 'task-123', status: 'queued' } },
@@ -195,6 +255,7 @@ describe('Perplexity Agent API adapters', () => {
     });
     const retrieved = await provider.retrieve(submitted);
     expect(retrieved.content).toBe('Research result [1]');
+    expect(retrieved.model).toBe('openai/gpt-5.6-luna');
     expect(calls.map(({ url, options }) => [url, options.method])).toEqual([
       ['https://api.perplexity.ai/v1/agent', 'POST'],
       ['https://api.perplexity.ai/v1/agent/task-123', 'GET'],
@@ -257,6 +318,111 @@ describe('Perplexity Agent API adapters', () => {
     });
   });
 
+  it.each([
+    ['invalid_api_key', 'authentication'],
+    ['payment_required', 'billing'],
+    ['rate_limit_exceeded', 'rate_limit'],
+    ['validation_error', 'invalid_request'],
+  ] as const)(
+    'carries an immediate %s failure as a bounded %s diagnostic',
+    async (code, kind) => {
+      const provider = new PerplexityDeepResearchProvider({
+        apiKey: 'synthetic-perplexity-key',
+        httpClient: queuedClient([{ data: failed('immediate-failed', code) }])
+          .client,
+      });
+
+      const submitted = await provider.submit('question', { timeout: 10 });
+
+      expect(submitted).toMatchObject({
+        taskId: 'immediate-failed',
+        status: 'failed',
+        failureDiagnostic: { kind },
+      });
+      expect(JSON.stringify(submitted)).not.toMatch(
+        /secret-value|private\.example|Bearer/,
+      );
+    },
+  );
+
+  it.each([
+    ['invalid_api_key', 'authentication'],
+    ['payment_required', 'billing'],
+    ['rate_limit_exceeded', 'rate_limit'],
+    ['validation_error', 'invalid_request'],
+  ] as const)(
+    'carries a polled %s failure as a bounded %s diagnostic',
+    async (code, kind) => {
+      const provider = new PerplexityDeepResearchProvider({
+        apiKey: 'synthetic-perplexity-key',
+        httpClient: queuedClient([{ data: failed('polled-failed', code) }])
+          .client,
+      });
+
+      const polled = await provider.poll(handle('polled-failed'));
+
+      expect(polled).toEqual({
+        status: 'failed',
+        rawStatus: 'failed',
+        message: 'Perplexity Agent task failed.',
+        failureDiagnostic: { kind },
+      });
+      expect(JSON.stringify(polled)).not.toMatch(
+        /secret-value|private\.example|Bearer/,
+      );
+    },
+  );
+
+  it('requires an observed provider/model only for completed results', async () => {
+    const queued = parseAgentResponse({
+      id: 'queued-without-model',
+      status: 'queued',
+    });
+    expect(queued).toMatchObject({ status: 'queued' });
+    expect(queued).not.toHaveProperty('model');
+
+    const syncCompleted = completed('sync-without-model');
+    delete syncCompleted.model;
+    const syncResult = await new PerplexitySonarProProvider({
+      apiKey: 'synthetic-perplexity-key',
+      httpClient: queuedClient([{ data: syncCompleted }]).client,
+    }).execute('question', { timeout: 10 });
+    expect(syncResult).toMatchObject({
+      error: 'Perplexity Agent request failed.',
+      failureDiagnostic: { kind: 'provider' },
+    });
+
+    const durableCompleted = completed('durable-without-model');
+    delete durableCompleted.model;
+    const durableResult = await new PerplexityDeepResearchProvider({
+      apiKey: 'synthetic-perplexity-key',
+      httpClient: queuedClient([{ data: durableCompleted }]).client,
+    }).retrieve(handle('durable-without-model'));
+    expect(durableResult).toMatchObject({
+      error: 'Perplexity Agent retrieval failed.',
+      failureDiagnostic: { kind: 'provider' },
+    });
+  });
+
+  it('propagates caller aborts instead of classifying them as timeouts', async () => {
+    const abortedClient = vi.fn<HttpClient>(async () => {
+      throw new HttpRequestAbortedError();
+    });
+
+    await expect(
+      new PerplexitySonarProProvider({
+        apiKey: 'synthetic-perplexity-key',
+        httpClient: abortedClient,
+      }).execute('question', { timeout: 10 }),
+    ).rejects.toBeInstanceOf(HttpRequestAbortedError);
+    await expect(
+      new PerplexityDeepResearchProvider({
+        apiKey: 'synthetic-perplexity-key',
+        httpClient: abortedClient,
+      }).execute('question', { timeout: 10 }),
+    ).rejects.toBeInstanceOf(HttpRequestAbortedError);
+  });
+
   it('fails closed for unknown statuses, malformed usage, invalid URLs, and unmatched citation markers', async () => {
     expect(() =>
       parseAgentResponse({ id: 'task-1', status: 'mystery' }),
@@ -265,6 +431,7 @@ describe('Perplexity Agent API adapters', () => {
       parseAgentResponse({
         id: 'task-1',
         status: 'completed',
+        model: 'openai/gpt-5.6-luna',
         output: [
           { type: 'unknown_future_item' },
           {
@@ -278,6 +445,7 @@ describe('Perplexity Agent API adapters', () => {
       parseAgentResponse({
         id: 'task-1',
         status: 'completed',
+        model: 'openai/gpt-5.6-luna',
         output: [
           {
             type: 'message',
@@ -299,7 +467,10 @@ describe('Perplexity Agent API adapters', () => {
       httpClient: malformedClient.client,
     }).execute('question', { timeout: 10 });
     expect(malformedResult.content).toBe('');
-    expect(malformedResult.error).toContain('response was malformed');
+    expect(malformedResult).toMatchObject({
+      error: 'Perplexity Agent request failed.',
+      failureDiagnostic: { kind: 'provider' },
+    });
 
     const invalidUrl = completed('inline-3');
     invalidUrl.output[0]!.results[0]!.url = 'file:///etc/passwd';
@@ -307,7 +478,36 @@ describe('Perplexity Agent API adapters', () => {
       apiKey: 'synthetic-perplexity-key',
       httpClient: queuedClient([{ data: invalidUrl }]).client,
     }).execute('question', { timeout: 10 });
-    expect(invalidUrlResult.error).toContain('not HTTP(S)');
+    expect(invalidUrlResult).toMatchObject({
+      error: 'Perplexity Agent request failed.',
+      failureDiagnostic: { kind: 'provider' },
+    });
+  });
+
+  it.each([
+    'agent-model',
+    'https://api.perplexity.ai/v1/agent',
+    '/etc/passwd',
+    'openai/gpt/5.6',
+    `openai/${'x'.repeat(191)}`,
+  ])('rejects unsafe observed model identifier %s', (model) => {
+    expect(() =>
+      parseAgentResponse(completed('unsafe-model', 'Answer [1]', model)),
+    ).toThrow('model was malformed');
+  });
+
+  it('redacts secrets, URLs, and paths from bounded error text', () => {
+    const secret = 'synthetic-secret';
+    const redacted = redactPerplexityError(
+      `Bearer ${secret} at https://private.example.test/key and /etc/passwd`,
+      secret,
+    );
+    expect(redacted).toBe(
+      'Bearer [REDACTED] at [REDACTED_URL] and [REDACTED_PATH]',
+    );
+    expect(redacted).not.toContain(secret);
+    expect(redacted).not.toContain('private.example');
+    expect(redacted).not.toContain('/etc/passwd');
   });
 
   it('does not expose secrets or raw response bodies and does not retry ambiguous submit', async () => {
@@ -322,21 +522,89 @@ describe('Perplexity Agent API adapters', () => {
       apiKey: secret,
       httpClient: unauthorized,
     }).execute('question', { timeout: 10 });
-    expect(result.error).not.toContain(secret);
-    expect(result.error).not.toContain('api_key');
-    expect(result.error).not.toContain('Bearer');
+    expect(result).toMatchObject({
+      error: 'Perplexity Agent request failed.',
+      failureDiagnostic: { kind: 'authentication', httpStatus: 401 },
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain('api_key');
+    expect(JSON.stringify(result)).not.toContain('Bearer');
 
     const ambiguous = vi.fn<HttpClient>(async () => {
-      throw new Error(`socket failed with Bearer ${secret}`);
+      throw new Error(
+        `socket failed with Bearer ${secret} at https://api.perplexity.ai/private`,
+      );
     });
-    await expect(
+    const submission = expect(
       new PerplexityDeepResearchProvider({
         apiKey: secret,
         httpClient: ambiguous,
       }).submit('question', { timeout: 10 }),
-    ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
+    ).rejects;
+    await submission.toBeInstanceOf(UnsafeToRetrySubmissionError);
+    await submission.toThrow('submission outcome is unknown');
+    await submission.not.toThrow(secret);
+    await submission.not.toThrow('https://');
     expect(ambiguous).toHaveBeenCalledTimes(1);
   });
+
+  it('maps allowlisted terminal failure codes without exposing provider text', async () => {
+    const secret = 'synthetic-perplexity-key';
+    const result = await new PerplexitySonarProProvider({
+      apiKey: secret,
+      httpClient: queuedClient([
+        {
+          data: {
+            id: 'failed-task',
+            status: 'failed',
+            model: 'xai/grok-4.6',
+            error: {
+              code: 'rate_limit_exceeded',
+              message: `Bearer ${secret} https://private.example.test/path`,
+            },
+          },
+        },
+      ]).client,
+    }).execute('question', { timeout: 10 });
+
+    expect(result).toMatchObject({
+      error: 'Perplexity Agent task was not completed (status: failed).',
+      failureDiagnostic: { kind: 'rate_limit' },
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain('https://private');
+  });
+
+  it.each([
+    [400, 'invalid_request'],
+    [402, 'billing'],
+    [403, 'plan_required'],
+    [408, 'timeout'],
+    [429, 'rate_limit'],
+    [500, 'provider'],
+  ] as const)(
+    'maps HTTP %s to the bounded %s diagnostic without retaining the body',
+    async (status, kind) => {
+      const secret = `secret-${status}`;
+      const result = await new PerplexitySonarProProvider({
+        apiKey: secret,
+        httpClient: queuedClient([
+          {
+            status,
+            data: {
+              error: {
+                message: `Bearer ${secret} https://private.example.test`,
+              },
+            },
+          },
+        ]).client,
+      }).execute('question', { timeout: 10 });
+
+      expect(result.failureDiagnostic).toEqual({ kind, httpStatus: status });
+      expect(JSON.stringify(result)).not.toContain(secret);
+      expect(JSON.stringify(result)).not.toContain('private.example');
+    },
+  );
 
   it('validates input and timeout before resolving credentials or using the transport', async () => {
     const client = vi.fn<HttpClient>();
@@ -344,7 +612,10 @@ describe('Perplexity Agent API adapters', () => {
       httpClient: client,
     });
     const result = await provider.execute('', { timeout: 0 });
-    expect(result.error).toContain('input must be a non-empty string');
+    expect(result).toMatchObject({
+      error: 'Perplexity Agent request failed.',
+      failureDiagnostic: { kind: 'invalid_request' },
+    });
     expect(client).not.toHaveBeenCalled();
   });
 });

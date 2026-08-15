@@ -4,10 +4,16 @@ import type {
   HttpRequestOptions,
   HttpResponse,
 } from '../core/http-client.js';
+import {
+  HttpRequestAbortedError,
+  HttpRequestTimeoutError,
+  HttpResponseTooLargeError,
+} from '../core/http-client.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
   Citation,
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderUsage,
@@ -16,7 +22,7 @@ import type { BaseProviderOptions } from './base.js';
 import { BackgroundBaseProvider, BaseProvider } from './base.js';
 
 const AGENT_API_URL = 'https://api.perplexity.ai/v1/agent';
-const AGENT_PRESETS = new Set(['low', 'medium', 'high']);
+const AGENT_PRESETS = new Set(['fast', 'low', 'medium', 'high', 'xhigh']);
 const AGENT_STATUSES = new Set([
   'queued',
   'in_progress',
@@ -36,7 +42,8 @@ const SOURCE_TYPES = new Set([
   'forum',
 ]);
 const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
-const SAFE_MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/;
+const SAFE_MODEL_IDENTIFIER =
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._-]{0,189}$/;
 const DOCUMENTED_NON_CONTENT_OUTPUT_TYPES = new Set([
   'fetch_url_results',
   'finance_results',
@@ -65,7 +72,7 @@ export interface AgentInputPart {
 export type AgentInput = string | readonly AgentInputPart[];
 
 export interface AgentSearchResult {
-  readonly id: string;
+  readonly id: string | number;
   readonly url: string;
   readonly title?: string;
   readonly snippet?: string;
@@ -101,6 +108,7 @@ interface AgentTransport {
 
 interface AgentResponseError extends Error {
   readonly kind: 'agent_response' | 'agent_http';
+  readonly httpStatus?: number;
 }
 
 function responseError(
@@ -121,6 +129,13 @@ function record(value: unknown): Record<string, unknown> | undefined {
 
 function safeIdentifier(value: unknown, field: string): string {
   if (typeof value !== 'string' || !SAFE_IDENTIFIER.test(value)) {
+    throw responseError(`Perplexity Agent ${field} was malformed.`);
+  }
+  return value;
+}
+
+function safeModelIdentifier(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !SAFE_MODEL_IDENTIFIER.test(value)) {
     throw responseError(`Perplexity Agent ${field} was malformed.`);
   }
   return value;
@@ -282,11 +297,15 @@ function parseUsage(value: unknown): ParsedAgentUsage {
   };
 }
 
-function safeSearchResultId(value: unknown): string {
+function safeSearchResultId(value: unknown): string | number {
   if (typeof value === 'number') {
-    return String(nonNegativeNumber(value, 'search result id'));
+    return nonNegativeNumber(value, 'search result id');
   }
   return safeIdentifier(value, 'search result id');
+}
+
+function searchResultKey(value: string | number): string {
+  return String(value);
 }
 
 function parseSearchResult(value: unknown): AgentSearchResult {
@@ -361,20 +380,19 @@ function parseOutput(value: unknown): {
       }
       for (const resultValue of item.results) {
         const result = parseSearchResult(resultValue);
-        if (resultIds.has(result.id)) {
+        const resultKey = searchResultKey(result.id);
+        if (resultIds.has(resultKey)) {
           throw responseError(
             'Perplexity Agent search result ids were duplicated.',
           );
         }
-        resultIds.add(result.id);
+        resultIds.add(resultKey);
         searchResults.push(result);
       }
       continue;
     }
     if (!DOCUMENTED_NON_CONTENT_OUTPUT_TYPES.has(item.type)) {
-      throw responseError(
-        `Perplexity Agent output type was unsupported: ${item.type}.`,
-      );
+      throw responseError('Perplexity Agent output type was unsupported.');
     }
   }
   return { messages, searchResults };
@@ -384,7 +402,9 @@ function citedResultIds(
   messages: readonly string[],
   results: readonly AgentSearchResult[],
 ): ReadonlySet<string> {
-  const byId = new Map(results.map((result) => [result.id, result]));
+  const byId = new Map(
+    results.map((result) => [searchResultKey(result.id), result]),
+  );
   const cited = new Set<string>();
   const markerPattern = /\[([a-z][a-z0-9_-]*:)?(\d+)\]/gi;
   for (const message of messages) {
@@ -411,7 +431,7 @@ function citedResultIds(
           );
         }
       }
-      cited.add(result.id);
+      cited.add(searchResultKey(result.id));
     }
   }
   return cited;
@@ -435,7 +455,12 @@ export function parseAgentResponse(
     throw responseError('Perplexity Agent response status was unknown.');
   }
   const model =
-    root.model === undefined ? undefined : safeIdentifier(root.model, 'model');
+    root.model === undefined
+      ? undefined
+      : safeModelIdentifier(root.model, 'model');
+  if (status === 'completed' && model === undefined) {
+    throw responseError('Perplexity Agent completed response omitted model.');
+  }
   const output =
     root.output === undefined ? undefined : parseOutput(root.output);
   if (status === 'completed' && output === undefined) {
@@ -458,14 +483,12 @@ export function parseAgentResponse(
     const code =
       errorRecord.code === undefined
         ? undefined
-        : safeText(errorRecord.code, 'error code');
-    const message =
-      errorRecord.message === undefined
-        ? undefined
-        : redactPerplexityError(safeText(errorRecord.message, 'error message'));
+        : safeIdentifier(errorRecord.code, 'error code');
     error = {
       ...(code === undefined ? {} : { code }),
-      ...(message === undefined ? {} : { message }),
+      ...(errorRecord.message === undefined
+        ? {}
+        : { message: 'Perplexity Agent request failed.' }),
     };
   }
   const usage = root.usage === undefined ? undefined : parseUsage(root.usage);
@@ -474,7 +497,9 @@ export function parseAgentResponse(
     status: status as AgentStatus,
     ...(model === undefined ? {} : { model }),
     messages,
-    searchResults: searchResults.filter((result) => cited.has(result.id)),
+    searchResults: searchResults.filter((result) =>
+      cited.has(searchResultKey(result.id)),
+    ),
     ...(usage === undefined ? {} : { usage }),
     ...(error === undefined ? {} : { error }),
   };
@@ -485,6 +510,75 @@ function diagnostic(error: unknown): string {
   return redactPerplexityError(message).slice(0, 240);
 }
 
+function failureKindForStatus(
+  status: number,
+): ProviderFailureDiagnostic['kind'] {
+  if (status === 401) return 'authentication';
+  if (status === 402) return 'billing';
+  if (status === 403) return 'plan_required';
+  if (status === 408) return 'timeout';
+  if (status === 429) return 'rate_limit';
+  if ([400, 404, 409, 422].includes(status)) return 'invalid_request';
+  return 'provider';
+}
+
+function failureDiagnostic(error: unknown): ProviderFailureDiagnostic {
+  if (error instanceof HttpRequestTimeoutError) {
+    return { kind: 'timeout' };
+  }
+  if (error instanceof HttpResponseTooLargeError) {
+    return { kind: 'provider' };
+  }
+  if (
+    error instanceof Error &&
+    'kind' in error &&
+    error.kind === 'agent_http' &&
+    'httpStatus' in error &&
+    typeof error.httpStatus === 'number'
+  ) {
+    return {
+      kind: failureKindForStatus(error.httpStatus),
+      httpStatus: error.httpStatus,
+    };
+  }
+  if (
+    error instanceof Error &&
+    /fetch failed|failed to fetch|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(
+      error.message,
+    )
+  ) {
+    return { kind: 'network' };
+  }
+  if (error instanceof TypeError) return { kind: 'invalid_request' };
+  return { kind: 'provider' };
+}
+
+const FAILURE_CODE_KINDS: Readonly<
+  Record<string, ProviderFailureDiagnostic['kind']>
+> = Object.freeze({
+  authentication_error: 'authentication',
+  invalid_api_key: 'authentication',
+  unauthorized: 'authentication',
+  permission_denied: 'plan_required',
+  forbidden: 'plan_required',
+  plan_required: 'plan_required',
+  billing_error: 'billing',
+  insufficient_credits: 'billing',
+  payment_required: 'billing',
+  rate_limit_error: 'rate_limit',
+  rate_limit_exceeded: 'rate_limit',
+  invalid_request_error: 'invalid_request',
+  validation_error: 'invalid_request',
+  bad_request: 'invalid_request',
+});
+
+function responseFailureDiagnostic(
+  response: ParsedAgentResponse,
+): ProviderFailureDiagnostic {
+  const code = response.error?.code?.toLowerCase();
+  return { kind: (code && FAILURE_CODE_KINDS[code]) || 'provider' };
+}
+
 export function redactPerplexityError(text: string, secret?: string): string {
   let redacted = text;
   if (secret) redacted = redacted.replaceAll(secret, '[REDACTED]');
@@ -493,13 +587,24 @@ export function redactPerplexityError(text: string, secret?: string): string {
     /((?:api[_-]?key|access[_-]?token|authorization|token|secret)\s*[:=]\s*["']?)[^\s,"'}]+/gi,
     '$1[REDACTED]',
   );
+  redacted = redacted.replace(
+    /(?:https?|file):\/\/[^\s,)}\]]+/gi,
+    '[REDACTED_URL]',
+  );
+  redacted = redacted.replace(
+    /(^|\s)(?:\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+|[A-Za-z]:\\[^\s,)}\]]+)/g,
+    '$1[REDACTED_PATH]',
+  );
   return redacted.replace(/\s+/g, ' ').trim();
 }
 
 function httpError(status: number): AgentResponseError {
-  return responseError(
-    `Perplexity Agent API returned HTTP ${status}.`,
-    'agent_http',
+  return Object.assign(
+    responseError(
+      `Perplexity Agent API returned HTTP ${status}.`,
+      'agent_http',
+    ),
+    { httpStatus: status },
   );
 }
 
@@ -537,18 +642,17 @@ async function postAgent(
   signal: AbortSignal | undefined,
   timeoutMs: number,
 ): Promise<ParsedAgentResponse> {
+  const value = await postAgentPayload(
+    transport,
+    input,
+    preset,
+    model,
+    background,
+    signal,
+    timeoutMs,
+  );
   try {
-    return parseAgentResponse(
-      await postAgentPayload(
-        transport,
-        input,
-        preset,
-        model,
-        background,
-        signal,
-        timeoutMs,
-      ),
-    );
+    return parseAgentResponse(value);
   } catch (error) {
     throw responseError(
       `Perplexity Agent response was malformed: ${diagnostic(error)}`,
@@ -563,7 +667,11 @@ async function submitAgent(
   model: string | undefined,
   signal: AbortSignal | undefined,
   timeoutMs: number,
-): Promise<{ readonly id: string; readonly status?: AgentStatus }> {
+): Promise<{
+  readonly id: string;
+  readonly status?: AgentStatus;
+  readonly failureDiagnostic?: ProviderFailureDiagnostic;
+}> {
   const value = await postAgentPayload(
     transport,
     input,
@@ -581,7 +689,21 @@ async function submitAgent(
     typeof root.status === 'string' && AGENT_STATUSES.has(root.status)
       ? (root.status as AgentStatus)
       : undefined;
-  return { id, ...(status === undefined ? {} : { status }) };
+  const diagnostic =
+    status === 'failed' || status === 'incomplete'
+      ? (() => {
+          try {
+            return responseFailureDiagnostic(parseAgentResponse(value));
+          } catch {
+            return { kind: 'provider' as const };
+          }
+        })()
+      : undefined;
+  return {
+    id,
+    ...(status === undefined ? {} : { status }),
+    ...(diagnostic === undefined ? {} : { failureDiagnostic: diagnostic }),
+  };
 }
 
 async function getAgent(
@@ -673,8 +795,7 @@ function resultFromResponse(
     const statusMessage =
       response.status === 'incomplete'
         ? 'Perplexity Agent task was incomplete.'
-        : (response.error?.message ??
-          `Perplexity Agent task was not completed (status: ${response.status}).`);
+        : `Perplexity Agent task was not completed (status: ${response.status}).`;
     return {
       provider,
       tier,
@@ -682,6 +803,7 @@ function resultFromResponse(
       citations: [],
       durationMs,
       error: redactPerplexityError(statusMessage),
+      failureDiagnostic: responseFailureDiagnostic(response),
     };
   }
   return {
@@ -692,7 +814,7 @@ function resultFromResponse(
       (result): Citation => ({
         url: result.url,
         provider,
-        providerReference: result.id,
+        providerReference: String(result.id),
         ...(result.title === undefined ? {} : { title: result.title }),
         ...(result.snippet === undefined ? {} : { snippet: result.snippet }),
       }),
@@ -725,19 +847,21 @@ function pollResult(response: ParsedAgentResponse): AsyncPollResult {
       return {
         status: 'cancelled',
         rawStatus: response.status,
-        message: response.error?.message,
+        message: 'Perplexity Agent task was cancelled.',
       };
     case 'incomplete':
       return {
         status: 'failed',
         rawStatus: response.status,
         message: 'Perplexity Agent task was incomplete.',
+        failureDiagnostic: responseFailureDiagnostic(response),
       };
     case 'failed':
       return {
         status: 'failed',
         rawStatus: response.status,
-        message: response.error?.message,
+        message: 'Perplexity Agent task failed.',
+        failureDiagnostic: responseFailureDiagnostic(response),
       };
   }
 }
@@ -817,13 +941,15 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         Math.round(performance.now() - started),
       );
     } catch (error) {
+      if (error instanceof HttpRequestAbortedError) throw error;
       return {
         provider: this.id,
         tier: this.tier,
         content: '',
         citations: [],
         durationMs: Math.round(performance.now() - started),
-        error: diagnostic(error),
+        error: 'Perplexity Agent request failed.',
+        failureDiagnostic: failureDiagnostic(error),
       };
     }
   }
@@ -857,14 +983,26 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         submittedAt: Date.now(),
         status,
         providerStatus: response.status ?? 'accepted_unknown',
+        ...(response.failureDiagnostic === undefined
+          ? {}
+          : { failureDiagnostic: response.failureDiagnostic }),
       };
     } catch (error) {
-      throw new UnsafeToRetrySubmissionError(diagnostic(error));
+      void error;
+      throw new UnsafeToRetrySubmissionError(
+        'Perplexity Agent submission outcome is unknown.',
+      );
     }
   }
 
   async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
-    return pollResult(await getAgent(this.transport(), handle.taskId, 15_000));
+    try {
+      return pollResult(
+        await getAgent(this.transport(), handle.taskId, 15_000),
+      );
+    } catch {
+      throw responseError('Perplexity Agent status check failed.');
+    }
   }
 
   async retrieve(handle: AsyncTaskHandle): Promise<ProviderResult> {
@@ -878,19 +1016,25 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         Math.round(performance.now() - started),
       );
     } catch (error) {
+      if (error instanceof HttpRequestAbortedError) throw error;
       return {
         provider: this.id,
         tier: this.tier,
         content: '',
         citations: [],
         durationMs: Math.round(performance.now() - started),
-        error: diagnostic(error),
+        error: 'Perplexity Agent retrieval failed.',
+        failureDiagnostic: failureDiagnostic(error),
       };
     }
   }
 
   async cancel(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
-    return pollResult(await cancelAgent(this.transport(), handle.taskId));
+    try {
+      return pollResult(await cancelAgent(this.transport(), handle.taskId));
+    } catch {
+      throw responseError('Perplexity Agent cancellation failed.');
+    }
   }
 
   async test(): Promise<{ ok: boolean; error?: string }> {
@@ -912,8 +1056,8 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         };
       }
       return { ok: true };
-    } catch (error) {
-      return { ok: false, error: diagnostic(error) };
+    } catch {
+      return { ok: false, error: 'Perplexity Agent health check failed.' };
     }
   }
 }
@@ -958,13 +1102,15 @@ export abstract class PerplexityAgentInlineProvider extends BaseProvider {
         Math.round(performance.now() - started),
       );
     } catch (error) {
+      if (error instanceof HttpRequestAbortedError) throw error;
       return {
         provider: this.id,
         tier: this.tier,
         content: '',
         citations: [],
         durationMs: Math.round(performance.now() - started),
-        error: diagnostic(error),
+        error: 'Perplexity Agent request failed.',
+        failureDiagnostic: failureDiagnostic(error),
       };
     }
   }
@@ -987,8 +1133,8 @@ export abstract class PerplexityAgentInlineProvider extends BaseProvider {
             ok: false,
             error: 'Perplexity Agent health check was not completed.',
           };
-    } catch (error) {
-      return { ok: false, error: diagnostic(error) };
+    } catch {
+      return { ok: false, error: 'Perplexity Agent health check failed.' };
     }
   }
 }
