@@ -264,63 +264,81 @@ async function reconcileCanonicalRuns(
 ): Promise<{
   readonly runs: readonly {
     readonly runDir: string;
-    readonly state: 'pending' | 'terminal';
+    readonly state: 'pending' | 'terminal' | 'error';
     readonly response?: unknown;
+    readonly error?: typeof RECONCILIATION_FAILED;
   }[];
   readonly pending: number;
+  readonly errors: readonly (typeof RECONCILIATION_FAILED)[];
 }> {
-  const runs = [];
+  const runs: Array<{
+    runDir: string;
+    state: 'pending' | 'terminal' | 'error';
+    response?: unknown;
+    error?: typeof RECONCILIATION_FAILED;
+  }> = [];
+  const errors: (typeof RECONCILIATION_FAILED)[] = [];
   for (const runDir of discoverCanonicalRunDirectories(
     baseDir,
     Number.MAX_SAFE_INTEGER,
   )) {
-    const runsRoot = canonicalRunsRoot(runDir);
-    const before = readCanonicalRunManifest(runsRoot, runDir);
-    const remoteCustody = before.coordination_state.attempts.some(
-      (attempt) =>
-        attempt.durable_handle &&
-        ['pending', 'running'].includes(attempt.durable_handle.status),
-    );
-    const needsResume =
-      before.coordination_state.status === 'running' ||
-      !before.terminal_response ||
-      remoteCustody;
-    const canonical = needsResume
-      ? await resumeCanonicalPreparedExecution({
-          runs_root: runsRoot,
-          run_directory: runDir,
-          coordinator: createNodeCoordinatorDependencies(),
-          attempt_bridge: createRegisteredProviderAttemptBridge(
-            {
-              request: before.request,
-              catalog: { digest: before.coordination_state.catalog_digest },
-              profile_plans_by_identity:
-                before.coordination_state.profile_plans_by_identity,
-            },
-            getExactProvider,
-          ),
-        })
-      : {
-          manifest: before,
-          response: before.terminal_response,
-        };
-    writeCanonicalPresentationArtifacts(
-      canonical.manifest,
-      runDir,
-      generateSlug(canonical.manifest.request.query),
-    );
-    runs.push({
-      runDir,
-      state:
-        canonical.manifest.coordination_state.status === 'running'
-          ? ('pending' as const)
-          : ('terminal' as const),
-      ...(canonical.response && { response: canonical.response }),
-    });
+    try {
+      const runsRoot = canonicalRunsRoot(runDir);
+      const before = readCanonicalRunManifest(runsRoot, runDir);
+      const remoteCustody = before.coordination_state.attempts.some(
+        (attempt) =>
+          attempt.durable_handle &&
+          ['pending', 'running'].includes(attempt.durable_handle.status),
+      );
+      const needsResume =
+        before.coordination_state.status === 'running' ||
+        !before.terminal_response ||
+        remoteCustody;
+      const canonical = needsResume
+        ? await resumeCanonicalPreparedExecution({
+            runs_root: runsRoot,
+            run_directory: runDir,
+            coordinator: createNodeCoordinatorDependencies(),
+            attempt_bridge: createRegisteredProviderAttemptBridge(
+              {
+                request: before.request,
+                catalog: { digest: before.coordination_state.catalog_digest },
+                profile_plans_by_identity:
+                  before.coordination_state.profile_plans_by_identity,
+              },
+              getExactProvider,
+            ),
+          })
+        : {
+            manifest: before,
+            response: before.terminal_response,
+          };
+      writeCanonicalPresentationArtifacts(
+        canonical.manifest,
+        runDir,
+        generateSlug(canonical.manifest.request.query),
+      );
+      runs.push({
+        runDir,
+        state:
+          canonical.manifest.coordination_state.status === 'running'
+            ? ('pending' as const)
+            : ('terminal' as const),
+        ...(canonical.response && { response: canonical.response }),
+      });
+    } catch {
+      errors.push(RECONCILIATION_FAILED);
+      runs.push({
+        runDir,
+        state: 'error',
+        error: RECONCILIATION_FAILED,
+      });
+    }
   }
   return {
     runs,
     pending: runs.filter((run) => run.state === 'pending').length,
+    errors,
   };
 }
 
@@ -334,7 +352,7 @@ function printCanonicalRuns(
     const response = run.response as
       | { readonly status?: string; readonly request_id?: string }
       | undefined;
-    const detail = response?.status ?? run.state;
+    const detail = run.error ?? response?.status ?? run.state;
     print(`  ${run.runDir} | Status: ${detail}`);
   }
 }
@@ -415,7 +433,7 @@ export function registerStatusCommand(program: Command): void {
         };
         const color = isColorEnabled(prettyStream);
         const rendered = new Set<string>();
-        const errors: (typeof RECONCILIATION_FAILED)[] = [];
+        const errors: (typeof RECONCILIATION_FAILED)[] = [...canonical.errors];
         const regenerationErrors: (typeof REGENERATION_FAILED)[] = [];
         const record = (pass: ReconcileRunsResult): void => {
           errors.push(...pass.errors);
@@ -433,6 +451,7 @@ export function registerStatusCommand(program: Command): void {
           try {
             while (remaining) {
               canonical = await reconcileCanonicalRuns(baseDir, config);
+              errors.push(...canonical.errors);
               const pass = await reconcileRuns(runtime, runDirs, true);
               totalRetrieved += pass.retrieved;
               withSpinnerStopped(spinner, () => record(pass), true);

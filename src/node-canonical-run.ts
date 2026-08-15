@@ -151,6 +151,16 @@ export const CanonicalRunManifestV3Schema = z
     const createdAt = Date.parse(state.created_at);
     const requestedAt = Date.parse(manifest.request.requested_at);
     const requestDeadline = Date.parse(state.request_deadline_at);
+    const firstLifecycle = state.lifecycle[0];
+    const terminalLifecycle = state.lifecycle.at(-1);
+    const expectedTerminalKind =
+      state.status === 'cancelled'
+        ? 'request_cancelled'
+        : state.status === 'failed'
+          ? 'request_failed'
+          : state.status === 'running'
+            ? undefined
+            : 'request_completed';
     if (createdAt < requestedAt || requestDeadline <= createdAt) {
       ctx.addIssue({
         code: 'custom',
@@ -181,6 +191,17 @@ export const CanonicalRunManifestV3Schema = z
       const handleSubmitted = attempt.durable_handle
         ? Date.parse(attempt.durable_handle.submitted_at)
         : undefined;
+      const terminalAttempt = [
+        'succeeded',
+        'failed',
+        'timed_out',
+        'cancelled',
+      ].includes(attempt.status);
+      const finishedEvents = state.lifecycle.filter(
+        (event) =>
+          event.event_kind === 'attempt_finished' &&
+          event.attempt_id === attempt.attempt_id,
+      );
       if (
         queued < createdAt ||
         attemptDeadline < queued ||
@@ -194,7 +215,18 @@ export const CanonicalRunManifestV3Schema = z
         (started !== undefined &&
           (started < queued || started > attemptDeadline)) ||
         (finished !== undefined &&
-          (finished < (started ?? queued) || finished > attemptDeadline)) ||
+          (finished < (started ?? queued) ||
+            (attempt.status !== 'timed_out' && finished > attemptDeadline))) ||
+        (started !== undefined &&
+          terminalAttempt &&
+          (finished === undefined ||
+            finishedEvents.length !== 1 ||
+            finishedEvents[0]?.occurred_at !== attempt.finished_at)) ||
+        (started === undefined &&
+          terminalAttempt &&
+          (finished === undefined ||
+            finishedEvents.length !== 0 ||
+            terminalLifecycle?.occurred_at !== attempt.finished_at)) ||
         (handleSubmitted !== undefined &&
           (handleSubmitted < createdAt || handleSubmitted < queued)) ||
         (attempt.durable_handle?.last_observed_at !== undefined &&
@@ -208,16 +240,6 @@ export const CanonicalRunManifestV3Schema = z
         });
       }
     });
-    const firstLifecycle = state.lifecycle[0];
-    const terminalLifecycle = state.lifecycle.at(-1);
-    const expectedTerminalKind =
-      state.status === 'cancelled'
-        ? 'request_cancelled'
-        : state.status === 'failed'
-          ? 'request_failed'
-          : state.status === 'running'
-            ? undefined
-            : 'request_completed';
     if (
       firstLifecycle?.occurred_at !== state.created_at ||
       (expectedTerminalKind !== undefined &&

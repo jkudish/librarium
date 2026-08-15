@@ -5,6 +5,8 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -171,8 +173,8 @@ function canonicalBridge(
 async function seedCanonicalRun(
   run: string,
   mode: 'sync' | 'async',
+  now = Date.now(),
 ): Promise<{ runDir: string; plan: PreparedResearchExecution; now: number }> {
-  const now = Date.now();
   const runDir = join(state.outputDir, run);
   mkdirSync(runDir, { recursive: true });
   const plan = canonicalPlan(mode, run, now);
@@ -379,6 +381,124 @@ describe('status command', () => {
     expect(state.retrieve).toHaveBeenCalledOnce();
     expect(readCanonicalRunManifest(state.outputDir, runDir).revision).toBe(
       revision,
+    );
+  });
+
+  it('terminalizes an expired run after its deadline and still reconciles a later run', async () => {
+    const expired = await seedCanonicalRun(
+      'expired-v3',
+      'async',
+      Date.now() - 120_000,
+    );
+    const active = await seedCanonicalRun('active-v3', 'async');
+    state.poll.mockClear();
+    state.retrieve.mockClear();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    const expiredManifest = readCanonicalRunManifest(
+      state.outputDir,
+      expired.runDir,
+    );
+    const expiredAttempt = expiredManifest.coordination_state.attempts[0];
+    expect(expiredAttempt).toMatchObject({ status: 'timed_out' });
+    expect(Date.parse(expiredAttempt?.finished_at ?? '')).toBeGreaterThan(
+      Date.parse(expiredAttempt?.deadline_at ?? ''),
+    );
+    expect(
+      expiredManifest.coordination_state.lifecycle.find(
+        (event) =>
+          event.event_kind === 'attempt_finished' &&
+          event.attempt_id === expiredAttempt?.attempt_id,
+      )?.occurred_at,
+    ).toBe(expiredAttempt?.finished_at);
+    expect(
+      readCanonicalRunManifest(state.outputDir, active.runDir)
+        .coordination_state.status,
+    ).toBe('succeeded');
+    expect(state.poll).toHaveBeenCalledTimes(1);
+    expect(state.retrieve).toHaveBeenCalledTimes(1);
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(payload.errors).toBeUndefined();
+
+    const receipt = structuredClone(expiredManifest.terminal_response);
+    const lifecycle = structuredClone(
+      expiredManifest.coordination_state.lifecycle,
+    );
+    const budget = structuredClone(expiredManifest.coordination_state.budget);
+    const outputs = structuredClone(
+      expiredManifest.provider_outputs_by_attempt,
+    );
+    state.submit.mockImplementation(async (query: string) => ({
+      provider: 'status-command-mock',
+      taskId: 'later-task',
+      query,
+      submittedAt: Date.now(),
+      status: 'pending',
+    }));
+    const later = await seedCanonicalRun('later-v3', 'async');
+    state.submit.mockClear();
+    state.poll.mockClear();
+    state.retrieve.mockClear();
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    const observed = readCanonicalRunManifest(state.outputDir, expired.runDir);
+    expect(state.submit).not.toHaveBeenCalled();
+    expect(state.poll).toHaveBeenCalledTimes(2);
+    expect(state.retrieve).toHaveBeenCalledOnce();
+    expect(state.retrieve.mock.calls[0]?.[0]).toMatchObject({
+      taskId: 'later-task',
+    });
+    expect(observed.terminal_response).toEqual(receipt);
+    expect(observed.coordination_state.lifecycle).toEqual(lifecycle);
+    expect(observed.coordination_state.budget).toEqual(budget);
+    expect(observed.provider_outputs_by_attempt).toEqual(outputs);
+    expect(observed.coordination_state.attempts[0]).toMatchObject({
+      status: 'timed_out',
+      durable_handle: { status: 'succeeded' },
+    });
+    expect(
+      readCanonicalRunManifest(state.outputDir, later.runDir).coordination_state
+        .status,
+    ).toBe('succeeded');
+  });
+
+  it('isolates one canonical reconciliation failure without transport or aborting later runs', async () => {
+    const active = await seedCanonicalRun('active-before-failure', 'async');
+    const failed = await seedCanonicalRun('failed-presentation', 'sync');
+    const outside = join(state.outputDir, 'outside-summary');
+    writeFileSync(outside, 'outside');
+    const summary = join(failed.runDir, 'summary.md');
+    rmSync(summary, { force: true });
+    symlinkSync(outside, summary);
+    state.poll.mockClear();
+    state.retrieve.mockClear();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    expect(state.poll).toHaveBeenCalledTimes(1);
+    expect(state.retrieve).toHaveBeenCalledTimes(1);
+    expect(
+      readCanonicalRunManifest(state.outputDir, active.runDir)
+        .coordination_state.status,
+    ).toBe('succeeded');
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(payload.errors).toContain('artifact.reconciliation_failed');
+    expect(payload.canonicalRuns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runDir: realpathSync(failed.runDir),
+          state: 'error',
+          error: 'artifact.reconciliation_failed',
+        }),
+        expect.objectContaining({
+          runDir: realpathSync(active.runDir),
+          state: 'terminal',
+        }),
+      ]),
     );
   });
 

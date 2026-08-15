@@ -1369,6 +1369,10 @@ export function cancelCoordination(
     attempt.status = 'cancelled';
     attempt.finished_at = cancelledAt;
     attempt.error = error;
+    if (wasDispatchPending) {
+      attempt.delivery_lease_id = undefined;
+      attempt.delivery_lease_expires_at = undefined;
+    }
     if (!wasDispatchPending) {
       appendAttemptFinished(next, attempt, dependencies);
     }
@@ -1417,6 +1421,10 @@ export function failCoordination(
     attempt.status = 'failed';
     attempt.finished_at = failedAt;
     attempt.error = error;
+    if (wasDispatchPending) {
+      attempt.delivery_lease_id = undefined;
+      attempt.delivery_lease_expires_at = undefined;
+    }
     if (!wasDispatchPending) appendAttemptFinished(next, attempt, dependencies);
   }
   for (const slot of next.slots) {
@@ -1487,6 +1495,10 @@ export function advanceDeadlines(
       attempt.finished_at = now;
       attempt.error = error;
       attempt.transient_poll_error = undefined;
+      if (wasDispatchPending) {
+        attempt.delivery_lease_id = undefined;
+        attempt.delivery_lease_expires_at = undefined;
+      }
       const slot = slotFor(next, attempt.slot_id);
       slot.status = 'timed_out';
       slot.error = error;

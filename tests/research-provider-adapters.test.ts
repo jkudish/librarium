@@ -429,7 +429,7 @@ describe('durable research provider adapters', () => {
     );
   });
 
-  it('fails closed on malformed status and empty Tavily completion', async () => {
+  it('keeps malformed Tavily status nonterminal and rejects empty retrieval', async () => {
     const provider = new TavilyResearchProvider({
       credentials: { env: { TAVILY_API_KEY: 'test-key' } },
       httpClient: vi.fn(async () =>
@@ -450,8 +450,9 @@ describe('durable research provider adapters', () => {
       submittedAt: 0,
       status: 'running' as const,
     };
-    await expect(provider.poll(handle)).resolves.toMatchObject({
-      status: 'failed',
+    await expect(provider.poll(handle)).rejects.toMatchObject({
+      message: 'Tavily Research status check failed.',
+      failureDiagnostic: { kind: 'provider', httpStatus: 200 },
     });
     await expect(provider.retrieve(handle)).resolves.toMatchObject({
       content: '',
@@ -472,9 +473,230 @@ describe('durable research provider adapters', () => {
       provider.submit('query', { timeout: 10 }),
     ).resolves.toMatchObject({
       taskId: 'tavily-preserved',
-      status: 'failed',
+      status: 'pending',
       providerStatus: 'invalid_response',
+      lastPollError: 'Tavily returned a malformed create response',
     });
+  });
+
+  it.each([
+    ['malformed progress', response({ status: 'in_progress' }, 202), 202],
+    ['malformed success', response({ status: 'completed' }, 200), 200],
+    ['authentication', response({}, 401), 401],
+    ['authorization', response({}, 403), 403],
+    ['billing', response({}, 433), 433],
+    ['invalid request', response({}, 422), 422],
+  ] as const)(
+    'keeps accepted Tavily custody on $label poll evidence',
+    async (_label, pollResponse, httpStatus) => {
+      const provider = new TavilyResearchProvider({
+        credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+        httpClient: vi.fn(async () => pollResponse) as HttpClient,
+      });
+      const handle = {
+        provider: provider.id,
+        taskId: 'tavily-run',
+        query: 'q',
+        submittedAt: 0,
+        status: 'running' as const,
+      };
+
+      await expect(provider.poll(handle)).rejects.toMatchObject({
+        message: 'Tavily Research status check failed.',
+        failureDiagnostic: { httpStatus },
+      });
+      expect(handle).toEqual(
+        expect.objectContaining({ taskId: 'tavily-run', status: 'running' }),
+      );
+    },
+  );
+
+  it.each([
+    'file:///private/report',
+    'javascript:alert(1)',
+    'data:text/plain,report',
+    'https://user:password@example.com/report',
+    'not a URL',
+  ])('rejects unsafe Tavily citation URL %s', async (url) => {
+    const provider = new TavilyResearchProvider({
+      credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+      httpClient: async () =>
+        response({
+          request_id: 'tavily-run',
+          created_at: '2026-08-12T12:00:00.000Z',
+          status: 'completed',
+          content: 'report',
+          sources: [{ title: 'unsafe', url }],
+          response_time: 1,
+        }) as never,
+    });
+
+    await expect(
+      provider.retrieve({
+        provider: provider.id,
+        taskId: 'tavily-run',
+        query: 'q',
+        submittedAt: 0,
+        status: 'completed',
+      }),
+    ).resolves.toMatchObject({
+      content: '',
+      citations: [],
+      error: 'Tavily Research retrieval failed.',
+    });
+  });
+
+  it.each([
+    {
+      label: 'authentication',
+      implementation: async () =>
+        response({ error: { message: 'secret invalid token' } }, 401) as never,
+      diagnostic: { kind: 'authentication', httpStatus: 401 },
+    },
+    {
+      label: 'plan restriction',
+      implementation: async () =>
+        response({ detail: { error: 'PLAN_REQUIRED' } }, 403) as never,
+      diagnostic: { kind: 'plan_required', httpStatus: 403 },
+    },
+    {
+      label: 'rate limit',
+      implementation: async () =>
+        response({ detail: { error: 'plan upgrade required' } }, 429) as never,
+      diagnostic: { kind: 'rate_limit', httpStatus: 429 },
+    },
+    {
+      label: 'plan usage limit',
+      implementation: async () =>
+        response({ detail: { error: 'usage limit reached' } }, 432) as never,
+      diagnostic: { kind: 'plan_required', httpStatus: 432 },
+    },
+    {
+      label: 'pay-as-you-go limit',
+      implementation: async () =>
+        response({ detail: { error: 'paygo limit reached' } }, 433) as never,
+      diagnostic: { kind: 'billing', httpStatus: 433 },
+    },
+    {
+      label: 'invalid request',
+      implementation: async () => response({}, 422) as never,
+      diagnostic: { kind: 'invalid_request', httpStatus: 422 },
+    },
+    {
+      label: 'provider response',
+      implementation: async () => response({}, 503) as never,
+      diagnostic: { kind: 'provider', httpStatus: 503 },
+    },
+    {
+      label: 'request timeout with quota text',
+      implementation: async () =>
+        response({ detail: { error: 'quota exceeded' } }, 408) as never,
+      diagnostic: { kind: 'timeout', httpStatus: 408 },
+    },
+    {
+      label: 'gateway timeout with quota text',
+      implementation: async () =>
+        response({ detail: { error: 'quota exceeded' } }, 504) as never,
+      diagnostic: { kind: 'timeout', httpStatus: 504 },
+    },
+    {
+      label: 'provider failure with quota text',
+      implementation: async () =>
+        response({ detail: { error: 'quota exceeded' } }, 500) as never,
+      diagnostic: { kind: 'provider', httpStatus: 500 },
+    },
+    {
+      label: 'network failure',
+      implementation: async () => {
+        throw new TypeError('fetch failed https://secret.example/token');
+      },
+      diagnostic: { kind: 'network' },
+    },
+    {
+      label: 'timeout',
+      implementation: async () => {
+        throw new DOMException('secret timeout detail', 'TimeoutError');
+      },
+      diagnostic: { kind: 'timeout' },
+    },
+    {
+      label: 'invalid 201 handle',
+      implementation: async () => response({ status: 'pending' }, 201) as never,
+      diagnostic: { kind: 'provider', httpStatus: 201 },
+    },
+  ])(
+    'keeps Tavily $label submission failures bounded and unsafe to retry',
+    async ({ implementation, diagnostic }) => {
+      const httpClient = vi.fn(implementation);
+      const provider = new TavilyResearchProvider({
+        credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+        httpClient,
+      });
+
+      const submission = provider.submit('query', { timeout: 10 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Tavily Research submission failed before a valid handle was returned.',
+        failureDiagnostic: diagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(
+        /secret|token|https?:|PLAN_REQUIRED/i,
+      );
+      expect(httpClient).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('redacts Tavily terminal and transport failures at poll and retrieval boundaries', async () => {
+    const terminalFailure = {
+      request_id: 'tavily-run',
+      status: 'failed',
+      error: { message: 'Bearer secret-token https://secret.example/raw' },
+    };
+    const terminal = new TavilyResearchProvider({
+      credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+      httpClient: vi.fn(async () => response(terminalFailure)) as HttpClient,
+    });
+    const handle = {
+      provider: terminal.id,
+      taskId: 'tavily-run',
+      query: 'q',
+      submittedAt: 0,
+      status: 'running' as const,
+    };
+
+    await expect(terminal.poll(handle)).resolves.toEqual({
+      status: 'failed',
+      rawStatus: 'failed',
+      message: 'Tavily Research task failed.',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(terminal.retrieve(handle)).resolves.toMatchObject({
+      content: '',
+      error: 'Tavily Research retrieval failed.',
+      failureDiagnostic: { kind: 'provider', httpStatus: 200 },
+    });
+
+    const transport = new TavilyResearchProvider({
+      credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+      httpClient: vi.fn(async () => {
+        throw new TypeError('fetch failed https://secret.example/Bearer-token');
+      }) as HttpClient,
+    });
+    await expect(transport.poll(handle)).rejects.toMatchObject({
+      message: 'Tavily Research status check failed.',
+      failureDiagnostic: { kind: 'network' },
+    });
+    await expect(transport.retrieve(handle)).resolves.toMatchObject({
+      error: 'Tavily Research retrieval failed.',
+      failureDiagnostic: { kind: 'network' },
+    });
+
+    const serialized = JSON.stringify([
+      await terminal.retrieve(handle),
+      await transport.retrieve(handle),
+    ]);
+    expect(serialized).not.toMatch(/secret|bearer|https?:|raw/i);
   });
 
   it('rejects invalid structured and source options before any transport call', async () => {
