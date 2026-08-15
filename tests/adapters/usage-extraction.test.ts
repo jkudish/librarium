@@ -39,7 +39,7 @@ describe('usage extraction', () => {
       jsonResponse(200, {
         id: 'resp-1',
         status: 'completed',
-        model: 'agent-model',
+        model: 'openai/gpt-5.6-luna',
         output: [
           {
             type: 'message',
@@ -81,6 +81,7 @@ describe('usage extraction', () => {
       jsonResponse(200, {
         id: 'resp-2',
         status: 'completed',
+        model: 'openai/gpt-5.6-luna',
         output: [
           {
             type: 'message',
@@ -106,7 +107,7 @@ describe('usage extraction', () => {
       jsonResponse(200, {
         id: 'agent-1',
         status: 'completed',
-        model: 'deep-research',
+        model: 'openai/gpt-5.6-sol',
         output: [
           {
             type: 'message',

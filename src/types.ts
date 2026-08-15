@@ -215,6 +215,8 @@ export interface AsyncTaskHandle {
   providerStatus?: string;
   /** Safe diagnostic from the most recent poll; never credentials or headers. */
   lastPollError?: string;
+  /** Safe, allowlisted facts for an immediately failed accepted task. */
+  failureDiagnostic?: ProviderFailureDiagnostic;
   outputDir?: string;
 }
 
@@ -225,6 +227,8 @@ export interface AsyncPollResult {
   message?: string;
   /** Provider-native state, persisted separately from Librarium's mapped state. */
   rawStatus?: string;
+  /** Safe, allowlisted facts when the observed task state is failed. */
+  failureDiagnostic?: ProviderFailureDiagnostic;
 }
 
 // Fields shared by every provider implementation.
