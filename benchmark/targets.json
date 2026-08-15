@@ -37,13 +37,6 @@
       "costConfidence": "unknown"
     },
     {
-      "id": "perplexity-advanced-deep",
-      "tier": "deep-research",
-      "envVar": "PERPLEXITY_API_KEY",
-      "estimatedCostUsd": null,
-      "costConfidence": "unknown"
-    },
-    {
       "id": "openai-research",
       "tier": "deep-research",
       "envVar": "OPENAI_API_KEY",
@@ -66,13 +59,6 @@
     },
     {
       "id": "perplexity-sonar-pro",
-      "tier": "ai-grounded",
-      "envVar": "PERPLEXITY_API_KEY",
-      "estimatedCostUsd": null,
-      "costConfidence": "unknown"
-    },
-    {
-      "id": "perplexity-pro-search",
       "tier": "ai-grounded",
       "envVar": "PERPLEXITY_API_KEY",
       "estimatedCostUsd": null,
@@ -295,7 +281,6 @@
       "parallel-research",
       "perplexity-sonar-deep",
       "perplexity-deep-research",
-      "perplexity-advanced-deep",
       "openai-research",
       "gemini-deep",
       "valyu-research"
@@ -346,7 +331,6 @@
       "parallel-research",
       "perplexity-sonar-deep",
       "perplexity-deep-research",
-      "perplexity-advanced-deep",
       "openai-research",
       "gemini-deep",
       "valyu-research",
@@ -367,7 +351,6 @@
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
-      "perplexity-pro-search",
       "parallel-chat"
     ],
     "llm": ["claude", "openai-chat", "gemini-chat", "openrouter-chat"],
@@ -375,7 +358,6 @@
       "parallel-research",
       "perplexity-sonar-deep",
       "perplexity-deep-research",
-      "perplexity-advanced-deep",
       "openai-research",
       "gemini-deep",
       "valyu-research",
@@ -404,7 +386,6 @@
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
-      "perplexity-pro-search",
       "parallel-chat",
       "parallel-search"
     ]

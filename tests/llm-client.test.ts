@@ -243,4 +243,52 @@ describe('callWithCascade', () => {
     ).rejects.toThrow(/unparseable/);
     expect(getCalls()).toHaveLength(1);
   });
+
+  it.each([
+    ['fast', 'fast'],
+    ['fast-search', 'fast'],
+    ['sonar', 'fast'],
+    ['sonar-pro', 'low'],
+    ['pro-search', 'low'],
+    ['sonar-reasoning-pro', 'medium'],
+    ['deep-research', 'medium'],
+    ['sonar-deep-research', 'high'],
+    ['advanced-deep-research', 'high'],
+    ['ultra', 'xhigh'],
+  ] as const)(
+    'maps legacy Perplexity target %s to Agent preset %s',
+    async (model, preset) => {
+      let requestBody: unknown;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init: RequestInit) => {
+          requestBody = JSON.parse(init.body as string);
+          return new Response(
+            JSON.stringify({
+              id: 'agent-llm-test',
+              status: 'completed',
+              output: [
+                {
+                  type: 'message',
+                  content: [{ type: 'output_text', text: 'ok' }],
+                },
+              ],
+            }),
+            { status: url.includes('/v1/agent') ? 200 : 500 },
+          );
+        }),
+      );
+
+      const { result } = await callWithCascade({
+        clients: [{ provider: 'perplexity', model, apiKey: 'synthetic' }],
+        prompt: 'prompt',
+        action: 'synthesis',
+        timeoutMs: 1000,
+        json: false,
+      });
+
+      expect(result).toBe('ok');
+      expect(requestBody).toEqual({ input: 'prompt', preset });
+    },
+  );
 });

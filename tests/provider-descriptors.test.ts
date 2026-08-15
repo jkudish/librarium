@@ -14,24 +14,18 @@ import {
   PROVIDER_ID_ALIASES,
   validateDefaultGroups,
 } from '../src/constants.js';
-import type { HttpStreamClient } from '../src/core/http-client.js';
 import { getMeteringKind } from '../src/core/metering.js';
 import { PROVIDER_CATALOG } from '../src/core/provider-catalog.js';
 import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
 import { RETIRED_PROVIDER_REPLACEMENTS } from '../src/core/retired-provider-ids.js';
 import { searchApiOptionsSchema } from '../src/core/searchapi.js';
-import {
-  completeProSearchEvents,
-  streamFromStrings,
-  streamResponse,
-} from './fixtures/perplexity-pro-search.js';
 
 describe('built-in provider descriptors', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(39);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(37);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -81,7 +75,6 @@ describe('built-in provider descriptors', () => {
     expect(getAllProviders().map(({ id }) => id)).toEqual([
       'perplexity-sonar-deep',
       'perplexity-deep-research',
-      'perplexity-advanced-deep',
       'openai-research',
       'gemini-deep',
       'parallel-research',
@@ -113,7 +106,6 @@ describe('built-in provider descriptors', () => {
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
-      'perplexity-pro-search',
       'grok-x-only',
       'grok-combined',
       'valyu-search',
@@ -134,7 +126,6 @@ describe('built-in provider descriptors', () => {
         'searchapi-google-ai-mode',
         'searchapi-bing-copilot',
         'searchapi-google-ai-overview',
-        'perplexity-pro-search',
         'claude',
         'openai-chat',
         'gemini-chat',
@@ -251,11 +242,6 @@ describe('built-in provider descriptors', () => {
       BUILTIN_PROVIDER_DESCRIPTORS.find(({ id }) => id === 'perplexity-search')
         ?.optionsSchema,
     ).toBe(PerplexitySearchOptionsSchema);
-    expect(
-      BUILTIN_PROVIDER_DESCRIPTORS.find(
-        ({ id }) => id === 'perplexity-pro-search',
-      )?.optionsSchema.safeParse({ undocumented: true }).success,
-    ).toBe(false);
     for (const id of ['grok', 'grok-x-only', 'grok-combined'] as const) {
       expect(
         BUILTIN_PROVIDER_DESCRIPTORS.find(
@@ -408,26 +394,6 @@ describe('built-in provider descriptors', () => {
     for (const url of urls) {
       expect(new URL(url).searchParams.get('zero_retention')).toBe('true');
     }
-  });
-
-  it('injects the streaming transport through registry initialization', async () => {
-    const httpStreamClient = vi.fn<HttpStreamClient>(async () =>
-      streamResponse(streamFromStrings(completeProSearchEvents())),
-    );
-    await initializeProviders({
-      credentials: { env: { PERPLEXITY_API_KEY: 'synthetic-key' } },
-      httpStreamClient,
-    });
-
-    await expect(
-      getProvider('perplexity-pro-search')?.execute('registry Pro Search', {
-        timeout: 5,
-      }),
-    ).resolves.toMatchObject({
-      provider: 'perplexity-pro-search',
-      content: 'Split Pro Search content 😀.',
-    });
-    expect(httpStreamClient).toHaveBeenCalledOnce();
   });
 
   it('wires only documented Perplexity Search options through its factory', async () => {
@@ -647,8 +613,7 @@ describe('built-in provider descriptors', () => {
       'gemini-deep': 'remote',
       'parallel-research': 'remote',
       'perplexity-sonar-deep': 'remote',
-      'perplexity-deep-research': 'process-local',
-      'perplexity-advanced-deep': 'process-local',
+      'perplexity-deep-research': 'remote',
       'valyu-research': 'remote',
     });
   });

@@ -6,14 +6,18 @@ import {
   DEFAULT_GROUPS,
   PROJECT_CONFIG_FILE,
   resolveProviderId,
-  resolveProviderIds,
 } from '../constants.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
 import { ConfigSchema, ProjectConfigSchema } from '../types.js';
 import type { EnvRecord } from './credentials.js';
 import { hasCredential, resolveCredential } from './credentials.js';
 import { safeWriteFile } from './fs-utils.js';
-import { migrateRetiredProviderId } from './retired-provider-ids.js';
+import {
+  migrateRetiredProviderId,
+  migrateRetiredProviderToken,
+  retiredProviderGuidance,
+  retiredProviderMigrationPriority,
+} from './retired-provider-ids.js';
 
 export const CONFIG_DIR = resolve(homedir(), '.config', 'librarium');
 export const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json');
@@ -95,7 +99,6 @@ export function resolveEnvVar(
 export function validateFallbacks(config: Config): string[] {
   const warnings: string[] = [];
   const providerIds = Object.keys(config.providers);
-
   for (const [id, providerConfig] of Object.entries(config.providers)) {
     const fallbackId = providerConfig.fallback;
     if (!fallbackId) continue;
@@ -375,7 +378,18 @@ function migrateLegacyProviderIds(config: Config): string[] {
     'openai-deep',
   ].find((id) => config.providers[id] !== undefined);
 
-  for (const [id, providerConfig] of Object.entries(config.providers)) {
+  const entries = Object.entries(config.providers).sort(([left], [right]) => {
+    const leftCanonical = migrateRetiredProviderId(resolveProviderId(left));
+    const rightCanonical = migrateRetiredProviderId(resolveProviderId(right));
+    return (
+      leftCanonical.localeCompare(rightCanonical) ||
+      retiredProviderMigrationPriority(left, leftCanonical) -
+        retiredProviderMigrationPriority(right, rightCanonical) ||
+      left.localeCompare(right)
+    );
+  });
+
+  for (const [id, providerConfig] of entries) {
     const canonicalId = migrateRetiredProviderId(resolveProviderId(id));
     const normalizedFallback = providerConfig.fallback
       ? migrateRetiredProviderId(resolveProviderId(providerConfig.fallback))
@@ -383,7 +397,9 @@ function migrateLegacyProviderIds(config: Config): string[] {
 
     if (canonicalId !== id) {
       warnings.push(
-        `Provider ID "${id}" is deprecated; using "${canonicalId}"`,
+        id === 'perplexity-pro-search'
+          ? retiredProviderGuidance(id)!
+          : `Provider ID "${id}" is deprecated; using "${canonicalId}"`,
       );
     }
     if (
@@ -392,7 +408,9 @@ function migrateLegacyProviderIds(config: Config): string[] {
       normalizedFallback !== providerConfig.fallback
     ) {
       warnings.push(
-        `Provider "${canonicalId}" fallback "${providerConfig.fallback}" is deprecated; using "${normalizedFallback}"`,
+        providerConfig.fallback === 'perplexity-pro-search'
+          ? retiredProviderGuidance(providerConfig.fallback)!
+          : `Provider "${canonicalId}" fallback "${providerConfig.fallback}" is deprecated; using "${normalizedFallback}"`,
       );
     }
 
@@ -423,19 +441,23 @@ function migrateLegacyProviderIds(config: Config): string[] {
   config.providers = migratedProviders;
 
   for (const [groupName, members] of Object.entries(config.groups)) {
-    for (const member of members) {
-      const canonicalMember = migrateRetiredProviderId(
-        resolveProviderId(member),
-      );
+    const canonicalMembers = members.map((member) => {
+      const migrated = migrateRetiredProviderToken(member);
+      const [providerId, ...suffix] = migrated.split('/');
+      const canonicalMember = [
+        migrateRetiredProviderId(resolveProviderId(providerId ?? '')),
+        ...suffix,
+      ].join('/');
       if (canonicalMember !== member) {
         warnings.push(
-          `Group "${groupName}" member "${member}" is deprecated; using "${canonicalMember}"`,
+          member.split('/')[0] === 'perplexity-pro-search'
+            ? retiredProviderGuidance(member)!
+            : `Group "${groupName}" member "${member}" is deprecated; using "${canonicalMember}"`,
         );
       }
-    }
-    config.groups[groupName] = resolveProviderIds(
-      members.map(migrateRetiredProviderId),
-    );
+      return canonicalMember;
+    });
+    config.groups[groupName] = [...new Set(canonicalMembers)];
   }
 
   return warnings;
@@ -453,7 +475,6 @@ const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
     [
       'perplexity-sonar-deep',
       'perplexity-deep-research',
-      'perplexity-advanced-deep',
       'openai-research',
       'gemini-deep',
       'perplexity-sonar-pro',
@@ -470,7 +491,6 @@ const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
     [
       'perplexity-sonar-deep',
       'perplexity-deep-research',
-      'perplexity-advanced-deep',
       'openai-research',
       'gemini-deep',
       'perplexity-sonar-pro',
@@ -503,11 +523,19 @@ function captureStoredDefaultGroupRosters(
   for (const groupName of ['comprehensive', 'all'] as const) {
     const storedMembers = groups[groupName];
     if (storedMembers) {
-      // Canonicalize aliases without deduplication so additions and duplicate
-      // members cannot accidentally collapse into a recognized snapshot.
-      captured[groupName] = storedMembers.map((id) =>
-        migrateRetiredProviderId(resolveProviderId(id)),
-      );
+      // Canonicalize aliases and deduplicate them before snapshot matching.
+      captured[groupName] = [
+        ...new Set(
+          storedMembers.map((id) => {
+            const migrated = migrateRetiredProviderToken(id);
+            const [providerId, ...suffix] = migrated.split('/');
+            return [
+              migrateRetiredProviderId(resolveProviderId(providerId ?? '')),
+              ...suffix,
+            ].join('/');
+          }),
+        ),
+      ];
     }
   }
   return captured;

@@ -144,16 +144,16 @@ describe('provider selection', () => {
       enabled: false,
       apiKey: '$SEARCHAPI_API_KEY',
     };
-    c.providers['perplexity-pro-search'] = {
+    c.providers['perplexity-sonar-pro'] = {
       enabled: false,
       apiKey: '$PERPLEXITY_API_KEY',
     };
-    c.groups.comprehensive = ['searchapi-chatgpt', 'perplexity-pro-search'];
+    c.groups.comprehensive = ['searchapi-chatgpt', 'perplexity-sonar-pro'];
     c.groups.all = [...c.groups.comprehensive];
     const expandedProviders = [
       ...providers,
       provider('searchapi-chatgpt', 'SEARCHAPI_API_KEY'),
-      provider('perplexity-pro-search', 'PERPLEXITY_API_KEY'),
+      provider('perplexity-sonar-pro', 'PERPLEXITY_API_KEY'),
     ];
     const credentials = {
       env: {
@@ -170,7 +170,7 @@ describe('provider selection', () => {
           requireUsable: true,
           credentials,
         }),
-      ).toEqual(['searchapi-chatgpt', 'perplexity-pro-search']);
+      ).toEqual(['searchapi-chatgpt', 'perplexity-sonar-pro']);
     }
     expect(
       resolveProviderSelection(c, {}, expandedProviders, {

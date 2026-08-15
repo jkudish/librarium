@@ -38,10 +38,20 @@ describe('usage extraction', () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         id: 'resp-1',
-        model: 'sonar-pro',
-        choices: [{ message: { role: 'assistant', content: 'Answer.' } }],
-        citations: ['https://example.com'],
-        usage: apiUsage,
+        status: 'completed',
+        model: 'agent-model',
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'output_text', text: 'Answer.' }],
+          },
+        ],
+        usage: {
+          input_tokens: apiUsage.prompt_tokens,
+          output_tokens: apiUsage.completion_tokens,
+          total_tokens: apiUsage.total_tokens,
+          cost: apiUsage.cost,
+        },
       }),
     );
 
@@ -57,7 +67,12 @@ describe('usage extraction', () => {
       outputTokens: 34,
       totalTokens: 46,
       costUsd: 0.0123,
-      raw: apiUsage,
+      raw: {
+        input_tokens: 12,
+        output_tokens: 34,
+        total_tokens: 46,
+        cost: { total_cost: 0.0123 },
+      },
     });
   });
 
@@ -65,8 +80,14 @@ describe('usage extraction', () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         id: 'resp-2',
-        choices: [{ message: { role: 'assistant', content: 'Answer.' } }],
-        usage: { prompt_tokens: 5, completion_tokens: 6, total_tokens: 11 },
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'output_text', text: 'Answer.' }],
+          },
+        ],
+        usage: { input_tokens: 5, output_tokens: 6, total_tokens: 11 },
       }),
     );
 

@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { normalizedPerplexityAgentUnderlyingModel } from '../core/perplexity-agent-target.js';
 import {
   BUILTIN_PROVIDER_DEFINITIONS,
   BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER,
@@ -53,9 +54,7 @@ import {
   ParallelResearchProvider,
   ParallelSearchProvider,
 } from './parallel.js';
-import { PerplexityAdvancedDeepProvider } from './perplexity-advanced-deep.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
-import { PerplexityProSearchProvider } from './perplexity-pro-search.js';
 import { PerplexitySearchProvider } from './perplexity-search.js';
 import {
   type PerplexitySearchOptions,
@@ -233,9 +232,9 @@ const factories: Record<string, ProviderFactory> = {
   ),
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
   'perplexity-deep-research': (context) =>
-    new PerplexityDeepResearchProvider({ model: configuredModel(context) }),
-  'perplexity-advanced-deep': (context) =>
-    new PerplexityAdvancedDeepProvider({ model: configuredModel(context) }),
+    new PerplexityDeepResearchProvider({
+      model: normalizedPerplexityAgentUnderlyingModel(configuredModel(context)),
+    }),
   'openai-research': typedFactory(
     openAiResearchOptions,
     (context) =>
@@ -390,7 +389,6 @@ const factories: Record<string, ProviderFactory> = {
         zeroRetention: searchApiZeroRetention(context.options),
       }),
   ),
-  'perplexity-pro-search': () => new PerplexityProSearchProvider(),
   serpapi: () => new SerpApiProvider(),
   tavily: () => new TavilyProvider(),
   'tavily-research': typedFactory(

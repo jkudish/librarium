@@ -85,6 +85,7 @@ export interface NormalizedSuccess {
   readonly citations: readonly {
     readonly url: string;
     readonly provider: string;
+    readonly providerReference?: string;
     readonly title?: string;
     readonly snippet?: string;
   }[];
@@ -127,6 +128,8 @@ export function normalizeSuccess(
       typeof citation.url !== 'string' ||
       typeof citation.provider !== 'string' ||
       citation.provider !== providerId ||
+      (citation.providerReference !== undefined &&
+        typeof citation.providerReference !== 'string') ||
       (citation.title !== undefined && typeof citation.title !== 'string') ||
       (citation.snippet !== undefined && typeof citation.snippet !== 'string')
     ) {
@@ -135,6 +138,9 @@ export function normalizeSuccess(
     citations.push({
       url: citation.url,
       provider: providerId,
+      ...(citation.providerReference === undefined
+        ? {}
+        : { providerReference: citation.providerReference }),
       ...(citation.title === undefined ? {} : { title: citation.title }),
       ...(citation.snippet === undefined ? {} : { snippet: citation.snippet }),
     });

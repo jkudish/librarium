@@ -8,6 +8,8 @@
 export const RETIRED_PROVIDER_REPLACEMENTS = Object.freeze({
   'perplexity-sonar': 'perplexity-sonar-pro',
   'perplexity-deep': 'perplexity-sonar-deep',
+  'perplexity-pro-search': 'perplexity-sonar-pro',
+  'perplexity-advanced-deep': 'perplexity-sonar-deep',
   'openai-deep': 'openai-research',
   'openai-deep-o3': 'openai-research',
 } as const);
@@ -62,14 +64,16 @@ export function retiredProviderMigrationPriority(
   canonical: string,
 ): number {
   if (id === canonical) return 0;
-  if (id === 'openai-deep-o3') return 1;
-  if (id === 'openai-deep') return 2;
+  if (canonical === 'openai-research' && id === 'openai-deep-o3') return 1;
+  if (canonical === 'openai-research' && id === 'openai-deep') return 2;
   return 1;
 }
 
 export function retiredProviderGuidance(token: string): string | undefined {
   const replacement = retiredProviderTokenReplacement(token);
   return replacement
-    ? `Provider "${token}" was removed; use "${replacement}".`
+    ? token.split('/')[0] === 'perplexity-pro-search'
+      ? 'Perplexity provider "perplexity-pro-search" was migrated to "perplexity-sonar-pro/grounded"; legacy search_type "pro" now uses Agent preset "low".'
+      : `Provider "${token}" was removed; use "${replacement}".`
     : undefined;
 }

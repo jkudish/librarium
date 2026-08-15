@@ -147,12 +147,12 @@ export function productionValidationMatrix(config: Config) {
     (target) => `${target.key}:${target.binding_id}:${target.adapter_id}`,
   );
   if (
-    matrix.targets.length !== 42 ||
-    new Set(actualInventory).size !== 42 ||
+    matrix.targets.length !== 40 ||
+    new Set(actualInventory).size !== 40 ||
     JSON.stringify(actualInventory) !== JSON.stringify(expectedInventory)
   ) {
     throw new CanonicalLiveValidationError(
-      'Production paid validation requires the exact 42-target canonical binding inventory.',
+      'Production paid validation requires the exact 40-target canonical binding inventory.',
     );
   }
   return matrix;

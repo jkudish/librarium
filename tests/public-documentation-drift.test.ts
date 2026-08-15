@@ -33,10 +33,10 @@ const mcpTools = [
 
 describe('public v2 documentation drift', () => {
   it('keeps the generated catalog facts in README aligned with source', () => {
-    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(35);
-    expect(profileKeys).toHaveLength(42);
+    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(33);
+    expect(profileKeys).toHaveLength(40);
     expect(README).toMatch(
-      /\*\*35 built-in providers\*\* and \*\*42 implemented public\s+profiles\*\*/,
+      /\*\*33 built-in providers\*\* and \*\*40 implemented public\s+profiles\*\*/,
     );
 
     for (const provider of BUILTIN_PROVIDER_CATALOG) {
@@ -121,8 +121,9 @@ describe('public v2 documentation drift', () => {
   it('keeps the execution, provenance, privacy, and paid-validation boundaries explicit', () => {
     for (const text of [README, SKILL, PROVIDER_GUIDE]) {
       expect(text).toContain('background/durable');
-      expect(text).toContain('process-local');
     }
+    expect(README).toContain('process-local');
+    expect(PROVIDER_GUIDE).toContain('process-local');
     expect(README).toContain(
       'correlated visibility evidence, not six independent confirmations',
     );

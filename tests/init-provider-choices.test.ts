@@ -20,7 +20,6 @@ const NEW_OPT_IN_PROVIDERS = [
   'searchapi-google-ai-mode',
   'searchapi-bing-copilot',
   'searchapi-google-ai-overview',
-  'perplexity-pro-search',
 ] as const;
 
 const PARALLEL_OPT_IN_PROVIDERS = [

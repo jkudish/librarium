@@ -78,10 +78,10 @@ afterEach(() => {
 });
 
 describe('canonical v3 live validation matrix', () => {
-  it('derives the exact implemented 42-profile matrix, including durable private adapters', () => {
+  it('derives the exact implemented 40-profile matrix, including durable private adapters', () => {
     const matrix = buildCanonicalValidationMatrix();
     expect(matrix.targets.length).toBeGreaterThan(0);
-    expect(matrix.targets.length).toBeLessThanOrEqual(42);
+    expect(matrix.targets.length).toBeLessThanOrEqual(40);
     expect(matrix.targets.map((target) => target.key)).toContain(
       'exa/research',
     );
@@ -97,10 +97,10 @@ describe('canonical v3 live validation matrix', () => {
       adapter_id: 'exa-research',
       credential_family: 'EXA_API_KEY',
     });
-    expect(new Set(matrix.targets.map((target) => target.key)).size).toBe(42);
+    expect(new Set(matrix.targets.map((target) => target.key)).size).toBe(40);
     expect(
       new Set(matrix.targets.map((target) => target.adapter_id)).size,
-    ).toBe(42);
+    ).toBe(40);
   });
 
   it('admits only one exact prepared canonical profile and never a legacy selector list', () => {
@@ -203,7 +203,7 @@ describe('canonical v3 live validation matrix', () => {
     });
     expect(matrix.catalog_digest).toBe(catalog.digest);
     expect(matrix.targets.length).toBeGreaterThan(0);
-    expect(matrix.targets.length).toBeLessThanOrEqual(42);
+    expect(matrix.targets.length).toBeLessThanOrEqual(40);
     expect(
       matrix.targets.every(
         (target) => target.catalog_digest === catalog.digest,

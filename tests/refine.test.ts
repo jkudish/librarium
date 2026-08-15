@@ -121,7 +121,7 @@ describe('resolveRefineClient', () => {
     ).toBe('gemini-2.5-flash');
     expect(
       resolveRefineClient(makeConfig(), { PERPLEXITY_API_KEY: 'c' })?.model,
-    ).toBe('sonar');
+    ).toBe('low');
   });
 });
 
@@ -156,7 +156,9 @@ describe('formatHttpError', () => {
 
   it('falls back to the raw body for non-JSON responses and truncates', () => {
     const message = formatHttpError('Perplexity', 502, 'Bad gateway');
-    expect(message).toBe('Perplexity refine call failed: HTTP 502 Bad gateway');
+    expect(message).toBe(
+      'Perplexity refine call failed: HTTP 502 [unparseable provider error]',
+    );
     const long = formatHttpError(
       'OpenAI',
       400,

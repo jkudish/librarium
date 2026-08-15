@@ -135,6 +135,8 @@ function parseCitation(
     typeof value.url !== 'string' ||
     typeof value.provider !== 'string' ||
     (expectedProvider !== undefined && value.provider !== expectedProvider) ||
+    (value.providerReference !== undefined &&
+      typeof value.providerReference !== 'string') ||
     (value.title !== undefined && typeof value.title !== 'string') ||
     (value.snippet !== undefined && typeof value.snippet !== 'string')
   ) {
@@ -143,6 +145,9 @@ function parseCitation(
   return {
     url: value.url,
     provider: value.provider,
+    ...(value.providerReference === undefined
+      ? {}
+      : { providerReference: value.providerReference }),
     ...(value.title === undefined ? {} : { title: value.title }),
     ...(value.snippet === undefined ? {} : { snippet: value.snippet }),
   };

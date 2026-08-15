@@ -95,17 +95,20 @@ describe('default groups -- visibility expansion', () => {
     }
   });
 
-  it('keeps Pro Search in comprehensive/all but outside visibility/quick/fast', () => {
-    expect(DEFAULT_GROUPS.comprehensive).toContain('perplexity-pro-search');
-    expect(DEFAULT_GROUPS.all).toContain('perplexity-pro-search');
-    for (const group of ['visibility', 'quick', 'fast'] as const) {
-      expect(DEFAULT_GROUPS[group]).not.toContain('perplexity-pro-search');
+  it('keeps retired Perplexity identities out of every default group', () => {
+    for (const id of [
+      'perplexity-pro-search',
+      'perplexity-advanced-deep',
+    ] as const) {
+      for (const members of Object.values(DEFAULT_GROUPS)) {
+        expect(members).not.toContain(id);
+      }
     }
   });
 
-  it('has eight default groups and all 35 grounded providers', () => {
+  it('has eight default groups and all 33 grounded providers', () => {
     expect(Object.keys(DEFAULT_GROUPS)).toHaveLength(8);
-    expect(DEFAULT_GROUPS.all).toHaveLength(35);
+    expect(DEFAULT_GROUPS.all).toHaveLength(33);
   });
 });
 

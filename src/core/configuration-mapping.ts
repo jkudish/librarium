@@ -40,6 +40,8 @@ import {
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
   migrateRetiredProviderId,
+  retiredProviderGuidance,
+  retiredProviderMigrationPriority,
   retiredProviderTokenReplacement,
 } from './retired-provider-ids.js';
 import type {
@@ -555,13 +557,19 @@ function canonicalizeProviderConfigs(
 } {
   const providerConfigs = safeRecord<ProviderConfig>();
   const notices: PreparationNotice[] = [];
-  const selectedOpenAi = [
-    'openai-research',
-    'openai-deep-o3',
-    'openai-deep',
-  ].find((id) => ownValue(providers, id) !== undefined);
 
-  for (const [id, config] of Object.entries(providers)) {
+  const entries = Object.entries(providers).sort(([left], [right]) => {
+    const leftCanonical = canonicalProviderId(left);
+    const rightCanonical = canonicalProviderId(right);
+    return (
+      compareCanonicalStrings(leftCanonical, rightCanonical) ||
+      retiredProviderMigrationPriority(left, leftCanonical) -
+        retiredProviderMigrationPriority(right, rightCanonical) ||
+      compareCanonicalStrings(left, right)
+    );
+  });
+
+  for (const [id, config] of entries) {
     const adapterId = canonicalProviderId(id);
     const fallback = config.fallback
       ? canonicalProviderId(config.fallback)
@@ -572,6 +580,7 @@ function canonicalizeProviderConfigs(
         phase: 'migration',
         path: `/providers/${id}`,
         message:
+          retiredProviderGuidance(id) ??
           'A retired provider id was migrated to its canonical adapter id.',
       });
     }
@@ -581,6 +590,7 @@ function canonicalizeProviderConfigs(
         phase: 'migration',
         path: `/providers/${id}/fallback`,
         message:
+          retiredProviderGuidance(config.fallback!) ??
           'A retired fallback id was migrated to its canonical adapter id.',
       });
     }
@@ -588,16 +598,6 @@ function canonicalizeProviderConfigs(
       ...config,
       ...(fallback !== undefined && { fallback }),
     };
-    if (adapterId === 'openai-research' && id !== selectedOpenAi) {
-      notices.push({
-        code: 'configuration_provider_alias_collision',
-        phase: 'migration',
-        path: `/providers/${id}`,
-        message:
-          'A colliding OpenAI research alias was ignored by canonical precedence.',
-      });
-      continue;
-    }
     if (!ownValue(providerConfigs, adapterId) || id === adapterId) {
       providerConfigs[adapterId] = normalized;
       continue;
@@ -710,6 +710,7 @@ function canonicalizeGroups(
           phase: 'migration',
           path,
           message:
+            retiredProviderGuidance(resolution.alias.from) ??
             'A retired provider alias was migrated to its exact profile.',
           profile_key: `${resolution.target.provider_id}/${resolution.target.profile_id}`,
         });

@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refresh the public v2 catalog, workflow, execution, provenance, pricing,
   privacy, TypeScript/PHP boundary, MCP, and custom-provider guidance. The
-  documentation now states the 35-provider, 42-profile public roster and the
+  documentation now states the 33-provider, 40-profile public roster and the
   four built-in workflows (`quick`, `deep`, `visibility`, and `all`).
 - Replace the README demo with a deterministic, network-denied canonical
   fixture replay. The demo does not use credentials, paid calls, or mocked
@@ -33,10 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `searchapi-bing-copilot`, and the two-stage
   `searchapi-google-ai-overview`): normalize Markdown, structured answer blocks,
   citations, and model metadata while preserving surface attribution.
-- **Perplexity Pro Search** (`perplexity-pro-search`, ai-grounded tier): forces
-  streaming Sonar Pro Search, validates the Pro reasoning/completion lifecycle,
-  normalizes citations and provider-reported usage/cost, and performs no hidden
-  retry or downgraded second submission.
+- **Perplexity Agent migration**: `perplexity-sonar-pro/grounded` now uses the
+  inline Agent low preset; `perplexity-deep-research/research` uses durable
+  Agent medium; and `perplexity-sonar-deep/research` uses durable Agent high.
+  `perplexity-pro-search` and `perplexity-advanced-deep` are migration-only
+  identities and are not registered or cataloged.
 - Validated Perplexity Search controls for multi-query input, country/language,
   domain allow/deny filters, result limits, context size, and extraction-token
   budgets.
@@ -330,7 +331,10 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 
 ### Changed
 - HTML report layout: the provider table now drives tabs instead of accordions. Each single-line row (glyph, provider, tier, duration, result count or truncated error with full title tooltip, right-aligned usage) is a real tab trigger with aria-selected and arrow-key support; one panel below shows the active provider's full rendered output (default: first success). Sources move into their own tab so long lists no longer render on initial view; the unique-source count stays in the always-visible meta line. Content column widened to 940px; tiny inline vanilla JS with a noscript fallback that stacks all panels
-- `perplexity-sonar-deep` now uses Perplexity's Async Sonar API (`POST /v1/async/sonar`, polled via `GET /v1/async/sonar/{id}`): mixed and async modes submit and return immediately instead of blocking for minutes, and `librarium status --wait --retrieve` polls and retrieves like openai-deep tasks. Retrieved results keep token usage and API-reported cost, and prefer `search_results` (titles, snippets) for citations. Sync mode is unchanged. `perplexity-deep-research` and `perplexity-advanced-deep` still complete inline: Perplexity's Agent API has no background mode
+- Perplexity Sonar/provider paths now use the shared `/v1/agent` client. Grounded
+  Sonar Pro uses Agent low inline; Deep Research uses durable Agent medium; and
+  Sonar Deep uses durable Agent high. Accepted background submissions persist
+  the provider id and never resubmit after an ambiguous write.
 - `gemini-deep` now runs Google's real Deep Research agent via the Interactions API (`POST /v1beta/interactions` with `background: true`, polled via `GET /v1beta/interactions/{id}`) instead of a synchronous `generateContent` imitation. Mixed and async modes submit and return immediately; `librarium status --wait --retrieve` polls and retrieves like the other async deep providers. Sync mode polls inline within `asyncTimeout`. Citations are extracted from `url_citation` annotations on the report text (real source URLs), and token usage is taken from the interaction's `usage` totals. Defaults to the `deep-research-preview-04-2026` agent; set `model` to `deep-research-max-preview-04-2026` for the heavier variant
 - Refine failures now include the API's own error detail (code and message, truncated), and refine cascades to the next available provider (openai, then gemini, then perplexity) before falling back to the original query; an explicit `refine.provider` pin disables the cascade
 - Wizard copy: execution modes explain themselves (mixed recommended), the refine toggle gets a one-line explainer and is skipped entirely when no refine-capable API key is configured
@@ -364,7 +368,7 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - Kagi FastGPT provider adapter: `kagi-fastgpt` — AI answers with curated, ad-free sources (ai-grounded tier)
 
 ### Fixed
-- Perplexity Agent API endpoint updated from `/v1/responses` to canonical `/v1/agent` — fixes HTTP 400 errors for all Perplexity Agent providers (`perplexity-sonar-deep`, `perplexity-deep-research`, `perplexity-advanced-deep`) in both health checks and live queries
+- Perplexity Agent API endpoint updated from `/v1/responses` to canonical `/v1/agent` — fixes HTTP 400 errors for the canonical Agent providers (`perplexity-sonar-pro`, `perplexity-sonar-deep`, `perplexity-deep-research`) in both health checks and live queries
 - Perplexity Deep Research health check: removed unsupported `max_output_tokens` parameter from test request
 - OpenAI Deep Research health check failing with HTTP 404 — deep research models don't appear in `/v1/models` endpoint; test now verifies API key via general models list
 

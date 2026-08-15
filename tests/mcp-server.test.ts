@@ -197,13 +197,18 @@ describe('mcp tool surface', () => {
 
   it('lists configured targets without claiming provider-observed models', async () => {
     await initializeProviders({
-      providers: { 'perplexity-deep-research': { model: 'sonar-pro' } },
+      providers: {
+        'perplexity-deep-research': { model: 'openai/gpt-5.6-sol' },
+      },
     });
     const { client, server } = await connect({
       loadMergedConfig: () => ({
         ...makeConfig(),
         providers: {
-          'perplexity-deep-research': { enabled: true, model: 'sonar-pro' },
+          'perplexity-deep-research': {
+            enabled: true,
+            model: 'openai/gpt-5.6-sol',
+          },
         },
       }),
       initialize: vi.fn().mockResolvedValue({
@@ -226,12 +231,12 @@ describe('mcp tool surface', () => {
       primary: {
         model_selection: 'fixed',
         kind: 'preset',
-        target_id: 'deep-research',
+        target_id: 'medium',
       },
       underlying: {
         model_selection: 'configurable',
         kind: 'model',
-        target_id: 'sonar-pro',
+        target_id: 'openai/gpt-5.6-sol',
       },
     });
     expect(provider).not.toHaveProperty('model');

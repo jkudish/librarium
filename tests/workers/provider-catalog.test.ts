@@ -33,13 +33,13 @@ function workerCatalog() {
 describe('provider catalog in workerd', () => {
   it('builds the full catalog without Node APIs', () => {
     const catalog = workerCatalog();
-    expect(catalog.entries).toHaveLength(35);
-    expect(catalog.resolved).toHaveLength(42);
-    expect(catalog.profiles).toHaveLength(42);
-    expect(catalog.workflow('all').members).toHaveLength(42);
+    expect(catalog.entries).toHaveLength(33);
+    expect(catalog.resolved).toHaveLength(40);
+    expect(catalog.profiles).toHaveLength(40);
+    expect(catalog.workflow('all').members).toHaveLength(40);
     expect(catalog.workflow('quick').members).toHaveLength(5);
     expect(catalog.workflow('visibility').members).toHaveLength(9);
-    expect(catalog.workflow('deep').members).toHaveLength(10);
+    expect(catalog.workflow('deep').members).toHaveLength(9);
   });
 
   it('maps configuration without importing Node config loading', () => {
