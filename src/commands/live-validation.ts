@@ -146,7 +146,7 @@ const ApprovalSchema = z
     aggregate_budget_microusd: z.string().regex(MICROUSD),
     raw_root: z.string().min(1).max(1_024),
     receipt_root: z.string().min(1).max(1_024),
-    targets: z.array(TargetProtocolSchema).min(1).max(42),
+    targets: z.array(TargetProtocolSchema).min(1).max(40),
   })
   .superRefine((approval, ctx) => {
     if (
