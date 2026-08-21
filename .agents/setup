@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# librarium orb setup — runs once on a fresh orb.
+# Installs Node 22.12 (the project floor), dependencies, a global librarium
+# binary, and builds dist/ so the CLI and plugin are usable immediately.
+
+cd "$(dirname "$0")/.."
+
+NODE_TARGET=22.12.0
+
+echo "[$(date +%H:%M:%S)] Checking Node version"
+CURRENT=$(node -v 2>/dev/null || echo "none")
+if [ "$CURRENT" != "v$NODE_TARGET" ]; then
+  echo "  Current: $CURRENT, target: v$NODE_TARGET"
+  if command -v n >/dev/null 2>&1; then
+    n "$NODE_TARGET"
+  elif npx --yes n --version >/dev/null 2>&1; then
+    npx --yes n "$NODE_TARGET"
+  else
+    echo "  n not available — install Node $NODE_TARGET manually if builds fail"
+  fi
+else
+  echo "  Already on v$NODE_TARGET"
+fi
+
+echo "[$(date +%H:%M:%S)] Installing dependencies"
+npm install
+
+echo "[$(date +%H:%M:%S)] Building dist/"
+npm run build
+
+echo "[$(date +%H:%M:%S)] Installing librarium globally"
+npm install -g librarium
+
+echo "[$(date +%H:%M:%S)] Setup complete"

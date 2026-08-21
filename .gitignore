@@ -6,4 +6,7 @@ dist/
 agents/
 .agents/*
 !.agents/skills/
+!.agents/setup
+!.agents/resume
+.amp/portals/*
 benchmark/results/
