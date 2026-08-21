@@ -412,6 +412,44 @@ describe('production live-validation binding (injected, offline)', () => {
       });
     },
   );
+
+  it('stops live validation when acceptance is unknown and no durable handle exists', async () => {
+    const target = buildCanonicalValidationMatrix().targets.find(
+      (candidate) => candidate.key === 'exa/research',
+    )!;
+    const observed = counters();
+    const dependencies = executorDependencies(target, observed);
+    dependencies.resume = async () => {
+      observed.resume += 1;
+      return {
+        manifest: {
+          coordination_state: {
+            status: 'running',
+            attempts: [{ status: 'acceptance_unknown' }],
+          },
+        },
+      } as any;
+    };
+    const rawRoot = mkdtempSync(join(tmpdir(), 'librarium-binding-'));
+    const binding = createProductionFrozenCanonicalExecutor(
+      { raw_root: rawRoot } as LiveValidationApproval,
+      { providers: {} } as Config,
+      dependencies,
+    );
+    const reference = await binding.prepare(target, protocol(target));
+    await expect(
+      binding.execute(target, protocol(target), reference),
+    ).resolves.toMatchObject({
+      status: 'terminal',
+      lifecycle: 'failed',
+    });
+    await expect(
+      binding.reconcile(target, protocol(target), reference),
+    ).resolves.toMatchObject({
+      status: 'terminal',
+      lifecycle: 'failed',
+    });
+  });
 });
 
 describe('production paid matrix and candidate attribution', () => {

@@ -73,6 +73,33 @@ const PROVIDER_FAILURE_KINDS = new Set<ProviderFailureKind>([
   'provider',
 ]);
 
+function isProvenSubmissionRejection(
+  diagnostic: ProviderFailureDiagnostic,
+): boolean {
+  if (diagnostic.kind === 'timeout' || diagnostic.kind === 'network') {
+    return false;
+  }
+  if (diagnostic.kind === 'provider') {
+    return (
+      diagnostic.httpStatus !== undefined &&
+      diagnostic.httpStatus >= 400 &&
+      diagnostic.httpStatus < 500
+    );
+  }
+  return true;
+}
+
+function failureDiagnosticFromUnknown(
+  error: unknown,
+): ProviderFailureDiagnostic | undefined {
+  if (typeof error !== 'object' || error === null || Array.isArray(error)) {
+    return undefined;
+  }
+  return validatedFailureDiagnostic(
+    (error as { readonly failureDiagnostic?: unknown }).failureDiagnostic,
+  );
+}
+
 function validatedFailureDiagnostic(
   value: unknown,
 ): ProviderFailureDiagnostic | undefined {
@@ -653,14 +680,29 @@ export function createProviderAttemptBridge(
         launch,
         now,
       );
-      if (submitted.kind !== 'value') {
-        // A rejected promise cannot prove that the remote side did not accept
-        // the request. Halt instead of retrying or spending a fallback.
+      if (submitted.kind === 'deadline') {
+        // The local deadline fired while POST may already have been in flight.
         await context.submissionAcceptanceUnknown(
           undefined,
-          submitted.kind === 'deadline'
-            ? 'submission_deadline_exceeded'
-            : 'submission_response_uncertain',
+          'submission_deadline_exceeded',
+        );
+        return { kind: 'acceptance_unknown' };
+      }
+      if (submitted.kind === 'error') {
+        const diagnostic = failureDiagnosticFromUnknown(submitted.error);
+        if (diagnostic && isProvenSubmissionRejection(diagnostic)) {
+          return {
+            kind: 'finished',
+            finished: {
+              outcome: 'failed',
+              error: diagnosedProviderFailure(diagnostic, false),
+            },
+          };
+        }
+        // Timeout/5xx/connection-drop after POST cannot prove rejection.
+        await context.submissionAcceptanceUnknown(
+          undefined,
+          'submission_response_uncertain',
         );
         return { kind: 'acceptance_unknown' };
       }
