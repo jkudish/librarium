@@ -166,7 +166,8 @@ incomplete, budget-limited, or fails.
 
 Other public commands are `live-validation`, `status`, `usage`, `browse`,
 `html`, `jsonl`, `refine`, `completions`, `ls`, `groups`, `init`, `doctor`,
-`config`, `cleanup`, `clear`, `upgrade`, `install-skill`, and `mcp`.
+`config`, `cleanup`, `clear`, `upgrade`, `install-skill`, `install-plugin`,
+and `mcp`.
 
 ### Command option ledger
 
@@ -193,6 +194,7 @@ that are not in the `run` table above.
 | `clear` | `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
 | `upgrade` | `--check`, `--dry-run`, `--force` |
 | `install-skill` | `--force`, `--dry-run` |
+| `install-plugin` | `--force`, `--dry-run` |
 | `mcp` | no explicit option |
 
 ### Durable work: wait, retrieve, and cancel
@@ -296,6 +298,20 @@ per-provider cap and marks it untrusted. `check_async` performs one bounded
 resume pass; for canonical schema version 3 it retrieves an observed completed
 result immediately, while its `retrieve` flag applies only to historical
 schema version 2 runs.
+
+### Amp plugin
+
+```bash
+librarium install-plugin
+```
+
+Installs the librarium Amp plugin to `~/.config/amp/plugins/librarium/`. The
+plugin exposes the same five tools as the MCP server as native Amp tools,
+gated behind a bundled skill so they stay out of unrelated threads. It adds
+per-agent provider defaults (configurable via the `librarium:set-agent-defaults`
+command) so different agent modes can default to different research groups
+without per-call overrides. The `librarium:research` command dispatches a
+run from the command palette.
 
 ## Shared TypeScript/PHP boundary
 

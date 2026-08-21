@@ -8,6 +8,7 @@ import { registerDoctorCommand } from './commands/doctor.js';
 import { registerGroupsCommand } from './commands/groups.js';
 import { registerHtmlCommand } from './commands/html.js';
 import { registerInitCommand } from './commands/init.js';
+import { registerInstallPluginCommand } from './commands/install-plugin.js';
 import { registerInstallSkillCommand } from './commands/install-skill.js';
 import { registerJsonlCommand } from './commands/jsonl.js';
 import { registerLiveValidationCommand } from './commands/live-validation.js';
@@ -52,6 +53,7 @@ export function createCliProgram(): Command {
   registerCleanupCommand(program);
   registerUpgradeCommand(program);
   registerInstallSkillCommand(program);
+  registerInstallPluginCommand(program);
   registerMcpCommand(program);
 
   return program;
