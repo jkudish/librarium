@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# librarium orb resume — runs on every orb wake.
+# Fast, idempotent checks that the environment is still usable.
+
+# Verify librarium is still on PATH (global installs survive orb resume).
+if ! command -v librarium >/dev/null 2>&1; then
+  echo "[librarium] librarium not on PATH — run .agents/setup to reinstall"
+fi
