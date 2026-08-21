@@ -161,6 +161,7 @@ export function productionValidationMatrix(config: Config) {
 function hasDurableCustody(manifest: {
   readonly coordination_state: {
     readonly attempts?: readonly {
+      readonly status?: string;
       readonly durable_handle?: { readonly status?: string };
     }[];
   };
@@ -172,17 +173,43 @@ function hasDurableCustody(manifest: {
   );
 }
 
+function hasUnknownAcceptanceWithoutHandle(manifest: {
+  readonly coordination_state: {
+    readonly attempts?: readonly {
+      readonly status?: string;
+      readonly durable_handle?: { readonly status?: string };
+    }[];
+  };
+}): boolean {
+  return (
+    manifest.coordination_state.attempts?.some(
+      (attempt) =>
+        attempt.status === 'acceptance_unknown' &&
+        attempt.durable_handle === undefined,
+    ) ?? false
+  );
+}
+
 function classifyCustodyOutcome(
   reference: FrozenAttemptReference,
   manifest: {
     readonly coordination_state: {
       readonly status: string;
       readonly attempts?: readonly {
+        readonly status?: string;
         readonly durable_handle?: { readonly status?: string };
       }[];
     };
   },
 ): import('./commands/live-validation.js').FrozenExecutionOutcome {
+  if (hasUnknownAcceptanceWithoutHandle(manifest)) {
+    return {
+      status: 'terminal',
+      lifecycle: 'failed',
+      request_id: reference.request_id,
+      raw_manifest: JSON.stringify(manifest),
+    };
+  }
   if (
     manifest.coordination_state.status === 'running' ||
     hasDurableCustody(manifest)

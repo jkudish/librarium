@@ -1,9 +1,14 @@
 import { z } from 'zod';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import {
+  HttpRequestAbortedError,
+  HttpRequestTimeoutError,
+} from '../core/http-client.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
   Citation,
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -71,6 +76,8 @@ const ExaRun = z.object({
 type ExaRun = z.infer<typeof ExaRun>;
 
 const URL = 'https://api.exa.ai/agent/runs';
+const SUBMISSION_FAILED =
+  'Exa Agent submission failed before a valid handle was returned.';
 const statuses: Record<string, AsyncTaskHandle['status']> = {
   queued: 'pending',
   running: 'running',
@@ -78,6 +85,15 @@ const statuses: Record<string, AsyncTaskHandle['status']> = {
   failed: 'failed',
   cancelled: 'cancelled',
 };
+
+class ExaResearchSubmissionError extends UnsafeToRetrySubmissionError {
+  readonly failureDiagnostic: ProviderFailureDiagnostic;
+
+  constructor(failureDiagnostic: ProviderFailureDiagnostic) {
+    super(SUBMISSION_FAILED);
+    this.failureDiagnostic = failureDiagnostic;
+  }
+}
 
 /** Durable Exa Agent adapter bound only to `exa/research`. */
 export class ExaResearchProvider extends BackgroundBaseProvider {
@@ -120,7 +136,9 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
       const result = await this.retrieve(handle);
       return { ...result, durationMs: Math.round(performance.now() - start) };
     } catch (error) {
-      return this.error(start, this.formatCatchError(error));
+      return error instanceof ExaResearchSubmissionError
+        ? this.error(start, error.message, error.failureDiagnostic)
+        : this.error(start, this.formatCatchError(error));
     }
   }
 
@@ -150,22 +168,23 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
         signal: options.signal,
       });
     } catch (error) {
-      throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+      throw new ExaResearchSubmissionError(
+        this.catchDiagnostic(error, options.signal),
       );
     }
     if (response.status !== 200) {
-      throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+      throw new ExaResearchSubmissionError(
+        this.httpDiagnostic(response.status),
       );
     }
     const parsed = ExaRun.safeParse(response.data);
     if (!parsed.success) {
       const id = ExaId.safeParse((response.data as { id?: unknown })?.id);
       if (!id.success)
-        throw new UnsafeToRetrySubmissionError(
-          'Exa Agent returned an invalid run handle',
-        );
+        throw new ExaResearchSubmissionError({
+          kind: 'provider',
+          httpStatus: 200,
+        });
       return {
         provider: this.id,
         taskId: id.data,
@@ -295,7 +314,11 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
       timeout,
     });
   }
-  private error(start: number, error: string): ProviderResult {
+  private error(
+    start: number,
+    error: string,
+    failureDiagnostic?: ProviderFailureDiagnostic,
+  ): ProviderResult {
     return {
       provider: this.id,
       tier: this.tier,
@@ -303,7 +326,56 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
       citations: [],
       durationMs: Math.round(performance.now() - start),
       error,
+      ...(failureDiagnostic && { failureDiagnostic }),
     };
+  }
+
+  private httpDiagnostic(status: number): ProviderFailureDiagnostic {
+    const httpStatus =
+      Number.isInteger(status) && status >= 100 && status <= 599
+        ? status
+        : undefined;
+    const kind: ProviderFailureDiagnostic['kind'] =
+      status === 401 || status === 403
+        ? 'authentication'
+        : status === 402
+          ? 'billing'
+          : status === 429
+            ? 'rate_limit'
+            : status === 408 || status === 504
+              ? 'timeout'
+              : status >= 400 && status < 500
+                ? 'invalid_request'
+                : status >= 500
+                  ? 'provider'
+                  : 'provider';
+    return { kind, ...(httpStatus !== undefined && { httpStatus }) };
+  }
+
+  private catchDiagnostic(
+    error: unknown,
+    signal?: AbortSignal,
+  ): ProviderFailureDiagnostic {
+    if (
+      signal?.aborted ||
+      error instanceof HttpRequestAbortedError ||
+      error instanceof HttpRequestTimeoutError ||
+      (error instanceof DOMException &&
+        (error.name === 'AbortError' || error.name === 'TimeoutError'))
+    ) {
+      return { kind: 'timeout' };
+    }
+    const detail = error instanceof Error ? error.message : '';
+    if (/API key not found/i.test(detail)) return { kind: 'authentication' };
+    if (
+      error instanceof TypeError ||
+      /fetch failed|failed to fetch|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT/i.test(
+        detail,
+      )
+    ) {
+      return { kind: 'network' };
+    }
+    return { kind: 'provider' };
   }
 }
 

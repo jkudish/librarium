@@ -7,7 +7,10 @@ import {
 } from '../src/adapters/index.js';
 import { TavilyResearchProvider } from '../src/adapters/tavily-research.js';
 import { YouResearchBackgroundProvider } from '../src/adapters/you-research-background.js';
-import type { HttpClient } from '../src/core/http-client.js';
+import {
+  type HttpClient,
+  HttpRequestTimeoutError,
+} from '../src/core/http-client.js';
 import { adapterProfileBinding } from '../src/core/profile-bindings.js';
 import { buildProviderCatalog } from '../src/core/profile-catalog.js';
 
@@ -274,6 +277,64 @@ describe('durable research provider adapters', () => {
       taskId: 'agent_run_preserved',
       status: 'failed',
       providerStatus: 'invalid_response',
+    });
+  });
+
+  it.each([
+    ['authentication', 401, 'authentication'],
+    ['forbidden', 403, 'authentication'],
+    ['invalid request', 422, 'invalid_request'],
+    ['rate limit', 429, 'rate_limit'],
+    ['server error', 503, 'provider'],
+  ] as const)(
+    'classifies Exa create HTTP %s as a bounded unsafe-to-retry diagnostic',
+    async (_label, status, kind) => {
+      const provider = new ExaResearchProvider({
+        credentials: { env: { EXA_API_KEY: 'test-key' } },
+        httpClient: async () =>
+          response(
+            { error: { message: 'Bearer secret-token' } },
+            status,
+          ) as never,
+      });
+      const submission = provider.submit('query', { timeout: 10 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Exa Agent submission failed before a valid handle was returned.',
+        failureDiagnostic: { kind, httpStatus: status },
+      });
+      await expect(submission).rejects.not.toThrow(/secret|token|Bearer/i);
+    },
+  );
+
+  it('classifies a missing Exa key as authentication before any POST', async () => {
+    const httpClient = vi.fn(async () => response(exaRun()));
+    const provider = new ExaResearchProvider({
+      credentials: { env: {} },
+      httpClient,
+    });
+    await expect(
+      provider.submit('query', { timeout: 10 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'authentication' },
+    });
+    expect(httpClient).not.toHaveBeenCalled();
+  });
+
+  it('classifies an Exa create timeout as maybe-accepted, not a proven rejection', async () => {
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: async () => {
+        throw new HttpRequestTimeoutError(30_000);
+      },
+    });
+    await expect(
+      provider.submit('query', { timeout: 10 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'timeout' },
     });
   });
 

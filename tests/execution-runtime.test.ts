@@ -443,6 +443,68 @@ describe('private prepared execution runtime', () => {
     });
   });
 
+  it('finishes durable submit on a proven 401 without fallback, retry, or unknown custody', async () => {
+    const submit = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          'Exa Agent submission failed before a valid handle was returned.',
+        ),
+        {
+          name: 'UnsafeToRetrySubmissionError',
+          failureDiagnostic: { kind: 'authentication', httpStatus: 401 },
+        },
+      );
+    });
+    const fallback: Provider = {
+      id: 'adapter-reserve',
+      displayName: 'Reserve',
+      tier: 'raw-search',
+      envVar: '',
+      execution: 'inline',
+      execute: vi.fn(async () => successfulResult('adapter-reserve')),
+    };
+    const durable: Provider = {
+      id: 'adapter-durable',
+      displayName: 'Durable',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit,
+      poll: vi.fn(),
+      retrieve: vi.fn(),
+    };
+    const result = await runPreparedExecution(
+      prepared([profile('durable', 'background')], [profile('reserve')]),
+      {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createProviderAttemptBridge({
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === 'adapter-durable'
+              ? resolvedBinding('durable', durable)
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', fallback)
+                : undefined,
+          now: () => start,
+        }),
+      },
+    );
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(fallback.execute).not.toHaveBeenCalled();
+    expect(durable.poll).not.toHaveBeenCalled();
+    expect(result.state.attempts).toHaveLength(1);
+    expect(result.state.attempts[0]?.status).toBe('failed');
+    expect(result.state.attempts[0]?.error).toMatchObject({
+      code: 'provider_authentication_failed',
+      provider_code: 'http_401',
+      retryable: false,
+      fallback_allowed: false,
+    });
+    expect(result.state.unresolved_acceptances).toEqual([]);
+  });
+
   it('rechecks concurrent orphan submissions after the request expires', async () => {
     const plan = prepared(
       [profile('durable-a', 'background'), profile('durable-b', 'background')],
