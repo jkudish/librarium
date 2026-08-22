@@ -1301,6 +1301,7 @@ function writeFrozenEvidence(
     gate.approval.receipt_root,
     `${target.key.replace('/', '-')}.json`,
     built.receipt,
+    target,
   );
   return built.quality.passed === true
     ? { passed: true }
