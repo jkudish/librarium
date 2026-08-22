@@ -1164,7 +1164,8 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     display: {
       family: 'Parallel',
       name: 'Parallel',
-      description: 'Parallel search, chat, and research APIs for agents.',
+      description:
+        'Parallel search, turbo, chat, and research APIs for agents.',
       best_for: 'First-party Parallel retrieval and task execution.',
       setup_url: 'https://docs.parallel.ai/',
     },
@@ -1183,6 +1184,17 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         retrieval_method: 'search_endpoint',
         operator_id: 'parallel',
         status: 'implemented',
+      }),
+      declare({
+        profile_id: 'turbo',
+        selection_order: 375,
+        target: NOT_APPLICABLE_TARGET,
+        result_kind: 'search_results',
+        corpora: ['web'],
+        retrieval_method: 'search_endpoint',
+        operator_id: 'parallel',
+        status: 'implemented',
+        workflows: ['quick'],
       }),
       declare({
         profile_id: 'chat',

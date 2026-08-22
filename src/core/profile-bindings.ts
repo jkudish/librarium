@@ -473,6 +473,11 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     adapter_id: 'parallel-search',
   },
   {
+    provider_id: 'parallel',
+    profile_id: 'turbo',
+    adapter_id: 'parallel-turbo',
+  },
+  {
     provider_id: 'perplexity-sonar-deep',
     profile_id: 'research',
     adapter_id: 'perplexity-sonar-deep',

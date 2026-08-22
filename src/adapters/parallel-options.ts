@@ -72,7 +72,7 @@ const fetchPolicy = z
   })
   .strict();
 
-export const ParallelSearchOptionsSchema = z
+const ParallelSearchControlsSchema = z
   .object({
     objective: z.string().trim().min(1).max(20_000).optional(),
     searchQueries: z
@@ -80,7 +80,6 @@ export const ParallelSearchOptionsSchema = z
       .min(1)
       .max(10)
       .optional(),
-    mode: z.enum(['turbo', 'fast', 'basic', 'advanced']).optional(),
     maxCharsTotal: z.number().int().positive().optional(),
     maxCharsPerResult: z.number().int().positive().optional(),
     maxResults: z.number().int().positive().optional(),
@@ -89,6 +88,13 @@ export const ParallelSearchOptionsSchema = z
     fetchPolicy: fetchPolicy.optional(),
   })
   .strict();
+
+export const ParallelSearchOptionsSchema = ParallelSearchControlsSchema.extend({
+  mode: z.enum(['turbo', 'fast', 'basic', 'advanced']).optional(),
+}).strict();
+
+/** Turbo locks Search API `mode` to `turbo`; callers cannot override it. */
+export const ParallelTurboOptionsSchema = ParallelSearchControlsSchema;
 
 export const ParallelChatOptionsSchema = z
   .object({
@@ -126,6 +132,7 @@ export const ParallelResearchOptionsSchema = z
   });
 
 export type ParallelSearchOptions = z.infer<typeof ParallelSearchOptionsSchema>;
+export type ParallelTurboOptions = z.infer<typeof ParallelTurboOptionsSchema>;
 export type ParallelChatOptions = z.infer<typeof ParallelChatOptionsSchema>;
 export type ParallelResearchOptions = z.infer<
   typeof ParallelResearchOptionsSchema

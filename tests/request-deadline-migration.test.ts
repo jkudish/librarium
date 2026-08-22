@@ -602,6 +602,7 @@ describe('v1 total request-deadline migration', () => {
       'parallel-research',
       'parallel-chat',
       'parallel-search',
+      'parallel-turbo',
       'perplexity-sonar-deep',
       'perplexity-deep-research',
       'openai-research',
@@ -643,7 +644,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(40);
+    expect(new Set(expectedAdapterIds).size).toBe(41);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

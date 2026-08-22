@@ -14,6 +14,7 @@ import {
   parallelChatOptions,
   parallelResearchOptions,
   parallelSearchOptions,
+  parallelTurboOptions,
   tavilyResearchOptions,
   webSearchOptions,
   youResearchBackgroundOptions,
@@ -53,6 +54,7 @@ import {
   ParallelChatProvider,
   ParallelResearchProvider,
   ParallelSearchProvider,
+  ParallelTurboProvider,
 } from './parallel.js';
 import { PerplexityDeepResearchProvider } from './perplexity-deep-research.js';
 import { PerplexitySearchProvider } from './perplexity-search.js';
@@ -192,6 +194,7 @@ function searchApiZeroRetention(options: SearchApiOptions): boolean {
 function parallelOptions<
   T extends z.output<
     | typeof parallelSearchOptions
+    | typeof parallelTurboOptions
     | typeof parallelChatOptions
     | typeof parallelResearchOptions
   >,
@@ -229,6 +232,10 @@ const factories: Record<string, ProviderFactory> = {
   'parallel-search': typedFactory(
     parallelSearchOptions,
     (context) => new ParallelSearchProvider(parallelOptions(context.options)),
+  ),
+  'parallel-turbo': typedFactory(
+    parallelTurboOptions,
+    (context) => new ParallelTurboProvider(parallelOptions(context.options)),
   ),
   'perplexity-sonar-deep': () => new PerplexitySonarDeepProvider(),
   'perplexity-deep-research': (context) =>

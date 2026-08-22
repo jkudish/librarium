@@ -102,7 +102,7 @@ describe('pricing snapshot validation', () => {
       .sort();
 
     expect(priced).toEqual(bound);
-    expect(new Set(priced).size).toBe(40);
+    expect(new Set(priced).size).toBe(41);
     expect(
       BUILTIN_PRICING_SNAPSHOT.definitions.every((entry) =>
         ['complete', 'partial', 'unavailable'].includes(entry.completeness),
@@ -327,10 +327,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:62ede14e769f22b86c9f50c98ba7c343dd988042176be4e8347fd02d30df8810',
+      'sha256:e7654b40db5af22a56e71112ba97882eaf392b9f42e48e29a920a28706ad59b5',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:62ede14e769f22b86c9f50c98ba7c343dd988042176be4e8347fd02d30df8810',
+      'sha256:e7654b40db5af22a56e71112ba97882eaf392b9f42e48e29a920a28706ad59b5',
     );
     expect(
       `sha256:${createHash('sha256')

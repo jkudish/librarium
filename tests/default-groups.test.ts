@@ -108,7 +108,7 @@ describe('default groups -- visibility expansion', () => {
 
   it('has eight default groups and all 33 grounded providers', () => {
     expect(Object.keys(DEFAULT_GROUPS)).toHaveLength(8);
-    expect(DEFAULT_GROUPS.all).toHaveLength(33);
+    expect(DEFAULT_GROUPS.all).toHaveLength(34);
   });
 });
 

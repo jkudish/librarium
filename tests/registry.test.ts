@@ -172,7 +172,7 @@ describe('registry', () => {
   it('initializeProviders registers all active providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(37);
+    expect(all).toHaveLength(38);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -234,7 +234,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(31);
+    ).toHaveLength(32);
   });
 
   it('injects credentials into every background built-in', async () => {

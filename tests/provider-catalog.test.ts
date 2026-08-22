@@ -125,6 +125,7 @@ const IMPLEMENTED_MATRIX = [
   ['searchapi', 'search'],
   ['serpapi', 'search'],
   ['tavily', 'search'],
+  ['parallel', 'turbo'],
   ['parallel', 'search'],
   ['valyu', 'search'],
   ['searchapi-chatgpt', 'surface'],
@@ -927,6 +928,7 @@ describe('provider catalog -- built-in workflows', () => {
       'brave-answers/grounded',
       'exa/search',
       'kagi-fastgpt/grounded',
+      'parallel/turbo',
     ]);
   });
 
@@ -1040,7 +1042,7 @@ describe('provider catalog -- built-in workflows', () => {
     ]);
     // The reserved name still resolves to the built-in workflow, and the user's
     // pre-existing custom group is untouched.
-    expect(keysOf(built.resolveGroup('quick') ?? [])).toHaveLength(5);
+    expect(keysOf(built.resolveGroup('quick') ?? [])).toHaveLength(6);
     expect(keysOf(built.resolveGroup('custom:quick') ?? [])).toEqual([
       'tavily/search',
     ]);
@@ -1495,6 +1497,7 @@ describe('provider catalog -- explicit and capability selection', () => {
       'searchapi/search',
       'serpapi/search',
       'tavily/search',
+      'parallel/turbo',
       'parallel/search',
       'valyu/search',
     ]);
@@ -1516,7 +1519,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     );
     expect(selected).not.toContain('serpapi/search');
     expect(selected).not.toContain('tavily/search');
-    expect(selected).toHaveLength(8);
+    expect(selected).toHaveLength(9);
   });
 
   it('never selects an unauthenticated profile by capability', () => {
