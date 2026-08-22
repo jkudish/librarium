@@ -718,6 +718,7 @@ export function writeSanitizedCanonicalReceipt(
   root: string,
   name: string,
   receipt: Record<string, unknown>,
+  target?: CanonicalValidationTarget,
 ): void {
   const path = validationPath(root, name);
   const allowed = new Set([
@@ -750,8 +751,22 @@ export function writeSanitizedCanonicalReceipt(
       'Public receipt contains a non-allowlisted field.',
     );
   }
+  if (
+    target &&
+    (receipt.profile !== target.key ||
+      receipt.catalog_digest !== target.catalog_digest ||
+      receipt.pricing_snapshot_fingerprint !==
+        target.pricing_snapshot_fingerprint)
+  ) {
+    throw new CanonicalLiveValidationError(
+      'Public receipt target authority does not match its frozen profile.',
+    );
+  }
   // Re-serialize through the allowlist boundary before making evidence public.
-  assertSafeReceiptValue(receipt);
+  const frozenPricingUnits = new Set(
+    target ? quoteCanonicalValidationTarget(target).quote.missing_units : [],
+  );
+  assertSafeReceiptValue(receipt, 'receipt', frozenPricingUnits);
   safeWriteFile(path, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
 }
 

@@ -572,14 +572,58 @@ describe('canonical v3 live validation evidence boundary', () => {
       lifecycle: 'succeeded' as const,
     };
 
-    expect(
-      sanitizeCanonicalReceipt({
-        ...base,
-        pricing_quote: { missing_units: ['exa:agent_compute_units'] },
-      }),
-    ).toMatchObject({
+    const receipt = sanitizeCanonicalReceipt({
+      ...base,
       pricing_quote: { missing_units: ['exa:agent_compute_units'] },
     });
+    expect(receipt).toMatchObject({
+      pricing_quote: { missing_units: ['exa:agent_compute_units'] },
+    });
+    const receiptRoot = mkdtempSync(
+      join(tmpdir(), 'librarium-live-validation-receipt-'),
+    );
+    roots.push(receiptRoot);
+    expect(() =>
+      writeSanitizedCanonicalReceipt(
+        receiptRoot,
+        'exa-research.json',
+        receipt,
+        target,
+      ),
+    ).not.toThrow();
+    expect(
+      JSON.parse(readFileSync(join(receiptRoot, 'exa-research.json'), 'utf8')),
+    ).toEqual(receipt);
+    expect(() =>
+      writeSanitizedCanonicalReceipt(
+        receiptRoot,
+        'missing-target.json',
+        receipt,
+      ),
+    ).toThrow('prohibited material');
+    const otherTarget = buildCanonicalValidationMatrix().targets.find(
+      (candidate) => candidate.key === 'exa/search',
+    );
+    if (!otherTarget) throw new Error('missing Exa search target');
+    expect(() =>
+      writeSanitizedCanonicalReceipt(
+        receiptRoot,
+        'wrong-target.json',
+        receipt,
+        otherTarget,
+      ),
+    ).toThrow('target authority');
+    expect(() =>
+      writeSanitizedCanonicalReceipt(
+        receiptRoot,
+        'unknown-unit.json',
+        {
+          ...receipt,
+          pricing_quote: { missing_units: ['exa:unknown_unit'] },
+        },
+        target,
+      ),
+    ).toThrow('prohibited material');
 
     for (const unsafeUnit of [
       'secret:value',
