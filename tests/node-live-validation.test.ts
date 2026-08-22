@@ -1678,6 +1678,94 @@ describe('frozen paid protocol (injected, zero-network)', () => {
     ).toThrow('matching full preregistration');
   });
 
+  it('executes only the canonical targets included in a paid subset', async () => {
+    const { gate: frozen, matrix, candidateAuthority } = gate();
+    const index = matrix.targets.findIndex(
+      (target) => target.key === 'brave-search/search',
+    );
+    const protocol = frozen.approval.targets[index];
+    if (index < 0 || !protocol)
+      throw new Error('missing targeted fixture profile');
+    const approval = {
+      ...frozen.approval,
+      aggregate_budget_microusd:
+        protocol.pricing.reserved_microusd ??
+        protocol.pricing.approved_maximum_microusd ??
+        '0',
+      targets: [protocol],
+    };
+    const targeted = {
+      approval,
+      fingerprint: approvalFingerprint(approval),
+    };
+
+    const approvedMatrix = assertLiveValidationGate(
+      targeted,
+      targeted.fingerprint,
+      targeted.fingerprint,
+      candidateAuthority,
+    );
+    expect(approvedMatrix.targets.map((target) => target.key)).toStrictEqual([
+      'brave-search/search',
+    ]);
+    const rawManifest = await canonicalManifest(
+      approvedMatrix.targets[0]!,
+      targeted.approval.raw_root,
+      'request-targeted',
+    );
+    const prepared: string[] = [];
+    const state = await executeFrozenValidationProtocol({
+      gate: targeted,
+      matrix: approvedMatrix,
+      candidate_authority: candidateAuthority,
+      reference_manifest_authority: fixtureReferenceAuthority,
+      executor: {
+        prepare: async (target, frozenProtocol) => {
+          prepared.push(target.key);
+          return attemptReference(
+            target,
+            frozenProtocol,
+            targeted.approval.raw_root,
+            'request-targeted',
+          );
+        },
+        execute: async () => ({
+          status: 'terminal',
+          lifecycle: 'succeeded',
+          request_id: 'request-targeted',
+          raw_manifest: rawManifest,
+        }),
+        reconcile: async () => {
+          throw new Error('targeted fixture must not reconcile');
+        },
+      },
+      wait: async () => {},
+    });
+    expect(prepared).toStrictEqual(['brave-search/search']);
+    expect(state.completed).toStrictEqual(['brave-search/search']);
+  });
+
+  it('rejects a paid subset that reorders canonical targets', () => {
+    const { gate: frozen, candidateAuthority } = gate();
+    const approval = {
+      ...frozen.approval,
+      targets: [frozen.approval.targets[2]!, frozen.approval.targets[1]!],
+    };
+    const reordered = {
+      approval,
+      fingerprint: approvalFingerprint(approval),
+    };
+
+    expect(() =>
+      assertLiveValidationGate(
+        reordered,
+        reordered.fingerprint,
+        reordered.fingerprint,
+        candidateAuthority,
+      ),
+    ).toThrow('target order differs from canonical matrix');
+  });
+
   it.each([
     [
       'query',

@@ -550,14 +550,20 @@ export function assertLiveValidationGate(
       'Frozen paid preregistration drifted from canonical authority.',
     );
   }
-  if (
-    JSON.stringify(approval.targets.map((target) => target.key)) !==
-    JSON.stringify(matrix.targets.map((target) => target.key))
-  ) {
-    throw new CanonicalLiveValidationError(
-      'Frozen paid preregistration target order differs from canonical matrix.',
-    );
-  }
+  const canonicalTargetIndexes = new Map(
+    matrix.targets.map((target, index) => [target.key, index]),
+  );
+  let priorTargetIndex = -1;
+  const approvedTargets = approval.targets.map((protocol) => {
+    const index = canonicalTargetIndexes.get(protocol.key);
+    if (index === undefined || index <= priorTargetIndex) {
+      throw new CanonicalLiveValidationError(
+        'Frozen paid preregistration target order differs from canonical matrix.',
+      );
+    }
+    priorTargetIndex = index;
+    return matrix.targets[index]!;
+  });
   assertSeparateEvidenceRoots(approval);
   if (!candidateAuthority) {
     throw new CanonicalLiveValidationError(
@@ -612,7 +618,7 @@ export function assertLiveValidationGate(
       );
     }
   }
-  return matrix;
+  return { ...matrix, targets: approvedTargets };
 }
 
 export type FrozenExecutionOutcome =
@@ -2191,7 +2197,7 @@ export function registerLiveValidationCommand(
               artifacts: parseArtifacts(options.artifact),
             });
           })();
-        assertLiveValidationGate(
+        const approvedMatrix = assertLiveValidationGate(
           gate,
           options.confirm,
           process.env.LIBRARIUM_LIVE_VALIDATION_APPROVED,
@@ -2206,7 +2212,7 @@ export function registerLiveValidationCommand(
           continueFrozenValidationProtocol(
             new CanonicalValidationCheckpointRepository(gate.approval.raw_root),
             gate,
-            matrix,
+            approvedMatrix,
             options.confirm ?? '',
             candidateAuthority,
           );
@@ -2220,14 +2226,14 @@ export function registerLiveValidationCommand(
         try {
           const state = await executeFrozenValidationProtocol({
             gate,
-            matrix,
+            matrix: approvedMatrix,
             executor,
             candidate_authority: candidateAuthority,
             signal: controller.signal,
           });
           const certification = terminalValidationCertification(
             state,
-            matrix.targets.length,
+            approvedMatrix.targets.length,
           );
           if (certification) {
             process.stdout.write(`${JSON.stringify(certification, null, 2)}\n`);
