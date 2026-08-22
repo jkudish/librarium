@@ -674,6 +674,37 @@ describe('canonical v3 live validation evidence boundary', () => {
       }).passed,
     ).toBe(true);
   });
+
+  it('compares Valyu provenance against the publicly representable corpora', () => {
+    const target = buildCanonicalValidationMatrix().targets.find(
+      (candidate) => candidate.key === 'valyu/research',
+    );
+    if (!target) throw new Error('missing Valyu research target');
+    const provenance = {
+      access_mode: 'direct' as const,
+      operator_id: 'valyu',
+      result_kind: 'research_report' as const,
+      retrieval_methods: ['research_agent' as const],
+      corpora: ['web' as const],
+    };
+
+    expect(
+      deterministicReceiptSensibility({
+        target,
+        content: 'A cited research report',
+        citations: [{ url: 'https://example.com/source', provider: 'valyu' }],
+        provenance,
+      }),
+    ).toMatchObject({ provenance_profile_match: true, passed: true });
+    expect(
+      deterministicReceiptSensibility({
+        target,
+        content: 'A cited research report',
+        citations: [{ url: 'https://example.com/source', provider: 'valyu' }],
+        provenance: { ...provenance, corpora: [] },
+      }).provenance_profile_match,
+    ).toBe(false);
+  });
 });
 
 describe('canonical v3 live validation persisted fixture lane', () => {

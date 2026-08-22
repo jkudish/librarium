@@ -1160,9 +1160,12 @@ export function deterministicReceiptSensibility(input: {
     input.provenance?.result_kind === profile.result_kind &&
     input.provenance?.retrieval_methods?.includes(profile.retrieval_method) ===
       true &&
-    profile.corpora.every((corpus) =>
-      input.provenance?.corpora?.includes(corpus),
-    );
+    // Specialized Valyu categories survive on citation metadata; the public
+    // ResearchResponse provenance schema intentionally cannot claim them as a
+    // universal corpus.
+    profile.corpora
+      .filter((corpus) => corpus !== 'specialized')
+      .every((corpus) => input.provenance?.corpora?.includes(corpus));
   const collectionModeRequired =
     profile.result_kind === 'surface_observation' ||
     profile.retrieval_method === 'surface_collector';
