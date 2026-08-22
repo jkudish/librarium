@@ -198,7 +198,7 @@ describe('Firecrawl Search provider', () => {
     });
   });
 
-  it('ignores malformed results without a safe absolute HTTP(S) URL', async () => {
+  it('ignores results without a safe absolute HTTPS URL', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         success: true,
@@ -211,6 +211,7 @@ describe('Firecrawl Search provider', () => {
             { url: 'not a URL' },
             { url: 'javascript:alert(1)' },
             { url: 'ftp://example.com' },
+            { url: 'http://insecure.example' },
             { url: 'https://ok.example' },
           ],
           news: 'not an array',
@@ -224,6 +225,7 @@ describe('Firecrawl Search provider', () => {
     );
 
     expect(result.content).toContain('https://ok.example');
+    expect(result.content).not.toContain('insecure.example');
     expect(result.citations).toEqual([
       {
         url: 'https://ok.example/',

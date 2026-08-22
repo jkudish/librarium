@@ -305,7 +305,7 @@ export class FirecrawlSearchProvider extends BaseProvider {
   ): NormalizedResult | undefined {
     if (!entry || typeof entry !== 'object') return undefined;
     const item = entry as FirecrawlWebResult | FirecrawlNewsResult;
-    const url = absoluteHttpUrl(item.url);
+    const url = absoluteHttpsUrl(item.url);
     if (!url) return undefined;
     const title = textValue(item.title);
     if (kind === 'web') {
@@ -444,14 +444,12 @@ function textValue(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
-function absoluteHttpUrl(value: unknown): string | undefined {
+function absoluteHttpsUrl(value: unknown): string | undefined {
   const url = textValue(value);
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return undefined;
-    }
+    if (parsed.protocol !== 'https:') return undefined;
     return parsed.href;
   } catch {
     return undefined;
