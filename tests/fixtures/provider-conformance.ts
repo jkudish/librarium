@@ -145,6 +145,10 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     evidence: ['tests/adapters/parallel.test.ts'],
     lanes: [...base, 'options'],
   },
+  'parallel/turbo': {
+    evidence: ['tests/adapters/parallel.test.ts'],
+    lanes: [...base, 'options'],
+  },
   'valyu/search': {
     evidence: ['tests/adapters/valyu.test.ts'],
     lanes: [...base, 'options'],

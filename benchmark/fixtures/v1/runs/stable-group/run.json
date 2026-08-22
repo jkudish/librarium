@@ -88,9 +88,30 @@
           "costConfidence": "estimated"
         }
       }
+    },
+    {
+      "id": "parallel-turbo",
+      "tier": "raw-search",
+      "status": "success",
+      "durationMs": 210,
+      "wordCount": 18,
+      "citationCount": 1,
+      "outputFile": "shared.md",
+      "metaFile": "parallel-turbo.meta.json",
+      "metering": {
+        "kind": "request_priced",
+        "pricingVersion": "2026-06",
+        "estimate": {
+          "estimatedCostUsd": 0.001,
+          "billableUnits": 1,
+          "unit": "request",
+          "pricingVersion": "2026-06",
+          "costConfidence": "estimated"
+        }
+      }
     }
   ],
-  "sources": { "total": 5, "unique": 1, "file": "sources.json" },
+  "sources": { "total": 6, "unique": 1, "file": "sources.json" },
   "asyncTasks": [],
   "exitCode": 0
 }

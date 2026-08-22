@@ -23,6 +23,13 @@
       "costConfidence": "unknown"
     },
     {
+      "id": "parallel-turbo",
+      "tier": "raw-search",
+      "envVar": "PARALLEL_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
       "id": "perplexity-sonar-deep",
       "tier": "deep-research",
       "envVar": "PERPLEXITY_API_KEY",
@@ -290,10 +297,12 @@
       "openrouter-online",
       "brave-answers",
       "exa",
-      "kagi-fastgpt"
+      "kagi-fastgpt",
+      "parallel-turbo"
     ],
     "raw": [
       "parallel-search",
+      "parallel-turbo",
       "perplexity-search",
       "brave-search",
       "jina-search",
@@ -314,6 +323,7 @@
       "jina-search",
       "brave-search",
       "firecrawl-search",
+      "parallel-turbo",
       "tavily"
     ],
     "visibility": [
@@ -387,7 +397,8 @@
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
       "parallel-chat",
-      "parallel-search"
+      "parallel-search",
+      "parallel-turbo"
     ]
   },
   "candidateGroups": {

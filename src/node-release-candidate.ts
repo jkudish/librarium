@@ -83,7 +83,7 @@ export interface ReleaseMatrixTarget {
 }
 
 export interface ReleaseMatrixIdentity {
-  readonly target_count: 40;
+  readonly target_count: 41;
   readonly catalog_digest: string;
   readonly pricing_snapshot_fingerprint: string;
   readonly matrix_fingerprint: string;
@@ -795,11 +795,11 @@ function matrixIdentity(value: unknown): ReleaseMatrixIdentity {
   });
   const keys = targets.map((target) => target.key);
   if (
-    targets.length !== 40 ||
-    new Set(keys).size !== 40 ||
+    targets.length !== 41 ||
+    new Set(keys).size !== 41 ||
     canonicalJson(keys) !== canonicalJson([...keys].sort(compareText))
   ) {
-    fail('Release candidate requires the exact sorted 40-profile matrix.');
+    fail('Release candidate requires the exact sorted 41-profile matrix.');
   }
   const catalog = catalogDigest(
     matrix.catalog_digest,
@@ -833,10 +833,10 @@ function matrixIdentity(value: unknown): ReleaseMatrixIdentity {
       }),
     )
   ) {
-    fail('Canonical matrix fingerprint does not match its exact 40 targets.');
+    fail('Canonical matrix fingerprint does not match its exact 41 targets.');
   }
   return {
-    target_count: 40,
+    target_count: 41,
     catalog_digest: catalog,
     pricing_snapshot_fingerprint: pricing,
     matrix_fingerprint: fingerprint,
@@ -857,8 +857,8 @@ function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
     ],
     'Frozen installed-package identity',
   );
-  if (identity.target_count !== 40 || !Array.isArray(identity.targets)) {
-    fail('Frozen installed-package identity must contain exactly 40 targets.');
+  if (identity.target_count !== 41 || !Array.isArray(identity.targets)) {
+    fail('Frozen installed-package identity must contain exactly 41 targets.');
   }
   const targets = identity.targets.map((targetValue, index) => {
     const target = jsonRecord(
@@ -920,8 +920,8 @@ function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
   });
   const keys = targets.map((target) => target.key);
   if (
-    targets.length !== 40 ||
-    new Set(keys).size !== 40 ||
+    targets.length !== 41 ||
+    new Set(keys).size !== 41 ||
     canonicalJson(keys) !== canonicalJson([...keys].sort(compareText))
   ) {
     fail('Frozen installed-package targets must be unique and sorted.');
@@ -958,10 +958,10 @@ function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
       }),
     )
   ) {
-    fail('Frozen matrix fingerprint does not match its exact 40 targets.');
+    fail('Frozen matrix fingerprint does not match its exact 41 targets.');
   }
   return {
-    target_count: 40,
+    target_count: 41,
     catalog_digest: catalog,
     pricing_snapshot_fingerprint: pricing,
     matrix_fingerprint: fingerprint,

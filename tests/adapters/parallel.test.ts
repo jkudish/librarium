@@ -3,6 +3,7 @@ import {
   ParallelChatProvider,
   ParallelResearchProvider,
   ParallelSearchProvider,
+  ParallelTurboProvider,
 } from '../../src/adapters/parallel.js';
 import type {
   HttpClient,
@@ -84,6 +85,34 @@ describe('Parallel first-party providers', () => {
         max_results: 2,
       },
     });
+  });
+
+  it('locks turbo to Search API mode turbo and rejects a mode override', async () => {
+    const http = client({
+      results: [{ url: 'https://example.test/turbo', title: 'Turbo' }],
+    });
+    const result = await new ParallelTurboProvider(
+      { maxResults: 1 },
+      { apiKey: key, httpClient: http },
+    ).execute('turbo query', { timeout: 9 });
+
+    expect(result.provider).toBe('parallel-turbo');
+    expect(result.error).toBeUndefined();
+    const [, request] = (http as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, HttpRequestOptions];
+    expect(request.body).toMatchObject({
+      objective: 'turbo query',
+      search_queries: ['turbo query'],
+      mode: 'turbo',
+      advanced_settings: { max_results: 1 },
+    });
+
+    const rejected = await new ParallelTurboProvider(
+      { mode: 'advanced' },
+      { apiKey: key, httpClient: http },
+    ).execute('turbo query', { timeout: 9 });
+    expect(rejected.error).toContain('parallel-turbo options');
+    expect(http).toHaveBeenCalledOnce();
   });
 
   it('rejects invalid search controls before dispatch', async () => {

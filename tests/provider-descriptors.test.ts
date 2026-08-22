@@ -25,7 +25,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(37);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(38);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -100,6 +100,7 @@ describe('built-in provider descriptors', () => {
       'gemini-chat',
       'openrouter-chat',
       'parallel-search',
+      'parallel-turbo',
       'searchapi-chatgpt',
       'searchapi-gemini',
       'searchapi-perplexity',
@@ -133,6 +134,7 @@ describe('built-in provider descriptors', () => {
         'parallel-research',
         'parallel-chat',
         'parallel-search',
+        'parallel-turbo',
         'you-answer',
       ]),
     );
@@ -197,6 +199,7 @@ describe('built-in provider descriptors', () => {
       { id: 'parallel-research', isOptIn: true, enableByDefault: false },
       { id: 'parallel-chat', isOptIn: true, enableByDefault: false },
       { id: 'parallel-search', isOptIn: true, enableByDefault: false },
+      { id: 'parallel-turbo', isOptIn: true, enableByDefault: false },
     ]);
   });
 

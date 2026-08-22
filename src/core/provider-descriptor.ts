@@ -8,6 +8,7 @@ import {
   ParallelChatOptionsSchema,
   ParallelResearchOptionsSchema,
   ParallelSearchOptionsSchema,
+  ParallelTurboOptionsSchema,
 } from '../adapters/parallel-options.js';
 import { PerplexitySearchOptionsSchema } from '../adapters/perplexity-search-options.js';
 import {
@@ -156,6 +157,9 @@ export const firecrawlSearchOptions = commonOptions
   );
 export const parallelSearchOptions = commonOptions.merge(
   ParallelSearchOptionsSchema,
+);
+export const parallelTurboOptions = commonOptions.merge(
+  ParallelTurboOptionsSchema,
 );
 export const parallelChatOptions = commonOptions.merge(
   ParallelChatOptionsSchema,
@@ -420,6 +424,25 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       bestFor: 'First-party ranked web evidence without answer synthesis.',
       setupUrl: 'https://docs.parallel.ai/search/search-quickstart',
       order: 295,
+    },
+    metering: { kind: 'api_unit_priced', unit: 'request' },
+    capabilities: inline('always'),
+    autoEnable: false,
+  }),
+  define({
+    id: 'parallel-turbo',
+    registrationOrder: 24.6,
+    tier: 'raw-search',
+    envVar: 'PARALLEL_API_KEY',
+    optionsSchema: parallelTurboOptions,
+    display: {
+      family: 'Parallel',
+      name: 'Parallel Turbo',
+      description:
+        'Parallel Search API turbo mode for lowest-latency ranked excerpts.',
+      bestFor: 'High-volume grounding where latency and cost matter most.',
+      setupUrl: 'https://docs.parallel.ai/search/modes',
+      order: 296,
     },
     metering: { kind: 'api_unit_priced', unit: 'request' },
     capabilities: inline('always'),

@@ -66,6 +66,7 @@ export const QUICK_WORKFLOW_ROSTER: readonly WorkflowRosterMember[] = [
   { provider_id: 'brave-answers', profile_id: 'grounded' },
   { provider_id: 'exa', profile_id: 'search' },
   { provider_id: 'kagi-fastgpt', profile_id: 'grounded' },
+  { provider_id: 'parallel', profile_id: 'turbo' },
 ];
 
 /**

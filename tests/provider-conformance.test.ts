@@ -34,7 +34,7 @@ describe('built-in provider conformance inventory', () => {
     expect(Object.keys(PROVIDER_CONFORMANCE_EVIDENCE).sort()).toEqual(
       implemented,
     );
-    expect(implemented).toHaveLength(40);
+    expect(implemented).toHaveLength(41);
   });
 
   it('keeps every implemented profile bound to one executable strategy', () => {

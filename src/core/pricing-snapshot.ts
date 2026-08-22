@@ -122,6 +122,14 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     'official:docs.parallel.ai/getting-started/pricing',
     { requests: '1' },
   ),
+  unavailable(
+    'parallel',
+    'turbo',
+    ['requests', 'results'],
+    'Additional-result count changes the turbo Search price.',
+    'official:docs.parallel.ai/getting-started/pricing',
+    { requests: '1' },
+  ),
 
   // Perplexity
   unavailable(
@@ -438,6 +446,6 @@ export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:62ede14e769f22b86c9f50c98ba7c343dd988042176be4e8347fd02d30df8810',
+      'sha256:e7654b40db5af22a56e71112ba97882eaf392b9f42e48e29a920a28706ad59b5',
     definitions: DEFINITIONS,
   });

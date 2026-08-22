@@ -326,9 +326,11 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'brave-answers',
     'exa',
     'kagi-fastgpt',
+    'parallel-turbo',
   ],
   raw: [
     'parallel-search',
+    'parallel-turbo',
     'perplexity-search',
     'brave-search',
     'jina-search',
@@ -349,6 +351,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'jina-search',
     'brave-search',
     'firecrawl-search',
+    'parallel-turbo',
     'tavily',
   ],
   visibility: [
@@ -429,6 +432,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'searchapi-google-ai-overview',
     'parallel-chat',
     'parallel-search',
+    'parallel-turbo',
   ],
 };
 

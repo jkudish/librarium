@@ -22,6 +22,8 @@ import {
   ParallelResearchOptionsSchema,
   type ParallelSearchOptions,
   ParallelSearchOptionsSchema,
+  type ParallelTurboOptions,
+  ParallelTurboOptionsSchema,
 } from './parallel-options.js';
 
 const API = 'https://api.parallel.ai';
@@ -278,22 +280,29 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 export class ParallelSearchProvider extends BaseProvider {
-  readonly id = 'parallel-search';
+  readonly id: string;
   readonly tier: ProviderTier = 'raw-search';
   constructor(
     private readonly configuredOptions: unknown = {},
     base: BaseProviderOptions = {},
+    private readonly searchIdentity: {
+      readonly id?: string;
+      readonly forcedMode?: 'turbo';
+    } = {},
   ) {
     super(base);
+    this.id = searchIdentity.id ?? 'parallel-search';
   }
   async execute(
     query: string,
     options: ProviderOptions,
   ): Promise<ProviderResult> {
     const start = performance.now();
-    const parsed = ParallelSearchOptionsSchema.safeParse(
-      this.configuredOptions,
-    );
+    const schema =
+      this.searchIdentity.forcedMode === 'turbo'
+        ? ParallelTurboOptionsSchema
+        : ParallelSearchOptionsSchema;
+    const parsed = schema.safeParse(this.configuredOptions);
     if (!parsed.success) return this.errorResult(start, parsed.error.message);
     try {
       const response = await this.request<{
@@ -370,7 +379,10 @@ export class ParallelSearchProvider extends BaseProvider {
       );
     }
   }
-  private body(query: string, value: ParallelSearchOptions) {
+  private body(
+    query: string,
+    value: ParallelSearchOptions | ParallelTurboOptions,
+  ) {
     const policy = sourcePolicy(value.sourcePolicy ?? {});
     const advanced = {
       ...(policy && { source_policy: policy }),
@@ -393,10 +405,13 @@ export class ParallelSearchProvider extends BaseProvider {
       ...(value.location && { location: value.location }),
       ...(value.maxResults !== undefined && { max_results: value.maxResults }),
     };
+    const mode =
+      this.searchIdentity.forcedMode ??
+      ('mode' in value ? value.mode : undefined);
     return {
       objective: value.objective ?? query,
       search_queries: value.searchQueries ?? [query],
-      ...(value.mode && { mode: value.mode }),
+      ...(mode && { mode }),
       ...(value.maxCharsTotal !== undefined && {
         max_chars_total: value.maxCharsTotal,
       }),
@@ -416,8 +431,18 @@ export class ParallelSearchProvider extends BaseProvider {
   private errorResult(start: number, error: string) {
     return this.resultError(
       Math.round(performance.now() - start),
-      `parallel-search options: ${error}`,
+      `${this.id} options: ${error}`,
     );
+  }
+}
+
+/** Parallel Search API with `mode` fixed to `turbo`. */
+export class ParallelTurboProvider extends ParallelSearchProvider {
+  constructor(configuredOptions: unknown = {}, base: BaseProviderOptions = {}) {
+    super(configuredOptions, base, {
+      id: 'parallel-turbo',
+      forcedMode: 'turbo',
+    });
   }
 }
 

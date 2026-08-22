@@ -48,6 +48,7 @@ describe('built-in workflows -- reserved names', () => {
       'brave-answers/grounded',
       'exa/search',
       'kagi-fastgpt/grounded',
+      'parallel/turbo',
     ]);
     expect(
       VISIBILITY_WORKFLOW_ROSTER.map((m) => `${m.provider_id}/${m.profile_id}`),
