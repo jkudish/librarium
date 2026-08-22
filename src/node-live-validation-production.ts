@@ -197,12 +197,29 @@ function classifyCustodyOutcome(
       readonly status: string;
       readonly attempts?: readonly {
         readonly status?: string;
+        readonly error?: { readonly code?: string };
         readonly durable_handle?: { readonly status?: string };
       }[];
     };
   },
 ): import('./commands/live-validation.js').FrozenExecutionOutcome {
   if (hasUnknownAcceptanceWithoutHandle(manifest)) {
+    return {
+      status: 'terminal',
+      lifecycle: 'failed',
+      request_id: reference.request_id,
+      raw_manifest: JSON.stringify(manifest),
+    };
+  }
+  const requestDeadlineExceeded =
+    manifest.coordination_state.status !== 'running' &&
+    (manifest.coordination_state.attempts?.some(
+      (attempt) =>
+        attempt.status === 'timed_out' &&
+        attempt.error?.code === 'request_deadline_exceeded',
+    ) ??
+      false);
+  if (requestDeadlineExceeded) {
     return {
       status: 'terminal',
       lifecycle: 'failed',
