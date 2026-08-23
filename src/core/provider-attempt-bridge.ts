@@ -676,6 +676,7 @@ export function createProviderAttemptBridge(
           provider.submit(launch.query, {
             timeout: providerTimeoutSeconds(remainingMs),
             signal,
+            submissionId: launch.attempt_id,
           }),
         launch,
         now,

@@ -86,9 +86,13 @@ const STATUS_MAP: Record<string, AsyncTaskStatus> = {
   in_progress: 'running',
   requires_action: 'running',
   completed: 'completed',
-  failed: 'failed',
+  // The preview Interactions API has returned completed output after earlier
+  // `failed` and `incomplete` observations for the same immutable interaction.
+  // Keep those provider states provisional and let the caller's absolute
+  // deadline bound polling rather than irreversibly discarding later output.
+  failed: 'running',
   cancelled: 'cancelled',
-  incomplete: 'failed',
+  incomplete: 'running',
   budget_exceeded: 'failed',
 };
 
@@ -294,7 +298,10 @@ export class GeminiDeepProvider extends BackgroundBaseProvider {
     return {
       status,
       rawStatus: data.status,
-      message: data.error?.message ?? undefined,
+      message:
+        data.status === 'failed' || data.status === 'incomplete'
+          ? `Gemini reported provisional status: ${data.status}`
+          : data.error?.message,
     };
   }
 

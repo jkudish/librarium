@@ -137,7 +137,7 @@ describe('GeminiDeepProvider Interactions API', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('maps poll statuses (in_progress running, failed with message)', async () => {
+  it('keeps reversible failed observations provisional', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(
@@ -158,8 +158,8 @@ describe('GeminiDeepProvider Interactions API', () => {
       rawStatus: 'in_progress',
     });
     expect(await provider.poll(makeHandle())).toEqual({
-      status: 'failed',
-      message: 'agent overloaded',
+      status: 'running',
+      message: 'Gemini reported provisional status: failed',
       rawStatus: 'failed',
     });
 
@@ -167,6 +167,51 @@ describe('GeminiDeepProvider Interactions API', () => {
     expect(calls[0]?.[0]).toBe(
       'https://generativelanguage.googleapis.com/v1beta/interactions/int-123',
     );
+  });
+
+  it('accepts completion after a provisional failed observation', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          id: 'int-reversible',
+          status: 'failed',
+          error: { message: 'temporary agent failure' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-reversible', status: 'completed' }),
+      );
+
+    const provider = makeProvider();
+    const handle = makeHandle('int-reversible');
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'running',
+      rawStatus: 'failed',
+    });
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
+      rawStatus: 'completed',
+    });
+  });
+
+  it.each([
+    ['budget_exceeded', 'failed'],
+    ['cancelled', 'cancelled'],
+  ] as const)('keeps stable %s observations terminal', async (raw, status) => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-terminal', status: raw }),
+      );
+
+    await expect(
+      makeProvider().poll(makeHandle('int-terminal')),
+    ).resolves.toEqual({
+      status,
+      rawStatus: raw,
+      message: undefined,
+    });
   });
 
   it('throws on a transport-level poll failure so polling retries', async () => {
@@ -290,7 +335,7 @@ describe('GeminiDeepProvider Interactions API', () => {
     expect(result.content).toBe('Part one.\nPart two.');
   });
 
-  it('returns an error result for failed or not-yet-completed interactions', async () => {
+  it('keeps provisional failures nonterminal during retrieval', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(
@@ -306,7 +351,8 @@ describe('GeminiDeepProvider Interactions API', () => {
 
     const provider = makeProvider();
     const failed = await provider.retrieve(makeHandle());
-    expect(failed.error).toBe('research failed');
+    expect(failed.error).toContain('not completed yet');
+    expect(failed.error).toContain('failed');
 
     const pending = await provider.retrieve(makeHandle());
     expect(pending.error).toContain('not completed yet');

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep Gemini Deep Research's reversible preview `failed` and `incomplete`
+  observations provisional until completion or the frozen request deadline,
+  while preserving terminal cancellation and budget-exhaustion states.
+- Correlate Tavily Research submissions with the frozen canonical attempt ID
+  and recover an uncertain create response only when Tavily's project-scoped
+  Logs API proves exactly one accepted task; ambiguous custody never resubmits.
+
 ### Added
 
 - **`parallel/turbo`**: first-class Parallel Search API turbo profile. It reuses
