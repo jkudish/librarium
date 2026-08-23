@@ -70,11 +70,24 @@ const TavilyFailed = z.object({
   status: z.literal('failed'),
   error: z.union([z.string().min(1), z.object({ message: z.string().min(1) })]),
 });
+const TavilyResearchLog = z.object({
+  timestamp: z.string().datetime({ offset: true }),
+  endpoint: z.literal('research'),
+  request_id: TavilyId,
+});
+const TavilyLogs = z.object({
+  logs: z.array(TavilyResearchLog),
+  count: z.number().int().nonnegative(),
+});
 type TavilyTerminal =
   | z.infer<typeof TavilyCompleted>
   | z.infer<typeof TavilyFailed>;
 
 const URL = 'https://api.tavily.com/research';
+const LOGS_URL = 'https://api.tavily.com/logs';
+const SUBMISSION_RECONCILIATION_DELAYS_MS = [
+  0, 250, 750, 2_000, 5_000,
+] as const;
 const SUBMISSION_FAILED =
   'Tavily Research submission failed before a valid handle was returned.';
 const POLL_FAILED = 'Tavily Research status check failed.';
@@ -161,11 +174,13 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
     query: string,
     options: ProviderOptions,
   ): Promise<AsyncTaskHandle> {
+    const projectId = options.submissionId;
+    const startedAt = Date.now();
     let response;
     try {
       response = await this.request<unknown>(URL, {
         method: 'POST',
-        headers: this.headers(),
+        headers: this.headers(projectId),
         body: {
           input: query,
           model: this.configured.model ?? 'auto',
@@ -182,11 +197,27 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
         signal: options.signal,
       });
     } catch (error) {
+      const recovered = await this.reconcileSubmission(
+        query,
+        projectId,
+        startedAt,
+        options,
+      );
+      if (recovered) return recovered;
       throw new TavilyResearchSubmissionError(
         this.catchDiagnostic(error, options.signal),
       );
     }
     if (response.status !== 201) {
+      if (response.status >= 500) {
+        const recovered = await this.reconcileSubmission(
+          query,
+          projectId,
+          startedAt,
+          options,
+        );
+        if (recovered) return recovered;
+      }
       throw new TavilyResearchSubmissionError(
         this.httpDiagnostic(response.status, response.data),
       );
@@ -196,11 +227,19 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
       const id = TavilyId.safeParse(
         (response.data as { request_id?: unknown })?.request_id,
       );
-      if (!id.success)
+      if (!id.success) {
+        const recovered = await this.reconcileSubmission(
+          query,
+          projectId,
+          startedAt,
+          options,
+        );
+        if (recovered) return recovered;
         throw new TavilyResearchSubmissionError({
           kind: 'provider',
           httpStatus: 201,
         });
+      }
       return {
         provider: this.id,
         taskId: id.data,
@@ -308,8 +347,82 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
     }
   }
 
-  private headers(): Record<string, string> {
-    return { Authorization: `Bearer ${this.getApiKey()}` };
+  private headers(projectId?: string): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.getApiKey()}`,
+      ...(projectId && { 'X-Project-ID': projectId }),
+    };
+  }
+
+  /**
+   * Resolve an uncertain POST through Tavily's read-only Logs API. The frozen
+   * attempt id was attached before submission as an exact project filter, so
+   * only one matching Research log can establish custody. Zero, multiple, or
+   * malformed matches remain acceptance-unknown and never trigger another POST.
+   */
+  private async reconcileSubmission(
+    query: string,
+    projectId: string | undefined,
+    submittedAt: number,
+    options: ProviderOptions,
+  ): Promise<AsyncTaskHandle | undefined> {
+    if (!projectId || options.signal?.aborted) return undefined;
+    const remainingMs = submittedAt + options.timeout * 1_000 - Date.now();
+    const deadline = Date.now() + Math.min(Math.max(remainingMs, 0), 10_000);
+    for (const delay of SUBMISSION_RECONCILIATION_DELAYS_MS) {
+      if (delay > 0) {
+        try {
+          await wait(
+            Math.min(delay, Math.max(deadline - Date.now(), 0)),
+            options.signal,
+          );
+        } catch {
+          return undefined;
+        }
+      }
+      if (Date.now() >= deadline || options.signal?.aborted) return undefined;
+      try {
+        const date = new Date(submittedAt).toISOString().slice(0, 10);
+        const response = await this.request<unknown>(LOGS_URL, {
+          method: 'POST',
+          headers: this.headers(),
+          body: {
+            limit: 2,
+            start_date: date,
+            end_date: new Date().toISOString().slice(0, 10),
+            endpoints: ['research'],
+            project_id: projectId,
+            filter_by_api_key: true,
+          },
+          timeout: Math.min(3_000, Math.max(deadline - Date.now(), 1)),
+          signal: options.signal,
+        });
+        if (response.status !== 200) return undefined;
+        const parsed = TavilyLogs.safeParse(response.data);
+        if (
+          !parsed.success ||
+          parsed.data.count !== 1 ||
+          parsed.data.logs.length !== 1
+        ) {
+          return undefined;
+        }
+        const match = parsed.data.logs[0];
+        if (match) {
+          return {
+            provider: this.id,
+            taskId: match.request_id,
+            query,
+            submittedAt,
+            status: 'pending',
+            providerStatus: 'reconciled_from_logs',
+          };
+        }
+      } catch {
+        // The original POST remains uncertain. A Logs transport failure cannot
+        // safely prove rejection and must never cause a second submission.
+      }
+    }
+    return undefined;
   }
 
   private task(requestId: string, timeout: number) {

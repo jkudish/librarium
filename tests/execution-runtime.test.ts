@@ -941,6 +941,12 @@ describe('private prepared execution runtime', () => {
       durable_handle: { provider_task_id: 'async-task', status: 'pending' },
     });
     expect(result.outputs_by_attempt).toEqual({});
+    expect(durable.submit).toHaveBeenCalledWith(
+      'runtime query',
+      expect.objectContaining({
+        submissionId: result.state.attempts[0]?.attempt_id,
+      }),
+    );
     expect(durable.poll).not.toHaveBeenCalled();
     expect(durable.retrieve).not.toHaveBeenCalled();
   });

@@ -540,6 +540,99 @@ describe('durable research provider adapters', () => {
     });
   });
 
+  it('recovers exactly one uncertain Tavily submission from project-scoped logs without resubmitting', async () => {
+    const httpClient = vi.fn(async <_T>(url: string, _options = {}) => {
+      if (url === 'https://api.tavily.com/research') {
+        throw new TypeError('fetch failed after write');
+      }
+      expect(url).toBe('https://api.tavily.com/logs');
+      return response({
+        logs: [
+          {
+            timestamp: '2026-08-23T12:00:00.000Z',
+            endpoint: 'research',
+            request_id: 'recovered-task',
+          },
+        ],
+        count: 1,
+      }) as never;
+    }) as HttpClient;
+    const provider = new TavilyResearchProvider({
+      credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+      httpClient,
+    });
+
+    await expect(
+      provider.submit('query', {
+        timeout: 10,
+        submissionId: 'attempt-frozen-123',
+      }),
+    ).resolves.toMatchObject({
+      taskId: 'recovered-task',
+      status: 'pending',
+      providerStatus: 'reconciled_from_logs',
+    });
+
+    const submissionCalls = httpClient.mock.calls.filter(
+      ([url]) => url === 'https://api.tavily.com/research',
+    );
+    expect(submissionCalls).toHaveLength(1);
+    expect(submissionCalls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer test-key',
+        'X-Project-ID': 'attempt-frozen-123',
+      },
+    });
+    const logsCall = httpClient.mock.calls.find(
+      ([url]) => url === 'https://api.tavily.com/logs',
+    );
+    expect(logsCall?.[1]).toMatchObject({
+      method: 'POST',
+      body: {
+        limit: 2,
+        endpoints: ['research'],
+        project_id: 'attempt-frozen-123',
+        filter_by_api_key: true,
+      },
+    });
+  });
+
+  it('refuses ambiguous Tavily log custody and never resubmits', async () => {
+    const httpClient = vi.fn(async <_T>(url: string) => {
+      if (url === 'https://api.tavily.com/research') {
+        throw new TypeError('fetch failed after write');
+      }
+      return response({
+        logs: ['one', 'two'].map((suffix) => ({
+          timestamp: '2026-08-23T12:00:00.000Z',
+          endpoint: 'research',
+          request_id: `task-${suffix}`,
+        })),
+        count: 2,
+      }) as never;
+    }) as HttpClient;
+    const provider = new TavilyResearchProvider({
+      credentials: { env: { TAVILY_API_KEY: 'test-key' } },
+      httpClient,
+    });
+
+    await expect(
+      provider.submit('query', {
+        timeout: 10,
+        submissionId: 'attempt-frozen-ambiguous',
+      }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(
+      httpClient.mock.calls.filter(
+        ([url]) => url === 'https://api.tavily.com/research',
+      ),
+    ).toHaveLength(1);
+  });
+
   it.each([
     ['malformed progress', response({ status: 'in_progress' }, 202), 202],
     ['malformed success', response({ status: 'completed' }, 200), 200],

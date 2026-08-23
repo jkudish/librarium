@@ -28,6 +28,11 @@ export interface ProviderOptions {
   /** Relative operation timeout in seconds. */
   timeout: number;
   signal?: AbortSignal;
+  /**
+   * Frozen canonical attempt id. Background adapters may use it only as an
+   * opaque provider-side correlation value; it never authorizes resubmission.
+   */
+  submissionId?: string;
 }
 
 // Normalized usage/cost as reported by a provider's API. Honest data only:
