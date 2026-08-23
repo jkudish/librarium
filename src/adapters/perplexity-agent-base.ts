@@ -476,7 +476,7 @@ export function parseAgentResponse(
   const cited = citedResultIds(messages, searchResults);
 
   let error: ParsedAgentResponse['error'];
-  if (root.error !== undefined) {
+  if (root.error !== undefined && root.error !== null) {
     const errorRecord = record(root.error);
     if (!errorRecord)
       throw responseError('Perplexity Agent error was malformed.');

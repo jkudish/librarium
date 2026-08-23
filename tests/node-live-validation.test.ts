@@ -1589,6 +1589,37 @@ describe('frozen paid protocol (injected, zero-network)', () => {
         : ({} as ReturnType<typeof CanonicalRunManifestV3Schema.parse>),
   };
 
+  it('projects the canonical result provider instead of a citation URL into receipts', async () => {
+    const { gate: frozen, matrix } = gate();
+    const target = matrix.targets[0]!;
+    const protocol = frozen.approval.targets[0]!;
+    const raw = JSON.parse(
+      await canonicalManifest(
+        target,
+        frozen.approval.raw_root,
+        'valyu-provider-reference-url',
+      ),
+    );
+    raw.terminal_response.results[0].citations[0].source.provider_reference =
+      'https://example.com/provider-reference';
+
+    const evidence = rebuildFrozenValidationEvidence(frozen, target, protocol, {
+      status: 'terminal',
+      lifecycle: 'succeeded',
+      request_id: 'valyu-provider-reference-url',
+      raw_manifest: JSON.stringify(raw),
+      manifest: raw,
+    });
+
+    expect(evidence.receipt).toMatchObject({
+      response: {
+        citation_count: 1,
+        citations: [{ provider: target.adapter_id }],
+      },
+    });
+    expect(JSON.stringify(evidence.receipt)).not.toContain('https://');
+  });
+
   it('reports terminal certification with success-only completed results', () => {
     expect(
       terminalValidationCertification(

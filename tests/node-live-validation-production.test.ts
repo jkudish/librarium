@@ -501,6 +501,28 @@ describe('production paid matrix and candidate attribution', () => {
     );
   });
 
+  it('binds approved provider options into the paid catalog authority', () => {
+    const config = loadConfig(
+      join(tmpdir(), 'librarium-missing-option-matrix-config.json'),
+    );
+    const baseline = productionValidationMatrix(config);
+    const search = baseline.targets.find(
+      (target) => target.key === 'valyu/search',
+    );
+    if (!search) throw new Error('missing Valyu search target');
+
+    const optionBound = productionValidationMatrix(config, [
+      { key: search.key, options: { searchType: 'web' } },
+    ]);
+    const boundSearch = optionBound.targets.find(
+      (target) => target.key === search.key,
+    );
+
+    expect(optionBound.targets).toHaveLength(41);
+    expect(optionBound.catalog_digest).not.toBe(baseline.catalog_digest);
+    expect(boundSearch?.catalog_digest).toBe(optionBound.catalog_digest);
+  });
+
   it('rejects an explicitly disabled canonical family before provider construction', () => {
     const config = loadConfig(
       join(tmpdir(), 'librarium-missing-disabled-config.json'),

@@ -207,6 +207,21 @@ describe('Perplexity Agent API adapters', () => {
     },
   );
 
+  it('treats a null error on a completed response as no provider error', () => {
+    expect(
+      parseAgentResponse({
+        ...completed('completed-with-null-error'),
+        error: null,
+      }),
+    ).not.toHaveProperty('error');
+    expect(() =>
+      parseAgentResponse({
+        ...completed('completed-with-malformed-error'),
+        error: 'malformed',
+      }),
+    ).toThrow('error was malformed');
+  });
+
   it('preserves numeric search-result ids while projecting string citation references', async () => {
     const parsed = parseAgentResponse(completed('numeric-id'));
     expect(parsed.searchResults[0]?.id).toBe(1);
