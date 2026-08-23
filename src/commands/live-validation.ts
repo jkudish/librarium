@@ -1001,9 +1001,7 @@ function frozenEvidenceQuality(
         ? [
             {
               url: citation.source.url,
-              // This comes from the canonical terminal response, never the
-              // selected target or an adapter identifier.
-              provider: citation.source.provider_reference ?? citation.id,
+              provider: item.provider,
             },
           ]
         : [],
@@ -1166,7 +1164,7 @@ export function rebuildFrozenValidationEvidence(
         ? [
             {
               url: citation.source.url,
-              provider: citation.source.provider_reference ?? citation.id,
+              provider: item.provider,
             },
           ]
         : [],
@@ -2181,7 +2179,10 @@ export function registerLiveValidationCommand(
         const config = (
           dependencies.productionConfig ?? loadProductionValidationConfig
         )();
-        const matrix = productionValidationMatrix(config);
+        const matrix = productionValidationMatrix(
+          config,
+          gate.approval.targets,
+        );
         const candidateAuthority =
           dependencies.candidateAuthority ??
           (() => {

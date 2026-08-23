@@ -121,11 +121,33 @@ function normalizedProductionProviders(config: Config): Config['providers'] {
 }
 
 /** Build the config-aware public matrix before any credential context exists. */
-export function productionValidationMatrix(config: Config) {
+export function productionValidationMatrix(
+  config: Config,
+  protocols: readonly Pick<
+    LiveValidationApproval['targets'][number],
+    'key' | 'options'
+  >[] = [],
+) {
   const expected = buildCanonicalValidationMatrix();
   // A paid matrix is a complete fixed audit. An explicit disabled public
   // family must fail admission; it must never silently remove that family.
   const providers = normalizedProductionProviders(config);
+  for (const protocol of protocols) {
+    const target = expected.targets.find(
+      (candidate) => candidate.key === protocol.key,
+    );
+    if (!target) {
+      throw new CanonicalLiveValidationError(
+        `Unknown canonical public profile: ${protocol.key}.`,
+      );
+    }
+    const id = publicConfigId(target);
+    providers[id] = {
+      ...providers[id],
+      enabled: true,
+      options: protocol.options,
+    };
+  }
   const normalizedConfig = { ...config, providers };
   const mapped = mapConfiguration(normalizedConfig, {
     authoredGroups: configGroupProvenance(normalizedConfig),
