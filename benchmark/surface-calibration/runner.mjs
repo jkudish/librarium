@@ -370,8 +370,9 @@ export async function executeSurfaceCalibration(
   const preflight = buildPreflight(config, corpus, env);
   if (options.dryRun) return { dryRun: true, preflight, config, corpus };
 
-  const fixture = options.fixture ? readJson(resolve(options.fixture)) : null;
-  if (fixture) {
+  const fixtureMode = options.fixture !== undefined;
+  const fixture = fixtureMode ? readJson(resolve(options.fixture)) : null;
+  if (fixtureMode) {
     const fixtureErrors = validateFixture(fixture, corpus);
     if (fixtureErrors.length) {
       throw new Error(
@@ -379,7 +380,7 @@ export async function executeSurfaceCalibration(
       );
     }
   }
-  if (!fixture) {
+  if (!fixtureMode) {
     const missing = preflight.credentials
       .filter((item) => !item.available)
       .map((item) => item.envVar);
@@ -401,9 +402,9 @@ export async function executeSurfaceCalibration(
   mkdirSync(outputDirectory, { recursive: true });
   writeJson(
     join(outputDirectory, 'preflight.json'),
-    fixture ? { ...preflight, paidCalls: false, fixture: true } : preflight,
+    fixtureMode ? { ...preflight, paidCalls: false, fixture: true } : preflight,
   );
-  if (!fixture) {
+  if (!fixtureMode) {
     writeJson(join(outputDirectory, 'confirmation.json'), {
       schemaVersion: 1,
       confirmedAt: runDate.toISOString(),
@@ -421,7 +422,7 @@ export async function executeSurfaceCalibration(
     const fixtureCase = fixture?.cases?.find(
       (candidate) => candidate.caseId === item.id,
     );
-    const reference = fixture
+    const reference = fixtureMode
       ? fixtureCase.reference
       : await collect(
           item,
@@ -430,7 +431,7 @@ export async function executeSurfaceCalibration(
           config,
           env,
         );
-    const candidate = fixture
+    const candidate = fixtureMode
       ? fixtureCase.candidate
       : await collect(
           item,
@@ -447,7 +448,7 @@ export async function executeSurfaceCalibration(
       ...referenceScore.hardFailures,
       ...candidateScore.hardFailures,
     ];
-    if (hardFailures.length && !fixture) {
+    if (hardFailures.length && !fixtureMode) {
       writeJson(join(caseDirectory, 'hard-failure.json'), {
         hardFailures,
         referenceScore,
@@ -455,7 +456,7 @@ export async function executeSurfaceCalibration(
       });
       throw new Error(`${item.id} hard failure: ${hardFailures.join(', ')}`);
     }
-    const divergence = fixture
+    const divergence = fixtureMode
       ? fixtureCase.divergence
       : await judgeDivergence(
           item,

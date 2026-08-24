@@ -167,6 +167,32 @@ describe('consumer-surface calibration', () => {
     expect(existsSync(output)).toBe(false);
   });
 
+  it('does not treat a null fixture as a live run', async () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'surface-fixture-null-'));
+    const nullFixturePath = join(temporary, 'fixture.json');
+    const output = join(temporary, 'output');
+    writeFileSync(nullFixturePath, 'null', 'utf8');
+    let confirmationCount = 0;
+    await expect(
+      executeSurfaceCalibration(
+        { fixture: nullFixturePath, output },
+        {
+          env: {
+            SEARCHAPI_API_KEY: 'fixture-must-not-use-searchapi',
+            FIRECRAWL_API_KEY: 'fixture-must-not-use-firecrawl',
+            OPENAI_API_KEY: 'fixture-must-not-use-openai',
+          },
+          confirm: async () => {
+            confirmationCount++;
+            return true;
+          },
+        },
+      ),
+    ).rejects.toThrow('schemaVersion must be 1');
+    expect(confirmationCount).toBe(0);
+    expect(existsSync(output)).toBe(false);
+  });
+
   it('stops on a blocking challenge before semantic judging', () => {
     const blockedFixture = readJson(fixture);
     blockedFixture.cases[0].candidate.challenge = 'captcha';
