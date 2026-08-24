@@ -58,6 +58,73 @@ export function parseLibrariumRun(runDirectory) {
   const manifest = readJson(
     resolveArtifactReference(runDir, 'run.json', 'run manifest'),
   );
+  if (manifest.schemaVersion === 3) {
+    if (
+      manifest.artifact_name !== 'run_manifest' ||
+      manifest.artifact_version !== '3.0.0' ||
+      manifest.terminal_response?.status !== 'succeeded' ||
+      !Array.isArray(manifest.terminal_response.results)
+    ) {
+      throw new Error(`${runDir} is not a successful canonical Librarium run`);
+    }
+    const providerOutputs = manifest.terminal_response.results.map((result) => {
+      if (result.fallback_reason) {
+        throw new Error(
+          `Benchmark artifacts must not contain provider fallbacks: ${result.provider}`,
+        );
+      }
+      const resultKind = result.provenance?.result_kind;
+      const tier =
+        resultKind === 'research_report'
+          ? 'deep-research'
+          : resultKind === 'search_results'
+            ? 'raw-search'
+            : resultKind === 'model_answer'
+              ? 'llm'
+              : 'ai-grounded';
+      const durationMs = result.provider_meta?.['librarium:duration_ms'];
+      return {
+        provider: result.provider,
+        tier,
+        status: 'success',
+        durationMs:
+          typeof durationMs === 'number' && Number.isFinite(durationMs)
+            ? durationMs
+            : 0,
+        error: undefined,
+        model: result.model ?? null,
+        content:
+          typeof result.content === 'string'
+            ? result.content
+            : JSON.stringify(result.content),
+        citations: Array.isArray(result.citations)
+          ? result.citations.flatMap((citation) =>
+              citation?.source?.url
+                ? [
+                    {
+                      url: citation.source.url,
+                      ...(citation.source.title && {
+                        title: citation.source.title,
+                      }),
+                      ...(citation.excerpt && { snippet: citation.excerpt }),
+                      provider: result.provider,
+                    },
+                  ]
+                : [],
+            )
+          : [],
+        usage: result.usage ?? null,
+        metering: null,
+        rawFiles: { output: null, meta: null },
+      };
+    });
+    return {
+      runDir,
+      manifest,
+      providerOutputs,
+      sources: [],
+    };
+  }
   if (manifest.version !== 1 || !Array.isArray(manifest.providers)) {
     throw new Error(`${runDir} is not a Librarium v1 run artifact`);
   }

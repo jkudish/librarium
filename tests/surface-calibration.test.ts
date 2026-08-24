@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parseLibrariumRun } from '../benchmark/lib/artifacts.mjs';
 import { readJson } from '../benchmark/lib/io.mjs';
 import {
   buildDivergencePrompt,
@@ -115,6 +116,66 @@ describe('consumer-surface calibration', () => {
     } finally {
       process.chdir(originalCwd);
     }
+  });
+
+  it('reads the shipped CLI canonical v3 artifact without trusting sidecars', () => {
+    const runDirectory = mkdtempSync(join(tmpdir(), 'surface-canonical-v3-'));
+    writeFileSync(
+      join(runDirectory, 'run.json'),
+      JSON.stringify({
+        schemaVersion: 3,
+        artifact_name: 'run_manifest',
+        artifact_version: '3.0.0',
+        terminal_response: {
+          status: 'succeeded',
+          results: [
+            {
+              provider: 'php-searchapi-chatgpt',
+              profile: 'chatgpt',
+              provenance: { result_kind: 'surface_observation' },
+              content: '{"schemaVersion":1}',
+              citations: [
+                {
+                  source: {
+                    url: 'https://example.com/source',
+                    title: 'Source',
+                  },
+                  excerpt: 'Evidence',
+                },
+              ],
+              model: 'consumer-surface',
+              usage: { estimated_cost: '0.004', currency: 'USD' },
+              provider_meta: { 'librarium:duration_ms': 123 },
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      join(runDirectory, 'php-searchapi-chatgpt.md'),
+      'untrusted sidecar',
+      'utf8',
+    );
+
+    expect(parseLibrariumRun(runDirectory).providerOutputs).toEqual([
+      expect.objectContaining({
+        provider: 'php-searchapi-chatgpt',
+        tier: 'ai-grounded',
+        status: 'success',
+        durationMs: 123,
+        content: '{"schemaVersion":1}',
+        model: 'consumer-surface',
+        citations: [
+          {
+            url: 'https://example.com/source',
+            title: 'Source',
+            snippet: 'Evidence',
+            provider: 'php-searchapi-chatgpt',
+          },
+        ],
+      }),
+    ]);
   });
 
   it('bounds and redacts pre-dispatch diagnostics', () => {
