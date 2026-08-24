@@ -366,10 +366,6 @@ export async function executeSurfaceCalibration(
   const errors = validateCorpus(corpus);
   if (errors.length)
     throw new Error(`Invalid surface corpus:\n- ${errors.join('\n- ')}`);
-  const env = dependencies.env ?? process.env;
-  const preflight = buildPreflight(config, corpus, env);
-  if (options.dryRun) return { dryRun: true, preflight, config, corpus };
-
   const fixtureMode = options.fixture !== undefined;
   const fixture = fixtureMode ? readJson(resolve(options.fixture)) : null;
   if (fixtureMode) {
@@ -380,6 +376,10 @@ export async function executeSurfaceCalibration(
       );
     }
   }
+  const env = dependencies.env ?? process.env;
+  const preflight = buildPreflight(config, corpus, env);
+  if (options.dryRun) return { dryRun: true, preflight, config, corpus };
+
   if (!fixtureMode) {
     const missing = preflight.credentials
       .filter((item) => !item.available)

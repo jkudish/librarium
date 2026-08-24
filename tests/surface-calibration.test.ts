@@ -193,6 +193,29 @@ describe('consumer-surface calibration', () => {
     expect(existsSync(output)).toBe(false);
   });
 
+  it('validates dry-run fixtures before reading credentials', async () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'surface-fixture-dry-null-'));
+    const nullFixturePath = join(temporary, 'fixture.json');
+    writeFileSync(nullFixturePath, 'null', 'utf8');
+    let credentialReads = 0;
+    const env = new Proxy(
+      {},
+      {
+        get() {
+          credentialReads++;
+          throw new Error('fixture validation read credentials');
+        },
+      },
+    );
+    await expect(
+      executeSurfaceCalibration(
+        { dryRun: true, fixture: nullFixturePath },
+        { env },
+      ),
+    ).rejects.toThrow('schemaVersion must be 1');
+    expect(credentialReads).toBe(0);
+  });
+
   it('stops on a blocking challenge before semantic judging', () => {
     const blockedFixture = readJson(fixture);
     blockedFixture.cases[0].candidate.challenge = 'captcha';
