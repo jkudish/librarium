@@ -66,7 +66,7 @@ and diagnostics go to standard error.
 
 ## V2 catalog
 
-The v2 catalog has **33 built-in providers** and **41 implemented public
+The v2 catalog has **33 built-in providers** and **40 implemented public
 profiles**. A profile is the unit of selection and provenance:
 `provider_id/profile_id`. A provider can expose more than one profile, such as
 `exa/search` and the durable `exa/research` profile. Adapter IDs are a Node
@@ -112,7 +112,7 @@ process state remains available. All other profiles are `inline/none`.
 | Perplexity | `perplexity-search/search` (raw Search, unchanged), `perplexity-sonar-pro/grounded` (Agent low, inline), `perplexity-deep-research/research` (Agent medium, background/durable), `perplexity-sonar-deep/research` (Agent high, background/durable) |
 | SearchAPI | `searchapi/search`, `searchapi-chatgpt/surface`, `searchapi-gemini/surface`, `searchapi-perplexity/surface`, `searchapi-google-ai-mode/surface`, `searchapi-bing-copilot/surface`, `searchapi-google-ai-overview/surface` |
 | SerpAPI | `serpapi/search` |
-| Tavily | `tavily/search`, `tavily/research` (background/durable) |
+| Tavily | `tavily/search` |
 | Valyu | `valyu/search`, `valyu/research` (background/durable; exact-profile remote cancellation is advertised) |
 | You.com | `you-research/grounded`, `you-research/research` (background/durable), `you-answer/grounded` |
 

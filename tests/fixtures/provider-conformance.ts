@@ -61,10 +61,6 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     evidence: ['tests/research-provider-adapters.test.ts'],
     lanes: configurableBackground,
   },
-  'tavily/research': {
-    evidence: ['tests/research-provider-adapters.test.ts'],
-    lanes: configurableBackground,
-  },
   'you-research/research': {
     evidence: ['tests/research-provider-adapters.test.ts'],
     lanes: configurableBackground,

@@ -113,7 +113,7 @@ class TavilyResearchLifecycleError extends Error {
   }
 }
 
-/** Durable Tavily Research adapter bound only to `tavily/research`. */
+/** Retained internal Tavily Research adapter; not selectable in the v2 catalog. */
 export class TavilyResearchProvider extends BackgroundBaseProvider {
   readonly id = 'tavily-research';
   get envVar(): string {

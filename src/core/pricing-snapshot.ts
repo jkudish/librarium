@@ -388,13 +388,6 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     reference: 'official:tavily.com/pricing',
     fallback: true,
   }),
-  unavailable(
-    'tavily',
-    'research',
-    ['credits'],
-    'The auto research model and account plan determine credit consumption and USD value.',
-    'official:tavily.com/pricing',
-  ),
 
   // Valyu
   unavailable(
@@ -446,6 +439,6 @@ export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:e7654b40db5af22a56e71112ba97882eaf392b9f42e48e29a920a28706ad59b5',
+      'sha256:d28c5467bb856b43bb59ce1423bd7f8c3ac32eee171fce789235c319a51d267c',
     definitions: DEFINITIONS,
   });

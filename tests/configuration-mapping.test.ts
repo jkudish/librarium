@@ -400,7 +400,7 @@ describe('configuration mapping', () => {
 
   it('uses the validated full adapter matrix, including distinct OpenRouter identities', () => {
     const matrix = adapterProfileBindings();
-    expect(matrix.size).toBe(BUILTIN_PROFILE_BINDING_SPECS.length - 3);
+    expect(matrix.size).toBe(BUILTIN_PROFILE_BINDING_SPECS.length - 2);
     expect(
       [...matrix.values()].map((binding) => binding.adapter_id).sort(),
     ).toEqual(

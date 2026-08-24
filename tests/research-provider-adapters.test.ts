@@ -91,9 +91,7 @@ describe('durable research provider adapters', () => {
     expect(catalog.get('exa', 'research')?.binding.adapter_id).toBe(
       'exa-research',
     );
-    expect(catalog.get('tavily', 'research')?.binding.adapter_id).toBe(
-      'tavily-research',
-    );
+    expect(catalog.get('tavily', 'research')).toBeUndefined();
     expect(catalog.get('you-research', 'research')?.binding.adapter_id).toBe(
       'you-research-background',
     );
