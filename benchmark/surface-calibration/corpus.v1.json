@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "id": "consumer-surface-calibration",
+  "version": "2026-08-24.v1",
+  "curatedAt": "2026-08-24",
+  "surfacePair": {
+    "reference": {
+      "collector": "searchapi",
+      "surface": "chatgpt",
+      "accountContext": "unknown",
+      "personalization": "unknown",
+      "locale": "unknown",
+      "country": "unknown",
+      "device": "unknown"
+    },
+    "candidate": {
+      "collector": "firecrawl",
+      "surface": "chatgpt-web",
+      "accountContext": "signed_out",
+      "personalization": "unknown",
+      "locale": "en-CA",
+      "country": "CA",
+      "device": "desktop"
+    }
+  },
+  "cases": [
+    {
+      "id": "surface-librarium-identity",
+      "prompt": "Identify the software project jkudish/librarium. Return only one JSON object with keys entity, summary, repository_url, and sources. sources must be an array of HTTP(S) URLs. Distinguish the project from libraries, archives, bands, and unrelated products with the same name.",
+      "entity": {
+        "canonical": "jkudish/librarium",
+        "requiredTerms": ["librarium", "jkudish"],
+        "wrongEntityTerms": ["librarium band", "library of congress"]
+      },
+      "structure": {
+        "requiredKeys": ["entity", "summary", "repository_url", "sources"],
+        "arrayKeys": ["sources"],
+        "urlKeys": ["repository_url"]
+      }
+    },
+    {
+      "id": "surface-laravel-ai-identity",
+      "prompt": "Identify Laravel's official first-party AI SDK whose Composer package is laravel/ai. Return only one JSON object with keys entity, package, purpose, and sources. sources must be an array of HTTP(S) URLs. Do not substitute similarly named community packages.",
+      "entity": {
+        "canonical": "laravel/ai",
+        "requiredTerms": ["laravel", "laravel/ai"],
+        "wrongEntityTerms": ["prism-php/prism", "openai-php/laravel"]
+      },
+      "structure": {
+        "requiredKeys": ["entity", "package", "purpose", "sources"],
+        "arrayKeys": ["sources"],
+        "urlKeys": []
+      }
+    },
+    {
+      "id": "surface-searchapi-chatgpt-identity",
+      "prompt": "Identify SearchAPI's API for collecting the ChatGPT consumer answer surface. Return only one JSON object with keys entity, provider, surface, behavior, and sources. sources must be an array of HTTP(S) URLs. Distinguish it from OpenAI's developer API and from generic web search APIs.",
+      "entity": {
+        "canonical": "SearchAPI ChatGPT API",
+        "requiredTerms": ["searchapi", "chatgpt"],
+        "wrongEntityTerms": ["openai responses api", "google custom search api"]
+      },
+      "structure": {
+        "requiredKeys": [
+          "entity",
+          "provider",
+          "surface",
+          "behavior",
+          "sources"
+        ],
+        "arrayKeys": ["sources"],
+        "urlKeys": []
+      }
+    }
+  ]
+}

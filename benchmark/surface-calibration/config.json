@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "artifactVersion": 1,
+  "coreRevision": "cd390f2c1d6c6d9913d6043c2ee8f05a14653aca",
+  "firecrawlRevision": "6b7b390282107c1c21816e5bdc505fd713d14621",
+  "referenceCollector": "php-searchapi-chatgpt",
+  "routineCandidate": "php-firecrawl-chatgpt",
+  "providerTimeoutSeconds": 180,
+  "judge": {
+    "provider": "openai",
+    "model": "gpt-5-mini-2025-08-07",
+    "modelVersion": "2025-08-07",
+    "envVar": "OPENAI_API_KEY",
+    "promptVersion": "surface-divergence-v1",
+    "timeoutSeconds": 120,
+    "maxPromptBytes": 180000,
+    "maxCompletionTokens": 1000,
+    "inputUsdPerMillionTokens": 0.25,
+    "outputUsdPerMillionTokens": 2
+  },
+  "collectors": {
+    "php-searchapi-chatgpt": {
+      "collector": "searchapi",
+      "surface": "chatgpt",
+      "interface": "Librarium::query()->using('searchapi-chatgpt')->timeout(180)->run()",
+      "credentialEnvVar": "SEARCHAPI_API_KEY",
+      "estimatedCostUsdPerRun": 0.004,
+      "costConfidence": "estimated",
+      "maximumProviderRequestsPerPrompt": 1
+    },
+    "php-firecrawl-chatgpt": {
+      "collector": "firecrawl",
+      "surface": "chatgpt-web",
+      "interface": "Librarium::query()->using('firecrawl-chatgpt')->timeout(180)->run()",
+      "credentialEnvVar": "FIRECRAWL_API_KEY",
+      "estimatedCostUsdPerRun": null,
+      "costConfidence": "unknown",
+      "maximumCreditsPerRun": 2500,
+      "maximumProviderRequestsPerPrompt": 3
+    }
+  }
+}

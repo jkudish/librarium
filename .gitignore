@@ -10,3 +10,5 @@ agents/
 !.agents/resume
 .amp/portals/*
 benchmark/results/
+benchmark/surface-calibration/results/
+benchmark/surface-calibration/vendor/

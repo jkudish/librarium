@@ -1,0 +1,35 @@
+{
+  "providers": {
+    "php-searchapi-chatgpt": {
+      "enabled": true,
+      "apiKey": "$SEARCHAPI_API_KEY"
+    },
+    "php-firecrawl-chatgpt": {
+      "enabled": true,
+      "apiKey": "$FIRECRAWL_API_KEY"
+    }
+  },
+  "customProviders": {
+    "php-searchapi-chatgpt": {
+      "type": "script",
+      "command": "php",
+      "args": ["provider.php"],
+      "options": {
+        "profile": "searchapi-chatgpt",
+        "collector": "searchapi",
+        "surface": "chatgpt"
+      }
+    },
+    "php-firecrawl-chatgpt": {
+      "type": "script",
+      "command": "php",
+      "args": ["provider.php"],
+      "options": {
+        "profile": "firecrawl-chatgpt",
+        "collector": "firecrawl",
+        "surface": "chatgpt-web"
+      }
+    }
+  },
+  "trustedProviderIds": ["php-searchapi-chatgpt", "php-firecrawl-chatgpt"]
+}

@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 1,
+  "corpusVersion": "2026-08-24.v1",
+  "note": "Synthetic normalized observations for network-free orchestration and hard-failure tests; not production fidelity evidence.",
+  "cases": [
+    {
+      "caseId": "surface-librarium-identity",
+      "reference": {
+        "answer": "{\"entity\":\"jkudish/librarium\",\"summary\":\"Librarium is an evidence-aware multi-provider research project.\",\"repository_url\":\"https://github.com/jkudish/librarium\",\"sources\":[\"https://github.com/jkudish/librarium\",\"https://www.npmjs.com/package/librarium\"]}",
+        "completion": true,
+        "provenance": {
+          "requestedProfile": "searchapi-chatgpt",
+          "profile": "searchapi-chatgpt",
+          "provider": "searchapi",
+          "collector": "searchapi",
+          "surface": "chatgpt",
+          "context": {}
+        },
+        "challenge": "none",
+        "loginWall": false,
+        "reportedLatencyMs": null,
+        "durationMs": 1200,
+        "citations": [
+          {
+            "url": "https://github.com/jkudish/librarium",
+            "title": "GitHub",
+            "provider": "php-searchapi-chatgpt"
+          },
+          {
+            "url": "https://www.npmjs.com/package/librarium",
+            "title": "npm",
+            "provider": "php-searchapi-chatgpt"
+          }
+        ],
+        "cost": {
+          "usd": 0.004,
+          "confidence": "estimated",
+          "creditsUsed": null
+        },
+        "receipt": {
+          "requestId": "fixture-searchapi-1",
+          "providerRequestId": "fixture-provider-1",
+          "evidenceReceipts": []
+        }
+      },
+      "candidate": {
+        "answer": "{\"entity\":\"jkudish/librarium\",\"summary\":\"Librarium is a multi-provider research tool with evidence provenance.\",\"repository_url\":\"https://github.com/jkudish/librarium\",\"sources\":[\"https://github.com/jkudish/librarium\"]}",
+        "completion": true,
+        "provenance": {
+          "requestedProfile": "firecrawl-chatgpt",
+          "profile": "firecrawl-chatgpt",
+          "provider": "firecrawl",
+          "collector": "firecrawl",
+          "surface": "chatgpt-web",
+          "context": {
+            "authentication": "anonymous",
+            "locale": "en-CA",
+            "country": "CA",
+            "device": "desktop"
+          }
+        },
+        "challenge": "none",
+        "loginWall": false,
+        "reportedLatencyMs": 4100,
+        "durationMs": 4300,
+        "citations": [
+          {
+            "url": "https://github.com/jkudish/librarium",
+            "title": "GitHub",
+            "provider": "php-firecrawl-chatgpt"
+          }
+        ],
+        "cost": { "usd": null, "confidence": "unknown", "creditsUsed": 7 },
+        "receipt": {
+          "requestId": "fixture-firecrawl-1",
+          "providerRequestId": null,
+          "evidenceReceipts": []
+        }
+      },
+      "divergence": {
+        "materialDivergence": false,
+        "severity": 0.05,
+        "categories": [],
+        "rationale": "Equivalent entity and purpose."
+      }
+    },
+    {
+      "caseId": "surface-laravel-ai-identity",
+      "reference": {
+        "answer": "{\"entity\":\"Laravel AI SDK\",\"package\":\"laravel/ai\",\"purpose\":\"First-party Laravel interfaces for AI providers and tools.\",\"sources\":[\"https://github.com/laravel/ai\",\"https://laravel.com/docs/ai-sdk\"]}",
+        "completion": true,
+        "provenance": {
+          "requestedProfile": "searchapi-chatgpt",
+          "profile": "searchapi-chatgpt",
+          "provider": "searchapi",
+          "collector": "searchapi",
+          "surface": "chatgpt",
+          "context": {}
+        },
+        "challenge": "none",
+        "loginWall": false,
+        "durationMs": 1400,
+        "citations": [
+          {
+            "url": "https://github.com/laravel/ai",
+            "title": "GitHub",
+            "provider": "php-searchapi-chatgpt"
+          },
+          {
+            "url": "https://laravel.com/docs/ai-sdk",
+            "title": "Laravel docs",
+            "provider": "php-searchapi-chatgpt"
+          }
+        ],
+        "cost": {
+          "usd": 0.004,
+          "confidence": "estimated",
+          "creditsUsed": null
+        },
+        "receipt": {
+          "requestId": "fixture-searchapi-2",
+          "providerRequestId": "fixture-provider-2",
+          "evidenceReceipts": []
+        }
+      },
+      "candidate": {
+        "answer": "{\"entity\":\"Laravel AI SDK\",\"package\":\"laravel/ai\",\"purpose\":\"Laravel's official AI SDK.\",\"sources\":[\"https://github.com/laravel/ai\"]}",
+        "completion": true,
+        "provenance": {
+          "requestedProfile": "firecrawl-chatgpt",
+          "profile": "firecrawl-chatgpt",
+          "provider": "firecrawl",
+          "collector": "firecrawl",
+          "surface": "chatgpt-web",
+          "context": {
+            "authentication": "anonymous",
+            "locale": "en-CA",
+            "country": "CA",
+            "device": "desktop"
+          }
+        },
+        "challenge": "none",
+        "loginWall": false,
+        "reportedLatencyMs": 3900,
+        "durationMs": 4050,
+        "citations": [
+          {
+            "url": "https://github.com/laravel/ai",
+            "title": "GitHub",
+            "provider": "php-firecrawl-chatgpt"
+          }
+        ],
+        "cost": { "usd": null, "confidence": "unknown", "creditsUsed": 6 },
+        "receipt": {
+          "requestId": "fixture-firecrawl-2",
+          "providerRequestId": null,
+          "evidenceReceipts": []
+        }
+      },
+      "divergence": {
+        "materialDivergence": false,
+        "severity": 0.05,
+        "categories": [],
+        "rationale": "Equivalent package identity and purpose."
+      }
+    },
+    {
+      "caseId": "surface-searchapi-chatgpt-identity",
+      "reference": {
+        "answer": "{\"entity\":\"SearchAPI ChatGPT API\",\"provider\":\"SearchAPI\",\"surface\":\"ChatGPT consumer answer\",\"behavior\":\"Collects the grounded consumer response and references.\",\"sources\":[\"https://www.searchapi.io/docs/chatgpt\"]}",
+        "completion": true,
+        "provenance": {
+          "requestedProfile": "searchapi-chatgpt",
+          "profile": "searchapi-chatgpt",
+          "provider": "searchapi",
+          "collector": "searchapi",
+          "surface": "chatgpt",
+          "context": {}
+        },
+        "challenge": "none",
+        "loginWall": false,
+        "durationMs": 1600,
+        "citations": [
+          {
+            "url": "https://www.searchapi.io/docs/chatgpt",
+            "title": "SearchAPI docs",
+            "provider": "php-searchapi-chatgpt"
+          }
+        ],
+        "cost": {
+          "usd": 0.004,
+          "confidence": "estimated",
+          "creditsUsed": null
+        },
+        "receipt": {
+          "requestId": "fixture-searchapi-3",
+          "providerRequestId": "fixture-provider-3",
+          "evidenceReceipts": []
+        }
+      },
+      "candidate": {
+        "answer": "{\"entity\":\"SearchAPI ChatGPT API\",\"provider\":\"SearchAPI\",\"surface\":\"ChatGPT\",\"behavior\":\"Returns a representation of the consumer answer surface.\",\"sources\":[\"https://www.searchapi.io/docs/chatgpt\"]}",
+        "completion": true,
+        "provenance": {
+          "requestedProfile": "firecrawl-chatgpt",
+          "profile": "firecrawl-chatgpt",
+          "provider": "firecrawl",
+          "collector": "firecrawl",
+          "surface": "chatgpt-web",
+          "context": {
+            "authentication": "anonymous",
+            "locale": "en-CA",
+            "country": "CA",
+            "device": "desktop"
+          }
+        },
+        "challenge": "none",
+        "loginWall": false,
+        "reportedLatencyMs": 4700,
+        "durationMs": 4900,
+        "citations": [
+          {
+            "url": "https://www.searchapi.io/docs/chatgpt",
+            "title": "SearchAPI docs",
+            "provider": "php-firecrawl-chatgpt"
+          }
+        ],
+        "cost": { "usd": null, "confidence": "unknown", "creditsUsed": 8 },
+        "receipt": {
+          "requestId": "fixture-firecrawl-3",
+          "providerRequestId": null,
+          "evidenceReceipts": []
+        }
+      },
+      "divergence": {
+        "materialDivergence": false,
+        "severity": 0.1,
+        "categories": [],
+        "rationale": "Equivalent entity and surface behavior."
+      }
+    }
+  ]
+}

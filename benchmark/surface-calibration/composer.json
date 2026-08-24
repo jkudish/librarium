@@ -1,0 +1,30 @@
+{
+  "name": "jkudish/librarium-surface-calibration",
+  "description": "Pinned consumer harness for Librarium surface calibration",
+  "type": "project",
+  "license": "MIT",
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/jkudish/laravel-ai-librarium"
+    },
+    {
+      "type": "vcs",
+      "url": "https://github.com/jkudish/laravel-ai-librarium-firecrawl"
+    }
+  ],
+  "require": {
+    "php": "^8.4",
+    "orchestra/testbench": "^11.0",
+    "jkudish/laravel-ai-librarium": "dev-main as 1.0.x-dev",
+    "jkudish/laravel-ai-librarium-firecrawl": "dev-main"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": true
+    },
+    "sort-packages": true
+  }
+}

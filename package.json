@@ -31,6 +31,8 @@
     "build:sea": "node scripts/build-sea.mjs",
     "contracts:generate": "node scripts/generate-contract-snapshot.mjs",
     "benchmark": "node benchmark/cli.mjs",
+    "benchmark:surface": "node benchmark/surface-calibration/cli.mjs",
+    "benchmark:surface:fixture": "node benchmark/surface-calibration/cli.mjs --fixture benchmark/surface-calibration/fixtures/v1.json",
     "benchmark:performance": "node --experimental-strip-types benchmark/performance/cli.mjs",
     "benchmark:validate": "node benchmark/validate.mjs",
     "benchmark:ci": "node benchmark/ci.mjs",
