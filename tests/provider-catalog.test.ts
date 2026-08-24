@@ -105,7 +105,6 @@ const IMPLEMENTED_MATRIX = [
   ['parallel', 'research'],
   ['valyu', 'research'],
   ['exa', 'research'],
-  ['tavily', 'research'],
   ['you-research', 'research'],
   ['perplexity-sonar-pro', 'grounded'],
   ['gemini-grounded', 'grounded'],
@@ -284,9 +283,8 @@ describe('provider catalog -- declarations', () => {
         key === 'valyu/research' ? true : undefined,
       );
       expect(declaration.features?.json_schema_output).toBe(
-        ['exa/research', 'tavily/research', 'you-research/research'].includes(
-          key,
-        ) || key === 'parallel/chat'
+        ['exa/research', 'you-research/research'].includes(key) ||
+          key === 'parallel/chat'
           ? true
           : undefined,
       );
@@ -955,7 +953,6 @@ describe('provider catalog -- built-in workflows', () => {
       'parallel/research',
       'valyu/research',
       'exa/research',
-      'tavily/research',
       'you-research/research',
     ]);
   });
@@ -1582,8 +1579,7 @@ describe('provider catalog -- defaults and reserve', () => {
       IMPLEMENTED_MATRIX.filter(
         ([provider, profile]) =>
           !(
-            profile === 'research' &&
-            ['exa', 'tavily', 'you-research'].includes(provider)
+            profile === 'research' && ['exa', 'you-research'].includes(provider)
           ),
       ).map(([p, f]) => refKey(p, f)),
     );

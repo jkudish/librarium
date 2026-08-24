@@ -575,11 +575,6 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
   { provider_id: 'serpapi', profile_id: 'search', adapter_id: 'serpapi' },
   { provider_id: 'tavily', profile_id: 'search', adapter_id: 'tavily' },
   {
-    provider_id: 'tavily',
-    profile_id: 'research',
-    adapter_id: 'tavily-research',
-  },
-  {
     provider_id: 'valyu',
     profile_id: 'search',
     adapter_id: 'valyu-search',

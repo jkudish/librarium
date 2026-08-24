@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Query Tavily's Logs API with a valid two-day UTC window during uncertain
   Research submission recovery; Tavily rejects equal start and end dates.
 
+### Changed
+
+- Remove `tavily/research` from the v2 public catalog because Tavily does not
+  provide recoverable submission custody after an ambiguous create response.
+  `tavily/search` remains available.
+
 ### Added
 
 - **`parallel/turbo`**: first-class Parallel Search API turbo profile. It reuses
@@ -31,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refresh the public v2 catalog, workflow, execution, provenance, pricing,
   privacy, TypeScript/PHP boundary, MCP, and custom-provider guidance. The
-  documentation now states the 33-provider, 41-profile public roster and the
+  documentation now states the 33-provider, 40-profile public roster and the
   four built-in workflows (`quick`, `deep`, `visibility`, and `all`).
 - Replace the README demo with a deterministic, network-denied canonical
   fixture replay. The demo does not use credentials, paid calls, or mocked
