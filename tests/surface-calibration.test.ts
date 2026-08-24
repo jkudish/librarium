@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -24,6 +25,7 @@ const root = resolve(import.meta.dirname, '..');
 const calibration = join(root, 'benchmark', 'surface-calibration');
 const corpus = readJson(join(calibration, 'corpus.v1.json'));
 const config = readJson(join(calibration, 'config.json'));
+const providerConfig = readJson(join(calibration, '.librarium.json'));
 const fixture = join(calibration, 'fixtures', 'v1.json');
 
 describe('consumer-surface calibration', () => {
@@ -67,6 +69,31 @@ describe('consumer-surface calibration', () => {
         },
       });
       expect(preflight.admittedAdapterIds).toEqual([provider]);
+    }
+  });
+
+  it('matches PHP descriptor credentials to both execution profiles', () => {
+    for (const providerId of [
+      config.referenceCollector,
+      config.routineCandidate,
+    ]) {
+      const source = providerConfig.customProviders[providerId];
+      const result = spawnSync('php', [join(calibration, 'provider.php')], {
+        input: JSON.stringify({
+          operation: 'describe',
+          providerId,
+          sourceOptions: source.options,
+        }),
+        encoding: 'utf8',
+      });
+      expect(result.status).toBe(0);
+      const descriptor = JSON.parse(result.stdout).data;
+      expect(descriptor).toMatchObject({
+        tier: 'ai-grounded',
+        execution: source.executionProfile.profile.invocation,
+        envVar: source.executionProfile.credential.envVar,
+        requiresApiKey: true,
+      });
     }
   });
 

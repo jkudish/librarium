@@ -21,6 +21,7 @@
       },
       "executionProfile": {
         "bindingId": "php-searchapi-chatgpt.surface.v1",
+        "credential": { "envVar": "SEARCHAPI_API_KEY" },
         "profile": {
           "identity": {
             "provider_id": "php-searchapi-chatgpt",
@@ -56,6 +57,7 @@
       },
       "executionProfile": {
         "bindingId": "php-firecrawl-chatgpt.surface.v1",
+        "credential": { "envVar": "FIRECRAWL_API_KEY" },
         "profile": {
           "identity": {
             "provider_id": "php-firecrawl-chatgpt",
