@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -100,6 +100,82 @@ describe('consumer-surface calibration', () => {
         completion: false,
       }).hardFailures,
     ).toEqual(['missing-output', 'wrong-entity', 'structurally-broken']);
+  });
+
+  it('does not accept identity terms outside the identity field or malformed sources', () => {
+    const base = {
+      completion: true,
+      provenance: { collector: 'firecrawl', surface: 'chatgpt-web' },
+      citations: [],
+      durationMs: 1,
+      cost: { usd: null, confidence: 'unknown', creditsUsed: null },
+      receipt: {},
+    };
+    const spoofed = scoreObservation(corpus.cases[0], {
+      ...base,
+      answer: JSON.stringify({
+        entity: 'Unrelated project',
+        summary: 'Not jkudish/librarium',
+        repository_url: 'https://example.com',
+        sources: ['https://github.com/jkudish/librarium'],
+      }),
+    });
+    expect(spoofed.hardFailures).toContain('wrong-entity');
+    const malformedSources = scoreObservation(corpus.cases[0], {
+      ...base,
+      answer: JSON.stringify({
+        entity: 'jkudish/librarium',
+        summary: 'Project',
+        repository_url: 'https://github.com/jkudish/librarium',
+        sources: ['not-a-url'],
+      }),
+    });
+    expect(malformedSources.hardFailures).toEqual(['structurally-broken']);
+  });
+
+  it('fails closed before output or dispatch when a fixture is incomplete', async () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'surface-fixture-invalid-'));
+    const badFixture = readJson(fixture);
+    badFixture.cases.pop();
+    const badFixturePath = join(temporary, 'fixture.json');
+    const output = join(temporary, 'output');
+    writeFileSync(badFixturePath, JSON.stringify(badFixture), 'utf8');
+    let confirmationCount = 0;
+    let fetchCount = 0;
+    await expect(
+      executeSurfaceCalibration(
+        { fixture: badFixturePath, output },
+        {
+          env: {
+            SEARCHAPI_API_KEY: 'fixture-must-not-use-searchapi',
+            FIRECRAWL_API_KEY: 'fixture-must-not-use-firecrawl',
+            OPENAI_API_KEY: 'fixture-must-not-use-openai',
+          },
+          confirm: async () => {
+            confirmationCount++;
+            return true;
+          },
+          fetch: async () => {
+            fetchCount++;
+            throw new Error('fixture attempted network access');
+          },
+        },
+      ),
+    ).rejects.toThrow('cases must match the corpus exactly');
+    expect(confirmationCount).toBe(0);
+    expect(fetchCount).toBe(0);
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it('stops on a blocking challenge before semantic judging', () => {
+    const blockedFixture = readJson(fixture);
+    blockedFixture.cases[0].candidate.challenge = 'captcha';
+    const score = scoreObservation(
+      corpus.cases[0],
+      blockedFixture.cases[0].candidate,
+    );
+    expect(score.hardFailures).toContain('blocking-surface');
+    expect(score.usableCompletion).toBe(false);
   });
 
   it('bounds and blinds the pairwise divergence prompt', () => {

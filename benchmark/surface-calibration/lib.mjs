@@ -31,6 +31,15 @@ function structureCheck(answer, structure) {
   for (const key of structure.urlKeys) {
     if (!canonicalUrl(value[key])) errors.push(`${key} is not an HTTP(S) URL`);
   }
+  for (const key of structure.urlArrayKeys) {
+    if (
+      !Array.isArray(value[key]) ||
+      value[key].length === 0 ||
+      value[key].some((item) => !canonicalUrl(item))
+    ) {
+      errors.push(`${key} must be a non-empty array of HTTP(S) URLs`);
+    }
+  }
   return { correct: errors.length === 0, errors };
 }
 
@@ -51,11 +60,23 @@ export function validateCorpus(corpus) {
       errors.push(`invalid or duplicate case ${item.id}`);
     ids.add(item.id);
     if (!item.prompt) errors.push(`${item.id}.prompt is required`);
-    if (!item.entity?.canonical || !item.entity.requiredTerms?.length) {
-      errors.push(`${item.id}.entity must define canonical and requiredTerms`);
+    if (
+      !item.entity?.canonical ||
+      !item.entity.identityKey ||
+      !item.entity.acceptedValues?.length ||
+      !item.entity.requiredTerms?.length
+    ) {
+      errors.push(
+        `${item.id}.entity must define canonical, identityKey, acceptedValues, and requiredTerms`,
+      );
     }
-    if (!item.structure?.requiredKeys?.length) {
-      errors.push(`${item.id}.structure.requiredKeys is required`);
+    if (
+      !item.structure?.requiredKeys?.length ||
+      !Array.isArray(item.structure.urlArrayKeys)
+    ) {
+      errors.push(
+        `${item.id}.structure must define requiredKeys and urlArrayKeys`,
+      );
     }
   }
   return errors;
@@ -63,23 +84,34 @@ export function validateCorpus(corpus) {
 
 export function scoreObservation(item, observation) {
   const answer = String(observation.answer ?? '');
+  const parsed = parsedObject(answer);
+  const identity = String(parsed?.[item.entity.identityKey] ?? '');
   const requiredTerms = item.entity.requiredTerms.map((term) => ({
     term,
-    matched: termPresent(answer, term),
+    matched: termPresent(identity, term),
   }));
   const wrongTerms = item.entity.wrongEntityTerms.map((term) => ({
     term,
-    matched: termPresent(answer, term),
+    matched: termPresent(identity, term),
   }));
   const structure = structureCheck(answer, item.structure);
   const entityCorrect =
+    item.entity.acceptedValues.some(
+      (accepted) => normalizeText(identity) === normalizeText(accepted),
+    ) &&
     requiredTerms.every((check) => check.matched) &&
     wrongTerms.every((check) => !check.matched);
   const missing = observation.completion !== true || answer.trim() === '';
+  const challenge = observation.challenge ?? 'none';
+  const blockedBySurface =
+    observation.loginWall === true ||
+    challenge === 'captcha' ||
+    challenge === 'blocked';
   const hardFailures = [
     ...(missing ? ['missing-output'] : []),
     ...(!entityCorrect ? ['wrong-entity'] : []),
     ...(!structure.correct ? ['structurally-broken'] : []),
+    ...(blockedBySurface ? ['blocking-surface'] : []),
   ];
   return {
     collector: observation.provenance.collector,
@@ -87,9 +119,15 @@ export function scoreObservation(item, observation) {
     provenance: observation.provenance,
     usableCompletion: hardFailures.length === 0,
     hardFailures,
-    entity: { correct: entityCorrect, requiredTerms, wrongTerms },
+    entity: {
+      correct: entityCorrect,
+      identityKey: item.entity.identityKey,
+      observedValue: identity,
+      requiredTerms,
+      wrongTerms,
+    },
     structure,
-    challenge: observation.challenge ?? 'none',
+    challenge,
     loginWall: observation.loginWall === true,
     latencyMs: observation.durationMs,
     reportedLatencyMs: observation.reportedLatencyMs ?? null,

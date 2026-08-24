@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findRunDirectory, parseLibrariumRun } from '../lib/artifacts.mjs';
@@ -116,6 +116,60 @@ export function buildPreflight(config, corpus, env = process.env) {
   };
 }
 
+export function validateFixture(fixture, corpus) {
+  const errors = [];
+  if (fixture?.schemaVersion !== 1) errors.push('schemaVersion must be 1');
+  if (fixture?.corpusVersion !== corpus.version) {
+    errors.push(`corpusVersion must be ${corpus.version}`);
+  }
+  if (!Array.isArray(fixture?.cases)) {
+    errors.push('cases must be an array');
+    return errors;
+  }
+  const expectedIds = corpus.cases.map((item) => item.id).sort();
+  const actualIds = fixture.cases.map((item) => item?.caseId).sort();
+  if (
+    actualIds.length !== expectedIds.length ||
+    actualIds.some((id, index) => id !== expectedIds[index])
+  ) {
+    errors.push(
+      'cases must match the corpus exactly, without omissions or extras',
+    );
+  }
+  for (const item of fixture.cases) {
+    if (!item?.reference || !item?.candidate || !item?.divergence) {
+      errors.push(
+        `${item?.caseId ?? 'unknown case'} must define reference, candidate, and divergence`,
+      );
+      continue;
+    }
+    for (const [role, observation] of [
+      ['reference', item.reference],
+      ['candidate', item.candidate],
+    ]) {
+      if (
+        typeof observation.answer !== 'string' ||
+        typeof observation.completion !== 'boolean' ||
+        !observation.provenance?.collector ||
+        !observation.provenance?.surface ||
+        !Array.isArray(observation.citations) ||
+        !observation.cost ||
+        !observation.receipt
+      ) {
+        errors.push(`${item.caseId}.${role} is not a normalized observation`);
+      }
+    }
+    try {
+      validateDivergence(item.divergence);
+    } catch (error) {
+      errors.push(
+        `${item.caseId}.divergence: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return errors;
+}
+
 function normalizeObservation(providerId, parsed, config) {
   if (parsed.providerOutputs.length !== 1)
     throw new Error(`${providerId} returned an invalid provider count`);
@@ -160,7 +214,6 @@ function normalizeObservation(providerId, parsed, config) {
     durationMs: output.durationMs,
     citations: output.citations.slice(0, 20),
     cost,
-    rawArtifact: parsed.runDir,
   };
 }
 
@@ -194,29 +247,23 @@ async function collect(item, providerId, directory, config, env) {
       env: childEnvironment(env, collector.credentialEnvVar),
     },
   );
-  writeFileSync(
-    join(directory, `${providerId}.stdout.log`),
-    result.stdout,
-    'utf8',
-  );
-  writeFileSync(
-    join(directory, `${providerId}.stderr.log`),
-    result.stderr,
-    'utf8',
-  );
-  let manifest;
   try {
-    manifest = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(
-      `${providerId} exited ${result.code ?? result.signal ?? 'unknown'} without a JSON manifest`,
+    let manifest;
+    try {
+      manifest = JSON.parse(result.stdout);
+    } catch {
+      throw new Error(
+        `${providerId} exited ${result.code ?? result.signal ?? 'unknown'} without a JSON manifest`,
+      );
+    }
+    return normalizeObservation(
+      providerId,
+      parseLibrariumRun(findRunDirectory(outputBase, manifest)),
+      config,
     );
+  } finally {
+    rmSync(outputBase, { recursive: true, force: true });
   }
-  return normalizeObservation(
-    providerId,
-    parseLibrariumRun(findRunDirectory(outputBase, manifest)),
-    config,
-  );
 }
 
 async function judgeDivergence(
@@ -324,6 +371,14 @@ export async function executeSurfaceCalibration(
   if (options.dryRun) return { dryRun: true, preflight, config, corpus };
 
   const fixture = options.fixture ? readJson(resolve(options.fixture)) : null;
+  if (fixture) {
+    const fixtureErrors = validateFixture(fixture, corpus);
+    if (fixtureErrors.length) {
+      throw new Error(
+        `Invalid surface fixture:\n- ${fixtureErrors.join('\n- ')}`,
+      );
+    }
+  }
   if (!fixture) {
     const missing = preflight.credentials
       .filter((item) => !item.available)
@@ -337,7 +392,8 @@ export async function executeSurfaceCalibration(
     }
   }
 
-  const runId = timestampForPath(dependencies.now?.() ?? new Date());
+  const runDate = dependencies.now?.() ?? new Date();
+  const runId = timestampForPath(runDate);
   const outputDirectory = join(
     resolve(options.output ?? join(root, 'results')),
     runId,
@@ -347,31 +403,42 @@ export async function executeSurfaceCalibration(
     join(outputDirectory, 'preflight.json'),
     fixture ? { ...preflight, paidCalls: false, fixture: true } : preflight,
   );
+  if (!fixture) {
+    writeJson(join(outputDirectory, 'confirmation.json'), {
+      schemaVersion: 1,
+      confirmedAt: runDate.toISOString(),
+      corpusVersion: corpus.version,
+      corpusFingerprint: fingerprint(corpus),
+      configFingerprint: fingerprint(config),
+      preflightFingerprint: fingerprint(preflight),
+      authorization: 'interactive-RUN',
+    });
+  }
   const results = [];
   for (const item of corpus.cases) {
-    const caseDirectory = join(outputDirectory, 'raw', item.id);
+    const caseDirectory = join(outputDirectory, 'cases', item.id);
     mkdirSync(caseDirectory, { recursive: true });
     const fixtureCase = fixture?.cases?.find(
       (candidate) => candidate.caseId === item.id,
     );
-    const reference =
-      fixtureCase?.reference ??
-      (await collect(
-        item,
-        config.referenceCollector,
-        caseDirectory,
-        config,
-        env,
-      ));
-    const candidate =
-      fixtureCase?.candidate ??
-      (await collect(
-        item,
-        config.routineCandidate,
-        caseDirectory,
-        config,
-        env,
-      ));
+    const reference = fixture
+      ? fixtureCase.reference
+      : await collect(
+          item,
+          config.referenceCollector,
+          caseDirectory,
+          config,
+          env,
+        );
+    const candidate = fixture
+      ? fixtureCase.candidate
+      : await collect(
+          item,
+          config.routineCandidate,
+          caseDirectory,
+          config,
+          env,
+        );
     writeJson(join(caseDirectory, 'reference.normalized.json'), reference);
     writeJson(join(caseDirectory, 'candidate.normalized.json'), candidate);
     const referenceScore = scoreObservation(item, reference);
@@ -388,16 +455,16 @@ export async function executeSurfaceCalibration(
       });
       throw new Error(`${item.id} hard failure: ${hardFailures.join(', ')}`);
     }
-    const divergence =
-      fixtureCase?.divergence ??
-      (await judgeDivergence(
-        item,
-        reference,
-        candidate,
-        config,
-        env,
-        dependencies.fetch,
-      ));
+    const divergence = fixture
+      ? fixtureCase.divergence
+      : await judgeDivergence(
+          item,
+          reference,
+          candidate,
+          config,
+          env,
+          dependencies.fetch,
+        );
     const comparison = compareObservations(
       reference,
       candidate,

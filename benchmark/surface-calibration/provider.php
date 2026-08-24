@@ -20,7 +20,16 @@ function respond(array $payload): never
 
 function fail(string $message): never
 {
-    respond(['ok' => false, 'error' => mb_substr($message, 0, 500)]);
+    $secrets = array_values(array_filter([
+        getenv('SEARCHAPI_API_KEY') ?: null,
+        getenv('FIRECRAWL_API_KEY') ?: null,
+    ], fn ($value): bool => is_string($value) && $value !== ''));
+    respond(['ok' => false, 'error' => mb_substr(str_replace($secrets, '[REDACTED]', $message), 0, 500)]);
+}
+
+function boundedString(mixed $value, int $maximum): ?string
+{
+    return is_string($value) && $value !== '' ? mb_substr($value, 0, $maximum) : null;
 }
 
 $input = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);
@@ -124,14 +133,36 @@ try {
         ->take(MAX_CITATIONS)
         ->map(function ($citation) use ($providerId): array {
             return [
-                'url' => $citation->source->url,
-                'title' => $citation->source->title ?: null,
-                'snippet' => $citation->excerpt ?: null,
+                'url' => boundedString($citation->source->url, 2048),
+                'title' => boundedString($citation->source->title, 500),
+                'snippet' => boundedString($citation->excerpt, 1000),
                 'provider' => $providerId,
             ];
         })->values()->all();
     $providerMeta = $result->providerMeta === null ? [] : (array) $result->providerMeta;
-    $context = $result->provenance->context ?? [];
+    $rawContext = (array) ($result->provenance->context ?? []);
+    $context = array_intersect_key($rawContext, array_flip(['locale', 'country', 'device', 'authentication']));
+    $rawDeclaredContext = (array) ($providerMeta['consumer_declared_context'] ?? []);
+    $declaredContext = array_intersect_key($rawDeclaredContext, array_flip(['personalization', 'account_context']));
+    $evidenceReceipts = array_slice(array_values(array_filter(array_map(
+        function ($receipt): ?array {
+            if (! is_array($receipt)) {
+                return null;
+            }
+
+            return array_filter([
+                'kind' => boundedString($receipt['kind'] ?? null, 50),
+                'reference_sha256' => preg_match('/^[a-f0-9]{64}$/', (string) ($receipt['reference_sha256'] ?? '')) === 1
+                    ? $receipt['reference_sha256']
+                    : null,
+                'reference_state' => in_array($receipt['reference_state'] ?? null, ['retained', 'redacted'], true)
+                    ? $receipt['reference_state']
+                    : null,
+                'reference' => boundedString($receipt['reference'] ?? null, 2048),
+            ], fn ($value): bool => $value !== null);
+        },
+        (array) ($providerMeta['evidence_receipts'] ?? []),
+    ))), 0, 10);
     $actualCostUsd = $result->usage?->currency === 'USD' && $result->usage->actualCost !== null
         ? (float) $result->usage->actualCost
         : null;
@@ -146,7 +177,7 @@ try {
             'collector' => $result->provenance->collector,
             'surface' => $result->provenance->surface,
             'context' => $context,
-            'consumerDeclaredContext' => $providerMeta['consumer_declared_context'] ?? [],
+            'consumerDeclaredContext' => $declaredContext,
         ],
         'challenge' => $providerMeta['challenge'] ?? ($source['collector'] === 'firecrawl' ? 'unknown' : 'not-reported'),
         'loginWall' => (bool) ($providerMeta['login_wall'] ?? false),
@@ -157,9 +188,9 @@ try {
             'costKind' => $actualCostUsd === null ? null : 'actual',
         ],
         'receipt' => [
-            'requestId' => $response->requestId,
-            'providerRequestId' => $providerMeta['request_id'] ?? null,
-            'evidenceReceipts' => $providerMeta['evidence_receipts'] ?? [],
+            'requestId' => boundedString($response->requestId, 200),
+            'providerRequestId' => boundedString($providerMeta['request_id'] ?? null, 200),
+            'evidenceReceipts' => $evidenceReceipts,
         ],
     ];
 

@@ -28,9 +28,10 @@ out or unpersonalized.
 
 ## Offline verification
 
-Synthetic fixtures prove orchestration, normalized artifact retention, hard
-failures, individual measures, overlap, and role-policy reporting. They are not
-current provider evidence:
+Strict synthetic fixtures prove orchestration, normalized artifact retention,
+hard failures, individual measures, overlap, and role-policy reporting. Fixture
+mode validates the exact corpus matrix before creating output and has no live
+fallback. Fixtures are not current provider evidence:
 
 ```sh
 npm run benchmark:surface:fixture
@@ -60,7 +61,9 @@ npm run benchmark:surface
 The command is sequential and requires an interactive `RUN` confirmation. It
 stops on the first provider/interface failure, hard output failure, blocking
 challenge/login wall, or judge/artifact validation failure. There are no
-retries or fallbacks.
+retries or fallbacks. A live run writes a fingerprinted confirmation receipt
+before dispatch and retains only bounded normalized observations and receipts;
+the reusable benchmark's intermediate run directory is removed after parsing.
 
 ## Measures and recommendation
 
