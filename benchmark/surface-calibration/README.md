@@ -25,6 +25,14 @@ unknown; this lane does not infer that its collected consumer surface is signed
 out or unpersonalized.
 
 `composer.lock` is authoritative for the transitive PHP dependency graph.
+Install it with PHP 8.3+ and Composer 2 before running either PHP target. The
+two `jkudish` packages require GitHub access; provide Composer GitHub OAuth via
+the operator's credential manager without writing a token into this directory:
+
+```sh
+COMPOSER_AUTH="$(jq -nc --arg token "$(gh auth token)" '{"github-oauth":{"github.com":$token}}')" \
+  composer install --working-dir benchmark/surface-calibration --no-interaction
+```
 
 ## Offline verification
 
