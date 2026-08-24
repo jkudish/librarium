@@ -31,8 +31,8 @@ const runtimeEnvironmentVariables = [
   'TZ',
 ];
 
-function childEnvironment(env, credential) {
-  const result = { NO_COLOR: '1' };
+function childEnvironment(env, credential, overrides = {}) {
+  const result = { NO_COLOR: '1', ...overrides };
   for (const key of [...runtimeEnvironmentVariables, credential]) {
     if (typeof env[key] === 'string' && env[key] !== '') result[key] = env[key];
   }
@@ -256,6 +256,7 @@ async function collect(item, providerId, directory, config, env) {
   const outputBase = join(directory, providerId);
   mkdirSync(outputBase, { recursive: true });
   const collector = config.collectors[providerId];
+  const phpFailurePath = join(directory, `${providerId}.php-failure.json`);
   const result = await spawnCapture(
     process.execPath,
     [
@@ -276,7 +277,9 @@ async function collect(item, providerId, directory, config, env) {
     ],
     {
       cwd: root,
-      env: childEnvironment(env, collector.credentialEnvVar),
+      env: childEnvironment(env, collector.credentialEnvVar, {
+        SURFACE_CALIBRATION_FAILURE_PATH: phpFailurePath,
+      }),
     },
   );
   try {
@@ -295,12 +298,20 @@ async function collect(item, providerId, directory, config, env) {
       env[collector.credentialEnvVar],
     ]);
     if (terminalFailure) {
-      writeJson(join(directory, `${providerId}.failure.json`), terminalFailure);
+      const scriptDiagnostic = existsSync(phpFailurePath)
+        ? boundedDiagnostic(readJson(phpFailurePath)?.error, [
+            env[collector.credentialEnvVar],
+          ])
+        : '';
+      writeJson(join(directory, `${providerId}.failure.json`), {
+        ...terminalFailure,
+        ...(scriptDiagnostic && { scriptDiagnostic }),
+      });
       const diagnostic = terminalFailure.errors
         .map((error) => `${error.code}: ${error.message}`)
         .join('; ');
       throw new Error(
-        `${providerId} returned terminal status ${terminalFailure.status}${diagnostic ? `: ${diagnostic}` : ''}`,
+        `${providerId} returned terminal status ${terminalFailure.status}${diagnostic ? `: ${diagnostic}` : ''}${scriptDiagnostic ? `; script: ${scriptDiagnostic}` : ''}`,
       );
     }
     return normalizeObservation(

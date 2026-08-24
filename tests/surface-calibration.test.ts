@@ -221,6 +221,40 @@ describe('consumer-surface calibration', () => {
     });
   });
 
+  it('retains a bounded PHP facade failure without reaching a provider', () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'surface-php-failure-'));
+    const failurePath = join(temporary, 'failure.json');
+    const result = spawnSync('php', [join(calibration, 'provider.php')], {
+      cwd: calibration,
+      env: {
+        ...process.env,
+        SEARCHAPI_API_KEY: '',
+        FIRECRAWL_API_KEY: '',
+        SURFACE_CALIBRATION_FAILURE_PATH: failurePath,
+      },
+      input: JSON.stringify({
+        protocolVersion: 1,
+        operation: 'execute',
+        providerId: 'php-searchapi-chatgpt',
+        query: 'offline no-credential probe',
+        options: { timeout: config.providerTimeoutSeconds },
+        sourceOptions:
+          providerConfig.customProviders['php-searchapi-chatgpt'].options,
+      }),
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      error: 'searchapi-chatgpt: Credential is not configured.',
+    });
+    expect(readJson(failurePath)).toEqual({
+      schemaVersion: 1,
+      error: 'searchapi-chatgpt: Credential is not configured.',
+    });
+  });
+
   it('replays normalized receipts and separate measures without network calls', async () => {
     const output = mkdtempSync(join(tmpdir(), 'surface-calibration-'));
     const result = await executeSurfaceCalibration(

@@ -24,7 +24,15 @@ function fail(string $message): never
         getenv('SEARCHAPI_API_KEY') ?: null,
         getenv('FIRECRAWL_API_KEY') ?: null,
     ], fn ($value): bool => is_string($value) && $value !== ''));
-    respond(['ok' => false, 'error' => mb_substr(str_replace($secrets, '[REDACTED]', $message), 0, 500)]);
+    $safeMessage = mb_substr(str_replace($secrets, '[REDACTED]', $message), 0, 500);
+    $failurePath = getenv('SURFACE_CALIBRATION_FAILURE_PATH');
+    if (is_string($failurePath) && $failurePath !== '') {
+        file_put_contents($failurePath, json_encode([
+            'schemaVersion' => 1,
+            'error' => $safeMessage,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    }
+    respond(['ok' => false, 'error' => $safeMessage]);
 }
 
 function boundedString(mixed $value, int $maximum): ?string
