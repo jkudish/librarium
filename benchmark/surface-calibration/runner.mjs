@@ -56,6 +56,20 @@ function spawnCapture(command, args, options) {
   });
 }
 
+export function boundedDiagnostic(value, secrets = []) {
+  let diagnostic = String(value ?? '');
+  for (const secret of secrets) {
+    if (typeof secret === 'string' && secret !== '') {
+      diagnostic = diagnostic.replaceAll(secret, '[REDACTED]');
+    }
+  }
+  return diagnostic
+    .replace(/(bearer\s+)[^\s"']+/gi, '$1[REDACTED]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
+}
+
 export function buildPreflight(config, corpus, env = process.env) {
   const caseCount = corpus.cases.length;
   const searchApiUsd =
@@ -252,8 +266,11 @@ async function collect(item, providerId, directory, config, env) {
     try {
       manifest = JSON.parse(result.stdout);
     } catch {
+      const diagnostic = boundedDiagnostic(result.stderr, [
+        env[collector.credentialEnvVar],
+      ]);
       throw new Error(
-        `${providerId} exited ${result.code ?? result.signal ?? 'unknown'} without a JSON manifest`,
+        `${providerId} exited ${result.code ?? result.signal ?? 'unknown'} without a JSON manifest${diagnostic ? `: ${diagnostic}` : ''}`,
       );
     }
     return normalizeObservation(

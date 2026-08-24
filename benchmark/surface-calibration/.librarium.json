@@ -18,6 +18,31 @@
         "profile": "searchapi-chatgpt",
         "collector": "searchapi",
         "surface": "chatgpt"
+      },
+      "executionProfile": {
+        "bindingId": "php-searchapi-chatgpt.surface.v1",
+        "profile": {
+          "identity": {
+            "provider_id": "php-searchapi-chatgpt",
+            "profile_id": "chatgpt",
+            "target": { "primary": { "model_selection": "not_applicable" } }
+          },
+          "result_kind": "surface_observation",
+          "grounding_policy": "optional",
+          "observation_mode": "surface_snapshot",
+          "corpora": ["web"],
+          "retrieval_method": "surface_collector",
+          "access_mode": "collected",
+          "operator_id": "searchapi",
+          "collector_id": "searchapi",
+          "surface_id": "chatgpt",
+          "surface_context": {
+            "account_context": "unknown",
+            "personalization": "unknown"
+          },
+          "invocation": "inline",
+          "resumability": "none"
+        }
       }
     },
     "php-firecrawl-chatgpt": {
@@ -28,6 +53,34 @@
         "profile": "firecrawl-chatgpt",
         "collector": "firecrawl",
         "surface": "chatgpt-web"
+      },
+      "executionProfile": {
+        "bindingId": "php-firecrawl-chatgpt.surface.v1",
+        "profile": {
+          "identity": {
+            "provider_id": "php-firecrawl-chatgpt",
+            "profile_id": "chatgpt-web",
+            "target": { "primary": { "model_selection": "not_applicable" } }
+          },
+          "result_kind": "surface_observation",
+          "grounding_policy": "optional",
+          "observation_mode": "surface_snapshot",
+          "corpora": ["web"],
+          "retrieval_method": "surface_collector",
+          "access_mode": "collected",
+          "operator_id": "firecrawl",
+          "collector_id": "firecrawl",
+          "surface_id": "chatgpt-web",
+          "surface_context": {
+            "account_context": "anonymous",
+            "locale": "en-CA",
+            "country": "CA",
+            "device": "desktop",
+            "personalization": "unknown"
+          },
+          "invocation": "inline",
+          "resumability": "none"
+        }
       }
     }
   },

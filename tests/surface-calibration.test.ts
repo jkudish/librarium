@@ -9,9 +9,16 @@ import {
   validateCorpus,
 } from '../benchmark/surface-calibration/lib.mjs';
 import {
+  boundedDiagnostic,
   buildPreflight,
   executeSurfaceCalibration,
 } from '../benchmark/surface-calibration/runner.mjs';
+import {
+  loadConfig,
+  loadProjectConfig,
+  mergeConfigs,
+} from '../src/core/config.js';
+import { preflightProductionRequestStructure } from '../src/node-request-preflight.js';
 
 const root = resolve(import.meta.dirname, '..');
 const calibration = join(root, 'benchmark', 'surface-calibration');
@@ -35,6 +42,43 @@ describe('consumer-surface calibration', () => {
     expect(
       preflight.credentials.every((item: any) => item.available === false),
     ).toBe(true);
+  });
+
+  it('structurally admits both trusted PHP surface providers before dispatch', () => {
+    const merged = mergeConfigs(
+      loadConfig(join(tmpdir(), 'librarium-no-global-config.json')),
+      loadProjectConfig(calibration),
+    );
+    for (const provider of [
+      config.referenceCollector,
+      config.routineCandidate,
+    ]) {
+      const preflight = preflightProductionRequestStructure({
+        config: merged,
+        transport: {
+          kind: 'cli',
+          input: {
+            query: 'offline structural preflight',
+            providers: [provider],
+            mode: 'sync',
+            timeoutSeconds: config.providerTimeoutSeconds,
+            fallback: false,
+          },
+        },
+      });
+      expect(preflight.admittedAdapterIds).toEqual([provider]);
+    }
+  });
+
+  it('bounds and redacts pre-dispatch diagnostics', () => {
+    const secret = 'secret-canary-value';
+    const diagnostic = boundedDiagnostic(
+      `failure with ${secret} and Bearer another-secret ${'x'.repeat(1000)}`,
+      [secret],
+    );
+    expect(diagnostic).not.toContain(secret);
+    expect(diagnostic).not.toContain('another-secret');
+    expect(diagnostic.length).toBeLessThanOrEqual(500);
   });
 
   it('replays normalized receipts and separate measures without network calls', async () => {
