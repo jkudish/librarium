@@ -70,6 +70,24 @@ export function boundedDiagnostic(value, secrets = []) {
     .slice(0, 500);
 }
 
+export function summarizeTerminalFailure(response, secrets = []) {
+  if (!response || response.status === 'succeeded') return null;
+  return {
+    schemaVersion: 1,
+    status: response.status ?? 'unknown',
+    resultCount: Array.isArray(response.results) ? response.results.length : 0,
+    errors: Array.isArray(response.errors)
+      ? response.errors.slice(0, 10).map((error) => ({
+          code: boundedDiagnostic(error?.code, secrets),
+          message: boundedDiagnostic(error?.message, secrets),
+          ...(error?.profile && {
+            profile: boundedDiagnostic(error.profile, secrets),
+          }),
+        }))
+      : [],
+  };
+}
+
 export function buildPreflight(config, corpus, env = process.env) {
   const caseCount = corpus.cases.length;
   const searchApiUsd =
@@ -271,6 +289,18 @@ async function collect(item, providerId, directory, config, env) {
       ]);
       throw new Error(
         `${providerId} exited ${result.code ?? result.signal ?? 'unknown'} without a JSON manifest${diagnostic ? `: ${diagnostic}` : ''}`,
+      );
+    }
+    const terminalFailure = summarizeTerminalFailure(manifest.response, [
+      env[collector.credentialEnvVar],
+    ]);
+    if (terminalFailure) {
+      writeJson(join(directory, `${providerId}.failure.json`), terminalFailure);
+      const diagnostic = terminalFailure.errors
+        .map((error) => `${error.code}: ${error.message}`)
+        .join('; ');
+      throw new Error(
+        `${providerId} returned terminal status ${terminalFailure.status}${diagnostic ? `: ${diagnostic}` : ''}`,
       );
     }
     return normalizeObservation(

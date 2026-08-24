@@ -14,6 +14,7 @@ import {
   boundedDiagnostic,
   buildPreflight,
   executeSurfaceCalibration,
+  summarizeTerminalFailure,
 } from '../benchmark/surface-calibration/runner.mjs';
 import { initializeProviders } from '../src/adapters/node-registry.js';
 import {
@@ -187,6 +188,37 @@ describe('consumer-surface calibration', () => {
     expect(diagnostic).not.toContain(secret);
     expect(diagnostic).not.toContain('another-secret');
     expect(diagnostic.length).toBeLessThanOrEqual(500);
+  });
+
+  it('retains only bounded redacted canonical failure diagnostics', () => {
+    const secret = 'collector-secret';
+    expect(
+      summarizeTerminalFailure(
+        {
+          status: 'failed',
+          results: [],
+          errors: [
+            {
+              code: 'librarium.provider',
+              message: `provider rejected ${secret} ${'x'.repeat(1000)}`,
+              profile: 'php-searchapi-chatgpt/chatgpt',
+            },
+          ],
+        },
+        [secret],
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: 'failed',
+      resultCount: 0,
+      errors: [
+        {
+          code: 'librarium.provider',
+          message: `provider rejected [REDACTED] ${'x'.repeat(471)}`,
+          profile: 'php-searchapi-chatgpt/chatgpt',
+        },
+      ],
+    });
   });
 
   it('replays normalized receipts and separate measures without network calls', async () => {
