@@ -14,6 +14,7 @@ import {
   buildPreflight,
   executeSurfaceCalibration,
 } from '../benchmark/surface-calibration/runner.mjs';
+import { initializeProviders } from '../src/adapters/node-registry.js';
 import {
   loadConfig,
   loadProjectConfig,
@@ -94,6 +95,25 @@ describe('consumer-surface calibration', () => {
         envVar: source.executionProfile.credential.envVar,
         requiresApiKey: true,
       });
+    }
+  });
+
+  it('initializes both admitted PHP descriptors without executing them', async () => {
+    const merged = mergeConfigs(
+      loadConfig(join(tmpdir(), 'librarium-no-global-config.json')),
+      loadProjectConfig(calibration),
+    );
+    const providerIds = [config.referenceCollector, config.routineCandidate];
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(calibration);
+      const initialized = await initializeProviders(merged, {
+        builtinAdapterIds: [],
+        customProviderIds: providerIds,
+      });
+      expect(initialized.loadedCustomProviders).toEqual(providerIds);
+    } finally {
+      process.chdir(originalCwd);
     }
   });
 
