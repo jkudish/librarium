@@ -596,6 +596,14 @@ describe('durable research provider adapters', () => {
         filter_by_api_key: true,
       },
     });
+    const logBody = logsCall?.[1]?.body as {
+      start_date: string;
+      end_date: string;
+    };
+    expect(logBody.start_date).not.toBe(logBody.end_date);
+    expect(Date.parse(logBody.end_date) - Date.parse(logBody.start_date)).toBe(
+      86_400_000,
+    );
   });
 
   it('refuses ambiguous Tavily log custody and never resubmits', async () => {

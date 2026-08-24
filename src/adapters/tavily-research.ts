@@ -382,13 +382,18 @@ export class TavilyResearchProvider extends BackgroundBaseProvider {
       }
       if (Date.now() >= deadline || options.signal?.aborted) return undefined;
       try {
-        const date = new Date(submittedAt).toISOString().slice(0, 10);
+        // Tavily documents inclusive date bounds but rejects equal values.
+        // Start one UTC day before submission so same-day recovery remains a
+        // valid query while the unique project id keeps the match exact.
+        const startDate = new Date(submittedAt - 86_400_000)
+          .toISOString()
+          .slice(0, 10);
         const response = await this.request<unknown>(LOGS_URL, {
           method: 'POST',
           headers: this.headers(),
           body: {
             limit: 2,
-            start_date: date,
+            start_date: startDate,
             end_date: new Date().toISOString().slice(0, 10),
             endpoints: ['research'],
             project_id: projectId,

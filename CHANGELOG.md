@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Correlate Tavily Research submissions with the frozen canonical attempt ID
   and recover an uncertain create response only when Tavily's project-scoped
   Logs API proves exactly one accepted task; ambiguous custody never resubmits.
+- Query Tavily's Logs API with a valid two-day UTC window during uncertain
+  Research submission recovery; Tavily rejects equal start and end dates.
 
 ### Added
 
