@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-27
+
 Version 2 replaces Librarium's provider, configuration, execution, package,
 and artifact contracts. Review the breaking changes before upgrading from v1.
 
@@ -467,7 +469,8 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/jkudish/librarium/compare/v1.4.1...v2.0.0
 [1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0
 [0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
