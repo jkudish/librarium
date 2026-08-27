@@ -30,8 +30,8 @@ import { gunzipSync } from 'node:zlib';
 import { buildCanonicalValidationMatrix } from './node-live-validation.js';
 
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const RC_VERSION_PATTERN =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/;
+const RELEASE_VERSION_PATTERN =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?$/;
 const SAFE_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_JSON_BYTES = 16 * 1024 * 1024;
 const MAX_TAR_BYTES = 256 * 1024 * 1024;
@@ -274,10 +274,10 @@ function catalogDigest(value: unknown, label: string): string {
   return text;
 }
 
-export function assertReleaseCandidateVersion(version: string): void {
-  if (!RC_VERSION_PATTERN.test(version)) {
+export function assertReleaseVersion(version: string): void {
+  if (!RELEASE_VERSION_PATTERN.test(version)) {
     fail(
-      'Release candidate version must be X.Y.Z-rc.N with positive N and no leading zero.',
+      'Release version must be exact X.Y.Z or X.Y.Z-rc.N with positive RC N and no leading zero.',
     );
   }
 }
@@ -691,7 +691,7 @@ function packageMetadata(repositoryRoot: string): {
     'package.json version',
     128,
   );
-  assertReleaseCandidateVersion(version);
+  assertReleaseVersion(version);
   const lockPackages = jsonRecord(
     lockValue.packages,
     'package-lock.json packages',
@@ -725,6 +725,135 @@ function assertGitIdentity(identity: ReleaseGitIdentity): void {
   }
 }
 
+interface MatrixCoreLabels {
+  readonly targetRecord: (index: number) => string;
+  readonly targetField: (index: number, key: string, field: string) => string;
+  readonly targetsArray: string;
+  readonly count: string;
+  readonly ordering: string;
+  readonly catalog: string;
+  readonly pricing: string;
+  readonly consistency: string;
+  readonly fingerprint: string;
+  readonly fingerprintMismatch: string;
+}
+
+function parseMatrixCore(
+  targetsValue: unknown,
+  declaredTargetCount: unknown,
+  catalogValue: unknown,
+  pricingValue: unknown,
+  fingerprintValue: unknown,
+  labels: MatrixCoreLabels,
+): ReleaseMatrixIdentity {
+  if (!Array.isArray(targetsValue)) {
+    fail(labels.targetsArray);
+  }
+  if (declaredTargetCount !== 40) {
+    fail(labels.count);
+  }
+  const targets = targetsValue.map((targetValue, index) => {
+    const target = jsonRecord(targetValue, labels.targetRecord(index));
+    exactKeys(
+      target,
+      [
+        'adapter_id',
+        'binding_id',
+        'catalog_digest',
+        'credential_family',
+        'expected_effective_identity',
+        'key',
+        'pricing_snapshot_fingerprint',
+        'requested_identity',
+      ],
+      labels.targetRecord(index),
+    );
+    const key = boundedString(
+      target.key,
+      labels.targetField(index, '', 'key'),
+      256,
+    );
+    return {
+      key,
+      adapter_id: boundedString(
+        target.adapter_id,
+        labels.targetField(index, key, 'adapter_id'),
+        256,
+      ),
+      binding_id: boundedString(
+        target.binding_id,
+        labels.targetField(index, key, 'binding_id'),
+        256,
+      ),
+      catalog_digest: catalogDigest(
+        target.catalog_digest,
+        labels.targetField(index, key, 'catalog_digest'),
+      ),
+      requested_identity: structuredClone(
+        jsonRecord(
+          target.requested_identity,
+          labels.targetField(index, key, 'requested_identity'),
+        ),
+      ),
+      expected_effective_identity: structuredClone(
+        jsonRecord(
+          target.expected_effective_identity,
+          labels.targetField(index, key, 'expected_effective_identity'),
+        ),
+      ),
+      credential_family: boundedString(
+        target.credential_family,
+        labels.targetField(index, key, 'credential_family'),
+        256,
+      ),
+      pricing_snapshot_fingerprint: sha256(
+        target.pricing_snapshot_fingerprint,
+        labels.targetField(index, key, 'pricing_snapshot_fingerprint'),
+      ),
+    };
+  });
+  const keys = targets.map((target) => target.key);
+  if (
+    targets.length !== 40 ||
+    new Set(keys).size !== 40 ||
+    canonicalJson(keys) !== canonicalJson([...keys].sort(compareText))
+  ) {
+    fail(labels.ordering);
+  }
+  const catalog = catalogDigest(catalogValue, labels.catalog);
+  const pricing = sha256(pricingValue, labels.pricing);
+  if (
+    targets.some(
+      (target) =>
+        target.catalog_digest !== catalog ||
+        target.pricing_snapshot_fingerprint !== pricing,
+    )
+  ) {
+    fail(labels.consistency);
+  }
+  const fingerprint = sha256(fingerprintValue, labels.fingerprint);
+  if (
+    fingerprint !==
+    sha256Bytes(
+      canonicalJson({
+        schema_version: 1,
+        catalog_digest: catalog,
+        pricing_snapshot_fingerprint: pricing,
+        targets,
+      }),
+    )
+  ) {
+    fail(labels.fingerprintMismatch);
+  }
+  return {
+    target_count: 40,
+    catalog_digest: catalog,
+    pricing_snapshot_fingerprint: pricing,
+    matrix_fingerprint: fingerprint,
+    targets,
+  };
+}
+
 function matrixIdentity(value: unknown): ReleaseMatrixIdentity {
   const matrix = jsonRecord(value, 'Canonical installed-package matrix');
   exactKeys(
@@ -741,107 +870,29 @@ function matrixIdentity(value: unknown): ReleaseMatrixIdentity {
   if (matrix.schema_version !== 1) {
     fail('Canonical installed-package matrix schema is unsupported.');
   }
-  const targetsValue = matrix.targets;
-  if (!Array.isArray(targetsValue))
-    fail('Canonical matrix targets must be an array.');
-  const targets = targetsValue.map((targetValue, index) => {
-    const target = jsonRecord(targetValue, `Canonical matrix target ${index}`);
-    exactKeys(
-      target,
-      [
-        'adapter_id',
-        'binding_id',
-        'catalog_digest',
-        'credential_family',
-        'expected_effective_identity',
-        'key',
-        'pricing_snapshot_fingerprint',
-        'requested_identity',
-      ],
-      `Canonical matrix target ${index}`,
-    );
-    const key = boundedString(
-      target.key,
-      `Canonical matrix target ${index} key`,
-      256,
-    );
-    return {
-      key,
-      adapter_id: boundedString(target.adapter_id, `${key} adapter_id`, 256),
-      binding_id: boundedString(target.binding_id, `${key} binding_id`, 256),
-      catalog_digest: catalogDigest(
-        target.catalog_digest,
-        `${key} catalog_digest`,
-      ),
-      requested_identity: structuredClone(
-        jsonRecord(target.requested_identity, `${key} requested_identity`),
-      ),
-      expected_effective_identity: structuredClone(
-        jsonRecord(
-          target.expected_effective_identity,
-          `${key} expected_effective_identity`,
-        ),
-      ),
-      credential_family: boundedString(
-        target.credential_family,
-        `${key} credential_family`,
-        256,
-      ),
-      pricing_snapshot_fingerprint: sha256(
-        target.pricing_snapshot_fingerprint,
-        `${key} pricing_snapshot_fingerprint`,
-      ),
-    };
-  });
-  const keys = targets.map((target) => target.key);
-  if (
-    targets.length !== 40 ||
-    new Set(keys).size !== 40 ||
-    canonicalJson(keys) !== canonicalJson([...keys].sort(compareText))
-  ) {
-    fail('Release candidate requires the exact sorted 40-profile matrix.');
-  }
-  const catalog = catalogDigest(
+  return parseMatrixCore(
+    matrix.targets,
+    40,
     matrix.catalog_digest,
-    'Canonical catalog digest',
-  );
-  const pricing = sha256(
     matrix.pricing_snapshot_fingerprint,
-    'Canonical pricing snapshot fingerprint',
-  );
-  if (
-    targets.some(
-      (target) =>
-        target.catalog_digest !== catalog ||
-        target.pricing_snapshot_fingerprint !== pricing,
-    )
-  ) {
-    fail('Canonical target matrix fingerprints differ from their matrix.');
-  }
-  const fingerprint = sha256(
     matrix.fingerprint,
-    'Canonical matrix fingerprint',
+    {
+      targetRecord: (index) => `Canonical matrix target ${index}`,
+      targetField: (_index, key, field) =>
+        key ? `${key} ${field}` : `Canonical matrix target ${_index} ${field}`,
+      targetsArray: 'Canonical matrix targets must be an array.',
+      count: 'Release candidate requires the exact sorted 40-profile matrix.',
+      ordering:
+        'Release candidate requires the exact sorted 40-profile matrix.',
+      catalog: 'Canonical catalog digest',
+      pricing: 'Canonical pricing snapshot fingerprint',
+      consistency:
+        'Canonical target matrix fingerprints differ from their matrix.',
+      fingerprint: 'Canonical matrix fingerprint',
+      fingerprintMismatch:
+        'Canonical matrix fingerprint does not match its exact 40 targets.',
+    },
   );
-  if (
-    fingerprint !==
-    sha256Bytes(
-      canonicalJson({
-        schema_version: 1,
-        catalog_digest: catalog,
-        pricing_snapshot_fingerprint: pricing,
-        targets,
-      }),
-    )
-  ) {
-    fail('Canonical matrix fingerprint does not match its exact 40 targets.');
-  }
-  return {
-    target_count: 40,
-    catalog_digest: catalog,
-    pricing_snapshot_fingerprint: pricing,
-    matrix_fingerprint: fingerprint,
-    targets,
-  };
 }
 
 function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
@@ -857,116 +908,29 @@ function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
     ],
     'Frozen installed-package identity',
   );
-  if (identity.target_count !== 40 || !Array.isArray(identity.targets)) {
-    fail('Frozen installed-package identity must contain exactly 40 targets.');
-  }
-  const targets = identity.targets.map((targetValue, index) => {
-    const target = jsonRecord(
-      targetValue,
-      `Frozen installed-package target ${index}`,
-    );
-    exactKeys(
-      target,
-      [
-        'adapter_id',
-        'binding_id',
-        'catalog_digest',
-        'credential_family',
-        'expected_effective_identity',
-        'key',
-        'pricing_snapshot_fingerprint',
-        'requested_identity',
-      ],
-      `Frozen installed-package target ${index}`,
-    );
-    return {
-      key: boundedString(target.key, `Frozen target ${index} key`, 256),
-      adapter_id: boundedString(
-        target.adapter_id,
-        `Frozen target ${index} adapter_id`,
-        256,
-      ),
-      binding_id: boundedString(
-        target.binding_id,
-        `Frozen target ${index} binding_id`,
-        256,
-      ),
-      catalog_digest: catalogDigest(
-        target.catalog_digest,
-        `Frozen target ${index} catalog_digest`,
-      ),
-      requested_identity: structuredClone(
-        jsonRecord(
-          target.requested_identity,
-          `Frozen target ${index} requested_identity`,
-        ),
-      ),
-      expected_effective_identity: structuredClone(
-        jsonRecord(
-          target.expected_effective_identity,
-          `Frozen target ${index} expected_effective_identity`,
-        ),
-      ),
-      credential_family: boundedString(
-        target.credential_family,
-        `Frozen target ${index} credential_family`,
-        256,
-      ),
-      pricing_snapshot_fingerprint: sha256(
-        target.pricing_snapshot_fingerprint,
-        `Frozen target ${index} pricing_snapshot_fingerprint`,
-      ),
-    };
-  });
-  const keys = targets.map((target) => target.key);
-  if (
-    targets.length !== 40 ||
-    new Set(keys).size !== 40 ||
-    canonicalJson(keys) !== canonicalJson([...keys].sort(compareText))
-  ) {
-    fail('Frozen installed-package targets must be unique and sorted.');
-  }
-  const catalog = catalogDigest(
+  return parseMatrixCore(
+    identity.targets,
+    identity.target_count,
     identity.catalog_digest,
-    'Frozen catalog digest',
-  );
-  const pricing = sha256(
     identity.pricing_snapshot_fingerprint,
-    'Frozen pricing snapshot fingerprint',
-  );
-  if (
-    targets.some(
-      (target) =>
-        target.catalog_digest !== catalog ||
-        target.pricing_snapshot_fingerprint !== pricing,
-    )
-  ) {
-    fail('Frozen target matrix fingerprints differ from their matrix.');
-  }
-  const fingerprint = sha256(
     identity.matrix_fingerprint,
-    'Frozen matrix fingerprint',
+    {
+      targetRecord: (index) => `Frozen installed-package target ${index}`,
+      targetField: (index, _key, field) => `Frozen target ${index} ${field}`,
+      targetsArray:
+        'Frozen installed-package identity must contain exactly 40 targets.',
+      count:
+        'Frozen installed-package identity must contain exactly 40 targets.',
+      ordering: 'Frozen installed-package targets must be unique and sorted.',
+      catalog: 'Frozen catalog digest',
+      pricing: 'Frozen pricing snapshot fingerprint',
+      consistency:
+        'Frozen target matrix fingerprints differ from their matrix.',
+      fingerprint: 'Frozen matrix fingerprint',
+      fingerprintMismatch:
+        'Frozen matrix fingerprint does not match its exact 40 targets.',
+    },
   );
-  if (
-    fingerprint !==
-    sha256Bytes(
-      canonicalJson({
-        schema_version: 1,
-        catalog_digest: catalog,
-        pricing_snapshot_fingerprint: pricing,
-        targets,
-      }),
-    )
-  ) {
-    fail('Frozen matrix fingerprint does not match its exact 40 targets.');
-  }
-  return {
-    target_count: 40,
-    catalog_digest: catalog,
-    pricing_snapshot_fingerprint: pricing,
-    matrix_fingerprint: fingerprint,
-    targets,
-  };
 }
 
 export function assertReleaseMatrixParity(
@@ -1506,7 +1470,7 @@ function parseFrozenPackage(value: unknown): FrozenPackageManifest {
     'Frozen candidate version',
     128,
   );
-  assertReleaseCandidateVersion(version);
+  assertReleaseVersion(version);
   const gitSha = boundedString(candidate.git_sha, 'Frozen Git SHA', 40);
   const gitTree = boundedString(candidate.git_tree, 'Frozen Git tree', 40);
   if (!/^[0-9a-f]{40}$/.test(gitSha) || !/^[0-9a-f]{40}$/.test(gitTree)) {

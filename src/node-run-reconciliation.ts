@@ -333,13 +333,24 @@ export class RunReconciliationService {
           resolverFailed = true;
         }
         if (resolverFailed) {
+          const persisted = this.persistRetrievalFailure(
+            runDir,
+            report.id,
+            task.taskId,
+            DIAGNOSTIC.retrieveFailed,
+            false,
+          );
           const failed = taskResultFromReport(
             report.id,
-            report,
+            persisted?.manifest.providers.find(
+              (candidate) =>
+                candidate.id === report.id &&
+                candidate.task?.taskId === task.taskId,
+            ) ?? report,
             false,
             false,
             'error',
-            DIAGNOSTIC.retrieveFailed,
+            persisted ? DIAGNOSTIC.retrieveFailed : DIAGNOSTIC.persistFailed,
           );
           if (failed) outcomes.set(key, failed);
           continue;
@@ -370,38 +381,71 @@ export class RunReconciliationService {
         try {
           providerResult = await provider.retrieve(handle);
         } catch {
+          const persisted = this.persistRetrievalFailure(
+            runDir,
+            report.id,
+            task.taskId,
+            DIAGNOSTIC.retrieveFailed,
+            false,
+          );
           const failed = taskResultFromReport(
             report.id,
-            report,
+            persisted?.manifest.providers.find(
+              (candidate) =>
+                candidate.id === report.id &&
+                candidate.task?.taskId === task.taskId,
+            ) ?? report,
             false,
             false,
             'error',
-            DIAGNOSTIC.retrieveFailed,
+            persisted ? DIAGNOSTIC.retrieveFailed : DIAGNOSTIC.persistFailed,
           );
           if (failed) outcomes.set(key, failed);
           continue;
         }
         if (isRecord(providerResult) && providerResult.error !== undefined) {
+          const persisted = this.persistRetrievalFailure(
+            runDir,
+            report.id,
+            task.taskId,
+            DIAGNOSTIC.resultError,
+            true,
+          );
           const failed = taskResultFromReport(
             report.id,
-            report,
+            persisted?.manifest.providers.find(
+              (candidate) =>
+                candidate.id === report.id &&
+                candidate.task?.taskId === task.taskId,
+            ) ?? report,
             false,
             false,
             'error',
-            DIAGNOSTIC.resultError,
+            persisted ? DIAGNOSTIC.resultError : DIAGNOSTIC.persistFailed,
           );
           if (failed) outcomes.set(key, failed);
           continue;
         }
         const normalized = normalizeSuccess(providerResult, report.id);
         if ('error' in normalized) {
+          const persisted = this.persistRetrievalFailure(
+            runDir,
+            report.id,
+            task.taskId,
+            normalized.error,
+            true,
+          );
           const failed = taskResultFromReport(
             report.id,
-            report,
+            persisted?.manifest.providers.find(
+              (candidate) =>
+                candidate.id === report.id &&
+                candidate.task?.taskId === task.taskId,
+            ) ?? report,
             false,
             false,
             'error',
-            normalized.error,
+            persisted ? normalized.error : DIAGNOSTIC.persistFailed,
           );
           if (failed) outcomes.set(key, failed);
           continue;
@@ -419,13 +463,24 @@ export class RunReconciliationService {
           }
           metering = buildProviderMetering(report.id, config, usage);
         } catch {
+          const persisted = this.persistRetrievalFailure(
+            runDir,
+            report.id,
+            task.taskId,
+            DIAGNOSTIC.configInvalid,
+            true,
+          );
           const failed = taskResultFromReport(
             report.id,
-            report,
+            persisted?.manifest.providers.find(
+              (candidate) =>
+                candidate.id === report.id &&
+                candidate.task?.taskId === task.taskId,
+            ) ?? report,
             false,
             false,
             'error',
-            DIAGNOSTIC.configInvalid,
+            persisted ? DIAGNOSTIC.configInvalid : DIAGNOSTIC.persistFailed,
           );
           if (failed) outcomes.set(key, failed);
           continue;
@@ -656,5 +711,28 @@ export class RunReconciliationService {
     const at = this.readClockOrNull();
     if (at === null) return null;
     return this.repository.failUnretrievedTask(runDir, providerId, taskId, at);
+  }
+
+  private persistRetrievalFailure(
+    runDir: string,
+    providerId: string,
+    taskId: string,
+    diagnostic: string,
+    terminal: boolean,
+  ): RunArtifactSnapshot | null {
+    const at = this.readClockOrNull();
+    if (at === null) return null;
+    try {
+      return this.repository.recordRetrievalFailure(
+        runDir,
+        providerId,
+        taskId,
+        diagnostic,
+        at,
+        terminal,
+      );
+    } catch {
+      return null;
+    }
   }
 }

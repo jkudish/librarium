@@ -23,14 +23,15 @@ import { buildCanonicalValidationMatrix } from '../src/node-live-validation.js';
 import { createFilesystemCandidateAuthority } from '../src/node-live-validation-binding.js';
 import {
   assembleReleaseCandidate,
-  assertReleaseCandidateVersion,
   assertReleaseMatrixParity,
+  assertReleaseVersion,
   buildFrozenReleasePackage,
   freezeReleasePackage,
   RELEASE_CANDIDATE_RECORD_NAMES,
   RELEASE_CANDIDATE_SEA_TARGETS,
   releaseCandidateArtifactArguments,
   releaseCandidateInternals,
+  verifyFrozenReleasePackage,
   verifyReleaseCandidate,
 } from '../src/node-release-candidate.js';
 
@@ -356,11 +357,11 @@ function updateRecordReference(
 }
 
 describe('release candidate artifact contract', () => {
-  it('accepts only strict positive RC versions', () => {
-    expect(() => assertReleaseCandidateVersion('1.2.3-rc.1')).not.toThrow();
-    expect(() => assertReleaseCandidateVersion('0.0.0-rc.20')).not.toThrow();
+  it('accepts only exact stable or strict positive RC versions', () => {
+    expect(() => assertReleaseVersion('1.2.3')).not.toThrow();
+    expect(() => assertReleaseVersion('1.2.3-rc.1')).not.toThrow();
+    expect(() => assertReleaseVersion('0.0.0-rc.20')).not.toThrow();
     for (const invalid of [
-      '1.2.3',
       'v1.2.3-rc.1',
       '1.2.3-rc.0',
       '1.2.3-rc.01',
@@ -368,9 +369,7 @@ describe('release candidate artifact contract', () => {
       '1.2.3-RC.1',
       '1.2.3-rc.1+build',
     ]) {
-      expect(() => assertReleaseCandidateVersion(invalid)).toThrow(
-        'X.Y.Z-rc.N',
-      );
+      expect(() => assertReleaseVersion(invalid)).toThrow('X.Y.Z');
     }
   });
 
@@ -378,6 +377,91 @@ describe('release candidate artifact contract', () => {
     const actual = buildCanonicalValidationMatrix();
     expect(actual.catalog_digest).toMatch(/^fnv1a64\.1:[0-9a-f]{16}$/);
     expect(() => assertReleaseMatrixParity(actual, actual)).not.toThrow();
+  });
+
+  it.each([
+    [
+      'duplicate targets',
+      (value: any) => (value.targets[1] = value.targets[0]),
+      'exact sorted 40-profile matrix',
+    ],
+    [
+      'unsorted targets',
+      (value: any) => value.targets.reverse(),
+      'exact sorted 40-profile matrix',
+    ],
+    [
+      'wrong target count',
+      (value: any) => value.targets.pop(),
+      'exact sorted 40-profile matrix',
+    ],
+    [
+      'per-target digest drift',
+      (value: any) => {
+        value.targets[0].catalog_digest = 'fnv1a64.1:dddddddddddddddd';
+      },
+      'target matrix fingerprints differ',
+    ],
+    [
+      'matrix fingerprint drift',
+      (value: any) => (value.fingerprint = `sha256:${'d'.repeat(64)}`),
+      'matrix fingerprint does not match',
+    ],
+  ])('rejects malformed source matrix: %s', (_label, mutate, message) => {
+    const malformed = matrix();
+    mutate(malformed);
+    expect(() => assertReleaseMatrixParity(malformed, matrix())).toThrow(
+      message,
+    );
+  });
+
+  it.each([
+    [
+      'duplicate targets',
+      (value: any) =>
+        (value.installed_package.targets[1] =
+          value.installed_package.targets[0]),
+      'targets must be unique and sorted',
+    ],
+    [
+      'unsorted targets',
+      (value: any) => value.installed_package.targets.reverse(),
+      'targets must be unique and sorted',
+    ],
+    [
+      'wrong target count',
+      (value: any) => (value.installed_package.target_count = 39),
+      'must contain exactly 40 targets',
+    ],
+    [
+      'per-target digest drift',
+      (value: any) => {
+        value.installed_package.targets[0].catalog_digest =
+          'fnv1a64.1:dddddddddddddddd';
+      },
+      'target matrix fingerprints differ',
+    ],
+    [
+      'matrix fingerprint drift',
+      (value: any) => {
+        value.installed_package.matrix_fingerprint = `sha256:${'d'.repeat(64)}`;
+      },
+      'matrix fingerprint does not match',
+    ],
+  ])('rejects malformed frozen matrix: %s', async (_label, mutate, message) => {
+    const root = temporaryRoot();
+    const { repository, tarball } = fixtureRepository(root);
+    const packageRoot = join(root, 'frozen-package');
+    await freezeReleasePackage({
+      repository_root: repository,
+      output_root: packageRoot,
+      tarball,
+      dependencies: fixtureDependencies,
+    });
+    mutateCanonical(join(packageRoot, 'frozen-package.json'), mutate);
+    await expect(
+      verifyFrozenReleasePackage(packageRoot, repository, fixtureDependencies),
+    ).rejects.toThrow(message);
   });
 
   it('parses the installed matrix receipt without executing packaged code', async () => {

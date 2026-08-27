@@ -166,7 +166,6 @@ export function projectCanonicalRunPresentation(
         metaFile: earlierFiles.metaFile,
         error: earlierError,
       });
-      providerContents[earlierFiles.outputFile] = '';
       results.push({
         provider: earlierId,
         tier: tierFor(earlier.profile.result_kind),
@@ -233,7 +232,7 @@ export function projectCanonicalRunPresentation(
       ...(fallbackFor && { fallbackFor }),
     };
     reports.push(report);
-    providerContents[files.outputFile] = content;
+    if (projected) providerContents[files.outputFile] = content;
     results.push({
       provider: id,
       tier,

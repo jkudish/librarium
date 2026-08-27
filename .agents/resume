@@ -7,4 +7,6 @@ set -euo pipefail
 # Verify librarium is still on PATH (global installs survive orb resume).
 if ! command -v librarium >/dev/null 2>&1; then
   echo "[librarium] librarium not on PATH — run .agents/setup to reinstall"
+elif [[ "$(librarium --version)" != 2.* ]]; then
+  echo "[librarium] Librarium 2.x is required — run .agents/setup to reinstall the checkout"
 fi

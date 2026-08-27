@@ -100,7 +100,8 @@ const SCRIPT_TEST_SCHEMA = z.object({
   error: z.string().optional(),
 });
 
-const SCRIPT_PROTOCOL_VERSION = 1;
+/** Public wire version used by executable script custom providers. */
+export const SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION = 1 as const;
 const DEFAULT_SCRIPT_OPERATION_TIMEOUT_SECONDS = 30;
 const DEFAULT_SCRIPT_RETRIEVE_TIMEOUT_SECONDS = 120;
 
@@ -432,7 +433,7 @@ async function callScriptOperation<T>({
   schema: z.ZodSchema<T>;
 }): Promise<T> {
   const envelope: ScriptRequestEnvelope = {
-    protocolVersion: SCRIPT_PROTOCOL_VERSION,
+    protocolVersion: SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION,
     operation,
     providerId,
     query,

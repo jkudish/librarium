@@ -1,36 +1,59 @@
-# Release candidate promotion recovery
+# Immutable release promotion and recovery
 
-This procedure is preregistered for a future promotion task. The release-candidate workflow does not publish, create or move tags, create GitHub releases, upload release assets, or write the Homebrew tap.
+The release-candidate workflow certifies exact bytes but has no publication authority. The release workflow promotes those bytes without changing source, package metadata, tags, artifacts, or provenance. It is owner-only and uses the `release` environment.
 
-## Required recovery record
+## Required repository setup
 
-Before promotion, record these values from the verified candidate:
+Before publication, a repository administrator must create the `release` environment in **Settings → Environments** and configure:
 
-- full Git SHA and tree;
-- committed `X.Y.Z-rc.N` version;
-- candidate fingerprint;
-- npm tarball path, size, and SHA-256;
-- five SEA paths, sizes, and SHA-256 values;
-- five live-validation record hashes;
-- `candidate.json`, `SHA256SUMS`, and provenance hashes;
-- promotion workflow revision and run URL.
+- at least one required reviewer; and
+- deployment restricted to protected branches; and
+- an environment secret named `NPM_TOKEN`, containing a granular npm token with write access to `librarium` and bypass-2FA enabled.
 
-Do not start or resume promotion when any value differs from the preregistered record.
+The token is exposed only to the recovery step that restores an expected npm dist-tag. npm trusted-publishing OIDC authenticates `npm publish`, but not `npm dist-tag add`; the latter therefore requires traditional authentication. The workflow performs a read-only GitHub API preflight and fails before candidate checkout when either environment-protection rule is absent. Merely writing `environment: release` in workflow YAML does not protect it: GitHub can auto-create an unprotected environment. Repository settings and secrets are therefore required publication boundaries and are not configured by this repository.
 
-## Forward-only rules
+## Certification and version identity
 
-1. Stop at the first failed or uncertain publication step. Preserve the workflow logs and exact candidate bytes.
-2. Inspect each distribution channel without changing it. Record the npm version and integrity, tag target, GitHub release and asset hashes, and Homebrew formula commit and checksums.
-3. Never unpublish npm, force-move a tag, delete or overwrite a release asset, replace provenance, or rewrite Homebrew history.
-4. Treat an existing object with the expected identity and bytes as complete. Resume only at the first later incomplete step. Do not republish it.
-5. Treat an existing object with a conflicting SHA, integrity, version, tag target, asset body, checksum, or provenance subject as terminal for that version. Stop promotion. Commit the next `rc.N`, build a new candidate, and repeat certification.
-6. If npm is complete but later channels are incomplete, keep the published package immutable and finish the matching tag, release, assets, and formula in order from the same candidate.
-7. If the tag is correct but the release is incomplete, keep the tag. Add only absent release data whose expected name and checksum are not already present.
-8. If all release assets are correct but Homebrew is incomplete, add a new forward Homebrew commit that references the already published immutable assets. Do not amend or force-push the tap.
-9. If the promotion runner loses state, reconstruct it only from the preregistered recovery record and read-only channel inspection. Do not infer success from a previous step exit code.
+Certification requires an explicit, default-free `release_kind`:
 
-## Resume gate
+- `rc` requires the committed package and lock identity `X.Y.Z-rc.N` and publishes npm with dist-tag `rc` plus a prerelease GitHub release;
+- `stable` requires the separately committed package and lock identity `X.Y.Z` and publishes npm with dist-tag `latest` plus a non-prerelease GitHub release.
 
-A future promotion task can resume only after two people review the recovery record and channel inventory. The resumed workflow must accept the frozen candidate SHA and hashes. It must reject a mutable version, rebuilt bytes, missing provenance, duplicate names, and conflicting remote state.
+Both modes run the same package, SEA, installer, Homebrew, and distribution proofs and produce the same immutable candidate archive shape. Promotion derives behavior from the certified version and rejects a mismatched kind or dist-tag. It never renames an RC tarball to stable: npm package identity is inside the bytes, so stable publication requires a newly reviewed stable-version commit and successful stable certification run.
 
-The release-candidate workflow is not promotion authority. Its artifacts are evidence for the later explicitly approved promotion task.
+Record all four promotion inputs from one successful certification run: the full protected-main SHA, `sha256:...` candidate fingerprint, SHA-256 of `candidate.tar.gz`, and certification run ID. Before any write, promotion verifies that run, archive checksum, candidate contents, and staged publication bytes.
+
+Candidate workflow artifacts are retained for 30 days. Complete promotion within that window. An expired artifact cannot be reconstructed or substituted; certify a new immutable candidate instead.
+
+## Cross-channel identity
+
+The workflow repeatedly inventories providers and fails closed unless:
+
+- a new promotion's protected `main` tip equals the candidate SHA;
+- npm is absent or its downloaded tarball SHA-256 equals the candidate tarball, and the expected `rc` or `latest` dist-tag is exact or can move only forward;
+- an RC does not own npm's `latest` tag;
+- the Git tag is absent or resolves to the candidate SHA;
+- the GitHub release is absent or targets the candidate SHA, with no unexpected, duplicate, or mismatched asset;
+- a Homebrew formula for this exact version is absent or byte-identical to the derived formula.
+
+The GitHub release publishes the npm tarball, five SEA binaries, `candidate.json`, provenance, and `SHA256SUMS`. The checksum manifest records candidate SHA, fingerprint, and version plus every asset digest. The standalone installer verifies those identity headers and the selected SEA digest before replacement, then verifies the binary-reported version. Homebrew records the same candidate SHA, fingerprint, version, and SEA digests.
+
+## Forward-only order
+
+Promotion advances through exact npm bytes and expected dist-tag, immutable Git tag, GitHub release, absent GitHub assets, then one Homebrew commit. There is no force tag, force push, asset clobber, ignored push failure, source mutation, or rebuild. Provider races fail rather than overwrite.
+
+## Recovery after `main` advances
+
+Use `promotion_mode: new` for first publication. It requires current protected `main` to equal the certified candidate SHA.
+
+Use `promotion_mode: recover` only after an uncertain or partial npm write. Recovery requires all of these invariants:
+
+1. the same successful certification run ID, candidate SHA, fingerprint, and archive hash are supplied;
+2. the workflow checks out that exact candidate and verifies its unchanged archive bytes;
+3. the candidate remains an ancestor of current protected `main`;
+4. npm already contains that exact candidate tarball; recovery cannot initiate npm publication after `main` advances;
+5. every existing channel object matches the same candidate, and reconciliation resumes only at an absent later boundary.
+
+If npm bytes exist but their expected dist-tag is missing or points to an older version, recovery may restore that tag to the exact candidate. A newer expected tag, RC on `latest`, mismatched tarball, tag target, release target, asset, or same-version Homebrew formula is a terminal conflict for that version.
+
+Stop after an uncertain write and preserve the run URL, inputs, `promotion.json`, and inventory. Inspect channels read-only; do not delete, replace, unpublish, amend, or force-push. Out-of-order state is a conflict, not permission to skip ahead. No recovery approval itself authorizes workflow dispatch, publication, tagging, deployment, or repository-settings changes.

@@ -37,6 +37,9 @@ describe('CLI program factory', () => {
       second.commands.map((item) => item.name()),
     );
     expect(first.commands.map((item) => item.name())).toContain('mcp');
+    expect(first.commands.map((item) => item.name())).not.toContain(
+      'install-plugin',
+    );
     expect(process.exitCode).toBeUndefined();
   });
 

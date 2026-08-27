@@ -3,7 +3,6 @@ import type {
   HistoricalArtifactReaderSchema,
   RunManifestArtifactSchema,
 } from './artifacts/index.js';
-import type { CustomProviderExchangeSchema } from './custom-provider/index.js';
 import type { ExecutionProfile, StructuredError } from './domain/index.js';
 import type {
   AttemptSchema,
@@ -670,52 +669,6 @@ export const representativeRunManifest = {
   request: representativeRequest,
   response: representativePartialResponse,
 } satisfies z.input<typeof RunManifestArtifactSchema>;
-
-export const representativeCustomProviderExchange = {
-  request: {
-    protocol_version: '1.0.0',
-    message_type: 'execute',
-    request_id: 'req-contract-001',
-    attempt_id: 'attempt-grounded-fallback',
-    sent_at: '2026-08-08T00:00:03Z',
-    query: 'What changed in the example market this week?',
-    profile: groundedFallbackProfile,
-    options: {
-      'com.example:resultLimit': 10,
-    },
-  },
-  response: {
-    protocol_version: '1.0.0',
-    message_type: 'result',
-    request_id: 'req-contract-001',
-    attempt_id: 'attempt-grounded-fallback',
-    emitted_at: '2026-08-08T00:00:05Z',
-    result: successfulResult,
-  },
-} satisfies z.input<typeof CustomProviderExchangeSchema>;
-
-export const representativeCustomProviderTerminalPollExchange = {
-  request: {
-    protocol_version: '1.0.0',
-    message_type: 'poll',
-    request_id: 'req-contract-001',
-    attempt_id: 'attempt-research-primary',
-    sent_at: '2026-08-08T00:00:10Z',
-    durable_handle: {
-      ...durableHandle,
-      last_observed_at: '2026-08-08T00:00:07Z',
-      status: 'running',
-    },
-  },
-  response: {
-    protocol_version: '1.0.0',
-    message_type: 'status',
-    request_id: 'req-contract-001',
-    attempt_id: 'attempt-research-primary',
-    emitted_at: '2026-08-08T00:00:10Z',
-    durable_handle: durableHandle,
-  },
-} satisfies z.input<typeof CustomProviderExchangeSchema>;
 
 export const representativeArtifactReader = {
   artifact_name: 'run_manifest',

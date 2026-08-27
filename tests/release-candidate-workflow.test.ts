@@ -123,6 +123,19 @@ describe('release-candidate workflow policy', () => {
           'actions/checkout@v6',
         ),
     ],
+    [
+      'default certification mode',
+      (source: string) =>
+        source.replace(
+          '        options:\n          - rc',
+          '        default: rc\n        options:\n          - rc',
+        ),
+    ],
+    [
+      'ambiguous certification modes',
+      (source: string) =>
+        source.replace('          - stable', '          - final'),
+    ],
   ])('rejects %s policy mutation', (_label, mutate) => {
     const source = readFileSync(workflowPath, 'utf8');
     expect(() =>
@@ -187,12 +200,14 @@ describe('release-candidate protected-main authority', () => {
         repository_root: fixture.root,
         candidate_sha: fixture.sha,
         protected_ref: 'refs/heads/main',
+        release_kind: 'rc',
         dispatch_ref: 'refs/heads/main',
         dispatch_ref_protected: 'true',
       }),
     ).toMatchObject({
       sha: fixture.sha,
       version: '2.0.0-rc.1',
+      release_kind: 'rc',
       artifact_prefix: `librarium-rc-${fixture.sha}`,
     });
   });
@@ -223,6 +238,7 @@ describe('release-candidate protected-main authority', () => {
         repository_root: fixture.root,
         candidate_sha: fixture.sha,
         protected_ref: 'refs/heads/main',
+        release_kind: 'rc',
         dispatch_ref: 'refs/heads/main',
         dispatch_ref_protected: 'true',
         ...change(fixture),
@@ -238,17 +254,36 @@ describe('release-candidate protected-main authority', () => {
         repository_root: dirty.root,
         candidate_sha: dirty.sha,
         protected_ref: 'refs/heads/main',
+        release_kind: 'rc',
       }),
     ).toThrow('exactly clean');
 
     const stable = fixtureRepository('2.0.0');
+    expect(
+      assertReleaseCandidateAuthority({
+        repository_root: stable.root,
+        candidate_sha: stable.sha,
+        protected_ref: 'refs/heads/main',
+        release_kind: 'stable',
+      }),
+    ).toMatchObject({ version: '2.0.0', release_kind: 'stable' });
     expect(() =>
       assertReleaseCandidateAuthority({
         repository_root: stable.root,
         candidate_sha: stable.sha,
         protected_ref: 'refs/heads/main',
+        release_kind: 'rc',
       }),
-    ).toThrow('X.Y.Z-rc.N');
+    ).toThrow('does not match explicit rc');
+
+    expect(() =>
+      assertReleaseCandidateAuthority({
+        repository_root: stable.root,
+        candidate_sha: stable.sha,
+        protected_ref: 'refs/heads/main',
+        release_kind: '',
+      }),
+    ).toThrow('explicitly rc or stable');
 
     const mismatch = fixtureRepository();
     const lockPath = join(mismatch.root, 'package-lock.json');
@@ -263,6 +298,7 @@ describe('release-candidate protected-main authority', () => {
         repository_root: mismatch.root,
         candidate_sha: mismatchSha,
         protected_ref: 'refs/heads/main',
+        release_kind: 'rc',
       }),
     ).toThrow('package-lock.json top-level and root package versions differ');
   });

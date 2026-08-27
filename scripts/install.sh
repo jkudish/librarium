@@ -15,6 +15,8 @@
 #   LIBRARIUM_INSTALL_DIR   — Installation directory (default: /usr/local/bin)
 #   LIBRARIUM_CANDIDATE     — Exact local candidate binary (requires the next two)
 #   LIBRARIUM_SHA256        — Expected SHA-256 for the local candidate
+#   LIBRARIUM_CANDIDATE_SHA — Optional expected release candidate Git SHA
+#   LIBRARIUM_CANDIDATE_FINGERPRINT — Optional expected candidate fingerprint
 
 set -eu
 
@@ -26,6 +28,7 @@ EXPECTED_SHA256="${LIBRARIUM_SHA256:-}"
 STAGE_FILE=""
 BACKUP_FILE=""
 DOWNLOAD_FILE=""
+MANIFEST_FILE=""
 DESTINATION="${INSTALL_DIR}/${BINARY_NAME}"
 REPLACED=0
 HAD_PRIOR=0
@@ -126,6 +129,9 @@ cleanup() {
   if [ -n "$DOWNLOAD_FILE" ]; then
     rm -f "$DOWNLOAD_FILE" 2>/dev/null || true
   fi
+  if [ -n "$MANIFEST_FILE" ]; then
+    rm -f "$MANIFEST_FILE" 2>/dev/null || true
+  fi
   if [ -n "$BACKUP_FILE" ] && [ "$REPLACED" -eq 0 ]; then
     privileged rm -f "$BACKUP_FILE" 2>/dev/null || true
   fi
@@ -157,8 +163,8 @@ validate_local_candidate() {
     echo "Error: LIBRARIUM_SHA256 must be exactly 64 lowercase hexadecimal characters" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$LIBRARIUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$'; then
-    echo "Error: local candidate version must use strict X.Y.Z-rc.N syntax" >&2
+  if ! printf '%s\n' "$LIBRARIUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'; then
+    echo "Error: local candidate version must use strict X.Y.Z or X.Y.Z-rc.N syntax" >&2
     exit 1
   fi
 }
@@ -218,19 +224,52 @@ main() {
   else
     echo "  From: ${DOWNLOAD_URL}"
     DOWNLOAD_FILE=$(mktemp)
+    MANIFEST_FILE=$(mktemp)
+    download "https://github.com/${REPO}/releases/download/v${VERSION}/SHA256SUMS" "$MANIFEST_FILE"
+    manifest_version=$(sed -n 's/^# librarium-version //p' "$MANIFEST_FILE")
+    manifest_sha=$(sed -n 's/^# librarium-candidate-sha //p' "$MANIFEST_FILE")
+    manifest_fingerprint=$(sed -n 's/^# librarium-candidate-fingerprint //p' "$MANIFEST_FILE")
+    if [ "$manifest_version" != "$VERSION" ]; then
+      echo "Error: Release checksum manifest version mismatch" >&2
+      exit 1
+    fi
+    if ! printf '%s\n' "$manifest_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+      echo "Error: Release checksum manifest candidate SHA is invalid" >&2
+      exit 1
+    fi
+    if ! printf '%s\n' "$manifest_fingerprint" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+      echo "Error: Release checksum manifest candidate fingerprint is invalid" >&2
+      exit 1
+    fi
+    if [ -n "${LIBRARIUM_CANDIDATE_SHA:-}" ] && [ "$manifest_sha" != "$LIBRARIUM_CANDIDATE_SHA" ]; then
+      echo "Error: Release candidate SHA mismatch" >&2
+      exit 1
+    fi
+    if [ -n "${LIBRARIUM_CANDIDATE_FINGERPRINT:-}" ] && [ "$manifest_fingerprint" != "$LIBRARIUM_CANDIDATE_FINGERPRINT" ]; then
+      echo "Error: Release candidate fingerprint mismatch" >&2
+      exit 1
+    fi
+    echo "  Candidate: ${manifest_sha} (${manifest_fingerprint})"
+    REMOTE_SHA256=$(awk -v name="$ASSET_NAME" '$2 == name {print $1}' "$MANIFEST_FILE")
+    REMOTE_COUNT=$(awk -v name="$ASSET_NAME" '$2 == name {count++} END {print count+0}' "$MANIFEST_FILE")
+    if [ "$REMOTE_COUNT" -ne 1 ] || ! printf '%s\n' "$REMOTE_SHA256" | grep -Eq '^[0-9a-f]{64}$'; then
+      echo "Error: Release checksum manifest has no unique checksum for ${ASSET_NAME}" >&2
+      exit 1
+    fi
     download "$DOWNLOAD_URL" "$DOWNLOAD_FILE"
     privileged cp "$DOWNLOAD_FILE" "$STAGE_FILE"
     rm -f "$DOWNLOAD_FILE"
     DOWNLOAD_FILE=""
+    rm -f "$MANIFEST_FILE"
+    MANIFEST_FILE=""
   fi
   echo "  To:   ${DESTINATION}"
 
-  if [ -n "$LOCAL_CANDIDATE" ]; then
-    actual_sha256=$(sha256_file "$STAGE_FILE")
-    if [ "$actual_sha256" != "$EXPECTED_SHA256" ]; then
-      echo "Error: Candidate checksum mismatch" >&2
-      exit 1
-    fi
+  actual_sha256=$(sha256_file "$STAGE_FILE")
+  REQUIRED_SHA256="${EXPECTED_SHA256:-${REMOTE_SHA256:-}}"
+  if [ "$actual_sha256" != "$REQUIRED_SHA256" ]; then
+    echo "Error: Candidate checksum mismatch" >&2
+    exit 1
   fi
 
   privileged chmod 755 "$STAGE_FILE"

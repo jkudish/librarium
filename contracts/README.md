@@ -40,6 +40,6 @@ TypeScript execution schemas and provider adapters remain outside the
 PHP-vendored snapshot. PHP `run()` and `queue()` methods, Node persistence, and
 every other language-specific public API are also outside it. For runtime
 artifacts, use the TypeScript `ARTIFACTS_VERSION` contract (currently `1.0.0`)
-and its separate artifact schemas. For custom provider execution, use the
-separate strict `CUSTOM_PROVIDER_PROTOCOL_VERSION` (currently `1.0.0`). Neither
-version changes the terminal snapshot by implication.
+and its separate artifact schemas. Custom provider execution uses the npm and
+script interfaces documented in `docs/provider-development.md`; it is not part
+of this terminal snapshot and has no separate exchange-schema contract.

@@ -16,9 +16,10 @@ the confirmation, failures, raw artifacts, scores, and report stay together.
   supporting evidence.
 - `live`: 12 freshness-sensitive questions. Every question has a validation
   date, expiry date, cadence, validator, and revalidation instructions.
-- A full run covers 39 individual providers, all 8 built-in named groups, and
-  3 curated candidate groups. Candidate groups are deliberately bounded; the
-  runner never searches every provider combination.
+- A full run covers every provider declared in `benchmark/providers.json`, all
+  built-in named groups, and the curated candidate groups in that catalog.
+  Candidate groups are deliberately bounded; the runner never searches every
+  provider combination.
 
 Run corpus and target validation with:
 

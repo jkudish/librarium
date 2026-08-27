@@ -5,6 +5,20 @@ import {
 } from '../constants.js';
 
 const DEFAULT_MAX_RETRY_DELAY_MS = 30_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+function validatedTimeout(timeout: number): number {
+  if (
+    !Number.isSafeInteger(timeout) ||
+    timeout <= 0 ||
+    timeout > MAX_TIMER_DELAY_MS
+  ) {
+    throw new TypeError(
+      `HTTP timeout must be a positive integer no greater than ${MAX_TIMER_DELAY_MS}ms`,
+    );
+  }
+  return timeout;
+}
 
 interface RetrySettings {
   /** Total attempts, including the initial request. */
@@ -26,7 +40,8 @@ export interface HttpRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
   body?: unknown;
-  timeout?: number; // ms
+  /** Per-attempt timeout in milliseconds; retry delays are excluded. */
+  timeout?: number;
   signal?: AbortSignal;
   /**
    * GET requests retry transient failures by default. Mutating requests do not
@@ -119,6 +134,7 @@ export async function httpRequest<T = unknown>(
     timeout = 30000,
     signal,
   } = options;
+  const timeoutMs = validatedTimeout(timeout);
   const retry = resolveRetryPolicy(method, options.retry);
   let lastError: Error | undefined;
   let retryDelayMs = 0;
@@ -134,7 +150,7 @@ export async function httpRequest<T = unknown>(
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, timeout);
+    }, timeoutMs);
 
     if (signal?.aborted) {
       clearTimeout(timeoutId);
@@ -201,7 +217,7 @@ export async function httpRequest<T = unknown>(
       }
       if (isAbortError(error)) {
         lastError = timedOut
-          ? new HttpRequestTimeoutError(timeout)
+          ? new HttpRequestTimeoutError(timeoutMs)
           : new HttpRequestAbortedError();
       } else {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -240,6 +256,7 @@ export async function httpStreamRequest(
     timeout = 30000,
     signal,
   } = options;
+  const timeoutMs = validatedTimeout(timeout);
   const retryMode = (options.retry as HttpRetryPolicy | undefined)?.mode;
   if (retryMode && retryMode !== 'never') {
     throw new TypeError('Streaming requests only support retry mode "never"');
@@ -259,7 +276,7 @@ export async function httpStreamRequest(
   const timeoutId = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, timeout);
+  }, timeoutMs);
   signal?.addEventListener('abort', onExternalAbort, { once: true });
 
   const start = performance.now();
@@ -293,7 +310,7 @@ export async function httpStreamRequest(
             controller,
             signal,
             () => timedOut,
-            timeout,
+            timeoutMs,
             cleanup,
           )
         : emptyResponseStream(cleanup),
@@ -305,7 +322,7 @@ export async function httpStreamRequest(
     if (signal?.aborted) throw new HttpRequestAbortedError();
     if (isAbortError(error)) {
       throw timedOut
-        ? new HttpRequestTimeoutError(timeout)
+        ? new HttpRequestTimeoutError(timeoutMs)
         : new HttpRequestAbortedError();
     }
     throw error instanceof Error ? error : new Error(String(error));

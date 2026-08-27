@@ -12,6 +12,7 @@ import type { ExecutionProfile } from './contracts/domain/index.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './core/reserved-provider-ids.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
+export { SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION } from './adapters/custom.js';
 export type {
   ApprovalGate,
   FrozenCanonicalExecutor,

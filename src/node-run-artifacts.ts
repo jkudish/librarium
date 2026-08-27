@@ -122,6 +122,7 @@ const RETRIEVED_SENTINEL = Symbol('run-artifact-already-retrieved');
 const TASK_ALREADY_RETRIEVED_SENTINEL = Symbol(
   'run-artifact-task-already-retrieved',
 );
+const MAX_RETRIEVAL_ATTEMPTS = 3;
 
 const RESERVED_ARTIFACT_NAMES = new Set([
   'run.json',
@@ -743,6 +744,62 @@ export class RunArtifactRepository {
     return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
   }
 
+  /** Persist a retrieval failure and its monotonic attempt audit atomically. */
+  recordRetrievalFailure(
+    runDir: string,
+    providerId: string,
+    taskId: string,
+    diagnostic: string,
+    now: number,
+    terminal: boolean,
+  ): RunArtifactSnapshot {
+    const canonicalRunDir = this.assertRunDirectory(runDir);
+    this.assertMutationTimestamp(now);
+    if (!isSafeString(diagnostic))
+      throw new Error('Unsafe retrieval diagnostic');
+    try {
+      this.mutateManifestImpl(canonicalRunDir, (manifest) => {
+        const report = manifest.providers.find(
+          (candidate) =>
+            candidate.id === providerId && candidate.task?.taskId === taskId,
+        );
+        const task = report?.task;
+        if (!report || !task) {
+          throw new Error(
+            `Task ${providerId}/${taskId} is not recorded in run.json`,
+          );
+        }
+        if (
+          task.retrievedAt !== undefined ||
+          task.status === 'failed' ||
+          task.status === 'cancelled'
+        ) {
+          throw TASK_ALREADY_RETRIEVED_SENTINEL;
+        }
+        const attempts = (task.retrievalAttempts ?? 0) + 1;
+        const terminalFailure = terminal || attempts >= MAX_RETRIEVAL_ATTEMPTS;
+        report.task = {
+          ...task,
+          ...(terminalFailure ? { status: 'failed' as const } : {}),
+          retrievalAttempts: attempts,
+          lastRetrievalAttemptAt: Math.max(
+            task.lastRetrievalAttemptAt ?? 0,
+            now,
+          ),
+          lastRetrievalError: diagnostic,
+        };
+        if (terminalFailure) {
+          report.status = 'error';
+          report.error = diagnostic;
+        }
+        applyRunLifecycle(manifest, now);
+      });
+    } catch (error) {
+      if (error !== TASK_ALREADY_RETRIEVED_SENTINEL) throw error;
+    }
+    return this.readSnapshot(canonicalRunDir, { view: 'authoritative' });
+  }
+
   /**
    * Write one completed provider result and fold it into run.json under the
    * existing manifest lock.  The write-ahead order is deliberate: output and
@@ -1104,6 +1161,9 @@ export class RunArtifactRepository {
         'retrievedAt',
         'providerStatus',
         'lastPollError',
+        'retrievalAttempts',
+        'lastRetrievalAttemptAt',
+        'lastRetrievalError',
       ]),
       'report task',
     );
@@ -1121,7 +1181,27 @@ export class RunArtifactRepository {
         throw new Error(`Retrieved report task ${key} is invalid`);
       }
     }
-    for (const key of ['providerStatus', 'lastPollError'] as const) {
+    if (
+      value.retrievalAttempts !== undefined &&
+      (typeof value.retrievalAttempts !== 'number' ||
+        !Number.isSafeInteger(value.retrievalAttempts) ||
+        value.retrievalAttempts < 0)
+    ) {
+      throw new Error('Retrieved report task retrievalAttempts is invalid');
+    }
+    if (
+      value.lastRetrievalAttemptAt !== undefined &&
+      !isFiniteNonnegative(value.lastRetrievalAttemptAt)
+    ) {
+      throw new Error(
+        'Retrieved report task lastRetrievalAttemptAt is invalid',
+      );
+    }
+    for (const key of [
+      'providerStatus',
+      'lastPollError',
+      'lastRetrievalError',
+    ] as const) {
       if (value[key] !== undefined && !isSafeString(value[key])) {
         throw new Error(`Retrieved report task ${key} is unsafe`);
       }
@@ -1156,7 +1236,13 @@ export class RunArtifactRepository {
         status: 'completed',
         completedAt: task.completedAt ?? commitNow,
         retrievedAt: commitNow,
+        retrievalAttempts: (task.retrievalAttempts ?? 0) + 1,
+        lastRetrievalAttemptAt: Math.max(
+          task.lastRetrievalAttemptAt ?? 0,
+          commitNow,
+        ),
         lastPollError: undefined,
+        lastRetrievalError: undefined,
       },
     };
   }

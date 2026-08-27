@@ -1,3 +1,5 @@
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
 import { parseConfigAction } from '../cli-parsers.js';
@@ -8,11 +10,20 @@ import {
   mergeConfigs,
   saveConfig,
 } from '../core/config.js';
+import type {
+  PreparationIssue,
+  PreparationNotice,
+} from '../core/research-request.js';
+import {
+  ConfigV2FileError,
+  loadConfigV2,
+  saveConfigV2,
+} from '../node-config-v2.js';
 import type { Config, Defaults } from '../types.js';
 import { runOnboardingWizard } from './onboarding.js';
 
 export function registerConfigCommand(program: Command): void {
-  program
+  const configCommand = program
     .command('config')
     .description('Print or edit librarium configuration')
     .argument('[action]', 'Use "menu" to edit settings', parseConfigAction)
@@ -55,6 +66,138 @@ export function registerConfigCommand(program: Command): void {
         process.exitCode = 1;
       }
     });
+
+  configCommand
+    .command('migrate')
+    .description('Preview or explicitly write a v1-to-v2 config migration')
+    .requiredOption('--from <path>', 'Path to the global v1 or v2 config')
+    .option('--project <path>', 'Optional project config to merge')
+    .option(
+      '--output <path>',
+      'Explicit destination for the migrated v2 config',
+    )
+    .option('--force', 'Replace an existing destination')
+    .action((opts) => {
+      runConfigMigration(opts);
+    });
+}
+
+interface ConfigMigrationCommandOptions {
+  readonly from: string;
+  readonly project?: string;
+  readonly output?: string;
+  readonly force?: boolean;
+}
+
+function writeDiagnostics(
+  level: 'issue' | 'notice',
+  diagnostics: readonly (PreparationIssue | PreparationNotice)[],
+): void {
+  for (const diagnostic of diagnostics) {
+    process.stderr.write(`${JSON.stringify({ level, ...diagnostic })}\n`);
+  }
+}
+
+function commandIssue(code: string, path: string, message: string): void {
+  writeDiagnostics('issue', [{ code, phase: 'migration', path, message }]);
+  process.exitCode = 1;
+}
+
+function existingPathsMatch(left: string, right: string): boolean {
+  const leftReal = realpathSync.native(left);
+  const rightReal = realpathSync.native(right);
+  const normalize =
+    process.platform === 'win32'
+      ? (path: string) => path.toLowerCase()
+      : (path: string) => path;
+  if (normalize(leftReal) === normalize(rightReal)) return true;
+  if (process.platform === 'win32') return false;
+
+  const leftStat = statSync(left);
+  const rightStat = statSync(right);
+  return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+}
+
+function runConfigMigration(opts: ConfigMigrationCommandOptions): void {
+  const globalPath = resolve(opts.from);
+  const projectPath =
+    opts.project === undefined ? undefined : resolve(opts.project);
+  const outputPath =
+    opts.output === undefined ? undefined : resolve(opts.output);
+  const result = loadConfigV2({
+    global_path: globalPath,
+    ...(projectPath !== undefined && { project_path: projectPath }),
+  });
+
+  writeDiagnostics('notice', result.notices);
+  if (!result.ok) {
+    writeDiagnostics('issue', result.issues);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (outputPath !== undefined) {
+    if (result.source_versions.global !== 1) {
+      commandIssue(
+        'config_migration_write_requires_v1_source',
+        '/global/version',
+        'Writing is supported only for a v1 global source; native v2 input is preview-only.',
+      );
+      return;
+    }
+    if (projectPath !== undefined) {
+      commandIssue(
+        'config_migration_project_write_refused',
+        '/output',
+        'Project config is supported for effective-config preview only; omit --project when writing.',
+      );
+      return;
+    }
+    if (existsSync(outputPath)) {
+      try {
+        if (existingPathsMatch(outputPath, globalPath)) {
+          commandIssue(
+            'config_migration_source_overwrite_refused',
+            '/output',
+            'The migration output must not replace a source configuration file.',
+          );
+          return;
+        }
+      } catch {
+        commandIssue(
+          'config_migration_path_identity_failed',
+          '/output',
+          'Unable to verify that the migration destination is distinct from its source.',
+        );
+        return;
+      }
+    }
+    if (!opts.force && existsSync(outputPath)) {
+      commandIssue(
+        'config_migration_destination_exists',
+        '/output',
+        'The migration destination already exists; use --force to replace it.',
+      );
+      return;
+    }
+    try {
+      saveConfigV2(result.config, { path: outputPath });
+    } catch (error) {
+      if (error instanceof ConfigV2FileError) {
+        writeDiagnostics('issue', error.issues);
+        commandIssue('config_migration_write_failed', '/output', error.message);
+      } else {
+        commandIssue(
+          'config_migration_write_failed',
+          '/output',
+          'Unable to save the migrated configuration.',
+        );
+      }
+      return;
+    }
+  }
+
+  process.stdout.write(`${JSON.stringify(result.config, null, 2)}\n`);
 }
 
 function cancel(): void {

@@ -48,7 +48,15 @@ function isTaskState(value: unknown): value is RunTaskState {
     typeof value.submittedAt === 'number' &&
     ['pending', 'running', 'completed', 'failed', 'cancelled'].includes(
       String(value.status),
-    )
+    ) &&
+    (value.retrievalAttempts === undefined ||
+      (Number.isSafeInteger(value.retrievalAttempts) &&
+        Number(value.retrievalAttempts) >= 0)) &&
+    (value.lastRetrievalAttemptAt === undefined ||
+      (Number.isSafeInteger(value.lastRetrievalAttemptAt) &&
+        Number(value.lastRetrievalAttemptAt) >= 0)) &&
+    (value.lastRetrievalError === undefined ||
+      typeof value.lastRetrievalError === 'string')
   );
 }
 

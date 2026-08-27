@@ -1,6 +1,6 @@
 {
   "name": "librarium",
-  "version": "2.0.0-rc.18",
+  "version": "2.0.0",
   "description": "Evidence-aware multi-provider research with explicit profile provenance",
   "type": "module",
   "main": "./dist/index.js",
@@ -42,6 +42,7 @@
     "rc:verify": "node scripts/rc-artifacts.mjs verify",
     "rc:workflow": "node scripts/rc-workflow.mjs",
     "rc:distribution-proof": "node scripts/rc-distribution-proof.mjs",
+    "release:promotion": "node scripts/release-promotion.mjs",
     "dev": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup --watch",
     "test": "vitest run",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
@@ -69,7 +70,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
-    "@cloudflare/vitest-pool-workers": "^0.19.1",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@types/node": "^22.20.1",
     "@typescript/typescript6": "6.0.2",
     "ajv": "^8.20.0",

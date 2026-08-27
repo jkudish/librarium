@@ -1,5 +1,11 @@
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -70,6 +76,48 @@ describe('CLI integration', () => {
     const output = run('config --json');
     const parsed = JSON.parse(output);
     expect(typeof parsed).toBe('object');
+  });
+
+  it('loads a CLI-migrated v2 config through config, doctor, and run preflight', () => {
+    if (process.platform === 'win32') return;
+    const source = resolve(TEST_HOME, 'migration-source-v1.json');
+    const destination = resolve(TEST_HOME, '.config/librarium/config.json');
+    writeFileSync(
+      source,
+      JSON.stringify({
+        version: 1,
+        defaults: {
+          outputDir: './agents/librarium',
+          maxParallel: 2,
+          timeout: 30,
+          asyncTimeout: 1800,
+          asyncPollInterval: 10,
+          mode: 'sync',
+          llmWebSearch: true,
+        },
+        providers: { exa: { enabled: false } },
+        customProviders: {},
+        trustedProviderIds: [],
+        groups: {},
+      }),
+    );
+
+    const migrated = JSON.parse(
+      run(`config migrate --from ${source} --output ${destination}`),
+    );
+    expect(migrated.version).toBe(2);
+    expect(JSON.parse(readFileSync(destination, 'utf8')).version).toBe(2);
+    expect(statSync(destination).mode & 0o777).toBe(0o600);
+
+    const configured = JSON.parse(run('config --json'));
+    expect(configured.providers.exa.enabled).toBe(false);
+    expect(Array.isArray(JSON.parse(run('doctor --json')))).toBe(true);
+
+    const preflight = run(
+      'run "offline preflight" --providers exa --json --yes',
+    );
+    expect(preflight).not.toContain('Invalid Librarium v2 config');
+    expect(preflight).toContain('profile_disabled');
   });
 
   it('groups shows default group names', () => {

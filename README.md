@@ -166,8 +166,7 @@ incomplete, budget-limited, or fails.
 
 Other public commands are `live-validation`, `status`, `usage`, `browse`,
 `html`, `jsonl`, `refine`, `completions`, `ls`, `groups`, `init`, `doctor`,
-`config`, `cleanup`, `clear`, `upgrade`, `install-skill`, `install-plugin`,
-and `mcp`.
+`config`, `cleanup`, `clear`, `upgrade`, `install-skill`, and `mcp`.
 
 ### Command option ledger
 
@@ -190,11 +189,11 @@ that are not in the `run` table above.
 | `init` | `--auto` |
 | `doctor` | `--json` |
 | `config` | `--json`, `--global`, `--menu` |
+| `config migrate` | `--from`, `--project`, `--output`, `--force` |
 | `cleanup` | `--days`, `--all`, `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
 | `clear` | `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
 | `upgrade` | `--check`, `--dry-run`, `--force` |
 | `install-skill` | `--force`, `--dry-run` |
-| `install-plugin` | `--force`, `--dry-run` |
 | `mcp` | no explicit option |
 
 ### Durable work: wait, retrieve, and cancel
@@ -258,6 +257,82 @@ files. `loadConfigV2()` also never rewrites; it requires explicit paths. Only
 `saveConfigV2()` persists a validated v2 config, atomically and owner-only. It
 fails closed when it cannot verify equivalent owner-only protection on Windows.
 
+### Migrate a v1 config from the CLI
+
+Prerequisites: install Librarium 2.x, locate the global v1 config, and make a
+backup. The conventional global path is `~/.config/librarium/config.json`; a
+project config, when used, is normally `.librarium.json`. Keep the v1 files in
+place: `config migrate` refuses to use either source path as its output.
+
+Preview first. Preview is the default and does not write any file. The migrated
+v2 document is the only stdout content, so it can be inspected or consumed as
+JSON; migration notices are JSON Lines on stderr.
+
+```bash
+librarium config migrate \
+  --from ~/.config/librarium/config.json \
+  --project ./.librarium.json | jq .
+```
+
+Omit `--project` when there is no project layer; an explicitly supplied missing
+project file is an error. Review provider enablement,
+groups, timeouts, output paths, and every custom provider before writing.
+Custom providers are never added to `trusted_provider_ids` by migration; an
+untrusted custom provider produces a structured issue and a nonzero exit.
+Diagnostics contain codes and JSON-pointer paths and do not echo secret values.
+
+Write only after review, to a new sidecar path:
+
+```bash
+librarium config migrate \
+  --from ~/.config/librarium/config.json \
+  --output ~/.config/librarium/config.v2.json
+```
+
+Writing validates again through `saveConfigV2()` and uses its atomic owner-only
+save boundary. An existing destination is refused. `--force` explicitly
+replaces an existing destination, but it still cannot replace either source,
+including through a symlink or Windows case alias.
+Do not create the candidate with shell redirection: that bypasses the
+owner-only save boundary. Writing requires a v1 global source; native v2 input
+can be previewed and validated but is not rewritten by this command.
+
+`--project` is preview-only. Migration with a project path produces one merged
+effective `LibrariumConfigV2`; it is not an independently writable project
+layer. Because `saveConfigV2()` validates and saves only the full global schema,
+combining `--project` with `--output` is rejected. Omit `--project` to write a
+global-only migration.
+
+The normal `config`, `doctor`, and `run` preflight paths accept a migrated native
+v2 global file. They validate it and project it into the existing Node CLI
+compatibility shape; this does not grant trust to custom providers or bypass
+normal preflight. Legacy writers such as the config menu and onboarding refuse
+to replace an active native v2 file with their v1 shape. Project files remain
+on the existing project-config contract.
+
+Verify the candidate without provider calls. After a separate, explicit,
+rollback-ready installation makes it the global config, check the normal CLI
+path:
+
+```bash
+librarium config migrate \
+  --from ~/.config/librarium/config.v2.json | jq -e '.version == 2'
+librarium config --json
+librarium doctor --json
+```
+
+Package maintainers should also run `npm test` after changing migration or CLI
+behavior. These checks do not make provider calls. Rollback is normally just
+deleting the v2 sidecar, because the command never changes the v1 source. If
+you later activate v2 configuration by a separate, explicit installation step,
+restore the v1 backup using that installation procedure's rollback.
+
+On Windows, owner-only writes require the supported Windows PowerShell ACL
+boundary. If Librarium cannot establish and verify a protected current-user-only
+DACL, writing fails nonzero before creating the destination or its parent
+directories. Preview remains available; do not fall back to redirection or a
+more permissive file.
+
 Custom providers are executable code. `trusted_provider_ids` is an allowlist,
 not a sandbox. An npm module or script can run with the process permissions and
 environment. Review and trust that code deliberately. See
@@ -284,8 +359,8 @@ path that may construct its frozen paid target.
 
 ## For agents
 
-Run `librarium install-skill` to install the shipped agent skill, or use the
-MCP stdio server:
+Run `librarium install-skill` to install the shipped skill for Claude Code, or
+use the MCP stdio server:
 
 ```bash
 claude mcp add librarium -- librarium mcp
@@ -299,19 +374,14 @@ resume pass; for canonical schema version 3 it retrieves an observed completed
 result immediately, while its `retrieve` flag applies only to historical
 schema version 2 runs.
 
-### Amp plugin
+### Amp orbs
 
-```bash
-librarium install-plugin
-```
-
-Installs the librarium Amp plugin to `~/.config/amp/plugins/librarium/`. The
-plugin exposes the same five tools as the MCP server as native Amp tools,
-gated behind a bundled skill so they stay out of unrelated threads. It adds
-per-agent provider defaults (configurable via the `librarium:set-agent-defaults`
-command) so different agent modes can default to different research groups
-without per-call overrides. The `librarium:research` command dispatches a
-run from the command palette.
+Amp needs only the Librarium User Skill and the v2 CLI; no Amp plugin is
+required. A global User Skill is synced into every orb automatically. The
+Librarium repository's `.agents/setup` builds the checked-out source and runs
+`npm install -g .`, then verifies that `librarium --version` reports major
+version 2. Other orb projects can install `librarium@^2` after v2 is published.
+They must not silently use npm's v1 `latest` tag for a v2 workflow.
 
 ## Shared TypeScript/PHP boundary
 

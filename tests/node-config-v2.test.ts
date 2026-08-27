@@ -234,6 +234,29 @@ describe('explicit Node v2 config files', () => {
     expect(JSON.stringify(result)).not.toContain(missingPath);
   });
 
+  it('fails when an explicit project path cannot be read', () => {
+    const globalPath = join(directory, 'config.json');
+    const missingProjectPath = join(directory, 'missing-project.json');
+    writeFileSync(globalPath, JSON.stringify(config()));
+
+    const result = loadConfigV2({
+      global_path: globalPath,
+      project_path: missingProjectPath,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        {
+          code: 'config_file_read_failed',
+          path: '/project',
+          message: 'Unable to read configuration file.',
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain(missingProjectPath);
+  });
+
   it('validates before an atomic owner-only save', () => {
     if (process.platform === 'win32') return;
     const path = join(directory, 'nested', 'config.json');
