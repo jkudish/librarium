@@ -29,6 +29,7 @@ on:
           - recover
 
 permissions:
+  actions: read
   contents: write
   deployments: read
   id-token: write
@@ -94,6 +95,12 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
+
+      - name: Verify trusted-publishing toolchain floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(printf '%s\n' 11.5.1 "$(npm --version)" | sort -V | head -n1)" = 11.5.1
 
       - name: Install locked verification dependencies
         run: npm ci
@@ -176,7 +183,27 @@ jobs:
           npm publish "$RUNNER_TEMP/promotion/$ASSET" --provenance --access public --tag "$DIST_TAG"
 
       - name: Reinspect after npm
-        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="$(jq -r '.npm.sha256' "$RUNNER_TEMP/promotion/promotion.json")"
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          for delay in 0 2 4 8 16; do
+            sleep "$delay"
+            scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+            OBSERVED="$(jq -r '.npm_sha256 // empty' "$RUNNER_TEMP/inventory.json")"
+            if [ -n "$OBSERVED" ]; then
+              test "$OBSERVED" = "$EXPECTED"
+              if [ "$(jq -r --arg tag "$DIST_TAG" '.npm_dist_tags[$tag] // empty' "$RUNNER_TEMP/inventory.json")" = "$VERSION" ]; then
+                exit 0
+              fi
+            fi
+          done
+          if [ "${OBSERVED:-}" != "$EXPECTED" ]; then
+            echo 'npm registry did not expose the published candidate before the propagation deadline.' >&2
+            exit 1
+          fi
 
       - name: Reconcile npm dist-tag stage
         id: npm-tag-plan
@@ -190,14 +217,30 @@ jobs:
       - name: Restore exact expected npm dist-tag
         if: steps.npm-tag-plan.outputs.set_npm_dist_tag == 'true'
         shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
           VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
           DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
           npm dist-tag add "librarium@$VERSION" "$DIST_TAG"
 
       - name: Reinspect after npm dist-tag
-        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          for delay in 0 2 4 8 16; do
+            sleep "$delay"
+            scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+            if [ "$(jq -r --arg tag "$DIST_TAG" '.npm_dist_tags[$tag] // empty' "$RUNNER_TEMP/inventory.json")" = "$VERSION" ]; then
+              exit 0
+            fi
+          done
+          echo 'npm registry did not expose the expected dist-tag before the propagation deadline.' >&2
+          exit 1
 
       - name: Reconcile tag stage
         id: tag-plan

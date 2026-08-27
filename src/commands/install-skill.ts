@@ -118,7 +118,6 @@ export function registerInstallSkillCommand(
         console.log(
           '\nClaude Code will now use librarium for research queries.',
         );
-        console.log('Triggers: /librarium, /research, /deep-research');
       } catch (e) {
         console.error(e instanceof Error ? e.message : String(e));
         process.exitCode = 1;

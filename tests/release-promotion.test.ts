@@ -346,6 +346,17 @@ describe('release workflow policy', () => {
     expect(workflow).toContain('stable) ;;');
     expect(workflow).toContain('--tag "$DIST_TAG"');
     expect(workflow).toContain('npm dist-tag add');
+    expect(workflow).toMatch(
+      /permissions:\s*\n\s+actions: read\s*\n\s+contents: write/,
+    );
+    expect(workflow).toMatch(
+      /name: Restore exact expected npm dist-tag[\s\S]*?NODE_AUTH_TOKEN: \$\{\{ secrets\.NPM_TOKEN \}\}[\s\S]*?npm dist-tag add/,
+    );
+    const publishStep = workflow.slice(
+      workflow.indexOf('- name: Publish exact certified npm tarball'),
+      workflow.indexOf('- name: Reinspect after npm'),
+    );
+    expect(publishStep).not.toContain('NODE_AUTH_TOKEN');
     expect(workflow).toContain('--mode "$PROMOTION_MODE"');
     expect(workflow).toMatch(
       /promotion_mode:\s*\n\s+description:[^\n]*\n\s+required: true\s*\n\s+type: choice\s*\n\s+options:\s*\n\s+- new\s*\n\s+- recover/,
@@ -358,6 +369,8 @@ describe('release workflow policy', () => {
     expect(workflow).toContain('.type == "required_reviewers"');
     expect(recovery).toContain('newly reviewed stable-version commit');
     expect(recovery).toContain('npm already contains that exact candidate');
+    expect(recovery).toContain('environment secret named `NPM_TOKEN`');
+    expect(recovery).toContain('retained for 30 days');
     expect(recovery).toContain(
       'Merely writing `environment: release` in workflow YAML does not protect it',
     );
@@ -375,5 +388,13 @@ describe('release workflow policy', () => {
     expect(workflow).toContain('push origin "refs/tags/$TAG:refs/tags/$TAG"');
     expect(workflow).toContain('Upload only absent exact GitHub assets');
     expect(workflow).toContain('Verify complete cross-channel identity');
+    expect(workflow).toContain(
+      'npm registry did not expose the published candidate',
+    );
+    expect(workflow).toContain(
+      'npm registry did not expose the expected dist-tag',
+    );
+    expect(workflow).toContain('Verify trusted-publishing toolchain floor');
+    expect(workflow).toContain('11.5.1');
   });
 });

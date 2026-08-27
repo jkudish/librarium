@@ -7,9 +7,10 @@ The release-candidate workflow certifies exact bytes but has no publication auth
 Before publication, a repository administrator must create the `release` environment in **Settings → Environments** and configure:
 
 - at least one required reviewer; and
-- deployment restricted to protected branches.
+- deployment restricted to protected branches; and
+- an environment secret named `NPM_TOKEN`, containing a granular npm token with write access to `librarium` and bypass-2FA enabled.
 
-The workflow performs a read-only GitHub API preflight and fails before candidate checkout when either rule is absent. Merely writing `environment: release` in workflow YAML does not protect it: GitHub can auto-create an unprotected environment. Repository settings are therefore a required publication boundary and are not configured by this repository.
+The token is exposed only to the recovery step that restores an expected npm dist-tag. npm trusted-publishing OIDC authenticates `npm publish`, but not `npm dist-tag add`; the latter therefore requires traditional authentication. The workflow performs a read-only GitHub API preflight and fails before candidate checkout when either environment-protection rule is absent. Merely writing `environment: release` in workflow YAML does not protect it: GitHub can auto-create an unprotected environment. Repository settings and secrets are therefore required publication boundaries and are not configured by this repository.
 
 ## Certification and version identity
 
@@ -21,6 +22,8 @@ Certification requires an explicit, default-free `release_kind`:
 Both modes run the same package, SEA, installer, Homebrew, and distribution proofs and produce the same immutable candidate archive shape. Promotion derives behavior from the certified version and rejects a mismatched kind or dist-tag. It never renames an RC tarball to stable: npm package identity is inside the bytes, so stable publication requires a newly reviewed stable-version commit and successful stable certification run.
 
 Record all four promotion inputs from one successful certification run: the full protected-main SHA, `sha256:...` candidate fingerprint, SHA-256 of `candidate.tar.gz`, and certification run ID. Before any write, promotion verifies that run, archive checksum, candidate contents, and staged publication bytes.
+
+Candidate workflow artifacts are retained for 30 days. Complete promotion within that window. An expired artifact cannot be reconstructed or substituted; certify a new immutable candidate instead.
 
 ## Cross-channel identity
 

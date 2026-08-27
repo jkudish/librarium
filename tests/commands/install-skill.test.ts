@@ -151,6 +151,9 @@ describe('install-skill command', () => {
 
     expect(readFileSync(skillFile, 'utf8')).toBe(VALID_SKILL);
     expect(readdirSync(skillDir)).toEqual(['SKILL.md']);
+    expect(console.log).not.toHaveBeenCalledWith(
+      expect.stringContaining('Triggers:'),
+    );
     expect(process.exitCode).toBeUndefined();
   });
 
