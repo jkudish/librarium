@@ -163,8 +163,8 @@ validate_local_candidate() {
     echo "Error: LIBRARIUM_SHA256 must be exactly 64 lowercase hexadecimal characters" >&2
     exit 1
   fi
-  if ! printf '%s\n' "$LIBRARIUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-rc\.[1-9][0-9]*$'; then
-    echo "Error: local candidate version must use strict X.Y.Z-rc.N syntax" >&2
+  if ! printf '%s\n' "$LIBRARIUM_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'; then
+    echo "Error: local candidate version must use strict X.Y.Z or X.Y.Z-rc.N syntax" >&2
     exit 1
   fi
 }

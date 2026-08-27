@@ -23,7 +23,9 @@ function json(path: string): unknown {
   return JSON.parse(readFileSync(resolve(path), 'utf8'));
 }
 
-function githubOutput(values: Readonly<Record<string, string | boolean>>): void {
+function githubOutput(
+  values: Readonly<Record<string, string | boolean>>,
+): void {
   if (!process.argv.includes('--github-output')) return;
   const path = process.env.GITHUB_OUTPUT;
   if (!path) throw new Error('GITHUB_OUTPUT is required.');
@@ -45,16 +47,23 @@ async function main(): Promise<void> {
   }
   if (command === 'verify') {
     const spec = verifyPromotionStaging(option('promotion'));
-    process.stdout.write(`${JSON.stringify({ verified: true, ...spec.candidate })}\n`);
+    process.stdout.write(
+      `${JSON.stringify({ verified: true, ...spec.candidate })}\n`,
+    );
     return;
   }
   if (command === 'reconcile') {
     const spec = parseReleasePromotionSpec(json(option('spec')));
     const inventory = parseReleasePromotionInventory(json(option('inventory')));
-    const plan = reconcileReleasePromotion(spec, inventory);
+    const mode = option('mode');
+    if (mode !== 'new' && mode !== 'recover') {
+      throw new Error('--mode must be exactly new or recover.');
+    }
+    const plan = reconcileReleasePromotion(spec, inventory, mode);
     githubOutput({
       complete: plan.complete,
       publish_npm: plan.publish_npm,
+      set_npm_dist_tag: plan.set_npm_dist_tag,
       create_tag: plan.create_tag,
       create_github_release: plan.create_github_release,
       upload_github_assets: plan.upload_github_assets.join(','),

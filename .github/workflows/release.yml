@@ -1,5 +1,5 @@
 name: Promote certified release candidate
-run-name: "Promote ${{ inputs.candidate_sha }}"
+run-name: "Promote ${{ inputs.candidate_sha }} (${{ inputs.promotion_mode }})"
 
 on:
   workflow_dispatch:
@@ -20,9 +20,17 @@ on:
         description: 'Successful release-candidate workflow run ID containing the immutable candidate'
         required: true
         type: string
+      promotion_mode:
+        description: 'new requires current main; recover requires exact npm candidate bytes and permits forward-only main advance'
+        required: true
+        type: choice
+        options:
+          - new
+          - recover
 
 permissions:
   contents: write
+  deployments: read
   id-token: write
 
 concurrency:
@@ -39,6 +47,7 @@ jobs:
       CANDIDATE_FINGERPRINT: ${{ inputs.candidate_fingerprint }}
       CANDIDATE_ARCHIVE_SHA256: ${{ inputs.candidate_archive_sha256 }}
       CERTIFICATION_RUN_ID: ${{ inputs.certification_run_id }}
+      PROMOTION_MODE: ${{ inputs.promotion_mode }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -50,9 +59,15 @@ jobs:
           [[ "$CANDIDATE_FINGERPRINT" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$CANDIDATE_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$CERTIFICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$PROMOTION_MODE" =~ ^(new|recover)$ ]]
           test "$GITHUB_REF" = refs/heads/main
           test "${{ github.ref_protected }}" = true
-          test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+          if [ "$PROMOTION_MODE" = new ]; then
+            test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-environment.json"
+          jq -e '.protection_rules | any(.type == "required_reviewers" and ((.reviewers // []) | length > 0))' "$RUNNER_TEMP/release-environment.json"
+          jq -e '.deployment_branch_policy.protected_branches == true and .deployment_branch_policy.custom_branch_policies == false' "$RUNNER_TEMP/release-environment.json"
 
       - name: Checkout exact certified candidate
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -67,7 +82,10 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
-          test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/main
+          if [ "$PROMOTION_MODE" = new ]; then
+            test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          fi
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
       - name: Setup Node.js 24
@@ -146,6 +164,7 @@ jobs:
           node scripts/release-promotion.mjs reconcile
           --spec "$RUNNER_TEMP/promotion/promotion.json"
           --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
           --github-output
 
       - name: Publish exact certified npm tarball
@@ -153,9 +172,31 @@ jobs:
         run: |
           set -euo pipefail
           ASSET="$(jq -r '.npm.asset' "$RUNNER_TEMP/promotion/promotion.json")"
-          npm publish "$RUNNER_TEMP/promotion/$ASSET" --provenance --access public
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          npm publish "$RUNNER_TEMP/promotion/$ASSET" --provenance --access public --tag "$DIST_TAG"
 
       - name: Reinspect after npm
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile npm dist-tag stage
+        id: npm-tag-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Restore exact expected npm dist-tag
+        if: steps.npm-tag-plan.outputs.set_npm_dist_tag == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          npm dist-tag add "librarium@$VERSION" "$DIST_TAG"
+
+      - name: Reinspect after npm dist-tag
         run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
 
       - name: Reconcile tag stage
@@ -164,6 +205,7 @@ jobs:
           node scripts/release-promotion.mjs reconcile
           --spec "$RUNNER_TEMP/promotion/promotion.json"
           --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
           --github-output
 
       - name: Create immutable Git tag
@@ -185,6 +227,7 @@ jobs:
           node scripts/release-promotion.mjs reconcile
           --spec "$RUNNER_TEMP/promotion/promotion.json"
           --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
           --github-output
 
       - name: Create non-clobbering GitHub release
@@ -193,8 +236,14 @@ jobs:
         run: |
           set -euo pipefail
           TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
-          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
-          gh release create "$TAG" --verify-tag --target "$CANDIDATE_SHA" --title "$TAG" --notes "Immutable promotion of certified candidate $CANDIDATE_SHA ($CANDIDATE_FINGERPRINT)." --prerelease
+          RELEASE_KIND="$(jq -r '.candidate.release_kind' "$RUNNER_TEMP/promotion/promotion.json")"
+          PRERELEASE=()
+          case "$RELEASE_KIND" in
+            rc) PRERELEASE=(--prerelease) ;;
+            stable) ;;
+            *) exit 1 ;;
+          esac
+          gh release create "$TAG" --verify-tag --target "$CANDIDATE_SHA" --title "$TAG" --notes "Immutable promotion of certified candidate $CANDIDATE_SHA ($CANDIDATE_FINGERPRINT)." "${PRERELEASE[@]}"
 
       - name: Reinspect before GitHub assets
         run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
@@ -205,6 +254,7 @@ jobs:
           node scripts/release-promotion.mjs reconcile
           --spec "$RUNNER_TEMP/promotion/promotion.json"
           --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
           --github-output
 
       - name: Upload only absent exact GitHub assets
@@ -230,6 +280,7 @@ jobs:
           node scripts/release-promotion.mjs reconcile
           --spec "$RUNNER_TEMP/promotion/promotion.json"
           --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
           --github-output
 
       - name: Publish forward-only Homebrew formula commit
@@ -257,7 +308,8 @@ jobs:
           scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/final-inventory.json"
           node scripts/release-promotion.mjs reconcile \
             --spec "$RUNNER_TEMP/promotion/promotion.json" \
-            --inventory "$RUNNER_TEMP/final-inventory.json" > "$RUNNER_TEMP/final-plan.json"
+            --inventory "$RUNNER_TEMP/final-inventory.json" \
+            --mode "$PROMOTION_MODE" > "$RUNNER_TEMP/final-plan.json"
           test "$(jq -r '.complete' "$RUNNER_TEMP/final-plan.json")" = true
           node scripts/release-promotion.mjs verify --promotion "$RUNNER_TEMP/promotion"
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"

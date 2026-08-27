@@ -126,6 +126,19 @@ describe.skipIf(process.platform === 'win32')(
       expectNoTransactionFiles(root);
     });
 
+    it('accepts an exact stable candidate version', () => {
+      const root = fixtureRoot();
+      const candidate = join(root, 'candidate');
+      ordinaryCandidate(candidate, '2.0.0');
+      const result = runInstaller({
+        root,
+        candidate,
+        version: '2.0.0',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(sha256(join(root, 'librarium'))).toBe(sha256(candidate));
+    });
+
     it('preserves the prior install on checksum failure', () => {
       const root = fixtureRoot();
       const destination = join(root, 'librarium');

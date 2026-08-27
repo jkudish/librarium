@@ -30,8 +30,8 @@ import { gunzipSync } from 'node:zlib';
 import { buildCanonicalValidationMatrix } from './node-live-validation.js';
 
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const RC_VERSION_PATTERN =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/;
+const RELEASE_VERSION_PATTERN =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?$/;
 const SAFE_SEGMENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_JSON_BYTES = 16 * 1024 * 1024;
 const MAX_TAR_BYTES = 256 * 1024 * 1024;
@@ -274,10 +274,10 @@ function catalogDigest(value: unknown, label: string): string {
   return text;
 }
 
-export function assertReleaseCandidateVersion(version: string): void {
-  if (!RC_VERSION_PATTERN.test(version)) {
+export function assertReleaseVersion(version: string): void {
+  if (!RELEASE_VERSION_PATTERN.test(version)) {
     fail(
-      'Release candidate version must be X.Y.Z-rc.N with positive N and no leading zero.',
+      'Release version must be exact X.Y.Z or X.Y.Z-rc.N with positive RC N and no leading zero.',
     );
   }
 }
@@ -691,7 +691,7 @@ function packageMetadata(repositoryRoot: string): {
     'package.json version',
     128,
   );
-  assertReleaseCandidateVersion(version);
+  assertReleaseVersion(version);
   const lockPackages = jsonRecord(
     lockValue.packages,
     'package-lock.json packages',
@@ -1506,7 +1506,7 @@ function parseFrozenPackage(value: unknown): FrozenPackageManifest {
     'Frozen candidate version',
     128,
   );
-  assertReleaseCandidateVersion(version);
+  assertReleaseVersion(version);
   const gitSha = boundedString(candidate.git_sha, 'Frozen Git SHA', 40);
   const gitTree = boundedString(candidate.git_tree, 'Frozen Git tree', 40);
   if (!/^[0-9a-f]{40}$/.test(gitSha) || !/^[0-9a-f]{40}$/.test(gitTree)) {

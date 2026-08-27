@@ -17,7 +17,10 @@ import {
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const VERSION_PATTERN =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/;
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?$/;
+
+export type ReleaseKind = 'rc' | 'stable';
+export type ReleasePromotionMode = 'new' | 'recover';
 
 export class ReleasePromotionError extends Error {}
 
@@ -78,6 +81,26 @@ function stringMap(
   return result;
 }
 
+function versionMap(
+  value: unknown,
+  label: string,
+): Readonly<Record<string, string>> {
+  const record = object(value, label);
+  const result: Record<string, string> = {};
+  for (const [key, child] of Object.entries(record)) {
+    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(key)) {
+      fail(`${label} contains an invalid dist-tag name.`);
+    }
+    result[key] = string(child, `${label} ${key}`);
+  }
+  return result;
+}
+
+function releaseKind(version: string): ReleaseKind {
+  if (!VERSION_PATTERN.test(version)) fail('Candidate version is invalid.');
+  return version.includes('-rc.') ? 'rc' : 'stable';
+}
+
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -117,11 +140,13 @@ export interface ReleasePromotionSpec {
     readonly git_tree: string;
     readonly version: string;
     readonly fingerprint: string;
+    readonly release_kind: ReleaseKind;
   };
   readonly tag: string;
   readonly npm: {
     readonly asset: string;
     readonly sha256: string;
+    readonly dist_tag: 'rc' | 'latest';
   };
   readonly github_assets: Readonly<Record<string, string>>;
   readonly checksum_manifest: 'SHA256SUMS';
@@ -274,11 +299,14 @@ export async function prepareReleasePromotion(input: {
       git_tree: manifest.candidate.git_tree,
       version: manifest.candidate.version,
       fingerprint: manifest.candidate.fingerprint,
+      release_kind: releaseKind(manifest.candidate.version),
     },
     tag: `v${manifest.candidate.version}`,
     npm: {
       asset: basename(manifest.npm.tarball.path),
       sha256: manifest.npm.tarball.sha256,
+      dist_tag:
+        releaseKind(manifest.candidate.version) === 'rc' ? 'rc' : 'latest',
     },
     github_assets: githubAssets,
     checksum_manifest: 'SHA256SUMS',
@@ -297,6 +325,7 @@ export interface ReleasePromotionInventory {
   readonly branch_sha: string;
   readonly tag_sha: string | null;
   readonly npm_sha256: string | null;
+  readonly npm_dist_tags: Readonly<Record<string, string>>;
   readonly github_release: null | {
     readonly target_sha: string;
     readonly assets: Readonly<Record<string, string>>;
@@ -308,6 +337,7 @@ export interface ReleasePromotionInventory {
 export interface ReleasePromotionPlan {
   readonly complete: boolean;
   readonly publish_npm: boolean;
+  readonly set_npm_dist_tag: boolean;
   readonly create_tag: boolean;
   readonly create_github_release: boolean;
   readonly upload_github_assets: readonly string[];
@@ -344,11 +374,11 @@ export function parseReleasePromotionSpec(
   const candidate = object(root.candidate, 'Promotion candidate');
   exactKeys(
     candidate,
-    ['fingerprint', 'git_sha', 'git_tree', 'version'],
+    ['fingerprint', 'git_sha', 'git_tree', 'release_kind', 'version'],
     'Promotion candidate',
   );
   const npm = object(root.npm, 'Promotion npm');
-  exactKeys(npm, ['asset', 'sha256'], 'Promotion npm');
+  exactKeys(npm, ['asset', 'dist_tag', 'sha256'], 'Promotion npm');
   const formula = object(root.homebrew_formula, 'Promotion Homebrew formula');
   exactKeys(formula, ['path', 'sha256'], 'Promotion Homebrew formula');
   const parsed = {
@@ -362,10 +392,15 @@ export function parseReleasePromotionSpec(
         'Candidate fingerprint',
         SHA256_PATTERN,
       ),
+      release_kind: string(
+        candidate.release_kind,
+        'Candidate release kind',
+      ) as ReleaseKind,
     },
     npm: {
       asset: string(npm.asset, 'npm asset'),
       sha256: string(npm.sha256, 'npm SHA-256', SHA256_PATTERN),
+      dist_tag: string(npm.dist_tag, 'npm dist-tag') as 'rc' | 'latest',
     },
     github_assets: stringMap(root.github_assets, 'GitHub assets'),
     homebrew_formula: {
@@ -380,8 +415,18 @@ export function parseReleasePromotionSpec(
   if (parsed.tag !== `v${parsed.candidate.version}`) {
     fail('Promotion tag differs from the exact candidate version.');
   }
+  const expectedKind = releaseKind(parsed.candidate.version);
+  if (
+    parsed.candidate.release_kind !== expectedKind ||
+    parsed.npm.dist_tag !== (expectedKind === 'rc' ? 'rc' : 'latest')
+  ) {
+    fail(
+      'Promotion release kind or npm dist-tag differs from candidate identity.',
+    );
+  }
   if (
     parsed.homebrew_formula.path !== 'Formula/librarium.rb' ||
+    parsed.npm.asset !== `librarium-${parsed.candidate.version}.tgz` ||
     parsed.github_assets[parsed.npm.asset] !== parsed.npm.sha256
   ) {
     fail('Promotion distribution identity is inconsistent.');
@@ -400,6 +445,7 @@ export function parseReleasePromotionInventory(
       'github_release',
       'homebrew_formula_sha256',
       'homebrew_version',
+      'npm_dist_tags',
       'npm_sha256',
       'tag_sha',
     ],
@@ -422,6 +468,7 @@ export function parseReleasePromotionInventory(
     branch_sha: string(root.branch_sha, 'Branch SHA', SHA_PATTERN),
     tag_sha: optionalString(root.tag_sha, 'Tag SHA', SHA_PATTERN),
     npm_sha256: optionalString(root.npm_sha256, 'npm SHA-256', SHA256_PATTERN),
+    npm_dist_tags: versionMap(root.npm_dist_tags, 'npm dist-tags'),
     github_release: githubRelease,
     homebrew_version: optionalString(root.homebrew_version, 'Homebrew version'),
     homebrew_formula_sha256: optionalString(
@@ -460,8 +507,12 @@ function earlierVersion(left: string, right: string): boolean {
 export function reconcileReleasePromotion(
   spec: ReleasePromotionSpec,
   inventory: ReleasePromotionInventory,
+  mode: ReleasePromotionMode,
 ): ReleasePromotionPlan {
-  if (inventory.branch_sha !== spec.candidate.git_sha) {
+  if (mode !== 'new' && mode !== 'recover') {
+    fail('Promotion mode must be explicitly new or recover.');
+  }
+  if (mode === 'new' && inventory.branch_sha !== spec.candidate.git_sha) {
     fail('Protected main no longer identifies the certified candidate.');
   }
   if (
@@ -469,6 +520,28 @@ export function reconcileReleasePromotion(
     inventory.npm_sha256 !== spec.npm.sha256
   ) {
     fail('npm contains conflicting bytes for the candidate version.');
+  }
+  const npmBytesComplete = inventory.npm_sha256 !== null;
+  if (mode === 'recover' && !npmBytesComplete) {
+    fail('Recovery requires exact candidate bytes to exist on npm already.');
+  }
+  const expectedDistTag = spec.npm.dist_tag;
+  const actualDistTag = inventory.npm_dist_tags[expectedDistTag];
+  if (
+    actualDistTag !== undefined &&
+    actualDistTag !== spec.candidate.version &&
+    !earlierVersion(actualDistTag, spec.candidate.version)
+  ) {
+    fail(`npm dist-tag ${expectedDistTag} points to a newer version.`);
+  }
+  if (
+    spec.candidate.release_kind === 'rc' &&
+    inventory.npm_dist_tags.latest === spec.candidate.version
+  ) {
+    fail('RC candidate must never own the npm latest dist-tag.');
+  }
+  if (!npmBytesComplete && actualDistTag === spec.candidate.version) {
+    fail('npm dist-tag identifies candidate bytes that are absent.');
   }
   if (
     inventory.tag_sha !== null &&
@@ -515,7 +588,8 @@ export function reconcileReleasePromotion(
     fail('Homebrew version and formula identity are inconsistent.');
   }
 
-  const npmComplete = inventory.npm_sha256 !== null;
+  const npmTagComplete = actualDistTag === spec.candidate.version;
+  const npmComplete = npmBytesComplete && npmTagComplete;
   const tagComplete = inventory.tag_sha !== null;
   const releaseExists = inventory.github_release !== null;
   const releaseComplete = releaseExists && missingAssets.length === 0;
@@ -536,7 +610,8 @@ export function reconcileReleasePromotion(
 
   return {
     complete: npmComplete && tagComplete && releaseComplete && homebrewComplete,
-    publish_npm: !npmComplete,
+    publish_npm: !npmBytesComplete,
+    set_npm_dist_tag: npmBytesComplete && !npmTagComplete,
     create_tag: npmComplete && !tagComplete,
     create_github_release: tagComplete && !releaseExists,
     upload_github_assets: releaseExists ? missingAssets : [],

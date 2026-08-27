@@ -6,6 +6,8 @@ import { basename, join, relative, resolve, sep } from 'node:path';
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const RC_VERSION_PATTERN =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/;
+const STABLE_VERSION_PATTERN =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const SAFE_OUTPUT_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
@@ -92,6 +94,7 @@ export interface ReleaseCandidateAuthority {
   readonly sha: string;
   readonly tree: string;
   readonly version: string;
+  readonly release_kind: 'rc' | 'stable';
   readonly artifact_prefix: string;
 }
 
@@ -99,6 +102,7 @@ export function assertReleaseCandidateAuthority(input: {
   readonly repository_root: string;
   readonly candidate_sha: string;
   readonly protected_ref: string;
+  readonly release_kind: string;
   readonly dispatch_ref?: string;
   readonly dispatch_ref_protected?: string;
 }): ReleaseCandidateAuthority {
@@ -156,8 +160,16 @@ export function assertReleaseCandidateAuthority(input: {
     fail('package.json version is missing.');
   }
   const version = packageJson.version;
-  if (!RC_VERSION_PATTERN.test(version)) {
-    fail('Committed candidate version must use strict X.Y.Z-rc.N syntax.');
+  if (input.release_kind !== 'rc' && input.release_kind !== 'stable') {
+    fail('Certification release kind must be explicitly rc or stable.');
+  }
+  if (
+    (input.release_kind === 'rc' && !RC_VERSION_PATTERN.test(version)) ||
+    (input.release_kind === 'stable' && !STABLE_VERSION_PATTERN.test(version))
+  ) {
+    fail(
+      `Committed candidate version does not match explicit ${input.release_kind} certification mode.`,
+    );
   }
   if (lockVersion(packageLock) !== version) {
     fail('Committed package and lock versions must match exactly.');
@@ -166,6 +178,7 @@ export function assertReleaseCandidateAuthority(input: {
     sha: head,
     tree: git(repositoryRoot, ['rev-parse', 'HEAD^{tree}']),
     version,
+    release_kind: input.release_kind,
     artifact_prefix: `librarium-rc-${head}`,
   };
 }
@@ -223,6 +236,7 @@ export function assertReleaseCandidateWorkflowPolicy(source: string): void {
   const required = [
     'workflow_dispatch:',
     'git_sha:',
+    'release_kind:',
     'permissions:\n  contents: read',
     'github.ref_protected',
     'Validate dispatch context before candidate code',
@@ -251,6 +265,16 @@ export function assertReleaseCandidateWorkflowPolicy(source: string): void {
   }
   if (/\n\s+version:\s*\n\s+description:/.test(source)) {
     fail('RC workflow must not accept a mutable version input.');
+  }
+  if (
+    !/release_kind:\s*\n\s+description:[^\n]*\n\s+required: true\s*\n\s+type: choice\s*\n\s+options:\s*\n\s+- rc\s*\n\s+- stable/.test(
+      source,
+    ) ||
+    /release_kind:\s*[\s\S]{0,240}\n\s+default:/.test(source)
+  ) {
+    fail(
+      'Certification mode must be an explicit default-free rc/stable choice.',
+    );
   }
   const rawInputUses = source.match(/\$\{\{\s*inputs\.git_sha\s*\}\}/g) ?? [];
   if (rawInputUses.length !== 1) {
@@ -339,6 +363,7 @@ export async function runReleaseCandidateWorkflowCli(): Promise<void> {
       repository_root: option('repository')!,
       candidate_sha: option('candidate-sha')!,
       protected_ref: option('protected-ref')!,
+      release_kind: option('release-kind')!,
       dispatch_ref: process.env.GITHUB_REF,
       dispatch_ref_protected: process.env.GITHUB_REF_PROTECTED,
     });
@@ -347,6 +372,7 @@ export async function runReleaseCandidateWorkflowCli(): Promise<void> {
         sha: authority.sha,
         tree: authority.tree,
         version: authority.version,
+        release_kind: authority.release_kind,
         artifact_prefix: authority.artifact_prefix,
       });
     }
