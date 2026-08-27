@@ -27,6 +27,7 @@ import {
   frozenRequestFingerprint,
   installOfflineNetworkGuard,
   installOfflineValidationSigint,
+  readLiveValidationApproval,
   rebuildFrozenValidationEvidence,
   registerLiveValidationCommand,
   terminalValidationCertification,
@@ -1572,6 +1573,25 @@ describe('frozen paid protocol (injected, zero-network)', () => {
       request_contract: requestContract,
     };
   }
+
+  it('accepts a separately certified stable candidate approval', () => {
+    const frozen = gate().gate;
+    const approval = {
+      ...frozen.approval,
+      candidate: { ...frozen.approval.candidate, version: '2.0.0' },
+    };
+    const path = join(frozen.approval.raw_root, 'stable-approval.json');
+    writeFileSync(path, JSON.stringify(approval), {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+
+    expect(readLiveValidationApproval(path)).toEqual({
+      approval,
+      fingerprint: approvalFingerprint(approval),
+    });
+  });
+
   const fixtureReferenceAuthority = {
     read: (
       reference: { readonly request_id: string },
