@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_GROK_MODEL } from '../src/adapters/grok-responses.js';
+import { BUILTIN_PROVIDER_DESCRIPTORS } from '../src/adapters/provider-descriptors.js';
 import type { ProviderIdentity } from '../src/contracts/domain/index.js';
 import { canonicalJson } from '../src/core/catalog-fingerprint.js';
 import {
@@ -18,6 +20,7 @@ import {
 } from '../src/core/pricing.js';
 import { BUILTIN_PRICING_SNAPSHOT } from '../src/core/pricing-snapshot.js';
 import { BUILTIN_PROFILE_BINDING_SPECS } from '../src/core/profile-bindings.js';
+import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
 
 const NOW = '2026-08-13T00:00:00.000Z';
 
@@ -108,6 +111,53 @@ describe('pricing snapshot validation', () => {
         ['complete', 'partial', 'unavailable'].includes(entry.completeness),
       ),
     ).toBe(true);
+  });
+
+  it('pins every shipping Grok identity and exact official rate without drift', () => {
+    const shippingProfiles = [
+      ['grok', 'web'],
+      ['grok-x-only', 'x'],
+      ['grok-combined', 'combined'],
+    ] as const;
+    const expectedRates = [
+      ['uncached_input_tokens', '2', '1000000'],
+      ['output_tokens', '6', '1000000'],
+      ['reasoning_tokens', '6', '1000000'],
+      ['cache_read_tokens', '0.5', '1000000'],
+      ['searches', '5', '1000'],
+    ];
+
+    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
+    for (const [providerId, profileId] of shippingProfiles) {
+      const catalog = BUILTIN_PROVIDER_CATALOG.find(
+        ({ provider_id }) => provider_id === providerId,
+      );
+      const descriptor = BUILTIN_PROVIDER_DESCRIPTORS.find(
+        ({ id }) => id === providerId,
+      );
+      const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+        (entry) =>
+          entry.provider_id === providerId && entry.profile_id === profileId,
+      );
+
+      expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.6');
+      expect(descriptor?.defaultModel).toBe('grok-4.6');
+      expect(pricing).toMatchObject({
+        id: `${providerId}.${profileId}.grok-4.6`,
+        effective_target: { kind: 'model', target_id: 'grok-4.6' },
+        provenance: {
+          source_class: 'frozen_official_snapshot',
+          source_reference: 'official:docs.x.ai/developers/pricing',
+        },
+      });
+      expect(
+        pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
+          unit,
+          amount_decimal,
+          per_decimal,
+        ]),
+      ).toEqual(expectedRates);
+    }
   });
 
   it.each(['-1', 'NaN', 'Infinity', '1e309', '', '1.'.padEnd(130, '0')])(
@@ -327,10 +377,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:d28c5467bb856b43bb59ce1423bd7f8c3ac32eee171fce789235c319a51d267c',
+      'sha256:7d0bb6bf5049bb68bdf3c5836fd57eb2f6d73b262911e736f5d36cfb48019d5a',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:d28c5467bb856b43bb59ce1423bd7f8c3ac32eee171fce789235c319a51d267c',
+      'sha256:7d0bb6bf5049bb68bdf3c5836fd57eb2f6d73b262911e736f5d36cfb48019d5a',
     );
     expect(
       `sha256:${createHash('sha256')

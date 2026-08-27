@@ -750,7 +750,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 8,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
-    defaultModel: 'grok-4.5',
+    defaultModel: 'grok-4.6',
     optionsSchema: grokWebOptionsSchema,
     display: {
       family: 'xAI',
@@ -772,7 +772,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 32,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
-    defaultModel: 'grok-4.5',
+    defaultModel: 'grok-4.6',
     autoEnable: false,
     optionsSchema: grokXOnlyOptionsSchema,
     display: {
@@ -795,7 +795,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 33,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
-    defaultModel: 'grok-4.5',
+    defaultModel: 'grok-4.6',
     autoEnable: false,
     optionsSchema: grokCombinedOptionsSchema,
     display: {
