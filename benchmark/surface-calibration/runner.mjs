@@ -474,6 +474,7 @@ export async function executeSurfaceCalibration(
     });
   }
   const results = [];
+  const collectObservation = dependencies.collect ?? collect;
   for (const item of corpus.cases) {
     const caseDirectory = join(outputDirectory, 'cases', item.id);
     mkdirSync(caseDirectory, { recursive: true });
@@ -482,23 +483,23 @@ export async function executeSurfaceCalibration(
     );
     const reference = fixtureMode
       ? fixtureCase.reference
-      : await collect(
+      : await collectObservation(
           item,
           config.referenceCollector,
           caseDirectory,
           config,
           env,
         );
+    writeJson(join(caseDirectory, 'reference.normalized.json'), reference);
     const candidate = fixtureMode
       ? fixtureCase.candidate
-      : await collect(
+      : await collectObservation(
           item,
           config.routineCandidate,
           caseDirectory,
           config,
           env,
         );
-    writeJson(join(caseDirectory, 'reference.normalized.json'), reference);
     writeJson(join(caseDirectory, 'candidate.normalized.json'), candidate);
     const referenceScore = scoreObservation(item, reference);
     const candidateScore = scoreObservation(item, candidate);

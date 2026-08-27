@@ -74,7 +74,13 @@
         "receipt": {
           "requestId": "fixture-firecrawl-1",
           "providerRequestId": null,
-          "evidenceReceipts": []
+          "evidenceReceipts": [],
+          "operationReceipt": {
+            "mode": "interact",
+            "stage": "observation",
+            "cleanup": "completed",
+            "providerOperationsStarted": 3
+          }
         }
       },
       "divergence": {
@@ -154,7 +160,13 @@
         "receipt": {
           "requestId": "fixture-firecrawl-2",
           "providerRequestId": null,
-          "evidenceReceipts": []
+          "evidenceReceipts": [],
+          "operationReceipt": {
+            "mode": "interact",
+            "stage": "observation",
+            "cleanup": "completed",
+            "providerOperationsStarted": 3
+          }
         }
       },
       "divergence": {
@@ -229,7 +241,13 @@
         "receipt": {
           "requestId": "fixture-firecrawl-3",
           "providerRequestId": null,
-          "evidenceReceipts": []
+          "evidenceReceipts": [],
+          "operationReceipt": {
+            "mode": "interact",
+            "stage": "observation",
+            "cleanup": "completed",
+            "providerOperationsStarted": 3
+          }
         }
       },
       "divergence": {

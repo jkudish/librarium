@@ -70,8 +70,11 @@ The command is sequential and requires an interactive `RUN` confirmation. It
 stops on the first provider/interface failure, hard output failure, blocking
 challenge/login wall, or judge/artifact validation failure. There are no
 retries or fallbacks. A live run writes a fingerprinted confirmation receipt
-before dispatch and retains only bounded normalized observations and receipts;
-the reusable benchmark's intermediate run directory is removed after parsing.
+before dispatch and persists each bounded normalized collector observation as
+soon as it succeeds, so a later collector hard stop does not erase completed
+reference evidence. Firecrawl operation receipts and credits are retained only
+after strict enum and integer allowlisting; the reusable benchmark's
+intermediate run directory is removed after parsing.
 
 ## Measures and recommendation
 

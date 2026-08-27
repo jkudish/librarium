@@ -9,6 +9,8 @@ use Jkudish\LaravelAiLibrariumFirecrawl\FirecrawlDriver;
 use Jkudish\LaravelAiLibrariumFirecrawl\FirecrawlLibrariumServiceProvider;
 use Orchestra\Testbench\TestCase;
 
+require_once __DIR__.'/provider-values.php';
+
 const MAX_ANSWER_CHARACTERS = 20000;
 const MAX_CITATIONS = 20;
 
@@ -152,6 +154,8 @@ try {
     $context = array_intersect_key($rawContext, array_flip(['locale', 'country', 'device', 'authentication']));
     $rawDeclaredContext = (array) ($providerMeta['consumer_declared_context'] ?? []);
     $declaredContext = array_intersect_key($rawDeclaredContext, array_flip(['personalization', 'account_context']));
+    $operationReceipt = surfaceCalibrationOperationReceipt($providerMeta['operation_receipt'] ?? null);
+    $creditsUsed = surfaceCalibrationCreditsUsed($providerMeta['credits_used'] ?? null);
     $evidenceReceipts = array_slice(array_values(array_filter(array_map(
         function ($receipt): ?array {
             if (! is_array($receipt)) {
@@ -191,7 +195,7 @@ try {
         'loginWall' => (bool) ($providerMeta['login_wall'] ?? false),
         'reportedLatencyMs' => $providerMeta['latency_ms'] ?? null,
         'usage' => [
-            'creditsUsed' => $providerMeta['credits_used'] ?? null,
+            'creditsUsed' => $creditsUsed,
             'costUsd' => $actualCostUsd,
             'costKind' => $actualCostUsd === null ? null : 'actual',
         ],
@@ -199,6 +203,7 @@ try {
             'requestId' => boundedString($response->requestId, 200),
             'providerRequestId' => boundedString($providerMeta['request_id'] ?? null, 200),
             'evidenceReceipts' => $evidenceReceipts,
+            'operationReceipt' => $operationReceipt,
         ],
     ];
 

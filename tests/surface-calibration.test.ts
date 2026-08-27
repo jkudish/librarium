@@ -283,6 +283,14 @@ describe('consumer-surface calibration', () => {
       surface: 'chatgpt-web',
       usableCompletion: true,
       cost: { usd: null, creditsUsed: 7 },
+      receipt: {
+        operationReceipt: {
+          mode: 'interact',
+          stage: 'observation',
+          cleanup: 'completed',
+          providerOperationsStarted: 3,
+        },
+      },
     });
     expect(first.comparison).toMatchObject({
       citationOverlap: { jaccard: 0.5 },
@@ -296,6 +304,120 @@ describe('consumer-surface calibration', () => {
     expect(report).toContain('No aggregate score is computed');
     expect(report).toContain('SearchAPI remains the reference collector');
     expect(report).not.toMatch(/universal winner/i);
+  });
+
+  it('allowlists only bounded Firecrawl operation and credit values', () => {
+    const script = [
+      `require $argv[1];`,
+      `$input = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);`,
+      `echo json_encode([`,
+      `  'operationReceipt' => surfaceCalibrationOperationReceipt($input['operationReceipt'] ?? null),`,
+      `  'creditsUsed' => surfaceCalibrationCreditsUsed($input['creditsUsed'] ?? null),`,
+      `], JSON_THROW_ON_ERROR);`,
+    ].join(' ');
+    const result = spawnSync(
+      'php',
+      ['-r', script, join(calibration, 'provider-values.php')],
+      {
+        input: JSON.stringify({
+          operationReceipt: {
+            mode: 'interact',
+            stage: 'observation',
+            cleanup: 'completed',
+            provider_operations_started: 3,
+            raw_response: 'must not survive',
+          },
+          creditsUsed: 7,
+        }),
+        encoding: 'utf8',
+      },
+    );
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      operationReceipt: {
+        mode: 'interact',
+        stage: 'observation',
+        cleanup: 'completed',
+        providerOperationsStarted: 3,
+      },
+      creditsUsed: 7,
+    });
+
+    for (const value of [
+      {
+        mode: 'interact',
+        stage: 'provider-body',
+        cleanup: 'completed',
+        provider_operations_started: 3,
+      },
+      {
+        mode: 'interact',
+        stage: 'observation',
+        cleanup: 'completed',
+        provider_operations_started: 10_001,
+      },
+    ]) {
+      const rejected = spawnSync(
+        'php',
+        ['-r', script, join(calibration, 'provider-values.php')],
+        {
+          input: JSON.stringify({ operationReceipt: value, creditsUsed: -1 }),
+          encoding: 'utf8',
+        },
+      );
+      expect(rejected.status).toBe(0);
+      expect(JSON.parse(rejected.stdout)).toEqual({
+        operationReceipt: null,
+        creditsUsed: null,
+      });
+    }
+  });
+
+  it('persists a completed reference before a candidate hard stop', async () => {
+    const output = mkdtempSync(join(tmpdir(), 'surface-reference-stop-'));
+    const now = new Date('2026-08-27T20:00:00Z');
+    const reference = readJson(fixture).cases[0].reference;
+    const dispatches: string[] = [];
+
+    await expect(
+      executeSurfaceCalibration(
+        { output },
+        {
+          env: {
+            SEARCHAPI_API_KEY: 'offline-searchapi',
+            FIRECRAWL_API_KEY: 'offline-firecrawl',
+            OPENAI_API_KEY: 'offline-openai',
+          },
+          now: () => now,
+          confirm: async () => true,
+          collect: async (_item: any, providerId: string) => {
+            dispatches.push(providerId);
+            if (providerId === config.referenceCollector) return reference;
+            throw new Error('offline candidate stop');
+          },
+          fetch: async () => {
+            throw new Error('judge must not run after candidate stop');
+          },
+        },
+      ),
+    ).rejects.toThrow('offline candidate stop');
+
+    const caseDirectory = join(
+      output,
+      '2026-08-27T20-00-00-000Z',
+      'cases',
+      corpus.cases[0].id,
+    );
+    expect(readJson(join(caseDirectory, 'reference.normalized.json'))).toEqual(
+      reference,
+    );
+    expect(existsSync(join(caseDirectory, 'candidate.normalized.json'))).toBe(
+      false,
+    );
+    expect(dispatches).toEqual([
+      config.referenceCollector,
+      config.routineCandidate,
+    ]);
   });
 
   it('classifies missing, wrong-entity, and broken structure as hard failures', () => {
