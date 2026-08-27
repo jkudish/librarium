@@ -29,7 +29,11 @@ describe('v2 validation foundation', () => {
 
   it('runs expensive portable gates once and keeps CI permissions narrow', () => {
     const ci = readFileSync('.github/workflows/ci.yml', 'utf8');
-    const release = readFileSync('.github/workflows/release.yml', 'utf8');
+    const certification = readFileSync(
+      '.github/workflows/release-candidate.yml',
+      'utf8',
+    );
+    const promotion = readFileSync('.github/workflows/release.yml', 'utf8');
 
     expect(ci).toContain('permissions:\n  contents: read');
     expect(ci).toContain("autoformat:\n    if: github.event_name == 'push'");
@@ -40,15 +44,16 @@ describe('v2 validation foundation', () => {
     expect(ci).not.toMatch(/--coverage|--shard/);
 
     for (const gate of [
-      'Declaration consumer fixtures',
-      'Contract snapshot drift',
-      'Workers compatibility tests',
-      'Integration tests',
-      'Packed consumer smoke test',
+      'Declaration consumer fixtures from frozen dist',
+      'Workers compatibility tests from frozen dist',
+      'Integration tests from frozen dist',
       'Offline benchmark fixture replay',
     ]) {
-      expect(release).toContain(`- name: ${gate}`);
+      expect(certification).toContain(`- name: ${gate}`);
     }
-    expect(release).not.toMatch(/--coverage|--shard/);
+    expect(certification).toContain('run: npm test');
+    expect(certification).toContain('node scripts/verify-packed-consumer.mjs');
+    expect(certification).not.toMatch(/--coverage|--shard/);
+    expect(promotion).not.toContain('npm run build');
   });
 });
