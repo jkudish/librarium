@@ -7,7 +7,7 @@ import type {
 } from './pricing.js';
 import { validatePricingSnapshot } from './pricing.js';
 
-const REVIEWED_AT = '2026-08-13T00:00:00.000Z';
+const REVIEWED_AT = '2026-08-27T00:00:00.000Z';
 
 interface DefinitionOptions {
   readonly target?: PriceDefinitionInput['effective_target'];
@@ -233,7 +233,7 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     ['grok-combined', 'combined'],
   ].map(([providerId, profileId]) =>
     definition(providerId, profileId, {
-      target: { kind: 'model', target_id: 'grok-4.5' },
+      target: { kind: 'model', target_id: 'grok-4.6' },
       expected: [
         ...tokenUnits,
         'cache_read_tokens',
@@ -244,7 +244,7 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
         rate('uncached_input_tokens', '2', '1000000'),
         rate('output_tokens', '6', '1000000'),
         rate('reasoning_tokens', '6', '1000000'),
-        rate('cache_read_tokens', '0.3', '1000000'),
+        rate('cache_read_tokens', '0.5', '1000000'),
         rate('searches', '5', '1000'),
       ],
       reference: 'official:docs.x.ai/developers/pricing',
@@ -435,10 +435,10 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
 export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
   validatePricingSnapshot({
     schema_version: 1,
-    version: '2026-08-13.v1',
+    version: '2026-08-27.v1',
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:d28c5467bb856b43bb59ce1423bd7f8c3ac32eee171fce789235c319a51d267c',
+      'sha256:7d0bb6bf5049bb68bdf3c5836fd57eb2f6d73b262911e736f5d36cfb48019d5a',
     definitions: DEFINITIONS,
   });

@@ -620,7 +620,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'web',
         selection_order: 230,
-        target: configurableTarget('model', 'grok-4.5'),
+        target: configurableTarget('model', 'grok-4.6'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -647,7 +647,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'x',
         selection_order: 240,
-        target: configurableTarget('model', 'grok-4.5'),
+        target: configurableTarget('model', 'grok-4.6'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['x'],
@@ -672,7 +672,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'combined',
         selection_order: 250,
-        target: configurableTarget('model', 'grok-4.5'),
+        target: configurableTarget('model', 'grok-4.6'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         // One attempt, one result, one metering record, two corpora. This is
