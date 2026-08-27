@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -62,6 +63,37 @@ function runInstaller(input: {
       LIBRARIUM_CANDIDATE: input.candidate,
       LIBRARIUM_SHA256: input.checksum ?? sha256(input.candidate),
       LIBRARIUM_VERSION: input.version ?? VERSION,
+    },
+  });
+}
+
+function runRemoteInstaller(input: {
+  readonly root: string;
+  readonly candidate: string;
+  readonly manifest: string;
+  readonly fingerprint?: string;
+}) {
+  const bin = join(input.root, 'fake-bin');
+  mkdirSync(bin);
+  executable(
+    join(bin, 'curl'),
+    '#!/bin/sh\nout=""\nurl=""\nwhile [ "$#" -gt 0 ]; do\n  case "$1" in\n    -o) out="$2"; shift 2 ;;\n    *) url="$1"; shift ;;\n  esac\ndone\ncase "$url" in\n  */SHA256SUMS) cp "$FIXTURE_MANIFEST" "$out" ;;\n  *) cp "$FIXTURE_CANDIDATE" "$out" ;;\nesac\n',
+  );
+  return spawnSync('sh', [installer], {
+    cwd: input.root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      FIXTURE_CANDIDATE: input.candidate,
+      FIXTURE_MANIFEST: input.manifest,
+      LIBRARIUM_INSTALL_DIR: input.root,
+      LIBRARIUM_VERSION: VERSION,
+      LIBRARIUM_CANDIDATE_SHA: 'a'.repeat(40),
+      LIBRARIUM_CANDIDATE_FINGERPRINT:
+        input.fingerprint ?? `sha256:${'b'.repeat(64)}`,
+      LIBRARIUM_CANDIDATE: '',
+      LIBRARIUM_SHA256: '',
     },
   });
 }
@@ -168,6 +200,47 @@ describe.skipIf(process.platform === 'win32')(
       });
       expect(incomplete.status).not.toBe(0);
       expect(incomplete.stderr).toContain('require LIBRARIUM_CANDIDATE');
+    });
+
+    it('installs remote bytes only through the identity-qualified checksum manifest', () => {
+      const root = fixtureRoot();
+      const candidate = join(root, 'remote-candidate');
+      const manifest = join(root, 'SHA256SUMS.fixture');
+      ordinaryCandidate(candidate);
+      writeFileSync(
+        manifest,
+        `# librarium-candidate-sha ${'a'.repeat(40)}\n# librarium-candidate-fingerprint sha256:${'b'.repeat(64)}\n# librarium-version ${VERSION}\n${sha256(candidate)}  librarium-linux-x64\n`,
+      );
+      const result = runRemoteInstaller({ root, candidate, manifest });
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(join(root, 'librarium'))).toEqual(
+        readFileSync(candidate),
+      );
+      expectNoTransactionFiles(root);
+    });
+
+    it('preserves the prior install on remote manifest identity mismatch', () => {
+      const root = fixtureRoot();
+      const destination = join(root, 'librarium');
+      const candidate = join(root, 'remote-candidate');
+      const manifest = join(root, 'SHA256SUMS.fixture');
+      ordinaryCandidate(destination, '1.9.9-rc.1');
+      ordinaryCandidate(candidate);
+      writeFileSync(
+        manifest,
+        `# librarium-candidate-sha ${'a'.repeat(40)}\n# librarium-candidate-fingerprint sha256:${'b'.repeat(64)}\n# librarium-version ${VERSION}\n${sha256(candidate)}  librarium-linux-x64\n`,
+      );
+      const prior = readFileSync(destination);
+      const result = runRemoteInstaller({
+        root,
+        candidate,
+        manifest,
+        fingerprint: `sha256:${'c'.repeat(64)}`,
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('candidate fingerprint mismatch');
+      expect(readFileSync(destination)).toEqual(prior);
+      expectNoTransactionFiles(root);
     });
   },
 );

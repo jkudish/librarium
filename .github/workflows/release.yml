@@ -1,11 +1,23 @@
-name: Release
-run-name: "Release ${{ inputs.version }}"
+name: Promote certified release candidate
+run-name: "Promote ${{ inputs.candidate_sha }}"
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to release (e.g., 1.2.0 or v1.2.0)'
+      candidate_sha:
+        description: 'Exact certified protected-main SHA (40 lowercase hex)'
+        required: true
+        type: string
+      candidate_fingerprint:
+        description: 'Exact candidate fingerprint (sha256: followed by 64 lowercase hex)'
+        required: true
+        type: string
+      candidate_archive_sha256:
+        description: 'SHA-256 of candidate.tar.gz (64 lowercase hex)'
+        required: true
+        type: string
+      certification_run_id:
+        description: 'Successful release-candidate workflow run ID containing the immutable candidate'
         required: true
         type: string
 
@@ -13,422 +25,241 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-promotion
+  cancel-in-progress: false
+
 jobs:
-  ci:
+  promote:
+    if: github.actor == 'jkudish' && github.repository_owner == 'jkudish'
     runs-on: ubuntu-latest
-    if: github.actor == 'jkudish'
-    permissions:
-      contents: read
+    environment: release
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      CANDIDATE_FINGERPRINT: ${{ inputs.candidate_fingerprint }}
+      CANDIDATE_ARCHIVE_SHA256: ${{ inputs.candidate_archive_sha256 }}
+      CERTIFICATION_RUN_ID: ${{ inputs.certification_run_id }}
+      GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm run test
-
-      - name: Declaration consumer fixtures
-        run: npm run test:declarations
-
-      - name: Contract snapshot drift
+      - name: Validate dispatch authority before candidate code
+        shell: bash
         run: |
-          npm run contracts:generate
-          git diff --exit-code -- contracts/v1
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_FINGERPRINT" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CERTIFICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "${{ github.ref_protected }}" = true
+          test "$GITHUB_SHA" = "$CANDIDATE_SHA"
 
-      - name: Workers compatibility tests
-        run: npm run test:workers
-
-      - name: Integration tests
-        run: npm run test:integration
-
-      - name: Packed consumer smoke test
-        run: npm run test:packed
-
-      - name: Offline benchmark fixture replay
-        run: npm run benchmark:ci
-
-  release:
-    needs: ci
-    runs-on: ubuntu-latest
-    if: github.actor == 'jkudish'
-    outputs:
-      version: ${{ steps.version.outputs.number }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - name: Checkout exact certified candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Normalize and validate version
-        id: version
+      - name: Revalidate protected main authority
+        shell: bash
         run: |
-          VERSION="${{ inputs.version }}"
-          VERSION="${VERSION#v}"
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Error: Invalid version format '$VERSION'. Expected X.Y.Z or vX.Y.Z"
-            exit 1
-          fi
-          echo "number=$VERSION" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
 
-      - name: Upgrade npm for OIDC support
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
+      - name: Install locked verification dependencies
         run: npm ci
 
-      - name: Validate changelog
-        run: |
-          chmod +x .github/scripts/parse-changelog.sh
-          .github/scripts/parse-changelog.sh validate
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump version in package.json
-        run: npm version ${{ steps.version.outputs.number }} --no-git-tag-version --allow-same-version
-
-      - name: Update changelog (skip if Unreleased is empty)
-        run: |
-          UNRELEASED=$(awk '/^## \[Unreleased\]/{c=1;next}/^## \[/{c=0}c' CHANGELOG.md | grep -v '^[[:space:]]*$' | grep -v '^###' || true)
-          if [ -n "$UNRELEASED" ]; then
-            .github/scripts/parse-changelog.sh release ${{ steps.version.outputs.number }}
-          else
-            echo "No unreleased changes — skipping changelog update"
-          fi
-
-      - name: Commit version bump and changelog
-        run: |
-          git add package.json package-lock.json CHANGELOG.md
-          git diff --cached --quiet || git commit -m "Release v${{ steps.version.outputs.number }}"
-
-      - name: Create and push tag
-        run: |
-          git tag -f "v${{ steps.version.outputs.number }}"
-          git push origin "v${{ steps.version.outputs.number }}" --force
-
-      - name: Push to main
-        run: git push || true
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish to npm
-        # Tolerate ONLY the version-already-exists case (re-runs); fail loudly on
-        # everything else — npm masks auth failures as 404s on publish.
-        run: |
-          if npm view "librarium@$(node -p "require('./package.json').version")" version >/dev/null 2>&1; then
-            echo "Version already published — skipping"
-          else
-            npm publish --provenance --access public
-          fi
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view "v${{ steps.version.outputs.number }}" >/dev/null 2>&1 || \
-          gh release create "v${{ steps.version.outputs.number }}" \
-            --title "v${{ steps.version.outputs.number }}" \
-            --notes "See [CHANGELOG.md](https://github.com/jkudish/librarium/blob/main/CHANGELOG.md) for details." \
-            --latest
-
-  build-binaries:
-    needs: release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-            binary: librarium-linux-x64
-          - os: ubuntu-24.04-arm
-            platform: linux
-            arch: arm64
-            binary: librarium-linux-arm64
-          - os: macos-14-large
-            platform: darwin
-            arch: x64
-            binary: librarium-macos-x64
-          - os: macos-latest
-            platform: darwin
-            arch: arm64
-            binary: librarium-macos-arm64
-          - os: windows-latest
-            platform: win32
-            arch: x64
-            binary: librarium-windows-x64.exe
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout tag
-        uses: actions/checkout@v6
-        with:
-          ref: v${{ needs.release.outputs.version }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build SEA binary
-        run: npm run build:sea
-
-      - name: Verify binary
+      - name: Verify successful certification run identity
         shell: bash
         run: |
-          if [[ "${{ matrix.platform }}" == "win32" ]]; then
-            ./dist/${{ matrix.binary }} --version
-          else
-            chmod +x ./dist/${{ matrix.binary }}
-            ./dist/${{ matrix.binary }} --version
-          fi
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CERTIFICATION_RUN_ID" > "$RUNNER_TEMP/certification-run.json"
+          test "$(jq -r '.conclusion' "$RUNNER_TEMP/certification-run.json")" = success
+          test "$(jq -r '.event' "$RUNNER_TEMP/certification-run.json")" = workflow_dispatch
+          test "$(jq -r '.head_branch' "$RUNNER_TEMP/certification-run.json")" = main
+          test "$(jq -r '.head_sha' "$RUNNER_TEMP/certification-run.json")" = "$CANDIDATE_SHA"
+          test "$(jq -r '.path' "$RUNNER_TEMP/certification-run.json")" = .github/workflows/release-candidate.yml
 
-      - name: Upload binary to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${{ needs.release.outputs.version }}" "./dist/${{ matrix.binary }}" --clobber
+      - name: Download exact certified candidate artifact
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: librarium-rc-${{ inputs.candidate_sha }}-candidate
+          path: ${{ runner.temp }}/candidate-archive
+          run-id: ${{ inputs.certification_run_id }}
+          github-token: ${{ github.token }}
 
-  update-homebrew:
-    needs: [release, build-binaries]
-    runs-on: ubuntu-latest
-    if: always() && needs.release.result == 'success'
-
-    steps:
-      - name: Download binaries and compute SHAs
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify and extract candidate archive
+        shell: bash
         run: |
-          VERSION="${{ needs.release.outputs.version }}"
-          BASE_URL="https://github.com/jkudish/librarium/releases/download/v${VERSION}"
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/candidate-archive/candidate.tar.gz"
+          test "$(sha256sum "$ARCHIVE" | awk '{print $1}')" = "$CANDIDATE_ARCHIVE_SHA256"
+          mkdir "$RUNNER_TEMP/candidate"
+          ARCHIVE="$ARCHIVE" DESTINATION="$RUNNER_TEMP/candidate" python3 - <<'PY'
+          import os, pathlib, tarfile
+          archive = os.environ['ARCHIVE']
+          destination = os.environ['DESTINATION']
+          with tarfile.open(archive, 'r:gz') as candidate:
+              for member in candidate.getmembers():
+                  path = pathlib.PurePosixPath(member.name)
+                  if path.is_absolute() or '..' in path.parts or not (member.isdir() or member.isfile()):
+                      raise SystemExit(f'unsafe candidate archive member: {member.name}')
+              candidate.extractall(destination, filter='data')
+          PY
 
-          mkdir -p binaries
-          for binary in librarium-macos-arm64 librarium-macos-x64 librarium-linux-arm64 librarium-linux-x64; do
-            curl -fsSL -o "binaries/${binary}" "${BASE_URL}/${binary}"
+      - name: Verify candidate and stage exact publication bytes
+        run: >-
+          node scripts/release-promotion.mjs prepare
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+          --output "$RUNNER_TEMP/promotion"
+
+      - name: Match preregistered candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          SPEC="$RUNNER_TEMP/promotion/promotion.json"
+          test "$(jq -r '.candidate.git_sha' "$SPEC")" = "$CANDIDATE_SHA"
+          test "$(jq -r '.candidate.fingerprint' "$SPEC")" = "$CANDIDATE_FINGERPRINT"
+          node scripts/release-promotion.mjs verify --promotion "$RUNNER_TEMP/promotion"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Inspect initial publication state
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile npm stage
+        id: npm-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --github-output
+
+      - name: Publish exact certified npm tarball
+        if: steps.npm-plan.outputs.publish_npm == 'true'
+        run: |
+          set -euo pipefail
+          ASSET="$(jq -r '.npm.asset' "$RUNNER_TEMP/promotion/promotion.json")"
+          npm publish "$RUNNER_TEMP/promotion/$ASSET" --provenance --access public
+
+      - name: Reinspect after npm
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile tag stage
+        id: tag-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --github-output
+
+      - name: Create immutable Git tag
+        if: steps.tag-plan.outputs.create_tag == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          git tag "$TAG" "$CANDIDATE_SHA"
+          BASIC="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $BASIC" push origin "refs/tags/$TAG:refs/tags/$TAG"
+
+      - name: Reinspect after tag
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile GitHub release stage
+        id: release-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --github-output
+
+      - name: Create non-clobbering GitHub release
+        if: steps.release-plan.outputs.create_github_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          gh release create "$TAG" --verify-tag --target "$CANDIDATE_SHA" --title "$TAG" --notes "Immutable promotion of certified candidate $CANDIDATE_SHA ($CANDIDATE_FINGERPRINT)." --prerelease
+
+      - name: Reinspect before GitHub assets
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile GitHub asset stage
+        id: asset-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --github-output
+
+      - name: Upload only absent exact GitHub assets
+        if: steps.asset-plan.outputs.upload_github_assets != ''
+        shell: bash
+        env:
+          ASSETS: ${{ steps.asset-plan.outputs.upload_github_assets }}
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          IFS=',' read -r -a names <<< "$ASSETS"
+          for name in "${names[@]}"; do
+            test -n "$name"
+            gh release upload "$TAG" "$RUNNER_TEMP/promotion/$name"
           done
 
-          echo "SHA_MACOS_ARM64=$(sha256sum binaries/librarium-macos-arm64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
-          echo "SHA_MACOS_X64=$(sha256sum binaries/librarium-macos-x64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
-          echo "SHA_LINUX_ARM64=$(sha256sum binaries/librarium-linux-arm64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
-          echo "SHA_LINUX_X64=$(sha256sum binaries/librarium-linux-x64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+      - name: Reinspect before Homebrew
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
 
-      - name: Update Homebrew formula
+      - name: Reconcile Homebrew stage
+        id: homebrew-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --github-output
+
+      - name: Publish forward-only Homebrew formula commit
+        if: steps.homebrew-plan.outputs.publish_homebrew == 'true'
+        shell: bash
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          VERSION="${{ needs.release.outputs.version }}"
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/jkudish/homebrew-tap.git" tap
-          cd tap
+          set -euo pipefail
+          git clone --depth 1 https://github.com/jkudish/homebrew-tap.git "$RUNNER_TEMP/tap"
+          cp "$RUNNER_TEMP/promotion/librarium.rb" "$RUNNER_TEMP/tap/Formula/librarium.rb"
+          git -C "$RUNNER_TEMP/tap" config user.name "github-actions[bot]"
+          git -C "$RUNNER_TEMP/tap" config user.email "github-actions[bot]@users.noreply.github.com"
+          git -C "$RUNNER_TEMP/tap" add Formula/librarium.rb
+          git -C "$RUNNER_TEMP/tap" diff --cached --exit-code && exit 1
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          git -C "$RUNNER_TEMP/tap" commit -m "Update librarium to v$VERSION"
+          BASIC="$(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 -w0)"
+          git -C "$RUNNER_TEMP/tap" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $BASIC" push origin HEAD:main
 
-          mkdir -p Formula
-          cat > Formula/librarium.rb << RUBY
-          class Librarium < Formula
-            desc "Fan out research queries to multiple search and deep-research APIs in parallel"
-            homepage "https://github.com/jkudish/librarium"
-            version "${VERSION}"
-            license "MIT"
-
-            on_macos do
-              if Hardware::CPU.arm?
-                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-macos-arm64"
-                sha256 "${SHA_MACOS_ARM64}"
-              else
-                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-macos-x64"
-                sha256 "${SHA_MACOS_X64}"
-              end
-            end
-
-            on_linux do
-              if Hardware::CPU.arm?
-                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-linux-arm64"
-                sha256 "${SHA_LINUX_ARM64}"
-              else
-                url "https://github.com/jkudish/librarium/releases/download/v${VERSION}/librarium-linux-x64"
-                sha256 "${SHA_LINUX_X64}"
-              end
-            end
-
-            def install
-              binary_name = "librarium"
-              bin.install Dir["librarium-*"].first => binary_name
-            end
-
-            test do
-              assert_match version.to_s, shell_output("#{bin}/librarium --version")
-            end
-          end
-          RUBY
-
-          # Fix indentation (heredoc adds extra spaces)
-          sed -i 's/^          //' Formula/librarium.rb
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/jkudish/homebrew-tap.git"
-          git add Formula/librarium.rb
-          git commit -m "Update librarium to v${VERSION}" || echo "No changes to commit"
-          git push origin main
-
-  smoke-test-installs:
-    needs: [release, build-binaries, update-homebrew]
-    if: always() && needs.release.result == 'success'
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        method:
-          - npm
-          - standalone
-          - homebrew
-    env:
-      VERSION: ${{ needs.release.outputs.version }}
-
-    steps:
-      - name: Setup Node.js for npm smoke test
-        if: matrix.method == 'npm'
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Smoke test npm install
-        if: matrix.method == 'npm'
+      - name: Verify complete cross-channel identity
+        shell: bash
         run: |
           set -euo pipefail
-          PREFIX="$RUNNER_TEMP/librarium-npm"
-          rm -rf "$PREFIX"
-
-          for attempt in $(seq 1 8); do
-            if npm install -g "librarium@${VERSION}" --prefix "$PREFIX"; then
-              break
-            fi
-
-            if [ "$attempt" -eq 8 ]; then
-              echo "npm install failed after retries."
-              exit 1
-            fi
-
-            sleep 10
-          done
-
-          "$PREFIX/bin/librarium" --help >/dev/null
-          INSTALLED="$("$PREFIX/bin/librarium" --version)"
-          if [ "$INSTALLED" != "$VERSION" ]; then
-            echo "Version mismatch: expected $VERSION, got $INSTALLED"
-            exit 1
-          fi
-          echo "npm install smoke test passed: $INSTALLED"
-
-      - name: Smoke test standalone install
-        if: matrix.method == 'standalone'
-        run: |
-          set -euo pipefail
-          INSTALL_DIR="$RUNNER_TEMP/librarium-standalone"
-          SCRIPT="$RUNNER_TEMP/librarium-install.sh"
-
-          for attempt in $(seq 1 8); do
-            if curl -fsSL "https://raw.githubusercontent.com/jkudish/librarium/v${VERSION}/scripts/install.sh" -o "$SCRIPT"; then
-              break
-            fi
-
-            if [ "$attempt" -eq 8 ]; then
-              echo "Failed to download install.sh after retries."
-              exit 1
-            fi
-
-            sleep 5
-          done
-
-          chmod +x "$SCRIPT"
-          rm -rf "$INSTALL_DIR"
-          mkdir -p "$INSTALL_DIR"
-
-          for attempt in $(seq 1 8); do
-            if LIBRARIUM_INSTALL_DIR="$INSTALL_DIR" LIBRARIUM_VERSION="$VERSION" bash "$SCRIPT"; then
-              break
-            fi
-
-            if [ "$attempt" -eq 8 ]; then
-              echo "Standalone install failed after retries."
-              exit 1
-            fi
-
-            rm -f "$INSTALL_DIR/librarium"
-            sleep 10
-          done
-
-          "$INSTALL_DIR/librarium" --help >/dev/null
-          INSTALLED="$("$INSTALL_DIR/librarium" --version)"
-          if [ "$INSTALLED" != "$VERSION" ]; then
-            echo "Version mismatch: expected $VERSION, got $INSTALLED"
-            exit 1
-          fi
-          echo "Standalone install smoke test passed: $INSTALLED"
-
-      - name: Smoke test Homebrew install
-        if: matrix.method == 'homebrew'
-        run: |
-          set -euo pipefail
-
-          brew tap jkudish/tap
-
-          for attempt in $(seq 1 8); do
-            if brew list --versions librarium >/dev/null 2>&1; then
-              brew upgrade jkudish/tap/librarium || true
-            else
-              brew install jkudish/tap/librarium || true
-            fi
-
-            INSTALLED_VERSION="$(brew list --versions librarium 2>/dev/null | awk '{print $2}')"
-            if [ "$INSTALLED_VERSION" = "$VERSION" ]; then
-              break
-            fi
-
-            if [ "$attempt" -eq 8 ]; then
-              echo "Homebrew install failed after retries."
-              exit 1
-            fi
-
-            brew uninstall librarium --force >/dev/null 2>&1 || true
-            sleep 15
-          done
-
-          BREW_BIN="$(brew --prefix librarium)/bin/librarium"
-          "$BREW_BIN" --help >/dev/null
-          INSTALLED="$("$BREW_BIN" --version)"
-          if [ "$INSTALLED" != "$VERSION" ]; then
-            echo "Version mismatch: expected $VERSION, got $INSTALLED"
-            exit 1
-          fi
-          echo "Homebrew install smoke test passed: $INSTALLED"
+          scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/final-inventory.json"
+          node scripts/release-promotion.mjs reconcile \
+            --spec "$RUNNER_TEMP/promotion/promotion.json" \
+            --inventory "$RUNNER_TEMP/final-inventory.json" > "$RUNNER_TEMP/final-plan.json"
+          test "$(jq -r '.complete' "$RUNNER_TEMP/final-plan.json")" = true
+          node scripts/release-promotion.mjs verify --promotion "$RUNNER_TEMP/promotion"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
