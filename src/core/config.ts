@@ -9,6 +9,7 @@ import {
 } from '../constants.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
 import { ConfigSchema, ProjectConfigSchema } from '../types.js';
+import { validateConfigV2 } from './config-v2.js';
 import type { EnvRecord } from './credentials.js';
 import { hasCredential, resolveCredential } from './credentials.js';
 import { safeWriteFile } from './fs-utils.js';
@@ -81,6 +82,116 @@ const DEFAULT_CONFIG: Config = {
   groups: { ...DEFAULT_GROUPS },
 };
 
+function exactMicrousdToUsd(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const microusd = BigInt(value);
+  if (microusd > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(
+      'Native v2 cost limits exceed the compatibility CLI numeric range.',
+    );
+  }
+  const usd = Number(microusd) / 1_000_000;
+  const [whole, fraction = ''] = String(usd).split('.');
+  if (
+    fraction.length > 6 ||
+    whole.includes('e') ||
+    whole.includes('E') ||
+    BigInt(`${whole}${fraction.padEnd(6, '0')}`) !== microusd
+  ) {
+    throw new Error(
+      'Native v2 cost limits cannot be represented exactly by the compatibility CLI.',
+    );
+  }
+  return usd;
+}
+
+function compatibilityConfigFromV2(raw: unknown, path: string): Config {
+  const validated = validateConfigV2(raw);
+  if (!validated.ok) {
+    const diagnostics = validated.issues
+      .map(
+        ({ code, path: issuePath, message }) =>
+          `${code} ${issuePath}: ${message}`,
+      )
+      .join('; ');
+    throw new Error(`Invalid Librarium v2 config in ${path}: ${diagnostics}`);
+  }
+  const native = validated.config;
+  if (native.execution_defaults.request_deadline_ms !== undefined) {
+    throw new Error(
+      'Native v2 request_deadline_ms is not supported by the compatibility CLI.',
+    );
+  }
+  return ConfigSchema.parse({
+    version: 1,
+    defaults: {
+      outputDir: native.runtime.output_dir,
+      maxParallel: native.execution_defaults.max_concurrency,
+      timeout: native.execution_defaults.inline_attempt_deadline_ms / 1_000,
+      asyncTimeout:
+        native.execution_defaults.background_attempt_deadline_ms / 1_000,
+      asyncPollInterval: native.execution_defaults.poll_interval_ms / 1_000,
+      mode: native.execution_defaults.mode,
+      llmWebSearch: native.runtime.llm_web_search,
+      ...(native.execution_defaults.max_actual_cost_microusd !== undefined && {
+        maxCostUsd: exactMicrousdToUsd(
+          native.execution_defaults.max_actual_cost_microusd,
+        ),
+      }),
+      ...(native.execution_defaults.max_estimated_cost_microusd !==
+        undefined && {
+        maxEstimatedCostUsd: exactMicrousdToUsd(
+          native.execution_defaults.max_estimated_cost_microusd,
+        ),
+      }),
+    },
+    providers: Object.fromEntries(
+      Object.entries(native.providers).map(([id, provider]) => [
+        id,
+        {
+          enabled: provider.enabled,
+          ...(provider.api_key !== undefined && { apiKey: provider.api_key }),
+          ...(provider.model !== undefined && { model: provider.model }),
+          ...(provider.options !== undefined && { options: provider.options }),
+          ...(provider.fallback !== undefined && {
+            fallback: provider.fallback,
+          }),
+        },
+      ]),
+    ),
+    customProviders: Object.fromEntries(
+      Object.entries(native.custom_providers).map(([id, source]) => {
+        const { execution_profile: executionProfile, ...rest } = source;
+        return [
+          id,
+          {
+            ...rest,
+            ...(executionProfile !== undefined && {
+              executionProfile: {
+                bindingId: executionProfile.binding_id,
+                profile: executionProfile.profile,
+                ...(executionProfile.credential !== undefined && {
+                  credential: {
+                    envVar: executionProfile.credential.env_var,
+                  },
+                }),
+              },
+            }),
+          },
+        ];
+      }),
+    ),
+    trustedProviderIds: native.trusted_provider_ids,
+    groups: native.groups,
+    ...(native.runtime.refine !== undefined && {
+      refine: native.runtime.refine,
+    }),
+    ...(native.runtime.answer !== undefined && {
+      answer: native.runtime.answer,
+    }),
+  });
+}
+
 /**
  * Resolve $ENV_VAR references in a string.
  * Returns the resolved value or undefined if the env var is not set.
@@ -152,7 +263,13 @@ export function loadConfig(globalPath?: string): Config {
       `Invalid JSON in ${path}: ${e instanceof Error ? e.message : e}`,
     );
   }
-  const config = ConfigSchema.parse(raw);
+  const config =
+    typeof raw === 'object' &&
+    raw !== null &&
+    Object.hasOwn(raw, 'version') &&
+    (raw as { version?: unknown }).version === 2
+      ? compatibilityConfigFromV2(raw, path)
+      : ConfigSchema.parse(raw);
   // Keep the authored spelling for the pure v2 mapper. v1 still mutates
   // config.groups below, but doing that here would erase alias provenance
   // before the mapper can issue its structured migration diagnostic.
@@ -294,6 +411,25 @@ export function mergeConfigs(
  */
 export function saveConfig(config: Config, path?: string): void {
   const filePath = path ?? CONFIG_FILE;
+  if (existsSync(filePath)) {
+    let existing: unknown;
+    try {
+      existing = JSON.parse(readFileSync(filePath, 'utf8'));
+    } catch {
+      // Preserve the legacy writer's existing replacement behavior for files
+      // that are not readable JSON configurations.
+    }
+    if (
+      typeof existing === 'object' &&
+      existing !== null &&
+      Object.hasOwn(existing, 'version') &&
+      (existing as { version?: unknown }).version === 2
+    ) {
+      throw new Error(
+        'Refusing to overwrite native v2 configuration through the legacy config writer.',
+      );
+    }
+  }
   mkdirSync(dirname(filePath), { recursive: true });
   safeWriteFile(filePath, `${JSON.stringify(config, null, 2)}\n`, {
     mode: CONFIG_FILE_MODE,

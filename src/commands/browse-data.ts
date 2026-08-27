@@ -115,7 +115,9 @@ export function readBrowseRunView(
         mode: presentation.generatorManifest.mode,
         providers: presentation.reports.map((report) => ({
           report,
-          content: presentation.providerContents[report.outputFile] ?? '',
+          ...(Object.hasOwn(presentation.providerContents, report.outputFile)
+            ? { content: presentation.providerContents[report.outputFile] }
+            : {}),
         })),
         sources: {
           total: presentation.totalCitations,

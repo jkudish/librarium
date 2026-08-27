@@ -1,11 +1,7 @@
 ---
-description: Run multi-provider deep research queries using the librarium CLI
-triggers:
-  - /librarium
-  - /research
-  - /deep-research
-  - deep research
-  - multi-provider search
+name: librarium
+description: "Runs evidence-aware, multi-provider research with the Librarium v2 CLI. Use for deep research, competitive research, answer-engine visibility checks, or questions needing grounded multi-source coverage."
+compatibility: Requires Node.js 22.12 or newer and the Librarium 2.x CLI.
 ---
 
 # Librarium -- Multi-Provider Deep Research
@@ -17,9 +13,19 @@ counts or agreement into a confidence claim.
 
 ## Prerequisites
 
-- `librarium` CLI installed (`npm install -g librarium`)
-- API keys configured (`librarium init --auto`)
-- Binary at: `librarium` (or `npx librarium`)
+Before the first query in an orb, run `librarium --version` and require major
+version 2. The Librarium repository's `.agents/setup` installs its built v2
+checkout globally. In other orbs, install the published v2 package when it is
+available:
+
+```bash
+npm install -g 'librarium@^2'
+```
+
+Do not silently fall back to Librarium 1.x or install a mutable Git branch. If
+npm has no v2 release yet, report that distribution blocker instead. Configure
+available API keys with `librarium init --auto`, then inspect the usable matrix
+with `librarium doctor` and `librarium ls --json`. Never print secret values.
 
 ## 7-Phase Research Workflow
 
@@ -113,7 +119,7 @@ Instead of shelling out to the CLI, agents can drive librarium over the Model Co
 
 | Tier | Providers | Speed | Depth |
 |------|-----------|-------|-------|
-| background/durable | Exa, Tavily, OpenAI Research, Gemini Deep, Perplexity Deep Research (Agent medium), Perplexity Sonar Deep (Agent high), Parallel, Valyu, and You Research profiles | Minutes to longer | Persisted handles that can be polled and retrieved |
+| background/durable | `exa/research`, `openai-research/research`, `gemini-deep/research`, `perplexity-sonar-deep/research`, `perplexity-deep-research/research`, `you-research/research`, `parallel/research`, and `valyu/research` | Minutes to longer | Persisted handles that can be polled and retrieved |
 | inline | Search, grounded, collected surface, and chat profiles | Usually seconds | Immediate response; no durable handle |
 
 ### Visibility and privacy boundary

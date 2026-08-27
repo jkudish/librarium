@@ -510,6 +510,12 @@ export interface RunTaskState {
   providerStatus?: string;
   /** Safe diagnostic from the most recent poll; never credentials or headers. */
   lastPollError?: string;
+  /** Monotonic count of persisted durable retrieval attempts. */
+  retrievalAttempts?: number;
+  /** Timestamp of the most recently persisted retrieval attempt. */
+  lastRetrievalAttemptAt?: number;
+  /** Safe code-only diagnostic from the most recent retrieval failure. */
+  lastRetrievalError?: string;
 }
 
 // Live run manifest — written to run.json before dispatch and mutated atomically.

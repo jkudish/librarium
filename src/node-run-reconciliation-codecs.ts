@@ -241,6 +241,7 @@ export function taskResultFromReport(
       completedAt?: number;
       retrievedAt?: number;
       lastPollError?: string;
+      lastRetrievalError?: string;
     };
   }>,
   polled: boolean,
@@ -250,6 +251,7 @@ export function taskResultFromReport(
 ): ReconciliationTaskResult | null {
   const task = report.task;
   if (!task) return null;
+  const outcomeError = error ?? task.lastRetrievalError ?? task.lastPollError;
   return {
     provider,
     taskId: task.taskId,
@@ -278,8 +280,6 @@ export function taskResultFromReport(
     ...(task.retrievedAt === undefined
       ? {}
       : { retrievedAt: task.retrievedAt }),
-    ...(error === undefined && task.lastPollError === undefined
-      ? {}
-      : { error: error ?? task.lastPollError }),
+    ...(outcomeError === undefined ? {} : { error: outcomeError }),
   };
 }

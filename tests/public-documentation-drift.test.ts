@@ -2,13 +2,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createCliProgram } from '../src/cli-program.js';
 import { ARTIFACTS_VERSION } from '../src/contracts/artifacts/versions.js';
-import { CUSTOM_PROVIDER_PROTOCOL_VERSION } from '../src/contracts/custom-provider/index.js';
 import {
   BUILTIN_WORKFLOW_IDS,
   QUICK_WORKFLOW_ROSTER,
   VISIBILITY_WORKFLOW_ROSTER,
 } from '../src/core/builtin-workflows.js';
 import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
+import { SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION } from '../src/node-entry.js';
 
 const read = (path: string) =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -26,6 +26,15 @@ const profileKeys = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
   provider.profiles.map(
     (profile) => `${provider.provider_id}/${profile.profile_id}`,
   ),
+);
+const durableProfileKeys = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
+  provider.profiles
+    .filter(
+      (profile) =>
+        profile.invocation === 'background' &&
+        profile.resumability === 'durable',
+    )
+    .map((profile) => `${provider.provider_id}/${profile.profile_id}`),
 );
 const mcpTools = [
   ...MCP_SOURCE.matchAll(/server\.registerTool\(\s*'([^']+)'/g),
@@ -73,14 +82,37 @@ describe('public v2 documentation drift', () => {
     expect(SKILL).toContain('`deep` for research-report profiles');
   });
 
+  it('keeps the skill durable-profile roster aligned with source', () => {
+    const row = SKILL.split('\n').find((line) =>
+      line.startsWith('| background/durable |'),
+    );
+    expect(row).toBeDefined();
+    expect(
+      [...(row ?? '').matchAll(/`([^`]+\/[^`]+)`/g)].map((match) => match[1]),
+    ).toEqual(durableProfileKeys);
+  });
+
   it('documents every registered public command and long option', () => {
     const program = createCliProgram();
     for (const command of program.commands) {
       expect(README).toContain(`\`${command.name()}\``);
       for (const option of command.options) {
-        if (option.long && option.long !== '--help')
+        if (option.long && option.long !== '--help') {
           expect(README).toContain(option.long);
+        }
       }
+    }
+
+    const config = program.commands.find(
+      (command) => command.name() === 'config',
+    );
+    const migrate = config?.commands.find(
+      (command) => command.name() === 'migrate',
+    );
+    expect(migrate).toBeDefined();
+    expect(README).toContain('`config migrate`');
+    for (const option of migrate?.options ?? []) {
+      if (option.long) expect(README).toContain(option.long);
     }
   });
 
@@ -104,18 +136,37 @@ describe('public v2 documentation drift', () => {
     expect(README).toContain('Node.js **22.12 or newer**');
   });
 
-  it('keeps contract and custom-provider versions documented', () => {
+  it('keeps contract and script-provider versions documented', () => {
     expect(ARTIFACTS_VERSION).toBe('1.0.0');
-    expect(CUSTOM_PROVIDER_PROTOCOL_VERSION).toBe('1.0.0');
+    expect(SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION).toBe(1);
     expect(CONTRACTS_GUIDE).toContain(
       `ARTIFACTS_VERSION\` contract (currently \`${ARTIFACTS_VERSION}\`)`,
     );
-    expect(CONTRACTS_GUIDE).toContain(
-      `CUSTOM_PROVIDER_PROTOCOL_VERSION\` (currently \`${CUSTOM_PROVIDER_PROTOCOL_VERSION}\`)`,
-    );
     expect(PROVIDER_GUIDE).toContain(
-      `custom-provider wire protocol is \`${CUSTOM_PROVIDER_PROTOCOL_VERSION}\``,
+      `\`protocolVersion: ${SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION}\``,
     );
+    expect(PROVIDER_GUIDE).toContain('There is no separate `1.0.0`');
+  });
+
+  it('keeps shipped durable-profile rosters aligned with the catalog', () => {
+    const durableProfiles = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
+      provider.profiles
+        .filter(
+          (profile) =>
+            profile.invocation === 'background' &&
+            profile.resumability === 'durable',
+        )
+        .map((profile) => `${provider.provider_id}/${profile.profile_id}`),
+    ).sort();
+    const documentedRoster = (document: string) => {
+      const row = document.match(/\| background\/durable \| ([^|]+) \|/);
+      expect(row).not.toBeNull();
+      return [...(row?.[1] ?? '').matchAll(/`([^`]+)`/g)]
+        .map((match) => match[1])
+        .sort();
+    };
+
+    expect(documentedRoster(SKILL)).toEqual(durableProfiles);
   });
 
   it('keeps the execution, provenance, privacy, and paid-validation boundaries explicit', () => {

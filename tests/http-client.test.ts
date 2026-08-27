@@ -185,6 +185,19 @@ describe('httpRequest', () => {
     ).rejects.toThrow('timed out');
   });
 
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    'rejects invalid buffered timeout %s before fetch',
+    async (timeout) => {
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+
+      await expect(
+        httpRequest('https://api.example.com/invalid-timeout', { timeout }),
+      ).rejects.toThrow('HTTP timeout must be a positive integer');
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it('retries on 500 errors', async () => {
     const fetchMock = vi
       .fn()
@@ -664,4 +677,19 @@ describe('httpStreamRequest', () => {
     await expect(reader.read()).rejects.toBeInstanceOf(HttpRequestTimeoutError);
     expect(cancel).toHaveBeenCalledOnce();
   });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    'rejects invalid streaming timeout %s before fetch',
+    async (timeout) => {
+      const fetchMock = vi.fn();
+      globalThis.fetch = fetchMock;
+
+      await expect(
+        httpStreamRequest('https://api.example.com/invalid-timeout', {
+          timeout,
+        }),
+      ).rejects.toThrow('HTTP timeout must be a positive integer');
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

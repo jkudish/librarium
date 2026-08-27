@@ -88,12 +88,21 @@ scripts can execute arbitrary code with the calling process permissions and
 environment. Never treat it as a sandbox or grant trust during automatic
 migration.
 
-The custom-provider wire protocol is `1.0.0`. It uses strict JSON envelopes
-for `execute`, `submit`, `poll`, and `retrieve`. An inline `execute` request
-requires an inline profile; `submit` requires a durable background profile;
-`retrieve` requires a successful handle. Responses must preserve matching
-request and attempt IDs. Validate every exchange with the exported schemas
-before admitting it.
+An npm source exports a provider object or a factory that receives its provider
+ID, config, and source options. The returned ID must match the configured ID.
+Inline providers implement `execute`. Background providers also implement
+`submit`, `poll`, and `retrieve`.
+
+A script source reads one JSON request from stdin and writes one JSON response
+to stdout. The request uses integer `protocolVersion: 1` (exported from
+`librarium/node` as `SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION`) and an operation
+such as `describe`, `execute`, `submit`, `poll`, `retrieve`, or `test`. Return
+`{"ok":true,"data":...}` on success or `{"ok":false,"error":"..."}` on
+failure. Librarium validates each operation's payload before using it.
+
+There is no separate `1.0.0` exchange-schema protocol. Npm providers use the
+exported Node provider interfaces, and scripts use the integer-versioned process
+envelope above.
 
 ## Collection and provenance
 

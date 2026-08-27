@@ -102,8 +102,9 @@ function wizardProviders(config: Config): readonly WizardProvider[] {
 export function hasWizardSynthesisClient(
   config: Config,
   credentials: CredentialContext,
+  environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return resolveRefineClient(config, process.env, credentials) !== null;
+  return resolveRefineClient(config, environment, credentials) !== null;
 }
 
 export async function runWizard(): Promise<void> {

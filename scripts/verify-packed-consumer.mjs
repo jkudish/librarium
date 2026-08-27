@@ -107,6 +107,7 @@ const NODE_EXPORTS = [
   'CanonicalLiveValidationError',
   'CanonicalValidationCheckpointRepository',
   'ConfigV2FileError',
+  'SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION',
   'approvalFingerprint',
   'assertCanonicalTargetDispatchable',
   'assertCanonicalValidationPins',

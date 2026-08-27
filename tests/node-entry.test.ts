@@ -90,6 +90,7 @@ describe('librarium/node entry', () => {
   it('loads trusted custom providers without mutating a public registry', async () => {
     writeNpmProvider('library-provider');
     const node = await import('../src/node-entry.js');
+    expect(node.SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION).toBe(1);
 
     const result = await node.loadCustomProviders({
       providers: { 'library-provider': { enabled: true } },

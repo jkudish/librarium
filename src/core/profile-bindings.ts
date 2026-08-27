@@ -2,12 +2,8 @@ import type { z } from 'zod';
 import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Corpus, ExecutionProfile } from '../contracts/domain/index.js';
 import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
-import type { NetworkFreeEstimate } from './execution-plan.js';
 import { normalizedPerplexityAgentUnderlyingModel } from './perplexity-agent-target.js';
-import {
-  getBuiltinProviderDefinition,
-  type ProviderMeteringDescriptor,
-} from './provider-descriptor.js';
+import { getBuiltinProviderDefinition } from './provider-descriptor.js';
 import {
   catalogProfileKey,
   declaredExecutionProfile,
@@ -32,8 +28,8 @@ export interface ProfileBindingConfig {
 /**
  * One implemented declaration binds to exactly one adapter strategy. The
  * binding turns a validated configuration into the single exact execution
- * profile that will run, plus a network-free estimate when -- and only when --
- * the price is exact and non-volatile.
+ * profile that will run. Pricing is resolved separately from the reviewed
+ * pricing snapshot so there is only one quote authority.
  *
  * The record itself is shallow-frozen: metadata cannot be reassigned after
  * construction, while the shared zod schema and the resolver closure are kept
@@ -49,7 +45,6 @@ export interface ProfileBinding {
   validateModel(model?: string): void;
   resolve(config?: ProfileBindingConfig): {
     readonly profile: ExecutionProfile;
-    readonly estimate?: NetworkFreeEstimate;
   };
 }
 
@@ -153,48 +148,6 @@ function validateConfiguredModel(
   }
 }
 
-/**
- * Only exact, plan-priced metering yields a cost estimate.
- *
- * `native_cost`, `native_tokens` and `api_unit_priced` prices are volatile:
- * they depend on tokens, rows, or account tiers that are unknowable before the
- * call. Those estimates are omitted entirely, which makes a hard budget reject
- * the profile up front. Unknown never means zero.
- */
-export function networkFreeEstimate(
-  metering: ProviderMeteringDescriptor,
-): NetworkFreeEstimate | undefined {
-  const billableUnits =
-    metering.unit !== undefined && metering.defaultUnitsPerRequest !== undefined
-      ? [
-          {
-            unit: metering.unit,
-            quantity: String(metering.defaultUnitsPerRequest),
-          },
-        ]
-      : undefined;
-
-  if (metering.kind === 'request_priced') {
-    if (metering.defaultPerRequestUsd === undefined) {
-      return billableUnits ? { billable_units: billableUnits } : undefined;
-    }
-    return {
-      estimated_cost_microusd: String(
-        Math.round(metering.defaultPerRequestUsd * 1_000_000),
-      ),
-      ...(billableUnits && { billable_units: billableUnits }),
-    };
-  }
-
-  // Credits are exact in units but their USD value is account-specific, so the
-  // units are recorded and the cost stays unknown.
-  if (metering.kind === 'credit_priced' && billableUnits) {
-    return { billable_units: billableUnits };
-  }
-
-  return undefined;
-}
-
 interface BindingInput {
   readonly provider_id: string;
   readonly declaration: ExecutableProfileDeclaration;
@@ -215,16 +168,6 @@ function bindingOptionsSchema(adapterId: string): z.ZodTypeAny {
     );
   }
   return definition.optionsSchema;
-}
-
-function bindingEstimate(adapterId: string): NetworkFreeEstimate | undefined {
-  const definition = getBuiltinProviderDefinition(adapterId);
-  if (!definition) {
-    throw new ProfileBindingError(
-      `Profile binding references an unknown adapter: ${adapterId}`,
-    );
-  }
-  return networkFreeEstimate(definition.metering);
 }
 
 /**
@@ -289,7 +232,6 @@ function configuredTargetProjection(
 
 function bind(input: BindingInput): ProfileBinding {
   const optionsSchema = bindingOptionsSchema(input.adapter_id);
-  const estimate = bindingEstimate(input.adapter_id);
   const declared = declaredExecutionProfile(
     input.provider_id,
     input.declaration,
@@ -328,7 +270,7 @@ function bind(input: BindingInput): ProfileBinding {
         input.adapter_id,
         config?.model,
       );
-      return { profile, ...(estimate && { estimate }) };
+      return { profile };
     },
   });
 }

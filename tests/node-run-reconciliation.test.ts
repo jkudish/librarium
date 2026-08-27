@@ -253,7 +253,7 @@ describe('RunReconciliationService', () => {
     expect(retrieve).toHaveBeenCalledTimes(1);
   });
 
-  it('does not write for provider retrieval errors and allows retry', async () => {
+  it('terminalizes provider-returned errors immediately without writing result artifacts', async () => {
     const runDir = makeRun([
       pending('brave-search', 'error-task', 'completed'),
     ]);
@@ -261,30 +261,123 @@ describe('RunReconciliationService', () => {
       ...successResult('brave-search'),
       error: 'remote provider failed',
     };
-    let result = providerResult;
+    const retrieve = vi.fn(async () => providerResult);
     const service = new RunReconciliationService({
       repository: new RunArtifactRepository(),
       resolveBackgroundProvider: () =>
-        provider(
-          async () => ({ status: 'completed' }),
-          async () => result,
-        ),
+        provider(async () => ({ status: 'completed' }), retrieve),
       getProviderConfig: () => undefined,
       now: () => 20,
     });
-    const before = readFileSync(join(runDir, 'run.json'), 'utf8');
     const first = await service.reconcileOnce(runDir, { retrieve: true });
     expect(first.tasks[0]).toMatchObject({ status: 'error', retrieved: false });
-    expect(readFileSync(join(runDir, 'run.json'), 'utf8')).toBe(before);
+    expect(readRunManifest(runDir).providers[0]).toMatchObject({
+      status: 'error',
+      error: 'provider.result_error',
+      task: {
+        status: 'failed',
+        retrievalAttempts: 1,
+        lastRetrievalAttemptAt: 20,
+        lastRetrievalError: 'provider.result_error',
+      },
+    });
     expect(
       existsSync(
         join(runDir, providerArtifactFileNames('brave-search').outputFile),
       ),
     ).toBe(false);
 
-    result = successResult('brave-search');
+    const second = await service.reconcileOnce(runDir, { retrieve: true });
+    expect(second.retrieved).toBe(0);
+    expect(retrieve).toHaveBeenCalledOnce();
+  });
+
+  it('durably bounds retryable retrieval failures and commits a successful retry', async () => {
+    const runDir = makeRun([pending('brave-search', 'bounded', 'completed')]);
+    const retrieve = vi
+      .fn<ReconciliationBackgroundProvider['retrieve']>()
+      .mockRejectedValueOnce(new Error('secret first failure'))
+      .mockResolvedValueOnce(successResult('brave-search'));
+    let now = 100;
+    const service = new RunReconciliationService({
+      repository: new RunArtifactRepository(),
+      resolveBackgroundProvider: () =>
+        provider(async () => ({ status: 'completed' }), retrieve),
+      getProviderConfig: () => undefined,
+      now: () => now++,
+    });
+
+    await service.reconcileOnce(runDir, { retrieve: true });
+    expect(readRunManifest(runDir).providers[0]?.task).toMatchObject({
+      status: 'completed',
+      retrievalAttempts: 1,
+      lastRetrievalAttemptAt: 100,
+      lastRetrievalError: 'provider.retrieve_failed',
+    });
     const second = await service.reconcileOnce(runDir, { retrieve: true });
     expect(second.retrieved).toBe(1);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(readRunManifest(runDir).providers[0]?.task).toMatchObject({
+      retrievalAttempts: 2,
+      lastRetrievalAttemptAt: 101,
+      retrievedAt: 101,
+    });
+  });
+
+  it('terminalizes after three failed retrieval calls', async () => {
+    const runDir = makeRun([pending('brave-search', 'bounded', 'completed')]);
+    const retrieve = vi.fn(async () => {
+      throw new Error('never persist this');
+    });
+    let now = 200;
+    const service = new RunReconciliationService({
+      repository: new RunArtifactRepository(),
+      resolveBackgroundProvider: () =>
+        provider(async () => ({ status: 'completed' }), retrieve),
+      getProviderConfig: () => undefined,
+      now: () => now++,
+    });
+    await service.reconcileOnce(runDir, { retrieve: true });
+    await service.reconcileOnce(runDir, { retrieve: true });
+    await service.reconcileOnce(runDir, { retrieve: true });
+    await service.reconcileOnce(runDir, { retrieve: true });
+    expect(retrieve).toHaveBeenCalledTimes(3);
+    expect(readRunManifest(runDir).providers[0]).toMatchObject({
+      error: 'provider.retrieve_failed',
+      task: { status: 'failed', retrievalAttempts: 3 },
+    });
+  });
+
+  it('increments retrieval diagnostics monotonically across competing updates', async () => {
+    const runDir = makeRun([pending('brave-search', 'race', 'completed')]);
+    const repository = new RunArtifactRepository();
+    await Promise.all([
+      Promise.resolve().then(() =>
+        repository.recordRetrievalFailure(
+          runDir,
+          'brave-search',
+          'race',
+          'provider.retrieve_failed',
+          10,
+          false,
+        ),
+      ),
+      Promise.resolve().then(() =>
+        repository.recordRetrievalFailure(
+          runDir,
+          'brave-search',
+          'race',
+          'provider.retrieve_failed',
+          11,
+          false,
+        ),
+      ),
+    ]);
+    expect(readRunManifest(runDir).providers[0]?.task).toMatchObject({
+      retrievalAttempts: 2,
+      lastRetrievalAttemptAt: 11,
+      lastRetrievalError: 'provider.retrieve_failed',
+    });
   });
 
   it('terminalizes unsupported providers without invoking a resolver-owned provider', async () => {
@@ -403,10 +496,39 @@ describe('RunReconciliationService', () => {
       { provider: 'bad-provider', status: 'error', retrieved: false },
       { provider: 'good-provider', status: 'retrieved', retrieved: true },
     ]);
-    expect(
-      readRunManifest(runDir).providers[0]?.task?.retrievedAt,
-    ).toBeUndefined();
+    expect(readRunManifest(runDir).providers[0]?.task).toMatchObject({
+      status: 'failed',
+      retrievalAttempts: 1,
+      lastRetrievalError: 'provider.result_invalid',
+    });
     expect(readRunManifest(runDir).providers[1]?.task?.retrievedAt).toBe(50);
+  });
+
+  it('terminalizes invalid provider config immediately', async () => {
+    const runDir = makeRun([
+      pending('brave-search', 'invalid-config', 'completed'),
+    ]);
+    const retrieve = vi.fn(async () => successResult('brave-search'));
+    const service = new RunReconciliationService({
+      repository: new RunArtifactRepository(),
+      resolveBackgroundProvider: () =>
+        provider(async () => ({ status: 'completed' }), retrieve),
+      getProviderConfig: () => ({ options: 'not-an-object' }) as never,
+      now: () => 60,
+    });
+
+    await service.reconcileOnce(runDir, { retrieve: true });
+    expect(readRunManifest(runDir).providers[0]).toMatchObject({
+      status: 'error',
+      error: 'provider.config_invalid',
+      task: {
+        status: 'failed',
+        retrievalAttempts: 1,
+        lastRetrievalError: 'provider.config_invalid',
+      },
+    });
+    await service.reconcileOnce(runDir, { retrieve: true });
+    expect(retrieve).toHaveBeenCalledOnce();
   });
 
   it('rejects an invalid injected timestamp before any poll mutation', async () => {

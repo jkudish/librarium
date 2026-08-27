@@ -32,7 +32,7 @@ describe('wizard preflight credential UX', () => {
       reference === 'keychain:OPENAI_API_KEY' ? 'keychain-key' : undefined,
     );
 
-    expect(hasWizardSynthesisClient(config(), { resolveCredential })).toBe(
+    expect(hasWizardSynthesisClient(config(), { resolveCredential }, {})).toBe(
       true,
     );
     expect(resolveCredential).toHaveBeenCalledWith('keychain:OPENAI_API_KEY');

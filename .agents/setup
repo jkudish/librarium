@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # librarium orb setup — runs once on a fresh orb.
-# Installs Node 22.12 (the project floor), dependencies, a global librarium
-# binary, and builds dist/ so the CLI and plugin are usable immediately.
+# Installs Node 22.12 (the project floor), dependencies, builds dist/, and
+# installs that exact v2 checkout globally for agent and terminal use.
 
 cd "$(dirname "$0")/.."
 
@@ -30,7 +30,13 @@ npm install
 echo "[$(date +%H:%M:%S)] Building dist/"
 npm run build
 
-echo "[$(date +%H:%M:%S)] Installing librarium globally"
-npm install -g librarium
+echo "[$(date +%H:%M:%S)] Installing this librarium checkout globally"
+npm install -g .
+
+INSTALLED_VERSION="$(librarium --version)"
+if [[ "$INSTALLED_VERSION" != 2.* ]]; then
+  echo "Expected Librarium 2.x, installed $INSTALLED_VERSION" >&2
+  exit 1
+fi
 
 echo "[$(date +%H:%M:%S)] Setup complete"

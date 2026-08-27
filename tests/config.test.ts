@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,8 +9,11 @@ import {
   loadConfig,
   mergeConfigs,
   resolveEnvVar,
+  saveConfig,
   validateFallbacks,
 } from '../src/core/config.js';
+import { migrateConfig } from '../src/core/config-v2.js';
+import { saveConfigV2 } from '../src/node-config-v2.js';
 import { type Config, ConfigSchema, type ProjectConfig } from '../src/types.js';
 
 const CUSTOM_EXECUTION_PROFILE = {
@@ -159,6 +162,128 @@ describe('loadConfig', () => {
     expect(config.providers['perplexity-sonar-pro'].enabled).toBe(true);
     // Default groups should be merged in
     expect(config.groups).toHaveProperty('deep');
+  });
+
+  it('accepts a saved v1 migration through the normal compatibility loader', () => {
+    const source = ConfigSchema.parse({
+      ...storedConfig({ team: ['exa', 'acme'] }),
+      defaults: {
+        outputDir: './custom-output',
+        maxParallel: 3,
+        timeout: 12,
+        asyncTimeout: 90,
+        asyncPollInterval: 7,
+        mode: 'sync',
+        llmWebSearch: false,
+        maxCostUsd: 0.25,
+        maxEstimatedCostUsd: 0.1,
+      },
+      providers: {
+        exa: { enabled: true, fallback: 'brave-search' },
+        'brave-search': { enabled: true },
+        'openai-chat': {
+          enabled: true,
+          apiKey: '$OPENAI_API_KEY',
+          model: 'chat-model',
+          options: { webSearch: true },
+        },
+        'gemini-chat': { enabled: true },
+        acme: { enabled: true },
+      },
+      customProviders: {
+        acme: {
+          type: 'npm',
+          module: '@acme/librarium-provider',
+          export: 'provider',
+          options: { region: 'test' },
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: CUSTOM_EXECUTION_PROFILE,
+            credential: { envVar: 'ACME_API_KEY' },
+          },
+        },
+      },
+      trustedProviderIds: ['acme'],
+      refine: { provider: 'openai', model: 'refine-model' },
+      answer: { provider: 'gemini', model: 'answer-model' },
+    });
+    const migrated = migrateConfig({ global: source });
+    expect(migrated.ok, JSON.stringify(migrated)).toBe(true);
+    if (!migrated.ok) return;
+    const configPath = join(tmpDir, 'config-v2.json');
+    saveConfigV2(migrated.config, { path: configPath });
+
+    const loaded = loadConfig(configPath);
+
+    expect(loaded).toMatchObject({
+      version: 1,
+      defaults: {
+        outputDir: './custom-output',
+        mode: 'sync',
+        maxParallel: 3,
+        timeout: 12,
+        asyncTimeout: 90,
+        asyncPollInterval: 7,
+        llmWebSearch: false,
+        maxCostUsd: 0.25,
+        maxEstimatedCostUsd: 0.1,
+      },
+      providers: {
+        exa: { enabled: true, fallback: 'brave-search' },
+        'brave-search': { enabled: true },
+        'openai-chat': {
+          enabled: true,
+          apiKey: '$OPENAI_API_KEY',
+          model: 'chat-model',
+          options: { webSearch: true },
+        },
+        'gemini-chat': { enabled: true },
+        acme: { enabled: true },
+      },
+      customProviders: {
+        acme: {
+          type: 'npm',
+          module: '@acme/librarium-provider',
+          export: 'provider',
+          options: { region: 'test' },
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: CUSTOM_EXECUTION_PROFILE,
+            credential: { envVar: 'ACME_API_KEY' },
+          },
+        },
+      },
+      trustedProviderIds: ['acme'],
+      refine: { provider: 'openai', model: 'refine-model' },
+      answer: { provider: 'gemini', model: 'answer-model' },
+    });
+    expect(loaded.groups['custom:team']).toEqual(['exa/search', 'acme/search']);
+
+    expect(() => saveConfig(loaded, configPath)).toThrow(
+      'Refusing to overwrite native v2 configuration through the legacy config writer.',
+    );
+    expect(JSON.parse(readFileSync(configPath, 'utf8')).version).toBe(2);
+  });
+
+  it('refuses native v2 budgets that the compatibility number shape would change', () => {
+    const migrated = migrateConfig({ global: storedConfig() });
+    expect(migrated.ok, JSON.stringify(migrated)).toBe(true);
+    if (!migrated.ok) return;
+    const configPath = join(tmpDir, 'inexact-budget-v2.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...migrated.config,
+        execution_defaults: {
+          ...migrated.config.execution_defaults,
+          max_actual_cost_microusd: '9007199254740991',
+        },
+      }),
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(
+      'cannot be represented exactly by the compatibility CLI',
+    );
   });
 
   it('migrates legacy provider IDs in providers, groups, and fallbacks', () => {

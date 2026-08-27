@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { CONFIG_FILE_MODE, PROJECT_CONFIG_FILE } from './constants.js';
 import {
@@ -87,7 +87,7 @@ export function loadConfigV2(
   }
 
   let project: unknown;
-  if (options.project_path !== undefined && existsSync(options.project_path)) {
+  if (options.project_path !== undefined) {
     const projectPath = resolve(options.project_path);
     let projectText: string;
     try {

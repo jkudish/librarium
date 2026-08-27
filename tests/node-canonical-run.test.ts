@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readBrowseRunView } from '../src/commands/browse-data.js';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
 import {
   advanceCoordination,
@@ -566,6 +567,10 @@ describe('canonical v3 run.json', () => {
       status: 'submitted',
       durable_handle: { provider_task_id: 'public-task-id' },
     });
+    const pendingBrowse =
+      readBrowseRunView(runDirectory)?.presentation.providers[0];
+    expect(pendingBrowse?.report.status).toBe('async-pending');
+    expect(Object.hasOwn(pendingBrowse ?? {}, 'content')).toBe(false);
 
     const resumed = await resumeCanonicalPreparedExecution({
       runs_root: root,
