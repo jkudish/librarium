@@ -1,5 +1,5 @@
 name: Release candidate proof
-run-name: "RC proof run ${{ github.run_id }}"
+run-name: "${{ inputs.release_kind }} certification run ${{ github.run_id }}"
 
 on:
   workflow_dispatch:
@@ -8,6 +8,13 @@ on:
         description: 'Exact protected-main commit SHA (40 lowercase hex characters)'
         required: true
         type: string
+      release_kind:
+        description: 'Explicit certified package identity kind'
+        required: true
+        type: choice
+        options:
+          - rc
+          - stable
 
 permissions:
   contents: read
@@ -23,9 +30,11 @@ jobs:
       sha: ${{ steps.authority.outputs.sha }}
       tree: ${{ steps.authority.outputs.tree }}
       version: ${{ steps.authority.outputs.version }}
+      release-kind: ${{ steps.authority.outputs.release_kind }}
       artifact-prefix: ${{ steps.authority.outputs.artifact_prefix }}
     env:
       CANDIDATE_SHA: ${{ inputs.git_sha }}
+      CANDIDATE_RELEASE_KIND: ${{ inputs.release_kind }}
       GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
 
     steps:
@@ -33,6 +42,7 @@ jobs:
         shell: bash
         run: |
           [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_RELEASE_KIND" =~ ^(rc|stable)$ ]]
           test "$GITHUB_REF" = refs/heads/main
           test "$GITHUB_REF_PROTECTED" = true
           test "$GITHUB_SHA" = "$CANDIDATE_SHA"
@@ -72,6 +82,7 @@ jobs:
           node scripts/rc-workflow.mjs preflight
           --repository "$GITHUB_WORKSPACE"
           --candidate-sha "$CANDIDATE_SHA"
+          --release-kind "$CANDIDATE_RELEASE_KIND"
           --protected-ref refs/remotes/origin/main
           --github-output
 
@@ -106,6 +117,7 @@ jobs:
           node scripts/rc-workflow.mjs preflight
           --repository "$GITHUB_WORKSPACE"
           --candidate-sha "${{ needs.preflight.outputs.sha }}"
+          --release-kind "${{ needs.preflight.outputs.release-kind }}"
           --protected-ref refs/remotes/origin/main
 
       - name: Typecheck
@@ -159,6 +171,7 @@ jobs:
           node scripts/rc-workflow.mjs preflight
           --repository "$GITHUB_WORKSPACE"
           --candidate-sha "${{ needs.preflight.outputs.sha }}"
+          --release-kind "${{ needs.preflight.outputs.release-kind }}"
           --protected-ref refs/remotes/origin/main
 
       - name: Upload immutable frozen package

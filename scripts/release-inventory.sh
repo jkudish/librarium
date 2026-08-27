@@ -15,7 +15,6 @@ SPEC="$PROMOTION_ROOT/promotion.json"
 VERSION="$(jq -er '.candidate.version' "$SPEC")"
 TAG="$(jq -er '.tag' "$SPEC")"
 REPOSITORY="$(jq -er '.repository' "$SPEC")"
-EXPECTED_SHA="$(jq -er '.candidate.git_sha' "$SPEC")"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -38,6 +37,7 @@ fi
 
 REGISTRY_STATUS="$(curl -sS --retry 3 --retry-all-errors -o "$TMP/npm.json" -w '%{http_code}' "https://registry.npmjs.org/librarium")"
 test "$REGISTRY_STATUS" = 200
+NPM_DIST_TAGS="$(jq -ec '."dist-tags" // {}' "$TMP/npm.json")"
 NPM_TARBALL="$(jq -er --arg version "$VERSION" '.versions[$version].dist.tarball // empty' "$TMP/npm.json" || true)"
 if [ -z "$NPM_TARBALL" ]; then
   NPM_SHA=null
@@ -86,11 +86,8 @@ jq -n \
   --arg branch "$BRANCH_SHA" \
   --argjson tag "$TAG_SHA" \
   --argjson npm "$NPM_SHA" \
+  --argjson npm_dist_tags "$NPM_DIST_TAGS" \
   --argjson release "$GITHUB_RELEASE" \
   --argjson homebrew_version "$HOMEBREW_VERSION" \
   --argjson homebrew "$HOMEBREW_SHA" \
-  '{branch_sha:$branch,tag_sha:$tag,npm_sha256:$npm,github_release:$release,homebrew_version:$homebrew_version,homebrew_formula_sha256:$homebrew}' > "$OUTPUT"
-
-# Refuse a surprising branch value here as well as in reconciliation so no
-# provider inventory can be mistaken for authority.
-test "$BRANCH_SHA" = "$EXPECTED_SHA"
+  '{branch_sha:$branch,tag_sha:$tag,npm_sha256:$npm,npm_dist_tags:$npm_dist_tags,github_release:$release,homebrew_version:$homebrew_version,homebrew_formula_sha256:$homebrew}' > "$OUTPUT"

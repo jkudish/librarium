@@ -23,8 +23,8 @@ import { buildCanonicalValidationMatrix } from '../src/node-live-validation.js';
 import { createFilesystemCandidateAuthority } from '../src/node-live-validation-binding.js';
 import {
   assembleReleaseCandidate,
-  assertReleaseCandidateVersion,
   assertReleaseMatrixParity,
+  assertReleaseVersion,
   buildFrozenReleasePackage,
   freezeReleasePackage,
   RELEASE_CANDIDATE_RECORD_NAMES,
@@ -357,11 +357,11 @@ function updateRecordReference(
 }
 
 describe('release candidate artifact contract', () => {
-  it('accepts only strict positive RC versions', () => {
-    expect(() => assertReleaseCandidateVersion('1.2.3-rc.1')).not.toThrow();
-    expect(() => assertReleaseCandidateVersion('0.0.0-rc.20')).not.toThrow();
+  it('accepts only exact stable or strict positive RC versions', () => {
+    expect(() => assertReleaseVersion('1.2.3')).not.toThrow();
+    expect(() => assertReleaseVersion('1.2.3-rc.1')).not.toThrow();
+    expect(() => assertReleaseVersion('0.0.0-rc.20')).not.toThrow();
     for (const invalid of [
-      '1.2.3',
       'v1.2.3-rc.1',
       '1.2.3-rc.0',
       '1.2.3-rc.01',
@@ -369,9 +369,7 @@ describe('release candidate artifact contract', () => {
       '1.2.3-RC.1',
       '1.2.3-rc.1+build',
     ]) {
-      expect(() => assertReleaseCandidateVersion(invalid)).toThrow(
-        'X.Y.Z-rc.N',
-      );
+      expect(() => assertReleaseVersion(invalid)).toThrow('X.Y.Z');
     }
   });
 

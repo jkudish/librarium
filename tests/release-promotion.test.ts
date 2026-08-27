@@ -22,9 +22,14 @@ const spec: ReleasePromotionSpec = {
     git_tree: 'c'.repeat(40),
     version: '2.0.0-rc.19',
     fingerprint: `sha256:${'d'.repeat(64)}`,
+    release_kind: 'rc',
   },
   tag: 'v2.0.0-rc.19',
-  npm: { asset: 'librarium-2.0.0-rc.19.tgz', sha256: DIGEST },
+  npm: {
+    asset: 'librarium-2.0.0-rc.19.tgz',
+    sha256: DIGEST,
+    dist_tag: 'rc',
+  },
   github_assets: {
     'librarium-2.0.0-rc.19.tgz': DIGEST,
     'librarium-linux-x64': OTHER_DIGEST,
@@ -44,6 +49,7 @@ function inventory(
     branch_sha: SHA,
     tag_sha: null,
     npm_sha256: null,
+    npm_dist_tags: {},
     github_release: null,
     homebrew_version: null,
     homebrew_formula_sha256: null,
@@ -59,12 +65,35 @@ describe('immutable release promotion identity', () => {
     expect(() => parseReleasePromotionSpec({ ...spec, tag: 'v2.0.0' })).toThrow(
       'exact candidate version',
     );
+    const stable = {
+      ...spec,
+      candidate: {
+        ...spec.candidate,
+        version: '2.0.0',
+        release_kind: 'stable',
+      },
+      tag: 'v2.0.0',
+      npm: {
+        ...spec.npm,
+        asset: 'librarium-2.0.0.tgz',
+        dist_tag: 'latest',
+      },
+      github_assets: {
+        'librarium-2.0.0.tgz': DIGEST,
+        'librarium-linux-x64': OTHER_DIGEST,
+        SHA256SUMS: `sha256:${'3'.repeat(64)}`,
+      },
+    };
+    expect(parseReleasePromotionSpec(stable)).toMatchObject({
+      candidate: { release_kind: 'stable' },
+      npm: { dist_tag: 'latest' },
+    });
     expect(() =>
       parseReleasePromotionSpec({
-        ...spec,
-        candidate: { ...spec.candidate, version: '2.0.0' },
+        ...stable,
+        candidate: { ...stable.candidate, release_kind: 'rc' },
       }),
-    ).toThrow('Candidate version');
+    ).toThrow('release kind');
   });
 
   it('rejects malformed and excess remote inventory fields', () => {
@@ -82,17 +111,26 @@ describe('immutable release promotion identity', () => {
 
 describe('forward-only release recovery', () => {
   it('advances one immutable boundary at a time', () => {
-    expect(reconcileReleasePromotion(spec, inventory())).toMatchObject({
+    expect(reconcileReleasePromotion(spec, inventory(), 'new')).toMatchObject({
       publish_npm: true,
       create_tag: false,
     });
     expect(
-      reconcileReleasePromotion(spec, inventory({ npm_sha256: DIGEST })),
-    ).toMatchObject({ publish_npm: false, create_tag: true });
+      reconcileReleasePromotion(spec, inventory({ npm_sha256: DIGEST }), 'new'),
+    ).toMatchObject({
+      publish_npm: false,
+      set_npm_dist_tag: true,
+      create_tag: false,
+    });
     expect(
       reconcileReleasePromotion(
         spec,
-        inventory({ npm_sha256: DIGEST, tag_sha: SHA }),
+        inventory({
+          npm_sha256: DIGEST,
+          npm_dist_tags: { rc: spec.candidate.version },
+          tag_sha: SHA,
+        }),
+        'new',
       ),
     ).toMatchObject({ create_github_release: true });
   });
@@ -102,12 +140,14 @@ describe('forward-only release recovery', () => {
       spec,
       inventory({
         npm_sha256: DIGEST,
+        npm_dist_tags: { rc: spec.candidate.version },
         tag_sha: SHA,
         github_release: {
           target_sha: SHA,
           assets: { 'librarium-2.0.0-rc.19.tgz': DIGEST },
         },
       }),
+      'new',
     );
     expect(plan.upload_github_assets).toEqual([
       'SHA256SUMS',
@@ -122,6 +162,7 @@ describe('forward-only release recovery', () => {
         spec,
         inventory({
           npm_sha256: DIGEST,
+          npm_dist_tags: { rc: spec.candidate.version },
           tag_sha: SHA,
           github_release: {
             target_sha: SHA,
@@ -130,6 +171,7 @@ describe('forward-only release recovery', () => {
           homebrew_version: spec.candidate.version,
           homebrew_formula_sha256: spec.homebrew_formula.sha256,
         }),
+        'new',
       ).complete,
     ).toBe(true);
   });
@@ -139,6 +181,7 @@ describe('forward-only release recovery', () => {
       spec,
       inventory({
         npm_sha256: DIGEST,
+        npm_dist_tags: { rc: spec.candidate.version },
         tag_sha: SHA,
         github_release: {
           target_sha: SHA,
@@ -146,6 +189,7 @@ describe('forward-only release recovery', () => {
         },
         homebrew_version: '1.9.9',
       }),
+      'new',
     );
     expect(plan.publish_homebrew).toBe(true);
     expect(plan.complete).toBe(false);
@@ -194,7 +238,9 @@ describe('forward-only release recovery', () => {
     ],
     ['Homebrew downgrade', { homebrew_version: '2.0.0' }],
   ] as const)('fails closed on %s conflict', (_label, change) => {
-    expect(() => reconcileReleasePromotion(spec, inventory(change))).toThrow();
+    expect(() =>
+      reconcileReleasePromotion(spec, inventory(change), 'new'),
+    ).toThrow();
   });
 
   it.each([
@@ -213,9 +259,67 @@ describe('forward-only release recovery', () => {
       },
     ],
   ] as const)('rejects %s', (_label, change) => {
-    expect(() => reconcileReleasePromotion(spec, inventory(change))).toThrow(
-      'not forward-only',
-    );
+    expect(() =>
+      reconcileReleasePromotion(spec, inventory(change), 'new'),
+    ).toThrow('not forward-only');
+  });
+
+  it('allows only exact-byte recovery after protected main advances', () => {
+    expect(
+      reconcileReleasePromotion(
+        spec,
+        inventory({
+          branch_sha: OTHER_SHA,
+          npm_sha256: DIGEST,
+          npm_dist_tags: { rc: spec.candidate.version },
+        }),
+        'recover',
+      ),
+    ).toMatchObject({ create_tag: true, publish_npm: false });
+    expect(() =>
+      reconcileReleasePromotion(
+        spec,
+        inventory({ branch_sha: OTHER_SHA }),
+        'recover',
+      ),
+    ).toThrow('exact candidate bytes');
+    expect(() =>
+      reconcileReleasePromotion(
+        spec,
+        inventory({ branch_sha: OTHER_SHA, npm_sha256: DIGEST }),
+        'new',
+      ),
+    ).toThrow('Protected main');
+    expect(() =>
+      reconcileReleasePromotion(spec, inventory(), 'ambiguous' as 'new'),
+    ).toThrow('explicitly new or recover');
+  });
+
+  it('fails closed on unsafe npm dist-tag state', () => {
+    expect(() =>
+      reconcileReleasePromotion(
+        spec,
+        inventory({
+          npm_sha256: DIGEST,
+          npm_dist_tags: { latest: spec.candidate.version },
+        }),
+        'new',
+      ),
+    ).toThrow('latest');
+    expect(() =>
+      reconcileReleasePromotion(
+        spec,
+        inventory({ npm_dist_tags: { rc: spec.candidate.version } }),
+        'new',
+      ),
+    ).toThrow('absent');
+    expect(() =>
+      reconcileReleasePromotion(
+        spec,
+        inventory({ npm_dist_tags: { rc: '2.0.0' } }),
+        'new',
+      ),
+    ).toThrow('newer');
   });
 });
 
@@ -238,9 +342,24 @@ describe('release workflow policy', () => {
     expect(workflow).not.toContain('git tag -f');
     expect(workflow).not.toContain('|| true');
     expect(workflow).toContain('--prerelease');
-    expect(recovery).toContain('stable npm `2.0.0` publication is blocked');
+    expect(workflow).toContain('rc) PRERELEASE=(--prerelease)');
+    expect(workflow).toContain('stable) ;;');
+    expect(workflow).toContain('--tag "$DIST_TAG"');
+    expect(workflow).toContain('npm dist-tag add');
+    expect(workflow).toContain('--mode "$PROMOTION_MODE"');
+    expect(workflow).toMatch(
+      /promotion_mode:\s*\n\s+description:[^\n]*\n\s+required: true\s*\n\s+type: choice\s*\n\s+options:\s*\n\s+- new\s*\n\s+- recover/,
+    );
+    expect(workflow).not.toMatch(
+      /promotion_mode:\s*[\s\S]{0,300}\n\s+default:/,
+    );
+    expect(workflow).toContain('git merge-base --is-ancestor');
+    expect(workflow).toContain('environments/release');
+    expect(workflow).toContain('.type == "required_reviewers"');
+    expect(recovery).toContain('newly reviewed stable-version commit');
+    expect(recovery).toContain('npm already contains that exact candidate');
     expect(recovery).toContain(
-      'separate immutable final-version certification',
+      'Merely writing `environment: release` in workflow YAML does not protect it',
     );
     const privilegedCi = ci.slice(0, ci.indexOf('\n  test:'));
     expect(privilegedCi).not.toMatch(
