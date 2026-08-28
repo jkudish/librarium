@@ -1667,12 +1667,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/jkudish/laravel-ai-librarium-firecrawl.git",
-                "reference": "6b7b390282107c1c21816e5bdc505fd713d14621"
+                "reference": "66fbe76c2249188cacc2eab3948af6bf62f2b4fe"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/jkudish/laravel-ai-librarium-firecrawl/zipball/6b7b390282107c1c21816e5bdc505fd713d14621",
-                "reference": "6b7b390282107c1c21816e5bdc505fd713d14621",
+                "url": "https://api.github.com/repos/jkudish/laravel-ai-librarium-firecrawl/zipball/66fbe76c2249188cacc2eab3948af6bf62f2b4fe",
+                "reference": "66fbe76c2249188cacc2eab3948af6bf62f2b4fe",
                 "shasum": ""
             },
             "require": {
@@ -1727,6 +1727,12 @@
                 "format": [
                     "vendor/bin/pint --test"
                 ],
+                "pr:check": [
+                    "@php tools/pr-check.php"
+                ],
+                "pr:signoff": [
+                    "@php tools/pr-signoff.php"
+                ],
                 "test:live": [
                     "@php -r \"if (getenv('LIBRARIUM_LIVE_TESTS') !== '1') { fwrite(STDERR, 'LIBRARIUM_LIVE_TESTS=1 is required.\\n'); exit(1); }\"",
                     "@php -r \"if (getenv('FIRECRAWL_LIVE_SPEND_ACK') !== 'acknowledge-2500-credit-maximum') { fwrite(STDERR, 'The exact Firecrawl spend acknowledgement is required.\\n'); exit(1); }\"",
@@ -1743,7 +1749,7 @@
                 "source": "https://github.com/jkudish/laravel-ai-librarium-firecrawl/tree/main",
                 "issues": "https://github.com/jkudish/laravel-ai-librarium-firecrawl/issues"
             },
-            "time": "2026-08-24T00:31:39+00:00"
+            "time": "2026-08-28T04:11:47+00:00"
         },
         {
             "name": "laravel/ai",

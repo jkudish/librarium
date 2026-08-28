@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "artifactVersion": 1,
   "coreRevision": "cd390f2c1d6c6d9913d6043c2ee8f05a14653aca",
-  "firecrawlRevision": "6b7b390282107c1c21816e5bdc505fd713d14621",
+  "firecrawlRevision": "66fbe76c2249188cacc2eab3948af6bf62f2b4fe",
   "referenceCollector": "php-searchapi-chatgpt",
   "routineCandidate": "php-firecrawl-chatgpt",
   "providerTimeoutSeconds": 180,

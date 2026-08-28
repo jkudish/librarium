@@ -15,7 +15,7 @@ collector selector, a scheduler, or production policy.
 - `jkudish/laravel-ai-librarium` at
   `cd390f2c1d6c6d9913d6043c2ee8f05a14653aca`
 - `jkudish/laravel-ai-librarium-firecrawl` at
-  `6b7b390282107c1c21816e5bdc505fd713d14621`
+  `66fbe76c2249188cacc2eab3948af6bf62f2b4fe`
 - SearchAPI profile: `searchapi-chatgpt`
 - Firecrawl profile: `firecrawl-chatgpt`, anonymous `interact` against
   `https://chatgpt.com/`, desktop/en-CA/CA, signed out, personalization unknown
