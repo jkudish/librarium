@@ -40,8 +40,8 @@ import {
 } from '../node-live-validation-production.js';
 
 const SAFE_ID = /^[a-z][a-z0-9._-]{0,127}$/;
-const RC_VERSION =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.(?:0|[1-9]\d*)$/;
+const CANDIDATE_VERSION =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?$/;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const MICROUSD = /^(?:0|[1-9]\d*)$/;
 const DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d{1,36})?$/;
@@ -135,7 +135,7 @@ const ApprovalSchema = z
     candidate: z.strictObject({
       git_sha: z.string().regex(/^[a-f0-9]{40}$/),
       fingerprint: z.string().regex(SHA256),
-      version: z.string().regex(RC_VERSION),
+      version: z.string().regex(CANDIDATE_VERSION),
       artifact_hashes: z.record(
         z.string().regex(SAFE_ID),
         z.string().regex(SHA256),
