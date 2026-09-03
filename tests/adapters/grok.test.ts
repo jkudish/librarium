@@ -249,6 +249,17 @@ describe('GrokProvider', () => {
     expect(result.citations).toEqual([]);
     expect(result.error).toContain(`API returned ${status}`);
     expect(result.error).toContain(hint);
+    expect(result.failureDiagnostic).toEqual({
+      kind:
+        status === 401
+          ? 'authentication'
+          : status === 403
+            ? 'authentication'
+            : status === 429
+              ? 'rate_limit'
+              : 'invalid_request',
+      httpStatus: status,
+    });
   });
 
   it('normalizes network failures without throwing', async () => {
@@ -259,6 +270,7 @@ describe('GrokProvider', () => {
     const result = await provider().execute('ground this', { timeout: 10 });
 
     expect(result.error).toContain('Network error connecting to Grok (xAI)');
+    expect(result.failureDiagnostic).toEqual({ kind: 'network' });
   });
 
   it('wires the timeout and caller abort signal through the HTTP client', async () => {
@@ -339,6 +351,10 @@ describe('GrokProvider — live-verified edge cases', () => {
 
     expect(result.error).toContain('400');
     expect(result.error).toContain('XAI_API_KEY');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'authentication',
+      httpStatus: 400,
+    });
   });
 
   // NaN cannot appear on the JSON wire (it serializes to null), so null is
