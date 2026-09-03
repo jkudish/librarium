@@ -712,7 +712,7 @@ function verifyRcCandidateTree(
     typeof identity.name !== 'string' ||
     !identity.name ||
     typeof identity.version !== 'string' ||
-    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.[1-9]\d*$/.test(
+    !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?$/.test(
       identity.version,
     ) ||
     typeof identity.git_sha !== 'string' ||
