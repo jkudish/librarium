@@ -1408,7 +1408,7 @@ const FORBIDDEN_RECEIPT_TEXT =
   /(?:bearer\s+|(?:sk|rk|pk)[_-][A-Za-z0-9_-]{12,}|akia[A-Z0-9]{12,}|ghp_[A-Za-z0-9]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|aiza[A-Za-z0-9_-]{12,}|api[_-]?key|access[_-]?token|authorization|secret|signed(?:[_-]?url)?|x-amz-(?:credential|signature|security-token)|https?:\/\/|(?:^|["'])(?:\/?(?:Users|home|tmp|private|opt|var|etc|mnt|srv|proc|dev)|[A-Za-z]:[\\/]))/i;
 
 const SAFE_RECEIPT_STRING =
-  /^(?:USD|[a-z][a-z0-9._-]{0,127}(?:\/[a-z][a-z0-9._-]{0,127})?|(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.(?:0|[1-9]\d*)|(?:0|[1-9]\d*)(?:\.\d{1,36})?|[a-f0-9]{40}|sha256:[a-f0-9]{64}|fnv1a64\.1:[a-f0-9]{16})$/;
+  /^(?:USD|[a-z][a-z0-9._-]{0,127}(?:\/[a-z][a-z0-9._-]{0,127})?|(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.(?:0|[1-9]\d*))?|(?:0|[1-9]\d*)(?:\.\d{1,36})?|[a-f0-9]{40}|sha256:[a-f0-9]{64}|fnv1a64\.1:[a-f0-9]{16})$/;
 const SAFE_PROVIDER_PRICING_UNIT =
   /^[a-z][a-z0-9-]{0,62}:[a-z][a-z0-9_]{0,62}$/;
 const PRICING_UNIT_RECEIPT_PATH =
