@@ -22,6 +22,7 @@ import {
   mergeConfigs,
 } from './core/config.js';
 import { mapConfiguration } from './core/configuration-mapping.js';
+import { type CredentialContext, hasCredential } from './core/credentials.js';
 import { getBuiltinProviderDefinition } from './core/provider-descriptor.js';
 import { INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS } from './internal-adapter-ids.js';
 import {
@@ -31,6 +32,7 @@ import {
   materializeCanonicalPreparedExecution,
   resumeCanonicalPreparedExecution,
 } from './node-canonical-run.js';
+import { createNodeCredentialContext } from './node-credentials.js';
 import {
   assertCanonicalValidationPreparedExecution,
   buildCanonicalValidationMatrix,
@@ -42,7 +44,6 @@ import {
 import { readTrustedFrozenReferenceManifest } from './node-live-validation-binding.js';
 import {
   assertAdmittedAdaptersRegistered,
-  preflightProductionRequest,
   preflightProductionRequestStructure,
 } from './node-request-preflight.js';
 import { createRunDir } from './node-run-directory.js';
@@ -58,8 +59,13 @@ export interface ProductionLiveValidationDependencies {
    * keychain-aware phase so tests can prove every rejection ordering.
    */
   readonly preflightStructure?: typeof preflightProductionRequestStructure;
-  /** Keychain-aware request admission after structural admission succeeds. */
-  readonly preflightCredentials?: typeof preflightProductionRequest;
+  /** Test seam for credential-aware prepared-execution drift checks. */
+  readonly preflightCredentials?: (
+    input: Parameters<typeof preflightProductionRequestStructure>[0],
+  ) => ReturnType<typeof preflightProductionRequestStructure> & {
+    readonly credentials: CredentialContext;
+  };
+  readonly createCredentials?: () => CredentialContext;
   /** Canonical run services are injectable for offline production-binding tests. */
   readonly createCoordinator?: typeof createNodeCoordinatorDependencies;
   readonly createAttemptBridge?: typeof createRegisteredProviderAttemptBridge;
@@ -279,8 +285,9 @@ function classifyCustodyOutcome(
 }
 
 /**
- * Creates an exact one-target executor. `prepare` performs both request
- * preflight phases only after all upstream gates have admitted the target.
+ * Creates an exact one-target executor. `prepare` performs structural request
+ * admission and exact credential resolution only after all upstream gates
+ * have admitted the target.
  */
 export function createProductionFrozenCanonicalExecutor(
   approval: LiveValidationApproval,
@@ -296,8 +303,9 @@ export function createProductionFrozenCanonicalExecutor(
   const createDirectory = dependencies.createRunDirectory ?? createRunDir;
   const structuralPreflight =
     dependencies.preflightStructure ?? preflightProductionRequestStructure;
-  const credentialPreflight =
-    dependencies.preflightCredentials ?? preflightProductionRequest;
+  const credentialPreflight = dependencies.preflightCredentials;
+  const createCredentials =
+    dependencies.createCredentials ?? createNodeCredentialContext;
   const createCoordinator =
     dependencies.createCoordinator ?? createNodeCoordinatorDependencies;
   const createAttemptBridge =
@@ -313,7 +321,7 @@ export function createProductionFrozenCanonicalExecutor(
     {
       readonly target: CanonicalValidationTarget;
       readonly prepared: ReturnType<
-        typeof preflightProductionRequest
+        typeof preflightProductionRequestStructure
       >['prepared'];
     }
   >();
@@ -359,10 +367,26 @@ export function createProductionFrozenCanonicalExecutor(
     // Credential phase: resolve only the admitted public family and construct
     // only the exact adapter, including private durable adapters which consume
     // their mapped public configuration.
-    const admitted = credentialPreflight({
-      config: configured,
-      transport: exactInput(target, protocol),
-    });
+    const admitted = credentialPreflight
+      ? credentialPreflight({
+          config: configured,
+          transport: exactInput(target, protocol),
+        })
+      : (() => {
+          const credentials = createCredentials();
+          const credentialReference =
+            configured.providers[publicConfigId(target)]?.apiKey ??
+            `$${protocol.credential_reference}`;
+          if (!hasCredential(credentialReference, credentials)) {
+            throw new CanonicalLiveValidationError(
+              `Frozen credential is unavailable for ${target.key}.`,
+            );
+          }
+          // The structural prepared execution is the approved all-provider
+          // catalog authority. Recompiling it with ambient credential
+          // availability would change unrelated catalog rows and its digest.
+          return { ...structural, credentials };
+        })();
     assertCanonicalValidationPreparedExecution(admitted.prepared, target);
     if (
       admitted.admittedAdapterIds.length !== 1 ||

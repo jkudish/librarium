@@ -261,15 +261,28 @@ describe('production live-validation binding (injected, offline)', () => {
       join(tmpdir(), 'librarium-missing-live-validation-config.json'),
     );
     const canonicalTargets = buildCanonicalValidationMatrix().targets;
-    const protocols = [
-      protocol(canonicalTargets[0]!),
-      protocol(canonicalTargets[1]!),
+    const protocolKeys = [
+      'grok-combined/combined',
+      'grok-x-only/x',
+      'grok/web',
+      'parallel/chat',
+      'parallel/research',
+      'perplexity-deep-research/research',
+      'perplexity-sonar-deep/research',
+      'valyu/search',
     ];
-    const target = productionValidationMatrix(config, protocols).targets[0]!;
+    const protocols = protocolKeys.map((key) =>
+      protocol(canonicalTargets.find((candidate) => candidate.key === key)!),
+    );
+    const matrix = productionValidationMatrix(config, protocols);
+    const target = matrix.targets.find(
+      (candidate) => candidate.key === protocols[0]!.key,
+    )!;
     const observed = counters();
     const injected = executorDependencies(target, observed);
     const {
       preflightStructure: _useProductionStructuralPreflight,
+      preflightCredentials: _useProductionCredentialPreflight,
       ...dependencies
     } = injected;
     const binding = createProductionFrozenCanonicalExecutor(
@@ -278,7 +291,12 @@ describe('production live-validation binding (injected, offline)', () => {
         targets: protocols,
       } as LiveValidationApproval,
       config,
-      dependencies,
+      {
+        ...dependencies,
+        createCredentials: () => ({
+          env: { [protocols[0]!.credential_reference]: '[REDACTED:api-key]' },
+        }),
+      },
     );
 
     await expect(
@@ -287,10 +305,43 @@ describe('production live-validation binding (injected, offline)', () => {
       catalog_digest: target.catalog_digest,
     });
     expect(observed).toMatchObject({
-      credential: 1,
+      credential: 0,
       initialize: 1,
       materialize: 1,
     });
+  });
+
+  it('rejects a missing frozen credential before provider initialization or materialization', async () => {
+    const config = loadConfig(
+      join(tmpdir(), 'librarium-missing-live-validation-config.json'),
+    );
+    const canonicalTarget = buildCanonicalValidationMatrix().targets.find(
+      (candidate) => candidate.key === 'grok-combined/combined',
+    )!;
+    const frozenProtocol = protocol(canonicalTarget);
+    const target = productionValidationMatrix(config, [
+      frozenProtocol,
+    ]).targets.find((candidate) => candidate.key === frozenProtocol.key)!;
+    const observed = counters();
+    const injected = executorDependencies(target, observed);
+    const {
+      preflightStructure: _useProductionStructuralPreflight,
+      preflightCredentials: _useProductionCredentialPreflight,
+      ...dependencies
+    } = injected;
+    const binding = createProductionFrozenCanonicalExecutor(
+      {
+        raw_root: mkdtempSync(join(tmpdir(), 'librarium-binding-')),
+        targets: [frozenProtocol],
+      } as LiveValidationApproval,
+      config,
+      { ...dependencies, createCredentials: () => ({ env: {} }) },
+    );
+
+    await expect(binding.prepare(target, frozenProtocol)).rejects.toThrow(
+      'Frozen credential is unavailable for grok-combined/combined',
+    );
+    expect(observed).toMatchObject({ initialize: 0, materialize: 0 });
   });
 
   it('initializes only a private durable adapter while retaining its public configuration authority', async () => {
