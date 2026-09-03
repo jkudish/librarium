@@ -260,7 +260,12 @@ describe('production live-validation binding (injected, offline)', () => {
     const config = loadConfig(
       join(tmpdir(), 'librarium-missing-live-validation-config.json'),
     );
-    const target = productionValidationMatrix(config).targets[0]!;
+    const canonicalTargets = buildCanonicalValidationMatrix().targets;
+    const protocols = [
+      protocol(canonicalTargets[0]!),
+      protocol(canonicalTargets[1]!),
+    ];
+    const target = productionValidationMatrix(config, protocols).targets[0]!;
     const observed = counters();
     const injected = executorDependencies(target, observed);
     const {
@@ -270,6 +275,7 @@ describe('production live-validation binding (injected, offline)', () => {
     const binding = createProductionFrozenCanonicalExecutor(
       {
         raw_root: mkdtempSync(join(tmpdir(), 'librarium-binding-')),
+        targets: protocols,
       } as LiveValidationApproval,
       config,
       dependencies,

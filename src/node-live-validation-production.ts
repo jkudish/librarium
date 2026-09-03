@@ -103,7 +103,13 @@ function exactInput(
   };
 }
 
-function normalizedProductionProviders(config: Config): Config['providers'] {
+function normalizedProductionProviders(
+  config: Config,
+  protocols: readonly Pick<
+    LiveValidationApproval['targets'][number],
+    'key' | 'options'
+  >[] = [],
+): Config['providers'] {
   const expected = buildCanonicalValidationMatrix();
   for (const target of expected.targets) {
     if (config.providers[publicConfigId(target)]?.enabled === false) {
@@ -117,21 +123,6 @@ function normalizedProductionProviders(config: Config): Config['providers'] {
     const id = publicConfigId(target);
     providers[id] = { ...providers[id], enabled: true };
   }
-  return providers;
-}
-
-/** Build the config-aware public matrix before any credential context exists. */
-export function productionValidationMatrix(
-  config: Config,
-  protocols: readonly Pick<
-    LiveValidationApproval['targets'][number],
-    'key' | 'options'
-  >[] = [],
-) {
-  const expected = buildCanonicalValidationMatrix();
-  // A paid matrix is a complete fixed audit. An explicit disabled public
-  // family must fail admission; it must never silently remove that family.
-  const providers = normalizedProductionProviders(config);
   for (const protocol of protocols) {
     const target = expected.targets.find(
       (candidate) => candidate.key === protocol.key,
@@ -148,6 +139,21 @@ export function productionValidationMatrix(
       options: protocol.options,
     };
   }
+  return providers;
+}
+
+/** Build the config-aware public matrix before any credential context exists. */
+export function productionValidationMatrix(
+  config: Config,
+  protocols: readonly Pick<
+    LiveValidationApproval['targets'][number],
+    'key' | 'options'
+  >[] = [],
+) {
+  const expected = buildCanonicalValidationMatrix();
+  // A paid matrix is a complete fixed audit. An explicit disabled public
+  // family must fail admission; it must never silently remove that family.
+  const providers = normalizedProductionProviders(config, protocols);
   const normalizedConfig = { ...config, providers };
   const mapped = mapConfiguration(normalizedConfig, {
     authoredGroups: configGroupProvenance(normalizedConfig),
@@ -281,7 +287,10 @@ export function createProductionFrozenCanonicalExecutor(
   config: Config,
   dependencies: ProductionLiveValidationDependencies = {},
 ): FrozenCanonicalExecutor {
-  const productionProviders = normalizedProductionProviders(config);
+  const productionProviders = normalizedProductionProviders(
+    config,
+    approval.targets,
+  );
   const initialize = dependencies.initializeProviders ?? initializeProviders;
   const resolveProvider = dependencies.resolveExactProvider ?? getExactProvider;
   const createDirectory = dependencies.createRunDirectory ?? createRunDir;
