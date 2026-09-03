@@ -79,6 +79,10 @@ function runRemoteInstaller(input: {
     join(bin, 'curl'),
     '#!/bin/sh\nout=""\nurl=""\nwhile [ "$#" -gt 0 ]; do\n  case "$1" in\n    -o) out="$2"; shift 2 ;;\n    *) url="$1"; shift ;;\n  esac\ndone\ncase "$url" in\n  */SHA256SUMS) cp "$FIXTURE_MANIFEST" "$out" ;;\n  *) cp "$FIXTURE_CANDIDATE" "$out" ;;\nesac\n',
   );
+  executable(
+    join(bin, 'uname'),
+    "#!/bin/sh\ncase \"$1\" in\n  -s) printf 'Linux\\n' ;;\n  -m) printf 'x86_64\\n' ;;\n  *) exit 1 ;;\nesac\n",
+  );
   return spawnSync('sh', [installer], {
     cwd: input.root,
     encoding: 'utf8',
