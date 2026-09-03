@@ -493,6 +493,7 @@ describe('canonical v3 live validation evidence boundary', () => {
       candidate_fingerprint:
         'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       candidate_git_sha: '6c580293bfd1c03f2f29d5674e33cdf0ae809ec0',
+      candidate_version: '2.0.0',
       request_id: 'request-1',
       account: 'reviewed-account',
       region: 'us',
@@ -505,7 +506,23 @@ describe('canonical v3 live validation evidence boundary', () => {
     });
     expect(JSON.stringify(safe)).not.toContain('response body remains private');
     expect(JSON.stringify(safe)).not.toContain('https://example.com/source');
-    expect(safe).toMatchObject({ schema_version: 1, lifecycle: 'succeeded' });
+    expect(safe).toMatchObject({
+      schema_version: 1,
+      candidate_version: '2.0.0',
+      lifecycle: 'succeeded',
+    });
+    expect(() =>
+      sanitizeCanonicalReceipt({
+        target,
+        candidate_fingerprint:
+          'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        candidate_version: '2.0.0-beta.1',
+        request_id: 'request-1',
+        account: 'reviewed-account',
+        region: 'us',
+        lifecycle: 'failed',
+      }),
+    ).toThrow('prohibited material');
     expect(() =>
       sanitizeCanonicalReceipt({
         target,
