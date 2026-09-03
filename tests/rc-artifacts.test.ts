@@ -168,7 +168,10 @@ function canonicalWrite(path: string, value: unknown): void {
   writeFileSync(path, releaseCandidateInternals.canonicalText(value));
 }
 
-function fixtureRepository(root: string): {
+function fixtureRepository(
+  root: string,
+  version = VERSION,
+): {
   readonly repository: string;
   readonly tarball: string;
 } {
@@ -177,7 +180,7 @@ function fixtureRepository(root: string): {
   writeFileSync(join(repository, '.gitignore'), 'dist/\n');
   const packageValue = {
     name: 'librarium',
-    version: VERSION,
+    version,
     type: 'module',
     main: './dist/index.js',
     types: './dist/index.d.ts',
@@ -196,11 +199,11 @@ function fixtureRepository(root: string): {
   };
   const lockValue = {
     name: 'librarium',
-    version: VERSION,
+    version,
     lockfileVersion: 3,
     requires: true,
     packages: {
-      '': { name: 'librarium', version: VERSION },
+      '': { name: 'librarium', version },
     },
   };
   const packageJson = `${JSON.stringify(packageValue, null, 2)}\n`;
@@ -235,7 +238,7 @@ function fixtureRepository(root: string): {
     '{}\n',
   );
   commitRepository(repository);
-  const tarball = join(root, `librarium-${VERSION}.tgz`);
+  const tarball = join(root, `librarium-${version}.tgz`);
   writeFileSync(
     tarball,
     makeTarball({
@@ -284,9 +287,9 @@ const fixtureDependencies = {
   load_installed_matrix: () => matrix(),
 };
 
-async function completeFixture() {
+async function completeFixture(version = VERSION) {
   const root = temporaryRoot();
-  const { repository, tarball } = fixtureRepository(root);
+  const { repository, tarball } = fixtureRepository(root, version);
   const packageRoot = join(root, 'frozen-package');
   const frozen = await freezeReleasePackage({
     repository_root: repository,
@@ -584,6 +587,27 @@ describe('release candidate artifact contract', () => {
         `${name}=records/${name}.json`,
       ]),
     );
+  });
+
+  it('accepts a stable candidate at the credential-free authority gate', async () => {
+    const fixture = await completeFixture('2.0.0');
+    const authority = createFilesystemCandidateAuthority({
+      repository_root: fixture.repository,
+      package_json: join(fixture.repository, 'package.json'),
+      artifact_root: fixture.candidateRoot,
+      artifacts: Object.fromEntries(
+        RELEASE_CANDIDATE_RECORD_NAMES.map((name) => [
+          name,
+          `records/${name}.json`,
+        ]),
+      ),
+    });
+
+    expect(authority.candidate_version()).toBe('2.0.0');
+    expect(authority.candidate_fingerprint()).toBe(
+      fixture.candidate.candidate.fingerprint,
+    );
+    expect(() => authority.verify()).not.toThrow();
   });
 
   it('reassembles byte-identical candidates without rebuilding package bytes', async () => {
