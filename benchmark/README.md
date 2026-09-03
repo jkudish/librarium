@@ -6,6 +6,12 @@ latency, cost, and reliability without adding a command to the shipped
 runtime code comes only from `dist`, and the build has no benchmark entry
 point.
 
+The focused SearchAPI ↔ Firecrawl consumer-surface lane has its own three-case
+corpus, pinned PHP consumer adapter, and reporting contract under
+[`surface-calibration/`](./surface-calibration/README.md). It reuses the shipped
+Librarium trusted script-provider interface without adding those PHP paths to
+the npm runtime.
+
 Generated `benchmark/results/` directories are ignored by default. Publishing
 a reviewed run is deliberate: force-add the complete timestamped directory so
 the confirmation, failures, raw artifacts, scores, and report stay together.
