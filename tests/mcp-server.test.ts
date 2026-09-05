@@ -29,18 +29,16 @@ import {
   resolveProviderSelection,
   type SilentRunResult,
 } from '../src/mcp/research.js';
+import { DEFAULT_PAGE_CHARS } from '../src/mcp/result-pages.js';
 import { createMcpServer } from '../src/mcp/server.js';
 import {
   CONTENT_DELIMITER_BEGIN,
   CONTENT_DELIMITER_END,
-  MAX_PROVIDER_CHARS,
-  MAX_SOURCES,
   PathContainmentError,
   readRunResults,
   resolveContainedFile,
   resolveRunDir,
   shapeResearchResult,
-  truncateProviderContent,
   UNTRUSTED_CONTENT_WARNING,
 } from '../src/mcp/shaping.js';
 import { runCanonicalPreparedExecution } from '../src/node-canonical-run.js';
@@ -440,8 +438,12 @@ describe('research tool', () => {
     });
     expect(payload.providers[0].id).toBe('exa');
     // No full provider markdown inlined.
-    expect(JSON.stringify(payload)).not.toContain('content');
-    expect(payload.sources.items[0].url).toBe('https://a.com');
+    expect(payload.providers[0]).not.toHaveProperty('content');
+    expect(payload).not.toHaveProperty('response');
+    expect(payload).not.toHaveProperty('results');
+    expect(payload.sources).toEqual({ total: 5, unique: 4 });
+    expect(payload.retrieval.arguments.runDir).toBe(manifest.outputDir);
+    expect(payload.providers[0].resultId).toMatch(/^result-/);
     await server.close();
   });
 
@@ -492,7 +494,7 @@ describe('get_results tool', () => {
   it('reads provider markdown from the most recent run and caps it', async () => {
     const runDir = join(baseDir, 'q');
     mkdirSync(runDir, { recursive: true });
-    const big = 'x'.repeat(MAX_PROVIDER_CHARS + 5000);
+    const big = 'x'.repeat(DEFAULT_PAGE_CHARS + 5000);
     writeFileSync(join(runDir, 'exa.md'), big);
     const manifest = makeManifest({
       outputDir: runDir,
@@ -509,7 +511,8 @@ describe('get_results tool', () => {
     expect(payload.results[0].truncated).toBe(true);
     expect(payload.results[0].fullChars).toBe(big.length);
     expect(payload.results[0].content.length).toBeLessThan(big.length);
-    expect(payload.results[0].content).toContain('truncated');
+    expect(payload.hasMore).toBe(true);
+    expect(payload.nextCursor).toEqual(expect.any(String));
     await server.close();
   });
 
@@ -527,7 +530,7 @@ describe('get_results tool', () => {
     mkdirSync(runDir);
     const profile = canonicalFixtureProfile('mcp');
     const canonicalContent = `# Canonical MCP\n\n${'x'.repeat(
-      MAX_PROVIDER_CHARS + 5_000,
+      DEFAULT_PAGE_CHARS + 5_000,
     )}`;
     const provider: Provider = {
       id: 'adapter-mcp',
@@ -573,7 +576,8 @@ describe('get_results tool', () => {
         fullChars: canonicalContent.length,
       });
       expect(payload.results[0].content).toContain(CONTENT_DELIMITER_BEGIN);
-      expect(payload.results[0].content).toContain('truncated');
+      expect(payload.hasMore).toBe(true);
+      expect(payload.nextCursor).toEqual(expect.any(String));
       expect(JSON.stringify(payload)).not.toMatch(
         /Bearer should-never-leak|coordination_state|durable_handle|provider_task_id/,
       );
@@ -583,15 +587,9 @@ describe('get_results tool', () => {
 });
 
 describe('shaping helpers', () => {
-  it('truncateProviderContent leaves short content untouched', () => {
-    const r = truncateProviderContent('short');
-    expect(r.truncated).toBe(false);
-    expect(r.content).toBe('short');
-  });
-
-  it('shapeResearchResult caps sources and flags truncation', () => {
+  it('shapeResearchResult returns source counts without inlining evidence metadata', () => {
     const sources: DeduplicatedSource[] = Array.from(
-      { length: MAX_SOURCES + 10 },
+      { length: 35 },
       (_, i) => ({
         url: `https://s${i}.com`,
         normalizedUrl: `s${i}.com`,
@@ -604,9 +602,8 @@ describe('shaping helpers', () => {
       sources: { total: 40, unique: sources.length, file: 'sources.json' },
     });
     const shaped = shapeResearchResult(makeRunResult(manifest, sources));
-    expect(shaped.sources.shown).toBe(MAX_SOURCES);
-    expect(shaped.sources.truncated).toBe(true);
-    expect(shaped.sources.items).toHaveLength(MAX_SOURCES);
+    expect(shaped.sources).toEqual({ total: 40, unique: sources.length });
+    expect(JSON.stringify(shaped)).not.toContain('https://s');
   });
 
   it('resolveRunDir returns null for a missing explicit dir', () => {

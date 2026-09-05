@@ -2,7 +2,10 @@
  * One-way presentation of a private v3 run. Nothing in this module may drive
  * lifecycle, resume, provider selection, or run.json mutation.
  */
-import { providerIdentityKey } from './contracts/domain/index.js';
+import {
+  type ProviderIdentity,
+  providerIdentityKey,
+} from './contracts/domain/index.js';
 import type { ResearchResult } from './contracts/interchange/research-result.js';
 import { deduplicateSources } from './core/normalizer.js';
 import type { CanonicalRunManifestV3 } from './node-canonical-run.js';
@@ -97,6 +100,11 @@ export interface CanonicalRunPresentation {
   readonly reports: ProviderReport[];
   readonly results: ProviderDispatchResult[];
   readonly sources: DeduplicatedSource[];
+  /** Exact canonical identities for the derived report ids, including fallbacks. */
+  readonly providerIdentities: Readonly<Record<string, ProviderIdentity>>;
+  readonly providerCitations: Readonly<
+    Record<string, ResearchResult['citations']>
+  >;
   readonly providerContents: Readonly<Record<string, string>>;
   /** Safe canonical metadata keyed by derived provider artifact id. */
   readonly providerMetadata: Readonly<
@@ -120,6 +128,10 @@ export function projectCanonicalRunPresentation(
   const usedReportIds = new Set<string>();
   const reports: ProviderReport[] = [];
   const results: ProviderDispatchResult[] = [];
+  const providerIdentities: Record<string, ProviderIdentity> =
+    Object.create(null);
+  const providerCitations: Record<string, ResearchResult['citations']> =
+    Object.create(null);
   const providerContents: Record<string, string> = {};
   const providerMetadata: Record<string, Record<string, unknown>> = {};
 
@@ -150,6 +162,7 @@ export function projectCanonicalRunPresentation(
         slot.slot_id,
         usedReportIds,
       );
+      providerIdentities[earlierId] = earlier.profile.identity;
       const earlierFiles = providerArtifactFileNames(earlierId);
       const earlierStatus: ProviderReport['status'] =
         earlier.status === 'timed_out' ? 'timeout' : 'error';
@@ -184,9 +197,11 @@ export function projectCanonicalRunPresentation(
       ];
     const adapterId = plan?.binding.adapter_id ?? profile.identity.provider_id;
     const id = uniqueReportId(adapterId, slot.slot_id, usedReportIds);
+    providerIdentities[id] = profile.identity;
     const projected = slot.result_id
       ? resultById.get(slot.result_id)
       : undefined;
+    if (projected) providerCitations[id] = projected.citations;
     const tier = projected
       ? tierFor(projected.provenance.result_kind)
       : tierFor(profile.result_kind);
@@ -303,6 +318,8 @@ export function projectCanonicalRunPresentation(
     reports,
     results,
     sources,
+    providerIdentities,
+    providerCitations,
     providerContents,
     providerMetadata,
     totalCitations,
