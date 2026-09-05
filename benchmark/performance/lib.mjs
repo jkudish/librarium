@@ -1,4 +1,7 @@
-export const PERFORMANCE_SCHEMA_VERSION = 1;
+// Version 2 replaces legacy-engine timings with canonical planner/runtime
+// timings. Keep old result documents as v1 rather than comparing metrics whose
+// names or measured execution paths have changed meaning.
+export const PERFORMANCE_SCHEMA_VERSION = 2;
 
 export function percentile(sorted, ratio) {
   if (sorted.length === 0) return null;
