@@ -95,7 +95,9 @@ describe('cross-surface release invariants', () => {
       runs_root: root,
       run_directory: runDirectory,
       coordinator: {
-        clock: { now: () => Date.parse('2026-09-05T12:00:00.000Z') },
+        clock: {
+          now: () => Date.parse(preflight.prepared.request.requested_at),
+        },
         ids: {
           next: (scope) => `${scope}-${++nextId}`,
         },
