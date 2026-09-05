@@ -2,16 +2,13 @@ import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import {
-  getProviderMeta,
-  initializeProviders,
-} from '../adapters/node-registry.js';
 import { VERSION } from '../constants.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
-import { createNodeCredentialContext } from '../node-credentials.js';
+import type { CredentialContext } from '../core/credentials.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type { Config } from '../types.js';
 import { checkAsyncTasks } from './async.js';
+import { discoverProviders } from './provider-discovery.js';
 import {
   ResearchInputError,
   runResearchSilent,
@@ -37,8 +34,8 @@ export interface McpServerDeps {
   loadMergedConfig?: () => Config;
   /** Override async poll/retrieve. */
   checkAsync?: typeof checkAsyncTasks;
-  /** Provider init (registry). Injectable for tests. */
-  initialize?: typeof initializeProviders;
+  /** Presence-only credentials used by static provider discovery. */
+  discoveryCredentials?: CredentialContext;
   /** Run artifact store used by get_results and async run selection. */
   repository?: McpArtifactRepository;
 }
@@ -73,7 +70,6 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
   const runResearch = deps.runResearch ?? runResearchSilent;
   const loadMergedConfig = deps.loadMergedConfig ?? defaultLoadMergedConfig;
   const checkAsync = deps.checkAsync ?? checkAsyncTasks;
-  const initialize = deps.initialize ?? initializeProviders;
   const repository = deps.repository ?? new RunArtifactRepository();
 
   const server = new McpServer({
@@ -230,31 +226,28 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'List configured providers',
       description:
-        'Return a snapshot of the provider registry and config: id, name, tier, source, whether enabled, and whether an API key is configured.',
-      inputSchema: {},
+        'List providers from static configuration and declarations without initializing adapters. With detail="profiles", also returns versioned exact profile selectors, capabilities, workflows, availability reasons, credential presence status, and catalog revision.',
+      inputSchema: {
+        provider: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe(
+            'Filter by configured adapter id or canonical provider id.',
+          ),
+        detail: z
+          .literal('profiles')
+          .optional()
+          .describe('Include the versioned authoritative profile catalog.'),
+      },
     },
-    async (): Promise<CallToolResult> => {
+    async (args): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
-        const credentials = createNodeCredentialContext();
-        const initResult = await initialize({ ...config, credentials });
-        for (const warning of initResult.warnings) {
-          onWarn(`[librarium] warning: ${warning}`);
-        }
-        const meta = getProviderMeta(config.providers, credentials);
-        return jsonResult({
-          providers: meta.map((p) => ({
-            id: p.id,
-            name: p.displayName,
-            tier: p.tier,
-            source: p.source,
-            enabled: p.enabled,
-            keyConfigured: p.hasApiKey,
-            credentialSource: p.credentialSource,
-            configured: p.configured !== false,
-            target: p.target,
-          })),
-        });
+        return jsonResult(
+          discoverProviders(config, args, deps.discoveryCredentials),
+        );
       } catch (e) {
         return errorResult(`list_providers failed: ${describeError(e)}`);
       }

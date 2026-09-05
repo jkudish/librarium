@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -19,7 +20,10 @@ import {
   it,
   vi,
 } from 'vitest';
-import { initializeProviders } from '../src/adapters/node-registry.js';
+import {
+  initializeProviders,
+  registeredAdapterIds,
+} from '../src/adapters/node-registry.js';
 import {
   ResearchInputError,
   resolveProviderSelection,
@@ -159,11 +163,6 @@ describe('mcp tool surface', () => {
   it('exposes all five tools', async () => {
     const { client, server } = await connect({
       loadMergedConfig: () => makeConfig(),
-      initialize: vi.fn().mockResolvedValue({
-        warnings: [],
-        loadedCustomProviders: [],
-        skippedCustomProviders: [],
-      }),
     });
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -209,11 +208,6 @@ describe('mcp tool surface', () => {
   });
 
   it('lists configured targets without claiming provider-observed models', async () => {
-    await initializeProviders({
-      providers: {
-        'perplexity-deep-research': { model: 'openai/gpt-5.6-sol' },
-      },
-    });
     const { client, server } = await connect({
       loadMergedConfig: () => ({
         ...makeConfig(),
@@ -224,11 +218,7 @@ describe('mcp tool surface', () => {
           },
         },
       }),
-      initialize: vi.fn().mockResolvedValue({
-        warnings: [],
-        loadedCustomProviders: [],
-        skippedCustomProviders: [],
-      }),
+      discoveryCredentials: { env: { PERPLEXITY_API_KEY: 'present' } },
     });
     const response = await client.callTool({
       name: 'list_providers',
@@ -256,6 +246,60 @@ describe('mcp tool surface', () => {
     await server.close();
   });
 
+  it('returns versioned exact profiles and rejects invalid discovery inputs', async () => {
+    const registryBefore = registeredAdapterIds();
+    const filesBefore = readdirSync(baseDir);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const { client, server } = await connect({
+      loadMergedConfig: () => makeConfig(),
+      discoveryCredentials: { env: { EXA_API_KEY: 'present' } },
+    });
+
+    const response = await client.callTool({
+      name: 'list_providers',
+      arguments: { provider: 'exa', detail: 'profiles' },
+    });
+    const payload = JSON.parse(
+      (response.content as { text: string }[])[0].text,
+    );
+    expect(payload).toMatchObject({
+      schemaVersion: 1,
+      catalogRevision: expect.stringMatching(/^fnv1a64\.1:[0-9a-f]{16}$/),
+    });
+    expect(payload.providers).toEqual([
+      expect.objectContaining({
+        id: 'exa',
+        keyConfigured: true,
+        credentialSource: 'env',
+      }),
+    ]);
+    expect(
+      payload.profiles.map((profile: { selector: string }) => profile.selector),
+    ).toEqual(['exa/research', 'exa/search']);
+    expect(JSON.stringify(payload)).not.toMatch(
+      /option_schema|options_schema|input_schema|"json_schema":/i,
+    );
+    expect(registeredAdapterIds()).toEqual(registryBefore);
+    expect(readdirSync(baseDir)).toEqual(filesBefore);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const unknown = await client.callTool({
+      name: 'list_providers',
+      arguments: { provider: 'not-a-provider' },
+    });
+    expect(unknown.isError).toBe(true);
+    expect((unknown.content as { text: string }[])[0].text).toContain(
+      'Unknown provider filter',
+    );
+    const invalidDetail = await client.callTool({
+      name: 'list_providers',
+      arguments: { detail: 'full' },
+    });
+    expect(invalidDetail.isError).toBe(true);
+    fetchSpy.mockRestore();
+    await server.close();
+  });
+
   it('passes the merged config to check_async', async () => {
     const config = makeConfig();
     const runDir = join(baseDir, 'check-async');
@@ -273,11 +317,6 @@ describe('mcp tool surface', () => {
     const { client, server } = await connect({
       loadMergedConfig: () => config,
       checkAsync,
-      initialize: vi.fn().mockResolvedValue({
-        warnings: [],
-        loadedCustomProviders: [],
-        skippedCustomProviders: [],
-      }),
     });
 
     const result = await client.callTool({
