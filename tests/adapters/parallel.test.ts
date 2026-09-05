@@ -290,6 +290,33 @@ describe('Parallel first-party providers', () => {
   });
 
   it.each([
+    [400, 'invalid_request'],
+    [401, 'authentication'],
+    [403, 'authentication'],
+    [402, 'billing'],
+    [408, 'timeout'],
+    [429, 'rate_limit'],
+    [500, 'provider'],
+    [504, 'timeout'],
+  ] as const)(
+    'records bounded diagnostics for HTTP %i Chat failures',
+    async (status, kind) => {
+      const result = await new ParallelChatProvider({
+        apiKey: key,
+        httpClient: client({ error: { message: 'provider detail' } }, status),
+        model: 'base',
+      }).execute('question', { timeout: 9 });
+
+      expect(result).toMatchObject({
+        content: '',
+        citations: [],
+        failureDiagnostic: { kind, httpStatus: status },
+      });
+      expect(result.failureDiagnostic).not.toHaveProperty('message');
+    },
+  );
+
+  it.each([
     [{ choices: [] }, 'invalid Chat response'],
     [{ choices: [{ message: {} }] }, 'invalid Chat response'],
   ])(
