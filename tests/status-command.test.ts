@@ -74,13 +74,13 @@ vi.mock('../src/core/config.js', () => ({
 }));
 
 import { registerStatusCommand } from '../src/commands/status.js';
-import { loadAsyncTasks, saveAsyncTasks } from '../src/core/async-manager.js';
 import {
   advanceCoordination,
   createCoordinatorState,
   recordLaunchDispatched,
 } from '../src/core/coordinator.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
+import { loadRunTasks } from '../src/core/run-manifest.js';
 import {
   RunJsonCoordinationStateStore,
   readCanonicalRunManifest,
@@ -93,6 +93,7 @@ import {
   canonicalFixtureProfile,
   canonicalFixtureResult,
 } from './fixtures/canonical-run.js';
+import { seedHistoricalV2AsyncTasks } from './fixtures/historical-v2-run.js';
 
 function program(): Command {
   const command = new Command();
@@ -104,7 +105,7 @@ function program(): Command {
 function task(status: 'running' | 'completed' = 'running', run = 'run-1') {
   const dir = join(state.outputDir, run);
   mkdirSync(dir, { recursive: true });
-  saveAsyncTasks(dir, [
+  seedHistoricalV2AsyncTasks(dir, [
     {
       provider: 'status-command-mock',
       taskId: 'task-1',
@@ -249,7 +250,7 @@ describe('status command', () => {
 
     await program().parseAsync(['node', 'test', 'status']);
 
-    expect(loadAsyncTasks(dir)[0]).toMatchObject({
+    expect(loadRunTasks(dir)[0]).toMatchObject({
       status: 'completed',
       providerStatus: 'COMPLETED',
     });
@@ -283,7 +284,7 @@ describe('status command', () => {
         'utf8',
       ),
     ).toBe('Completed research.');
-    expect(loadAsyncTasks(dir)).toEqual([]);
+    expect(loadRunTasks(dir)).toEqual([]);
   });
 
   it('--wait retrieves work completed by an earlier status invocation', async () => {
@@ -292,7 +293,7 @@ describe('status command', () => {
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
     await program().parseAsync(['node', 'test', 'status']);
-    expect(loadAsyncTasks(dir)[0]?.status).toBe('completed');
+    expect(loadRunTasks(dir)[0]?.status).toBe('completed');
 
     state.poll.mockClear();
     await program().parseAsync(['node', 'test', 'status', '--wait']);
@@ -304,7 +305,7 @@ describe('status command', () => {
         join(dir, providerArtifactFileNames('status-command-mock').outputFile),
       ),
     ).toBe(true);
-    expect(loadAsyncTasks(dir)).toEqual([]);
+    expect(loadRunTasks(dir)).toEqual([]);
   });
 
   it('--wait does not conflate provider-native task IDs across runs', async () => {
@@ -317,8 +318,8 @@ describe('status command', () => {
 
     expect(state.poll).toHaveBeenCalledTimes(1);
     expect(state.retrieve).toHaveBeenCalledTimes(2);
-    expect(loadAsyncTasks(firstDir)).toEqual([]);
-    expect(loadAsyncTasks(secondDir)).toEqual([]);
+    expect(loadRunTasks(firstDir)).toEqual([]);
+    expect(loadRunTasks(secondDir)).toEqual([]);
     expect(
       existsSync(
         join(

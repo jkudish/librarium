@@ -11,6 +11,7 @@ import type {
   SaveConfigV2Options,
   ScriptCustomProviderSource,
 } from 'librarium/node';
+import { customProviderLoadConfigFromV2 } from 'librarium/node';
 
 type NodePublicApiInventory = [
   CustomProviderExecutionProfileConfig,
@@ -151,6 +152,11 @@ export type CustomProviderDeclarationInventory = [
   NodeRootReexportInventory,
   NodeCoreReexportInventory,
 ];
+
+declare const nativeConfig: Node.LibrariumConfigV2;
+const compatibleConfig: CustomProviderLoadConfig =
+  customProviderLoadConfigFromV2(nativeConfig);
+void compatibleConfig;
 
 // @ts-expect-error Config is an internal legacy runtime type.
 export type NodePrivateConfigGuard = import('librarium/node').Config;

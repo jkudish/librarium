@@ -1,42 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { GeminiGroundedProvider } from '../../src/adapters/gemini-grounded.js';
-import {
-  getProvider,
-  initializeProviders,
-  registerProvider,
-} from '../../src/adapters/index.js';
+import { getProvider, initializeProviders } from '../../src/adapters/index.js';
 import { PerplexitySearchProvider } from '../../src/adapters/perplexity-search.js';
 import { SearchApiProvider } from '../../src/adapters/searchapi.js';
-import { dispatch } from '../../src/core/dispatcher.js';
 import type { HttpClient } from '../../src/core/http-client.js';
-import type {
-  Config,
-  Provider,
-  ProviderOptions,
-  ProviderResult,
-} from '../../src/types.js';
-
-function makeConfig(): Config {
-  return {
-    version: 1,
-    defaults: {
-      outputDir: './agents/librarium',
-      maxParallel: 2,
-      timeout: 10,
-      asyncTimeout: 60,
-      asyncPollInterval: 1,
-      mode: 'sync',
-      llmWebSearch: true,
-    },
-    providers: { 'worker-mock': { enabled: true } },
-    customProviders: {},
-    trustedProviderIds: [],
-    groups: {},
-  };
-}
 
 describe('internal adapters in workerd', () => {
-  it('initializes built-ins and dispatches an in-memory provider', async () => {
+  it('initializes built-ins in memory', async () => {
     await initializeProviders({
       credentials: { env: { GEMINI_API_KEY: 'test-key' } },
     });
@@ -45,56 +15,6 @@ describe('internal adapters in workerd', () => {
     });
     expect(gemini.id).toBe('gemini-grounded');
     expect(getProvider('gemini-grounded')?.id).toBe('gemini-grounded');
-
-    const mockProvider: Provider = {
-      id: 'worker-mock',
-      displayName: 'Worker Mock',
-      tier: 'ai-grounded',
-      execution: 'inline',
-      envVar: '',
-      requiresApiKey: false,
-      execute: async (
-        query: string,
-        _options: ProviderOptions,
-      ): Promise<ProviderResult> => ({
-        provider: 'worker-mock',
-        tier: 'ai-grounded',
-        content: `workerd:${query}`,
-        citations: [
-          {
-            url: 'https://example.com/source',
-            title: 'Example Source',
-            provider: 'worker-mock',
-          },
-        ],
-        durationMs: 5,
-        model: 'mock-model',
-      }),
-    };
-    registerProvider(mockProvider);
-
-    const result = await dispatch({
-      config: makeConfig(),
-      providerIds: ['worker-mock'],
-      query: 'hello',
-      mode: 'sync',
-      credentials: { env: {} },
-    });
-
-    expect(result.asyncTasks).toEqual([]);
-    expect(result.reports).toHaveLength(1);
-    expect(result.reports[0]).toMatchObject({
-      outputFile:
-        'provider-worker-mock--d31b38595ef057e4742a7edf5bdb8342f5070092f6c5739eaab6d5f54d9687ed.md',
-      metaFile:
-        'provider-worker-mock--d31b38595ef057e4742a7edf5bdb8342f5070092f6c5739eaab6d5f54d9687ed.meta.json',
-    });
-    expect(result.results[0]).toMatchObject({
-      provider: 'worker-mock',
-      status: 'success',
-      text: 'workerd:hello',
-      sourceUrls: ['https://example.com/source'],
-    });
   });
 
   it('runs Perplexity Search through an injected transport', async () => {

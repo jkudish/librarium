@@ -7,6 +7,12 @@ import { hasCredential } from '../core/credentials.js';
 import { buildProviderMetering } from '../core/metering.js';
 import { normalizeUsage } from '../core/usage-normalization.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import {
+  costMicrousdFromUsd,
+  fingerprint,
+  PaidRunAdmissionError,
+  type RunPaidWallet,
+} from '../run-paid-wallet.js';
 import type {
   ClaimSupport,
   Config,
@@ -81,6 +87,7 @@ export async function runFollowup(
   config: Config,
   reportedBudget: ReturnType<typeof createBudgetTracker>,
   estimatedBudget: ReturnType<typeof createEstimateBudgetTracker>,
+  wallet?: RunPaidWallet,
 ): Promise<{
   followUp: VerificationFollowUp;
   evidence?: { provider: string; text: string; sourceUrls: string[] };
@@ -88,8 +95,27 @@ export async function runFollowup(
   const attempts: VerificationAttempt[] = [];
   const query = `${claim.claim} primary source evidence`;
   for (const id of attemptIds.slice(0, MAX_VERIFICATION_ATTEMPTS)) {
+    const authorization = wallet?.authorizedProvider('verification', id);
     const provider = getProvider(id);
     if (!provider) continue;
+    if (wallet && !authorization) {
+      if (
+        wallet
+          .stageStatus('verification')
+          ?.providers.some((candidate) => candidate.provider === id)
+      ) {
+        attempts.push({
+          provider: id,
+          tier: provider.tier as VerificationAttempt['tier'],
+          status: 'error',
+          durationMs: 0,
+          error:
+            'verification skipped: multiple frozen profiles share this adapter',
+        });
+        break;
+      }
+      continue;
+    }
     const metering = buildProviderMetering(id, config.providers[id]);
     const nextEstimate = metering.estimate?.estimatedCostUsd;
     const estimateExceeded =
@@ -114,11 +140,47 @@ export async function runFollowup(
       });
       break;
     }
-    estimatedBudget.reserve(metering.estimate);
+    if (!wallet) estimatedBudget.reserve(metering.estimate);
+    let paidAttemptId: string | undefined;
+    try {
+      paidAttemptId = wallet?.begin({
+        stage: 'verification',
+        provider: id,
+        ...(authorization?.profile && { profile: authorization.profile }),
+        ...(authorization?.model && { model: authorization.model }),
+        estimated_cost_microusd: costMicrousdFromUsd(
+          metering.estimate?.estimatedCostUsd,
+        ),
+        ...(metering.estimate?.pricingVersion && {
+          estimate_source: `pricing:${metering.estimate.pricingVersion}`,
+        }),
+        input_fingerprint: fingerprint(query),
+        input_ref: 'verification.json#/matrix',
+      });
+    } catch (error) {
+      if (!(error instanceof PaidRunAdmissionError)) throw error;
+      attempts.push({
+        provider: id,
+        tier: provider.tier as VerificationAttempt['tier'],
+        status: 'skipped',
+        durationMs: 0,
+        error: `skipped: ${error.reasonCode}`,
+      });
+      break;
+    }
     const started = Date.now();
     try {
       const result = await provider.execute(query, {
-        timeout: config.defaults.timeout,
+        timeout: wallet
+          ? Math.max(
+              1,
+              Math.ceil(
+                Math.min(config.defaults.timeout * 1000, wallet.remainingMs()) /
+                  1000,
+              ),
+            )
+          : config.defaults.timeout,
+        ...(wallet && { signal: wallet.signal }),
       });
       const usage = normalizeUsage(result);
       const sourceUrls = Array.from(
@@ -138,12 +200,25 @@ export async function runFollowup(
         metering: buildProviderMetering(id, config.providers[id], usage),
       });
       reportedBudget.record(usage);
+      if (paidAttemptId) {
+        wallet?.finish(paidAttemptId, {
+          status: success ? 'succeeded' : 'failed',
+          ...(usage && { usage }),
+          output_fingerprint: fingerprint({
+            content: result.content,
+            citations: result.citations,
+          }),
+          output_ref: 'verification.json',
+        });
+      }
       if (success)
         return {
           followUp: { claimId: claim.id, query, attempts, sourceUrls },
           evidence: { provider: id, text: result.content, sourceUrls },
         };
+      if (wallet && !wallet.fallbackAuthorized('verification')) break;
     } catch (error) {
+      if (paidAttemptId) wallet?.finish(paidAttemptId, { status: 'failed' });
       attempts.push({
         provider: id,
         tier: provider.tier as VerificationAttempt['tier'],
@@ -152,6 +227,7 @@ export async function runFollowup(
         error: error instanceof Error ? error.message : String(error),
         metering,
       });
+      if (wallet && !wallet.fallbackAuthorized('verification')) break;
     }
   }
   return { followUp: { claimId: claim.id, query, attempts, sourceUrls: [] } };

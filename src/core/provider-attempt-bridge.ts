@@ -44,6 +44,8 @@ export interface ProviderAttemptBridgeDependencies {
     | undefined;
   now?: () => number;
   wait?: (milliseconds: number) => Promise<void>;
+  /** Run-wide cancellation; adapter calls also retain their absolute deadline. */
+  signal?: AbortSignal;
 }
 
 function providerFailure(
@@ -227,9 +229,10 @@ async function beforeDeadline<T>(
   operation: (signal: AbortSignal, remainingMs: number) => Promise<T>,
   launch: AttemptLaunch,
   now: () => number,
+  runSignal?: AbortSignal,
 ): Promise<DeadlineResult<T>> {
   const remainingMs = Date.parse(launch.deadline_at) - now();
-  if (remainingMs <= 0) return { kind: 'deadline' };
+  if (remainingMs <= 0 || runSignal?.aborted) return { kind: 'deadline' };
   const controller = new AbortController();
   return new Promise((resolve) => {
     let settled = false;
@@ -237,12 +240,18 @@ async function beforeDeadline<T>(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      runSignal?.removeEventListener('abort', abortRun);
       resolve(result);
+    };
+    const abortRun = () => {
+      controller.abort();
+      finish({ kind: 'deadline' });
     };
     const timer = setTimeout(() => {
       controller.abort();
       finish({ kind: 'deadline' });
     }, remainingMs);
+    runSignal?.addEventListener('abort', abortRun, { once: true });
     operation(controller.signal, remainingMs).then(
       (value) => finish({ kind: 'value', value }),
       (error: unknown) => finish({ kind: 'error', error }),
@@ -342,12 +351,14 @@ async function retrieveCompletedTask(
   launch: AttemptLaunch,
   handle: DurableHandle,
   now: () => number,
+  runSignal?: AbortSignal,
 ): Promise<AttemptExecutionResult> {
   const completedHandle = observedHandle(handle, 'succeeded', now);
   const retrieved = await beforeDeadline(
     () => provider.retrieve(task),
     launch,
     now,
+    runSignal,
   );
   if (retrieved.kind === 'deadline') {
     return {
@@ -479,7 +490,14 @@ export function createProviderAttemptBridge(
         if (context.custody_only) {
           return { kind: 'accepted', durable_handle: handle };
         }
-        return retrieveCompletedTask(provider, task, launch, handle, now);
+        return retrieveCompletedTask(
+          provider,
+          task,
+          launch,
+          handle,
+          now,
+          dependencies.signal,
+        );
       }
       let latestHandle = handle;
       for (;;) {
@@ -487,6 +505,7 @@ export function createProviderAttemptBridge(
           () => provider.poll(task),
           launch,
           now,
+          dependencies.signal,
         );
         if (polled.kind === 'deadline') {
           return {
@@ -530,6 +549,7 @@ export function createProviderAttemptBridge(
             launch,
             latestHandle,
             now,
+            dependencies.signal,
           );
         }
         if (poll.status === 'failed') {
@@ -622,6 +642,7 @@ export function createProviderAttemptBridge(
             }),
           launch,
           now,
+          dependencies.signal,
         );
         if (executed.kind === 'deadline') {
           return {
@@ -680,6 +701,7 @@ export function createProviderAttemptBridge(
           }),
         launch,
         now,
+        dependencies.signal,
       );
       if (submitted.kind === 'deadline') {
         // The local deadline fired while POST may already have been in flight.
@@ -751,7 +773,14 @@ export function createProviderAttemptBridge(
         };
       }
       if (task.status === 'completed') {
-        return retrieveCompletedTask(provider, task, launch, handle, now);
+        return retrieveCompletedTask(
+          provider,
+          task,
+          launch,
+          handle,
+          now,
+          dependencies.signal,
+        );
       }
       if (context.mode === 'async') return { kind: 'accepted' };
 
@@ -777,6 +806,7 @@ export function createProviderAttemptBridge(
           () => provider.poll(task),
           launch,
           now,
+          dependencies.signal,
         );
         if (polled.kind === 'deadline') {
           return {
@@ -815,6 +845,7 @@ export function createProviderAttemptBridge(
             launch,
             latestHandle,
             now,
+            dependencies.signal,
           );
         }
         if (poll.status === 'failed') {

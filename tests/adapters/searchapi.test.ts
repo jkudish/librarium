@@ -5,18 +5,17 @@ import { getProvider, initializeProviders } from '../../src/adapters/index.js';
 import { getBuiltInProviderDescriptor } from '../../src/adapters/provider-descriptors.js';
 import { SearchApiProvider } from '../../src/adapters/searchapi.js';
 import type { SearchApiGoogleResponse } from '../../src/adapters/searchapi-google.js';
-import { dispatch } from '../../src/core/dispatcher.js';
 import type {
   HttpClient,
   HttpRequestOptions,
   HttpResponse,
 } from '../../src/core/http-client.js';
+import { buildProviderMetering } from '../../src/core/metering.js';
 import {
   createSearchApiRequest,
   SEARCHAPI_ZERO_RETENTION_REMEDIATION,
   searchApiOptionsSchema,
 } from '../../src/core/searchapi.js';
-import type { Config, Provider, ProviderResult } from '../../src/types.js';
 
 const SYNTHETIC_KEY = 'searchapi-synthetic-test-key';
 const originalFetch = globalThis.fetch;
@@ -33,30 +32,6 @@ function response<T>(status: number, data: T): HttpResponse<T> {
 
 function asHttpClient(mock: ReturnType<typeof vi.fn>): HttpClient {
   return mock as unknown as HttpClient;
-}
-
-function config(options: Record<string, unknown> = {}): Config {
-  return {
-    version: 1,
-    defaults: {
-      outputDir: './agents/librarium',
-      maxParallel: 1,
-      timeout: 9,
-      asyncTimeout: 60,
-      asyncPollInterval: 1,
-      mode: 'sync',
-      llmWebSearch: true,
-    },
-    providers: {
-      searchapi: {
-        enabled: true,
-        options,
-      },
-    },
-    customProviders: {},
-    trustedProviderIds: [],
-    groups: {},
-  };
 }
 
 afterEach(() => {
@@ -214,94 +189,42 @@ describe('SearchAPI request and privacy contract', () => {
     }
   });
 
-  it('returns narrow remediation through structured dispatch results and preserves configured pricing', async () => {
+  it('returns narrow remediation without secrets and preserves configured pricing', async () => {
     const httpClient = vi.fn(async () =>
       response(403, {
         error: 'zero retention requires an Enterprise account',
         diagnostic: `https://www.searchapi.io/api/v1/search?api_key=${SYNTHETIC_KEY}`,
       }),
     );
-    const appConfig = config({ zeroRetention: true, perRequestUsd: 0.012 });
-    await initializeProviders({
-      ...appConfig,
-      credentials: { env: { SEARCHAPI_API_KEY: SYNTHETIC_KEY } },
+    const options = { zeroRetention: true, perRequestUsd: 0.012 };
+    const provider = new SearchApiProvider({
+      ...options,
+      apiKey: SYNTHETIC_KEY,
       httpClient: asHttpClient(httpClient),
     });
-    appConfig.providers.searchapi = {
-      ...appConfig.providers.searchapi!,
-      fallback: 'synthetic-fallback',
-    };
-    appConfig.providers['synthetic-fallback'] = {
-      apiKey: 'synthetic-fallback-key',
-      enabled: false,
-    };
-    const fallbackExecute = vi.fn(
-      async (): Promise<ProviderResult> => ({
-        provider: 'synthetic-fallback',
-        tier: 'raw-search',
-        content: 'must not run',
-        citations: [],
-        durationMs: 1,
-      }),
-    );
-    const fallback: Provider = {
-      id: 'synthetic-fallback',
-      displayName: 'Synthetic fallback',
-      tier: 'raw-search',
-      execution: 'inline',
-      envVar: 'SYNTHETIC_FALLBACK_KEY',
-      execute: fallbackExecute,
-    };
-    const searchApi = getProvider('searchapi');
-    if (!searchApi) throw new Error('SearchAPI provider was not initialized');
-
-    const dispatched = await dispatch({
-      config: appConfig,
-      providerIds: ['searchapi'],
-      query: 'structured error',
-      mode: 'sync',
-      credentials: { env: { SEARCHAPI_API_KEY: SYNTHETIC_KEY } },
-      providerRegistry: {
-        getProvider: (id) =>
-          id === 'searchapi'
-            ? searchApi
-            : id === 'synthetic-fallback'
-              ? fallback
-              : undefined,
-      },
-    });
+    const result = await provider.execute('structured error', { timeout: 9 });
     const expectedError = `API returned 403: ${SEARCHAPI_ZERO_RETENTION_REMEDIATION}`;
 
-    expect(dispatched.results).toEqual([
-      expect.objectContaining({
-        provider: 'searchapi',
-        status: 'error',
-        error: expectedError,
-        preventFallback: true,
-        metering: {
-          kind: 'request_priced',
-          estimate: {
-            billableUnits: 1,
-            unit: 'request',
-            estimatedCostUsd: 0.012,
-            costConfidence: 'configured',
-            pricingVersion: '2026-08',
-          },
-          pricingVersion: '2026-08',
-        },
-      }),
-    ]);
-    expect(dispatched.reports).toEqual([
-      expect.objectContaining({
-        id: 'searchapi',
-        status: 'error',
-        error: expectedError,
-        preventFallback: true,
-      }),
-    ]);
+    expect(result).toMatchObject({
+      provider: 'searchapi',
+      error: expectedError,
+      preventFallback: true,
+    });
+    expect(
+      buildProviderMetering('searchapi', { enabled: true, options }),
+    ).toEqual({
+      kind: 'request_priced',
+      estimate: {
+        billableUnits: 1,
+        unit: 'request',
+        estimatedCostUsd: 0.012,
+        costConfidence: 'configured',
+        pricingVersion: '2026-08',
+      },
+      pricingVersion: '2026-08',
+    });
     expect(expectedError).not.toContain(SYNTHETIC_KEY);
     expect(httpClient).toHaveBeenCalledOnce();
-    expect(fallbackExecute).not.toHaveBeenCalled();
   });
 
   it('does not attach retention remediation to auth failures, unrelated 403s, or unrequested privacy', async () => {

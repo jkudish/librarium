@@ -25,7 +25,7 @@ export const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json');
 
 /**
  * Only authored groups are meaningful to the v2 catalog. `loadConfig` still
- * injects DEFAULT_GROUPS for the unchanged v1 dispatcher, so retain the two
+ * injects DEFAULT_GROUPS for legacy config compatibility, so retain the two
  * authored layers out-of-band instead of making injected defaults look like
  * custom user workflows.
  */
@@ -73,7 +73,7 @@ const DEFAULT_CONFIG: Config = {
     timeout: 30,
     asyncTimeout: 1800,
     asyncPollInterval: 30,
-    mode: 'mixed',
+    mode: 'sync',
     llmWebSearch: true,
   },
   providers: {},
@@ -117,11 +117,6 @@ function compatibilityConfigFromV2(raw: unknown, path: string): Config {
     throw new Error(`Invalid Librarium v2 config in ${path}: ${diagnostics}`);
   }
   const native = validated.config;
-  if (native.execution_defaults.request_deadline_ms !== undefined) {
-    throw new Error(
-      'Native v2 request_deadline_ms is not supported by the compatibility CLI.',
-    );
-  }
   return ConfigSchema.parse({
     version: 1,
     defaults: {
@@ -131,6 +126,9 @@ function compatibilityConfigFromV2(raw: unknown, path: string): Config {
       asyncTimeout:
         native.execution_defaults.background_attempt_deadline_ms / 1_000,
       asyncPollInterval: native.execution_defaults.poll_interval_ms / 1_000,
+      ...(native.execution_defaults.request_deadline_ms !== undefined && {
+        requestDeadlineMs: native.execution_defaults.request_deadline_ms,
+      }),
       mode: native.execution_defaults.mode,
       llmWebSearch: native.runtime.llm_web_search,
       ...(native.execution_defaults.max_actual_cost_microusd !== undefined && {

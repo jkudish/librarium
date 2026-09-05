@@ -10,6 +10,8 @@ import {
   synthesizeAnswer,
 } from '../src/commands/answer.js';
 import type { PostDispatchContext } from '../src/commands/run.js';
+import * as runCommand from '../src/commands/run.js';
+import { fingerprint, RunPaidWallet } from '../src/run-paid-wallet.js';
 import type {
   Config,
   DeduplicatedSource,
@@ -111,6 +113,33 @@ describe('answer command --max-cost flag', () => {
     expect(parseAnswer(['some query']).verify).toBeUndefined();
     expect(parseAnswer(['some query', '--verify']).verify).toBe(true);
   });
+
+  it.each([
+    { args: [], group: undefined },
+    { args: ['--group', 'quick'], group: 'quick' },
+  ])(
+    'preserves omitted versus explicit selectors: $args',
+    async ({ args, group }) => {
+      const execute = vi
+        .spyOn(runCommand, 'executeRun')
+        .mockResolvedValue({ exitCode: 0 });
+      try {
+        const program = new Command();
+        registerAnswerCommand(program);
+        await program.parseAsync([
+          'node',
+          'librarium',
+          'answer',
+          'query',
+          ...args,
+        ]);
+        expect(execute).toHaveBeenCalledOnce();
+        expect(execute.mock.calls[0]?.[1].group).toBe(group);
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
 });
 
 describe('synthesizeAnswer', () => {
@@ -246,7 +275,7 @@ describe('synthesizeAnswer', () => {
     expect(existsSync(join(dir, 'verification.json'))).toBe(true);
   });
 
-  it('makes zero verification calls when the inherited ceiling is already exhausted and preserves answer.md', async () => {
+  it('makes zero helper calls when hard-budget synthesis has unknown cost and preserves research', async () => {
     process.env.VERIFY_PRIMARY_KEY = 'primary-key';
     const execute = vi.fn<Provider['execute']>();
     registerProvider({
@@ -293,23 +322,223 @@ describe('synthesizeAnswer', () => {
         usage: { costUsd: 0.01 },
       },
     ];
+    context.wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint('request'),
+      config_fingerprint: fingerprint('config'),
+      created_at: '2026-09-05T12:00:00.000Z',
+      deadline_at: '2026-09-05T12:01:00.000Z',
+      limits: { max_actual_cost_microusd: '10000' },
+      stages: [
+        {
+          stage: 'refinement',
+          requested: false,
+          fallback_authorized: false,
+          prompt_version: 'refine-v1',
+          providers: [],
+        },
+        {
+          stage: 'research',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'research-v1',
+          providers: [{ provider: 'primary' }],
+        },
+        {
+          stage: 'synthesis',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'synthesis-v1',
+          providers: [{ provider: 'openai', model: 'gpt-5-mini' }],
+          reserve_first_attempt: true,
+        },
+        {
+          stage: 'verification',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'verification-v1',
+          providers: [
+            { provider: 'openai', model: 'gpt-5-mini' },
+            { provider: 'primary' },
+          ],
+        },
+      ],
+      now: () => Date.parse('2026-09-05T12:00:01.000Z'),
+    });
+
+    const out = await synthesizeAndVerifyAnswer(context);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(out).toBeUndefined();
+    expect(existsSync(join(dir, 'answer.md'))).toBe(false);
+    expect(context.results).toHaveLength(1);
+    expect(context.wallet.snapshot().attempts).toEqual([
+      expect.objectContaining({
+        stage: 'synthesis',
+        status: 'blocked',
+        reason_code: 'unknown_cost_under_hard_budget',
+      }),
+    ]);
+    expect(context.wallet.stageStatus('synthesis')).toMatchObject({
+      status: 'skipped',
+      reason_code: 'unknown_cost_under_hard_budget',
+    });
+  });
+
+  it('preserves a synthesized answer when the shared wallet blocks verification', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: 'Original grounded answer [1].' } },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const runConfig = makeConfig();
+    runConfig.providers['openai-chat'] = {
+      apiKey: '$OPENAI_API_KEY',
+      enabled: true,
+      options: { perRequestUsd: 0.005 },
+    };
+    const { context } = makeContext(
+      dir,
+      [makeResult('openai', 'a finding about x')],
+      runConfig,
+    );
+    context.wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint('request'),
+      config_fingerprint: fingerprint('config'),
+      created_at: '2026-09-05T12:00:00.000Z',
+      deadline_at: '2026-09-05T12:01:00.000Z',
+      limits: { max_actual_cost_microusd: '5000' },
+      stages: [
+        {
+          stage: 'refinement',
+          requested: false,
+          fallback_authorized: false,
+          prompt_version: 'refine-v1',
+          providers: [],
+        },
+        {
+          stage: 'research',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'research-v1',
+          providers: [{ provider: 'openai' }],
+        },
+        {
+          stage: 'synthesis',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'synthesis-v1',
+          providers: [
+            {
+              provider: 'openai',
+              model: 'gpt-5-mini',
+              estimated_cost_microusd: '5000',
+            },
+          ],
+          reserve_first_attempt: true,
+        },
+        {
+          stage: 'verification',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'verification-v1',
+          providers: [{ provider: 'openai', model: 'gpt-5-mini' }],
+        },
+      ],
+      now: () => Date.parse('2026-09-05T12:00:01.000Z'),
+    });
 
     const out = await synthesizeAndVerifyAnswer(context);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(execute).not.toHaveBeenCalled();
     expect(readFileSync(join(dir, 'answer.md'), 'utf8')).toContain(
       'Original grounded answer [1].',
     );
-    expect(out?.manifestExtra?.answer).toEqual({
-      provider: 'openai',
-      model: 'gpt-5-mini',
-    });
     expect(out?.manifestExtra?.verification).toMatchObject({
       status: 'incomplete',
       revised: false,
       usage: { providerAttempts: 0, llmCalls: 0 },
     });
+    expect(context.wallet.snapshot().attempts).toEqual([
+      expect.objectContaining({ stage: 'synthesis', status: 'succeeded' }),
+      expect.objectContaining({
+        stage: 'verification',
+        status: 'blocked',
+        reason_code: 'actual_budget_exhausted',
+      }),
+    ]);
+  });
+
+  it('does not call an unauthorized helper alternate under no-fallback', async () => {
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'down' } }), {
+          status: 500,
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { context } = makeContext(
+      dir,
+      [makeResult('openai', 'a finding')],
+      makeConfig(),
+    );
+    context.wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint('request'),
+      config_fingerprint: fingerprint('config'),
+      created_at: '2026-09-05T12:00:00.000Z',
+      deadline_at: '2026-09-05T12:01:00.000Z',
+      stages: [
+        {
+          stage: 'refinement',
+          requested: false,
+          fallback_authorized: false,
+          prompt_version: 'refine-v1',
+          providers: [],
+        },
+        {
+          stage: 'research',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'research-v1',
+          providers: [{ provider: 'openai' }],
+        },
+        {
+          stage: 'synthesis',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'synthesis-v1',
+          providers: [{ provider: 'openai', model: 'gpt-5-mini' }],
+        },
+        {
+          stage: 'verification',
+          requested: false,
+          fallback_authorized: false,
+          prompt_version: 'verification-v1',
+          providers: [],
+        },
+      ],
+      now: () => Date.parse('2026-09-05T12:00:01.000Z'),
+    });
+
+    expect(await synthesizeAnswer(context)).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(context.wallet.snapshot().attempts).toEqual([
+      expect.objectContaining({
+        provider: 'openai',
+        status: 'failed',
+      }),
+    ]);
   });
 
   it('retains synthesis attribution when verification throws unexpectedly', async () => {

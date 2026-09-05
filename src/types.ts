@@ -188,7 +188,7 @@ export interface ProviderResult {
   preventFallback?: true;
 }
 
-// Structured result returned by the core dispatcher for library consumers
+// Structured result projected from canonical execution for presentation consumers
 export interface ProviderDispatchResult {
   provider: string;
   tier: ProviderTier;
@@ -382,7 +382,9 @@ export const DefaultsSchema = z.object({
   timeout: z.number().default(30),
   asyncTimeout: z.number().default(1800),
   asyncPollInterval: z.number().default(30),
-  mode: LegacyExecutionModeSchema.default('mixed'),
+  // Compatibility projection of the native v2 run-wide deadline.
+  requestDeadlineMs: z.number().optional(),
+  mode: LegacyExecutionModeSchema.default('sync'),
   llmWebSearch: z.boolean().default(true),
   // Optional runtime spend circuit breaker. Honest budget: only API-reported
   // costs count toward it (see src/core/budget.ts). Unset means no limit.
@@ -471,6 +473,8 @@ export const ProjectConfigSchema = z.object({
       timeout: z.number().optional(),
       asyncTimeout: z.number().optional(),
       asyncPollInterval: z.number().optional(),
+      // Compatibility spelling for the native v2 run-wide deadline.
+      requestDeadlineMs: z.number().optional(),
       mode: LegacyExecutionModeSchema.optional(),
       llmWebSearch: z.boolean().optional(),
       maxCostUsd: z.number().optional(),
@@ -668,20 +672,4 @@ export interface DeduplicatedSource {
   title?: string;
   providers: string[];
   citationCount: number;
-}
-
-// Progress events from dispatcher
-export interface ProgressEvent {
-  providerId: string;
-  event:
-    | 'started'
-    | 'completed'
-    | 'error'
-    | 'async-submitted'
-    | 'fallback-started';
-  // Populated on 'completed', 'error', and 'async-submitted' (the report for
-  // providerId) and on 'fallback-started' (the failed primary's error report).
-  report?: ProviderReport;
-  /** Present on `async-submitted` so callers can persist the handle first. */
-  task?: AsyncTaskHandle;
 }

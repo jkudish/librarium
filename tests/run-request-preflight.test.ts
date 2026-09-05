@@ -66,6 +66,10 @@ vi.mock('../src/node-request-preflight.js', () => {
         admittedAdapterIds: ['legacy-provider', 'fallback-provider'],
         prepared: {
           request: {
+            request_id: 'request-1',
+            requested_at: new Date().toISOString(),
+            mode: 'sync',
+            query: 'private query',
             slots: [
               {
                 primary: {
@@ -79,6 +83,19 @@ vi.mock('../src/node-request-preflight.js', () => {
                 },
               },
             ],
+            fallback_reserve: [],
+          },
+          policy: {
+            limits: {
+              max_concurrency: 2,
+              request_deadline_ms: 60_000,
+              inline_attempt_deadline_ms: 30_000,
+              background_attempt_deadline_ms: 30_000,
+              poll_interval_ms: 1_000,
+            },
+            fallback: { kind: 'configured' },
+            exclusions: [],
+            refinement: { kind: 'disabled' },
           },
           profile_plans_by_identity: {
             '["legacy-provider","search","not_applicable",null,null,null,null,null]':
@@ -146,6 +163,18 @@ vi.mock('../src/node-run-directory.js', () => ({
     return '/tmp/unused-mcp-output';
   },
 }));
+
+vi.mock('../src/node-paid-attempt-ledger.js', () => {
+  let ledger: unknown;
+  return {
+    writePaidRunLedger: (_root: string, _run: string, next: unknown) => {
+      ledger = structuredClone(next);
+    },
+    readPaidRunLedger: () => structuredClone(ledger),
+    withPaidRunLedgerLock: <T>(_root: string, _run: string, action: () => T) =>
+      action(),
+  };
+});
 
 vi.mock('../src/node-canonical-run.js', () => ({
   createNodeCoordinatorDependencies: () => ({
@@ -297,7 +326,7 @@ describe('production request preflight transport ordering', () => {
     expect(state.events).not.toContain('dispatch');
   });
 
-  it('passes the frozen canonical plan rather than legacy dispatcher config', async () => {
+  it('passes the frozen canonical plan rather than mutable provider config', async () => {
     const outcome = await executeRun('private query', { json: true });
 
     expect(outcome.exitCode).toBe(0);

@@ -25,7 +25,12 @@ npm install -g 'librarium@^2'
 Do not silently fall back to Librarium 1.x or install a mutable Git branch. If
 npm has no v2 release yet, report that distribution blocker instead. Configure
 available API keys with `librarium init --auto`, then inspect the usable matrix
-with `librarium doctor` and `librarium ls --json`. Never print secret values.
+offline with `librarium doctor` and `librarium ls --json`. This confirms only
+configuration and credential presence, not authentication or connectivity, and
+does not load configured custom provider code. Use `librarium doctor --live`
+only when the user explicitly wants live connectivity tests; it loads trusted
+custom providers, makes provider network requests, and may incur charges. Never
+print secret values.
 
 ## 7-Phase Research Workflow
 
@@ -106,7 +111,8 @@ correlated.
 | `librarium jsonl [run-dir]` | Generate results.jsonl for a run |
 | `librarium refine <goal>` | Tier-tuned query variants, no dispatch |
 | `librarium ls` | List providers and status |
-| `librarium doctor` | Health check providers |
+| `librarium doctor` | Check provider configuration and credential presence offline |
+| `librarium doctor --live` | Test connectivity with provider network requests; charges may apply |
 | `librarium config` | Show resolved config |
 | `librarium cleanup [--days N] [--dry-run]` | Delete run dirs older than N days (default 30) |
 | `librarium clear [--dry-run] [-i] [--yes]` | Delete all run dirs (alias for `cleanup --all`); `-i` to pick interactively |

@@ -103,7 +103,7 @@ export const CustomProviderSourceV2Schema = z.discriminatedUnion('type', [
 
 export const ExecutionDefaultsV2Schema = z
   .strictObject({
-    mode: z.enum(['sync', 'async']),
+    mode: z.enum(['sync', 'async']).default('sync'),
     max_concurrency: z
       .number()
       .int()
@@ -313,7 +313,7 @@ const LegacyDefaultsSchema = z.strictObject({
   timeout: z.number().default(30),
   asyncTimeout: z.number().default(1800),
   asyncPollInterval: z.number().default(30),
-  mode: z.enum(['sync', 'async', 'mixed']).default('mixed'),
+  mode: z.enum(['sync', 'async', 'mixed']).default('sync'),
   llmWebSearch: z.boolean().default(true),
   maxCostUsd: z.number().finite().optional(),
   maxEstimatedCostUsd: z.number().finite().optional(),
@@ -418,7 +418,7 @@ interface NormalizedLayer {
 const DEFAULT_V2_CONFIG: LibrariumConfigV2 = {
   version: 2,
   execution_defaults: {
-    mode: 'async',
+    mode: 'sync',
     max_concurrency: 6,
     inline_attempt_deadline_ms: 30_000,
     background_attempt_deadline_ms: 1_800_000,

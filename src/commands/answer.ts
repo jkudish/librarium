@@ -23,6 +23,7 @@ import {
   resolveLlmClients,
 } from './llm-client.js';
 import { renderMarkdownAnsi } from './markdown-ansi.js';
+import { paidLlmAttemptHooks } from './paid-llm-attempt.js';
 import {
   type ExecuteRunHooks,
   executeRun,
@@ -108,18 +109,17 @@ export function registerAnswerCommand(program: Command): void {
       'Open the output directory (or report.html with --html) when the run completes',
     )
     .action(async (query: string, opts: RunOptions) => {
-      // Default to the quick group when the user did not pick providers/group.
-      const runOpts: RunOptions = { ...opts };
-      if (!runOpts.providers && !runOpts.group) {
-        runOpts.group = 'quick';
-      }
       const hooks: ExecuteRunHooks = {
+        paidStages: {
+          synthesis: true,
+          verification: Boolean(opts.verify),
+        },
         postDispatch: (context) =>
           opts.verify
             ? synthesizeAndVerifyAnswer(context)
             : synthesizeAnswer(context),
       };
-      await executeRun(query, runOpts, hooks);
+      await executeRun(query, opts, hooks);
     });
 }
 
@@ -155,6 +155,7 @@ export async function synthesizeAndVerifyAnswer(
       results: context.results,
       reports: context.reports,
       sources: context.sources,
+      wallet: context.wallet,
       warn: (message) => console.error(`[librarium] verify: ${message}`),
     });
   } catch (error) {
@@ -229,7 +230,13 @@ export async function synthesizeAnswer(
   let synthesis: { provider: string; model: string; text: string } | null =
     null;
   try {
-    synthesis = await runSynthesis(query, config, successful, answerSources);
+    synthesis = await runSynthesis(
+      query,
+      config,
+      successful,
+      answerSources,
+      context.wallet,
+    );
   } catch (e) {
     printLine('');
     printLine(
@@ -275,13 +282,19 @@ async function runSynthesis(
   config: Config,
   successful: ProviderDispatchResult[],
   answerSources: AnswerSource[],
+  wallet?: PostDispatchContext['wallet'],
 ): Promise<{ provider: string; model: string; text: string }> {
   const preference = preferenceFromConfig(config, 'answer', 'refine');
-  const clients = resolveLlmClients(preference, {
+  const resolvedClients = resolveLlmClients(preference, {
     env: process.env,
     config,
     credentials: createNodeCredentialContext(),
   });
+  const clients = wallet
+    ? resolvedClients.filter((client) =>
+        wallet.isAuthorized('synthesis', client),
+      )
+    : resolvedClients;
   if (clients.length === 0) {
     throw new Error(
       preference?.provider
@@ -295,18 +308,39 @@ async function runSynthesis(
     results: successful,
     sources: answerSources,
   });
+  const paid = wallet
+    ? paidLlmAttemptHooks({
+        wallet,
+        stage: 'synthesis',
+        prompt,
+        config,
+        input_ref: 'run.json#/provider_outputs_by_attempt',
+        output_ref: 'answer.md',
+      })
+    : undefined;
 
-  const { client, result } = await callWithCascade<string>({
+  const { client, result, usage } = await callWithCascade<string>({
     clients,
     prompt,
     action: 'synthesis',
-    timeoutMs: SYNTHESIS_TIMEOUT_MS,
+    timeoutMs: wallet
+      ? Math.min(SYNTHESIS_TIMEOUT_MS, Math.max(1, wallet.remainingMs()))
+      : SYNTHESIS_TIMEOUT_MS,
     json: false,
+    ...(paid && {
+      signal: paid.signal,
+      beforeAttempt: paid.beforeAttempt,
+      onAttempt: paid.onAttempt,
+    }),
     onWarning: (message) => console.error(`[librarium] answer: ${message}`),
   });
 
   const text = result.trim();
-  if (!text) throw new Error('synthesis returned an empty answer');
+  if (!text) {
+    paid?.completeFailure(usage);
+    throw new Error('synthesis returned an empty answer');
+  }
+  paid?.completeSuccess(text, usage);
   return { provider: client.provider, model: client.model, text };
 }
 

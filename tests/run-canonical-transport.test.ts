@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeRun } from '../src/commands/run.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
@@ -54,7 +56,7 @@ const prepared = {
     interchange_version: '1.0.0',
     message_type: 'request',
     request_id: 'request-1',
-    requested_at: '2026-08-11T12:00:00.000Z',
+    requested_at: new Date().toISOString(),
     mode: 'sync',
     query: 'query',
     slots: [
@@ -157,6 +159,18 @@ vi.mock('../src/node-run-directory.js', () => ({
   createRunDir: () => '/tmp/canonical-transport/run-1',
 }));
 
+vi.mock('../src/node-paid-attempt-ledger.js', () => {
+  let ledger: unknown;
+  return {
+    writePaidRunLedger: (_root: string, _run: string, next: unknown) => {
+      ledger = structuredClone(next);
+    },
+    readPaidRunLedger: () => structuredClone(ledger),
+    withPaidRunLedgerLock: <T>(_root: string, _run: string, action: () => T) =>
+      action(),
+  };
+});
+
 vi.mock('../src/node-canonical-artifacts.js', () => ({
   writeCanonicalPresentationArtifacts: () => ({
     reports: [],
@@ -214,6 +228,12 @@ describe('canonical CLI transport', () => {
     state.spinner.stop.mockClear();
     state.spinner.fail.mockClear();
     process.exitCode = undefined;
+    delete config.answer;
+    delete config.providers['openai-chat'];
+    rmSync('/tmp/canonical-transport/run-1', {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('prints one public terminal envelope without private coordinator facts', async () => {
@@ -353,6 +373,79 @@ describe('canonical CLI transport', () => {
     );
     const outcome = await executeRun('query', { json: true });
     expect(outcome).toMatchObject({ exitCode: 130 });
+    expect(state.cancelCanonical).toHaveBeenCalled();
+  });
+
+  it('keeps cancellation active through synthesis and starts no verification', async () => {
+    config.answer = { provider: 'openai', model: 'interrupt-model' };
+    config.providers['openai-chat'] = {
+      enabled: true,
+      apiKey: 'fixture-key',
+      options: { perRequestUsd: 0.001 },
+    };
+    mkdirSync('/tmp/canonical-transport/run-1', { recursive: true });
+    const partialPath = join(
+      '/tmp/canonical-transport/run-1',
+      'partial-research.md',
+    );
+    writeFileSync(partialPath, 'useful partial research');
+    state.cancelCanonical.mockResolvedValue(cancelledManifest);
+    state.runCanonical.mockImplementation(
+      async (
+        _plan: unknown,
+        dependencies: { on_state_created?: () => void },
+      ) => {
+        dependencies.on_state_created?.();
+        return {
+          runtime: { state: { status: 'succeeded' }, outputs_by_attempt: {} },
+          manifest: { coordination_state: { status: 'succeeded' } },
+          response: {
+            ...cancelledManifest.terminal_response,
+            status: 'succeeded' as const,
+            errors: [],
+          },
+        };
+      },
+    );
+    let synthesisCancelled = false;
+    let verificationStarted = false;
+
+    const outcome = await executeRun(
+      'query',
+      { json: true },
+      {
+        paidStages: { synthesis: true, verification: true },
+        postDispatch: async ({ wallet }) => {
+          if (!wallet) throw new Error('missing wallet');
+          const synthesis = wallet.begin({
+            stage: 'synthesis',
+            provider: 'openai',
+            model: 'interrupt-model',
+            estimated_cost_microusd: '1000',
+            input_fingerprint: 'a'.repeat(64),
+          });
+          process.emit('SIGINT');
+          synthesisCancelled = wallet.signal.aborted;
+          wallet.finish(synthesis, { status: 'failed' });
+          try {
+            wallet.begin({
+              stage: 'verification',
+              provider: 'openai',
+              model: 'interrupt-model',
+              estimated_cost_microusd: '1000',
+              input_fingerprint: 'b'.repeat(64),
+            });
+            verificationStarted = true;
+          } catch {}
+          return undefined;
+        },
+      },
+    );
+
+    expect(outcome.exitCode).toBe(130);
+    expect(synthesisCancelled).toBe(true);
+    expect(verificationStarted).toBe(false);
+    expect(existsSync(partialPath)).toBe(true);
     expect(state.cancelCanonical).toHaveBeenCalled();
   });
 });

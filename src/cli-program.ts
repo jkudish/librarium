@@ -13,6 +13,7 @@ import { registerJsonlCommand } from './commands/jsonl.js';
 import { registerLiveValidationCommand } from './commands/live-validation.js';
 import { registerLsCommand } from './commands/ls.js';
 import { registerMcpCommand } from './commands/mcp.js';
+import { registerPlanCommand } from './commands/plan.js';
 import { registerRefineCommand } from './commands/refine.js';
 import { registerRunCommand } from './commands/run.js';
 import { registerStatusCommand } from './commands/status.js';
@@ -33,6 +34,7 @@ export function createCliProgram(): Command {
     .version(VERSION);
 
   registerRunCommand(program);
+  registerPlanCommand(program);
   registerLiveValidationCommand(program, {
     fixtureReplay: replayCanonicalLiveValidationFixture,
   });

@@ -158,6 +158,51 @@ function profileKeys(result: ReturnType<typeof compile>) {
 }
 
 describe('private request compilation', () => {
+  it('defaults new CLI and MCP requests to the quick workflow in sync mode', () => {
+    const source = config({
+      providers: {
+        exa: { enabled: true },
+        'brave-answers': { enabled: true },
+        tavily: { enabled: true },
+      },
+    });
+
+    for (const kind of ['cli', 'mcp', 'silent_mcp'] as const) {
+      const result = compile(source, {
+        kind,
+        input: { query: 'default quick request' },
+      });
+      expect(profileKeys(result)).toEqual([
+        'brave-answers/grounded',
+        'exa/search',
+      ]);
+      if (!result.ok) continue;
+      expect(result.prepared.request.mode).toBe('sync');
+      expect(profileKeys(result)).not.toContain('tavily/search');
+      expect(profileKeys(result)).not.toContain('exa/research');
+      expect(result.notices).toContainEqual(
+        expect.objectContaining({ code: 'workflow_profile_unavailable' }),
+      );
+    }
+  });
+
+  it('diagnoses an unavailable quick workflow instead of broadening to another enabled provider', () => {
+    const result = compile(
+      config({ providers: { tavily: { enabled: true } } }),
+      { kind: 'cli', input: { query: 'no quick providers' } },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'selection_empty' }),
+    );
+    expect(result.notices).toContainEqual(
+      expect.objectContaining({ code: 'workflow_profile_unavailable' }),
+    );
+    expect(JSON.stringify(result)).not.toContain('tavily/search');
+  });
+
   it('resolves exact adapter ids, display names, qualified profiles, and split OpenRouter targets', () => {
     const result = compile(
       config({
@@ -541,7 +586,7 @@ describe('private request compilation', () => {
     }
   });
 
-  it('plans trusted custom profiles by adapter, qualified identity, group, and default without loading code', () => {
+  it('plans trusted custom profiles by adapter, qualified identity, and group without loading code', () => {
     const source = customSource({ groups: { team: ['acme-adapter'] } });
     for (const transport of [
       {
@@ -556,7 +601,6 @@ describe('private request compilation', () => {
         kind: 'mcp' as const,
         input: { query: 'group', group: 'team' },
       },
-      { kind: 'mcp' as const, input: { query: 'default' } },
     ]) {
       const result = compile(source, transport);
       expect(profileKeys(result)).toEqual(['acme/search']);
@@ -967,6 +1011,30 @@ describe('private request compilation', () => {
     expect(dependencies.calls()).toBe(3);
   });
 
+  it('carries a configured request deadline identically through CLI and MCP preparation', () => {
+    const source = config({
+      providers: { exa: { enabled: true } },
+      defaults: { requestDeadlineMs: 450_000 },
+    });
+    const prepared = (['cli', 'mcp', 'silent_mcp'] as const).map((kind) => {
+      const result = compileRequest({
+        config: source,
+        authoredGroups: { global: source.groups, project: {} },
+        credentials: credentials(),
+        transport: {
+          kind,
+          input: { query: 'configured deadline', providers: ['exa'] },
+        },
+        preparation: preparation(),
+      });
+      if (!result.ok) throw new Error(JSON.stringify(result.issues));
+      expect(result.prepared.policy.limits.request_deadline_ms).toBe(450_000);
+      return JSON.stringify(result.prepared);
+    });
+
+    expect(new Set(prepared).size).toBe(1);
+  });
+
   it('sorts merged diagnostics globally and prepares CLI, MCP, and silent MCP identically', () => {
     const source = config({ providers: { exa: { enabled: true } } });
     const invalid = compile(source, {
@@ -1158,7 +1226,7 @@ describe('private request compilation', () => {
       ),
     ].join('\n');
     expect(graph).not.toMatch(
-      /(?:node:|execution-runtime|coordinator(?:-store)?|bridge|dispatcher|research-run|node-registry|(?:^|\/)commands(?:\/|$)|(?:^|\/)mcp(?:\/|$))/,
+      /(?:node:|execution-runtime|coordinator(?:-store)?|bridge|node-registry|(?:^|\/)commands(?:\/|$)|(?:^|\/)mcp(?:\/|$))/,
     );
     const productionEntryPoints = [
       fileURLToPath(new URL('../src/cli.ts', import.meta.url)),
@@ -1190,6 +1258,7 @@ describe('private request compilation', () => {
       .map(([path]) => path)
       .sort();
     expect(diagnosticImporters).toEqual([
+      'src/commands/run-request.ts',
       'src/commands/run.ts',
       'src/commands/wizard.ts',
       'src/mcp/research.ts',

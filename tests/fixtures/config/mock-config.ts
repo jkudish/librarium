@@ -21,7 +21,7 @@ export interface MockProviderSpec {
   id: string;
   displayName?: string;
   tier?: MockTier;
-  /** Mark execute as failing so the dispatcher attempts a fallback. */
+  /** Mark execute as failing so canonical execution attempts a fallback. */
   fail?: boolean;
   error?: string;
   citations?: number;
@@ -58,7 +58,7 @@ export function buildMockConfig(spec: MockConfigSpec): Record<string, unknown> {
     trustedProviderIds.push(p.id);
     providers[p.id] = {
       enabled: p.enabled ?? true,
-      // The dispatcher gates a fallback target on a resolvable credential
+      // Canonical execution gates a fallback target on a resolvable credential
       // (config apiKey), independent of the provider being keyless. A literal
       // value satisfies that check so fallback-only mocks can fire.
       apiKey: 'mock-key',

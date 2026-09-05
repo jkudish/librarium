@@ -37,6 +37,7 @@ describe('CLI program factory', () => {
       second.commands.map((item) => item.name()),
     );
     expect(first.commands.map((item) => item.name())).toContain('mcp');
+    expect(first.commands.map((item) => item.name())).toContain('plan');
     expect(first.commands.map((item) => item.name())).not.toContain(
       'install-plugin',
     );
@@ -69,6 +70,32 @@ describe('CLI program factory', () => {
       'answer',
     );
     await expectRejectedBeforeAction(['refine', 'x'.repeat(100_001)], 'refine');
+  });
+
+  it('registers only the approved plan interface with run parsing parity', async () => {
+    const program = createCliProgram();
+    const plan = command(program, 'plan');
+    expect(plan.options.map(({ long }) => long)).toEqual(
+      expect.arrayContaining([
+        '--providers',
+        '--group',
+        '--mode',
+        '--parallel',
+        '--timeout',
+        '--max-cost',
+        '--max-estimated-cost',
+        '--no-fallback',
+        '--refine',
+        '--answer',
+        '--verify',
+        '--json',
+      ]),
+    );
+    expect(plan.options.map(({ long }) => long)).not.toContain('--for');
+    await expectRejectedBeforeAction(
+      ['plan', 'query', '--max-estimated-cost', 'unbounded'],
+      'plan',
+    );
   });
 
   it('rejects closed command arguments before invoking their actions', async () => {

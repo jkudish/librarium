@@ -131,8 +131,10 @@ export interface ProviderCatalogOptions {
   readonly reserve?: readonly CatalogProfileTarget[];
   /** Adapter ids which are disabled for primary selection but valid reserve. */
   readonly reserveOnlyAdapterIds?: readonly string[];
-  /** Already trust-filtered custom profiles; untrusted/disabled code stays out. */
+  /** Already trust-filtered custom profiles; untrusted code stays out. */
   readonly customProfiles?: readonly CustomCatalogProfile[];
+  /** Retain disabled trusted declarations for static discovery only. */
+  readonly includeDisabledCustomProfiles?: boolean;
 }
 
 export interface WorkflowOmission {
@@ -397,13 +399,16 @@ export function buildProviderCatalog(
       return compareCanonicalStrings(leftKey, rightKey);
     }),
   );
-  const customProfiles = declaredCustomProfiles.filter((custom) => {
-    const enabled = bindingConfig(options, custom.adapter_id)?.enabled === true;
-    return (
-      enabled ||
-      options.reserveOnlyAdapterIds?.includes(custom.adapter_id) === true
-    );
-  });
+  const customProfiles = options.includeDisabledCustomProfiles
+    ? declaredCustomProfiles
+    : declaredCustomProfiles.filter((custom) => {
+        const enabled =
+          bindingConfig(options, custom.adapter_id)?.enabled === true;
+        return (
+          enabled ||
+          options.reserveOnlyAdapterIds?.includes(custom.adapter_id) === true
+        );
+      });
   const profileKeys = new Set(
     refs.map(({ entry, declaration }) =>
       JSON.stringify([entry.provider_id, declaration.profile_id]),

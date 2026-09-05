@@ -44,6 +44,41 @@ function request(source: Config, group?: string) {
 }
 
 describe('Node production request preflight', () => {
+  it('uses quick plus sync for omitted CLI and MCP preferences without widening selection', () => {
+    const source = config({
+      providers: {
+        exa: { enabled: true },
+        'brave-answers': { enabled: true },
+        tavily: { enabled: true },
+      },
+    });
+    const createCredentials = () => ({
+      env: {
+        EXA_API_KEY: 'present',
+        BRAVE_ANSWERS_API_KEY: 'present',
+        TAVILY_API_KEY: 'present',
+      },
+    });
+
+    for (const kind of ['cli', 'silent_mcp'] as const) {
+      const result = preflightProductionRequest(
+        {
+          config: source,
+          transport: { kind, input: { query: 'first run' } },
+        },
+        { createCredentials },
+      );
+      expect(result.prepared.request.mode).toBe('sync');
+      expect(
+        result.prepared.request.slots.map(
+          (slot) =>
+            `${slot.primary.identity.provider_id}/${slot.primary.identity.profile_id}`,
+        ),
+      ).toEqual(['brave-answers/grounded', 'exa/search']);
+      expect(result.admittedAdapterIds).not.toContain('tavily');
+    }
+  });
+
   it('rejects structural input before constructing credentials', () => {
     const createCredentials = vi.fn(() => ({ env: {} }));
 
@@ -115,6 +150,26 @@ describe('Node production request preflight', () => {
         { createCredentials },
       ),
     ).toThrow(RequestPreflightError);
+
+    expect(createCredentials).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid configured request deadline before constructing credentials', () => {
+    const createCredentials = vi.fn(() => ({ env: {} }));
+
+    expect(() =>
+      preflightProductionRequest(
+        request(
+          config({
+            defaults: {
+              ...config().defaults,
+              requestDeadlineMs: 299_999,
+            },
+          }),
+        ),
+        { createCredentials },
+      ),
+    ).toThrow(/configuration_request_deadline_less_than_attempt_deadline/);
 
     expect(createCredentials).not.toHaveBeenCalled();
   });
@@ -202,7 +257,7 @@ describe('Node production request preflight', () => {
         }),
         transport: {
           kind: 'cli',
-          input: { query: 'durable only', mode: 'async' },
+          input: { query: 'durable only', group: 'deep', mode: 'async' },
         },
       },
       { createCredentials },
@@ -256,7 +311,7 @@ describe('Node production request preflight', () => {
         }),
         transport: {
           kind: 'cli',
-          input: { query: 'budgeted default' },
+          input: { query: 'budgeted workflow', group: 'all' },
         },
       },
       { createCredentials },
@@ -288,7 +343,11 @@ describe('Node production request preflight', () => {
         }),
         transport: {
           kind: 'cli',
-          input: { query: 'deadline default', mode: 'async' },
+          input: {
+            query: 'deadline workflow',
+            group: 'deep',
+            mode: 'async',
+          },
         },
       },
       { createCredentials },

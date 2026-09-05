@@ -121,6 +121,6 @@ describe('answer command completions parity', () => {
       expect(script).toContain('answer');
     }
     expect(zsh).toContain('--refine');
-    expect(fish).toContain('__fish_seen_subcommand_from run answer');
+    expect(fish).toContain('__fish_seen_subcommand_from run plan answer');
   });
 });

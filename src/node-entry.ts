@@ -9,6 +9,7 @@ import {
   loadCustomProviders as loadCustomProvidersInternal,
 } from './adapters/custom.js';
 import type { ExecutionProfile } from './contracts/domain/index.js';
+import { type LibrariumConfigV2, validateConfigV2 } from './core/config-v2.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './core/reserved-provider-ids.js';
 
 export type { CustomProviderLoadResult } from './adapters/custom.js';
@@ -278,6 +279,70 @@ export interface CustomProviderLoadConfig {
   readonly providers?: Readonly<Record<string, CustomProviderRuntimeConfig>>;
 }
 
+function isNativeV2Config(
+  config: CustomProviderLoadConfig | LibrariumConfigV2,
+): config is LibrariumConfigV2 {
+  return (
+    ('version' in config && config.version === 2) ||
+    'custom_providers' in config ||
+    'trusted_provider_ids' in config ||
+    'execution_defaults' in config
+  );
+}
+
+/** Validate and convert native snake_case v2 config for custom-code loading. */
+export function customProviderLoadConfigFromV2(
+  config: unknown,
+): CustomProviderLoadConfig {
+  const validated = validateConfigV2(config);
+  if (!validated.ok) {
+    const summary = validated.issues
+      .map(({ code, path }) => `${code} at ${path}`)
+      .join(', ');
+    throw new TypeError(`Invalid Librarium v2 configuration: ${summary}`);
+  }
+
+  return {
+    providers: Object.fromEntries(
+      Object.entries(validated.config.providers).map(([id, provider]) => [
+        id,
+        {
+          enabled: provider.enabled,
+          ...(provider.api_key !== undefined && { apiKey: provider.api_key }),
+          ...(provider.model !== undefined && { model: provider.model }),
+          ...(provider.options !== undefined && { options: provider.options }),
+          ...(provider.fallback !== undefined && {
+            fallback: provider.fallback,
+          }),
+        },
+      ]),
+    ),
+    customProviders: Object.fromEntries(
+      Object.entries(validated.config.custom_providers).map(([id, source]) => {
+        const { execution_profile: executionProfile, ...portable } = source;
+        return [
+          id,
+          {
+            ...portable,
+            ...(executionProfile !== undefined && {
+              executionProfile: {
+                bindingId: executionProfile.binding_id,
+                profile: executionProfile.profile,
+                ...(executionProfile.credential !== undefined && {
+                  credential: {
+                    envVar: executionProfile.credential.env_var,
+                  },
+                }),
+              },
+            }),
+          },
+        ];
+      }),
+    ),
+    trustedProviderIds: [...validated.config.trusted_provider_ids],
+  };
+}
+
 /**
  * Load trusted custom providers without mutating a global registry.
  *
@@ -290,19 +355,22 @@ export interface CustomProviderLoadConfig {
  * not a sandbox.
  */
 export async function loadCustomProviders(
-  config: CustomProviderLoadConfig,
+  config: CustomProviderLoadConfig | LibrariumConfigV2,
   options: LoadCustomProvidersOptions = {},
 ): Promise<CustomProviderLoadResult> {
+  const loadConfig = isNativeV2Config(config)
+    ? customProviderLoadConfigFromV2(config)
+    : config;
   const reservedProviderIds = new Set([
     ...RESERVED_BUILTIN_PROVIDER_IDS,
     ...(options.reservedProviderIds ?? []),
   ]);
 
   return loadCustomProvidersInternal({
-    customProviders: { ...(config.customProviders ?? {}) },
-    trustedProviderIds: [...(config.trustedProviderIds ?? [])],
+    customProviders: { ...(loadConfig.customProviders ?? {}) },
+    trustedProviderIds: [...(loadConfig.trustedProviderIds ?? [])],
     providerConfigs: Object.fromEntries(
-      Object.entries(config.providers ?? {}).map(([id, provider]) => [
+      Object.entries(loadConfig.providers ?? {}).map(([id, provider]) => [
         id,
         { ...provider, enabled: provider.enabled ?? true },
       ]),

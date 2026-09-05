@@ -1,6 +1,7 @@
 import { PROVIDER_DISPLAY_NAMES, PROVIDER_ENV_VARS } from '../constants.js';
 import {
   type CredentialContext,
+  redactCredentialText,
   resolveCredential,
 } from '../core/credentials.js';
 import {
@@ -132,10 +133,11 @@ export abstract class ProviderBase {
   protected formatError(status: number, data: unknown): string {
     let body: string;
     try {
-      body = JSON.stringify(data).slice(0, 200);
+      body = JSON.stringify(data) ?? String(data);
     } catch {
       body = String(data);
     }
+    body = this.redactErrorText(body).slice(0, 200);
     const base = `API returned ${status}: ${body}`;
     if (status === 401) {
       return `${base} — check that ${this.envVar} is set and valid`;
@@ -159,7 +161,14 @@ export abstract class ProviderBase {
     ) {
       return `Network error connecting to ${this.displayName} — check your internet connection`;
     }
-    return msg;
+    return this.redactErrorText(msg);
+  }
+
+  /** Redact this provider's resolved credential and credential URL parameters. */
+  protected redactErrorText(value: string): string {
+    const ref = this.apiKeyRef ?? `$${this.envVar}`;
+    const apiKey = resolveCredential(ref, this.credentials);
+    return redactCredentialText(value, [apiKey]);
   }
 
   abstract execute(

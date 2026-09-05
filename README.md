@@ -37,13 +37,19 @@ Version 2 separates the product into three import boundaries:
 
 | Import | Use it for | It never does on import |
 | --- | --- | --- |
-| `librarium` | Worker-safe schemas, config migration, and the public catalog | Read the host, load adapters, access credentials, start the CLI, or write files |
-| `librarium/core` | Injected catalog, planning, transport, coordination, and execution ports | Construct concrete provider adapters or a global registry |
-| `librarium/node` | Explicit Node config-file services, trusted custom-provider loading, and canonical validation helpers | Promise a general high-level library runner or a portable persistence layer |
+| `librarium` | Worker-safe schemas, the public catalog, and pure config/contract utilities | Read the host, load adapters, access credentials, start the CLI, or write files |
+| `librarium/core` | Advanced injected planning, transport, coordination, and execution ports | Supply caller-owned runtime dependencies, construct concrete provider adapters, or create a global registry |
+| `librarium/node` | Explicit Node config, credential, trusted custom-provider, and canonical validation services | Provide a turnkey built-in-provider runner or a portable persistence layer |
 
-The `librarium` executable remains the complete Node application for research
-runs. Node package installs require Node.js **22.12 or newer**. Standalone and
-Homebrew binaries include their own runtime.
+These library boundaries are deliberately compositional. A caller using
+`librarium/core` owns the concrete adapters, credential context, clocks,
+coordination store, artifact services, and other runtime dependencies required
+by the ports it invokes. `librarium/node` adds host-specific building blocks;
+it does not assemble the built-in catalog into a high-level runner.
+
+The `librarium` CLI and its MCP stdio server are the complete application
+interfaces for research runs. Node package installs require Node.js **22.12 or newer**.
+Standalone and Homebrew binaries include their own runtime.
 
 ## Quick start
 
@@ -53,16 +59,24 @@ npm install -g librarium
 # Configure credentials and select providers interactively.
 librarium init
 
-# Run a bounded selection.
-librarium run "PostgreSQL connection pooling" --group quick
+# Inspect the exact offline preflight plan before anything runs.
+librarium plan "PostgreSQL connection pooling"
+
+# Run the default quick workflow and wait for its providers concurrently.
+librarium run "PostgreSQL connection pooling"
 
 # Or make an evidence-bounded answer from the quick workflow.
 librarium answer "What changed in PostgreSQL 17?" --verify
 ```
 
-Use `librarium doctor` before a paid run when you want to check configured
-providers. `librarium run --json` sends only JSON to standard output; progress
-and diagnostics go to standard error.
+Use `librarium doctor` before a paid run to check configuration and credential
+presence offline without loading configured custom provider code. Connectivity
+is not tested unless you explicitly run `librarium doctor --live`, which loads
+trusted custom providers, makes provider network requests, and may incur
+charges. `librarium run --json` sends only JSON to standard output; progress and
+diagnostics go to standard error. New requests default to the `quick` workflow
+in `sync` mode. Pass `--group`, `--providers`, or `--mode` to override those
+defaults; saved configuration preferences are also honored.
 
 ## V2 catalog
 
@@ -150,11 +164,11 @@ librarium run <query> [options]
 | --- | --- |
 | `--providers <ids>` | Comma-separated provider IDs for the Node CLI compatibility layer |
 | `--group <name>` | Select a group or v2 workflow |
-| `--mode <mode>` | `sync`, `async`, or `mixed` execution |
+| `--mode <mode>` | `sync` (default; concurrent and awaited), `async` (durable profiles only), or legacy `mixed` (migrated to `async` with a notice) |
 | `--output <dir>` | Run-directory base path |
 | `--parallel <n>` / `--timeout <n>` | Concurrency and per-provider timeout limits |
-| `--max-cost <usd>` | Stop launching not-yet-started calls once provider-reported spend crosses this bound |
-| `--max-estimated-cost <usd>` | Reserve only known exact pre-dispatch estimates; do not interpret an omitted estimate as free |
+| `--max-cost <usd>` | Require bounded network-free primary/reserve estimates at admission, then stop new launches when provider-reported spend reaches the bound |
+| `--max-estimated-cost <usd>` | Require bounded network-free primary/reserve estimates and admit only when the complete primary plan fits |
 | `--yes` / `--no-fallback` | Skip the deep preflight confirmation / require the exact primary matrix |
 | `--json` / `--refine` / `--html` / `--jsonl` / `--open` | Machine output, optional query refinement, and presentation artifacts |
 
@@ -163,6 +177,46 @@ bounded and opt-in. It may use successful evidence from the run and limited
 follow-up searches, but it does not make a result verified merely because a
 model produced it. It leaves the original answer intact when verification is
 incomplete, budget-limited, or fails.
+
+### `plan`
+
+```bash
+librarium plan <query> [--answer] [--verify] [run selection options]
+```
+
+`plan` runs the same canonical request compilation, local credential-reference
+resolution, budget admission, and paid-stage reservation policy as execution,
+but stops before adapter initialization. It makes no provider requests or
+tests, imports no custom provider modules, spawns no custom scripts, performs
+no refinement or synthesis, and creates no run directory or ledger. OS
+keychain lookup is allowed after structural validation. A reported credential
+is therefore only locally present or reference-resolvable; it has not been
+authenticated.
+
+The default previews research. `--answer` adds synthesis, and `--verify` adds
+verification and requires `--answer`. The command accepts the request-shaping
+`run` controls: `--providers`, `--group`, `--mode`, `--parallel`, `--timeout`,
+`--max-cost`, `--max-estimated-cost`, `--no-fallback`, and `--refine`.
+`--json` emits a sanitized, versioned planning receipt with exact selected
+profiles and configured targets, workflow omissions, fallback reserve, all four
+paid stages, known/unknown estimates, effective limits and their sources,
+warnings, and diagnostics. For each requested paid stage it also applies the
+real wallet admission calculation to the first declared provider on an empty
+paid-attempt ledger, while retaining future synthesis reservations. Later
+stages are marked conditional because earlier paid attempts can consume budget.
+A blocked plan exits with status 2; it is never presented as an admitted partial
+plan. Invalid `plan` syntax also exits 2 and remains structured and sanitized in
+`--json` mode.
+
+“Plan ready” means only that local preflight admitted the request. It is not an
+authentication check, provider availability check, executable frozen plan,
+price quote, or final-bill guarantee. In particular, requested helper stages
+can be skipped when their estimate is unknown under a hard budget even when
+the research plan itself can proceed.
+
+When neither `--providers` nor `--group` is supplied, `run` selects the curated
+`quick` workflow. Unavailable quick providers are omitted with preflight
+diagnostics; Librarium does not broaden the request to every enabled provider.
 
 Other public commands are `live-validation`, `status`, `usage`, `browse`,
 `html`, `jsonl`, `refine`, `completions`, `ls`, `groups`, `init`, `doctor`,
@@ -175,6 +229,7 @@ that are not in the `run` table above.
 
 | Command | Options |
 | --- | --- |
+| `plan` | `--providers`, `--group`, `--mode`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--no-fallback`, `--refine`, `--answer`, `--verify`, `--json` |
 | `answer` | `--providers`, `--group`, `--mode`, `--output`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--yes`, `--no-fallback`, `--json`, `--refine`, `--verify`, `--html`, `--jsonl`, `--open` |
 | `live-validation` | `--targets`, `--approval`, `--confirm`, `--paid`, `--continue`, `--candidate-root`, `--artifact-root`, `--artifact`, `--fixture` |
 | `status` | `--wait`, `--retrieve`, `--json` |
@@ -187,7 +242,7 @@ that are not in the `run` table above.
 | `ls` | `--json` |
 | `groups` | `--json` |
 | `init` | `--auto` |
-| `doctor` | `--json` |
+| `doctor` | `--json`, `--live` (network requests; provider charges may apply) |
 | `config` | `--json`, `--global`, `--menu` |
 | `config migrate` | `--from`, `--project`, `--output`, `--force` |
 | `cleanup` | `--days`, `--all`, `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
@@ -241,6 +296,7 @@ only the documented optional fields.
     "max_concurrency": 4,
     "inline_attempt_deadline_ms": 30000,
     "background_attempt_deadline_ms": 1800000,
+    "request_deadline_ms": 1800000,
     "poll_interval_ms": 10000
   },
   "providers": { "exa": { "enabled": true } },
@@ -250,6 +306,9 @@ only the documented optional fields.
   "runtime": { "output_dir": "./agents/librarium", "llm_web_search": true }
 }
 ```
+
+`request_deadline_ms` is optional. When set, it bounds the entire canonical
+run across primary and fallback attempts; it is not a per-provider timeout.
 
 `migrateConfig()` accepts v1 or v2 data and returns either an immutable v2
 configuration plus notices or structured issues. It does not rewrite source
@@ -322,10 +381,15 @@ librarium doctor --json
 ```
 
 Package maintainers should also run `npm test` after changing migration or CLI
-behavior. These checks do not make provider calls. Rollback is normally just
-deleting the v2 sidecar, because the command never changes the v1 source. If
-you later activate v2 configuration by a separate, explicit installation step,
-restore the v1 backup using that installation procedure's rollback.
+behavior. These commands, including both forms of `doctor` shown above, inspect
+configuration and credential presence offline; they do not authenticate with or
+contact providers, load custom provider modules, or spawn custom provider
+scripts. Use `librarium doctor --live` only when a connectivity check is
+required, because it loads trusted custom provider code, makes provider network
+requests, and may incur charges. Rollback is normally just deleting the v2
+sidecar, because the command never changes the v1 source. If you later activate
+v2 configuration by a separate, explicit installation step, restore the v1
+backup using that installation procedure's rollback.
 
 On Windows, owner-only writes require the supported Windows PowerShell ACL
 boundary. If Librarium cannot establish and verify a protected current-user-only
@@ -343,9 +407,24 @@ environment. Review and trust that code deliberately. See
 Librarium can record provider-reported use and can reserve an exact,
 network-free price when a reviewed price definition makes that possible. A
 missing estimate, missing reported cost, API unit, or token price is unknown —
-never a zero-cost guarantee. `--max-cost` is a lower-bound circuit breaker;
-in-flight work can still finish and incur cost. `--max-estimated-cost` admits
-only calls with an exact known estimate under its reserve.
+never a zero-cost guarantee. Both hard-budget flags require a bounded,
+network-free estimate for every primary and fallback-reserve profile, and the
+complete primary estimate must fit before execution is admitted.
+With either flag, the shared wallet requires and reserves a known estimate
+before each paid attempt. `--max-estimated-cost` compares those admissions to
+committed estimates. `--max-cost` also stops launching new work when
+accumulated provider-reported actual spend reaches its bound. Already in-flight
+work can still finish and exceed either bound. `plan` previews the same
+calculation against an empty paid-attempt ledger and reports reservation-driven
+first-attempt blocks. Admission for later stages remains conditional on the
+estimates and provider-reported costs accumulated by earlier attempts.
+
+Estimated cost, provider-reported actual cost, and unknown cost are separate
+facts. An estimate is not a quote, and neither budget flag guarantees the final
+bill. Refinement, synthesis, and verification share the run-wide paid wallet,
+but their spending is not inherently fixed: a helper with no bounded estimate
+is skipped or blocked under a hard budget, while provider-reported cost may
+arrive only after an admitted attempt finishes.
 
 Every provider call can send a query and selected options to that provider.
 Retention, billing, and account-specific behavior belong to the upstream

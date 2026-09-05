@@ -17,7 +17,7 @@ describe('offline performance benchmark helpers', () => {
   });
 
   it('uses a versioned result schema', () => {
-    expect(PERFORMANCE_SCHEMA_VERSION).toBe(1);
+    expect(PERFORMANCE_SCHEMA_VERSION).toBe(2);
   });
 
   it('runs the configured warmup before retaining raw samples', async () => {

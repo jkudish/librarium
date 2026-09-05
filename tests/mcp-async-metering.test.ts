@@ -11,10 +11,10 @@ import type {
   ProviderResult,
   RunManifest,
 } from '../src/types.js';
+import { seedHistoricalV2AsyncTasks } from './fixtures/historical-v2-run.js';
 
 let registerProvider: typeof import('../src/adapters/index.js').registerProvider;
 let checkAsyncTasks: typeof import('../src/mcp/async.js').checkAsyncTasks;
-let saveAsyncTasks: typeof import('../src/core/async-manager.js').saveAsyncTasks;
 
 /**
  * Regression for the MCP `check_async` retrieval path: a completed async result
@@ -29,8 +29,6 @@ describe('MCP check_async retrieval persists metering', () => {
     registerProvider = (await import('../src/adapters/index.js'))
       .registerProvider;
     checkAsyncTasks = (await import('../src/mcp/async.js')).checkAsyncTasks;
-    saveAsyncTasks = (await import('../src/core/async-manager.js'))
-      .saveAsyncTasks;
     dir = join(tmpdir(), `librarium-mcp-async-${randomUUID().slice(0, 8)}`);
     mkdirSync(dir, { recursive: true });
   });
@@ -113,7 +111,7 @@ describe('MCP check_async retrieval persists metering', () => {
       status: 'completed',
       outputDir: dir,
     };
-    saveAsyncTasks(dir, [task]);
+    seedHistoricalV2AsyncTasks(dir, [task]);
 
     const result = await checkAsyncTasks(dir, true);
     expect(result.retrieved).toBe(1);
@@ -190,7 +188,7 @@ describe('MCP check_async retrieval persists metering', () => {
       poll: async () => ({ status: 'completed' }),
     };
     registerProvider(provider);
-    saveAsyncTasks(dir, [
+    seedHistoricalV2AsyncTasks(dir, [
       {
         provider: 'perplexity-sonar-deep',
         taskId: 'task-1',
@@ -215,8 +213,6 @@ describe('MCP check_async poll state persistence', () => {
     registerProvider = (await import('../src/adapters/index.js'))
       .registerProvider;
     checkAsyncTasks = (await import('../src/mcp/async.js')).checkAsyncTasks;
-    saveAsyncTasks = (await import('../src/core/async-manager.js'))
-      .saveAsyncTasks;
     dir = join(tmpdir(), `librarium-mcp-poll-${randomUUID().slice(0, 8)}`);
     mkdirSync(dir, { recursive: true });
   });
@@ -260,7 +256,7 @@ describe('MCP check_async poll state persistence', () => {
       }),
     };
     registerProvider(provider);
-    saveAsyncTasks(dir, [
+    seedHistoricalV2AsyncTasks(dir, [
       {
         provider: 'mock-async',
         taskId: 'task-cancelled',
@@ -323,7 +319,7 @@ describe('MCP check_async poll state persistence', () => {
       }),
     };
     registerProvider(provider);
-    saveAsyncTasks(dir, [
+    seedHistoricalV2AsyncTasks(dir, [
       {
         provider: 'mock-unknown',
         taskId: 'task-unknown',
@@ -347,7 +343,7 @@ describe('MCP check_async poll state persistence', () => {
   });
 
   it('terminalizes a pending task whose retired provider is no longer registered', async () => {
-    saveAsyncTasks(dir, [
+    seedHistoricalV2AsyncTasks(dir, [
       {
         provider: 'openai-deep',
         taskId: 'retired-task',

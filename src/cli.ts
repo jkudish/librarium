@@ -1,4 +1,5 @@
 import { createCliProgram } from './cli-program.js';
+import { isHandledPlanCliExit } from './commands/plan.js';
 
 const program = createCliProgram();
 
@@ -14,6 +15,7 @@ if (bareInvocation && process.stdout.isTTY && process.stdin.isTTY) {
     });
 } else {
   program.parseAsync(process.argv).catch((err: Error) => {
+    if (isHandledPlanCliExit(err)) return;
     process.stderr.write(`Error: ${err.message}\n`);
     process.exitCode = 1;
   });

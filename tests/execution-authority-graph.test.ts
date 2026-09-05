@@ -10,7 +10,7 @@ const canonicalEntries = [
 ] as const;
 
 const forbiddenCanonicalInputs =
-  /(?:^|\/)(?:core\/(?:dispatcher|research-run|run-manifest|async-manager)|node-run-artifacts|node-run-reconciliation(?:-runtime)?|commands\/(?:html-report-v2|jsonl-report-v2))\.ts$/;
+  /(?:^|\/)(?:core\/run-manifest|node-run-artifacts|node-run-reconciliation(?:-runtime)?|commands\/(?:html-report-v2|jsonl-report-v2))\.ts$/;
 
 async function inputGraph(entry: string): Promise<string[]> {
   const result = await build({

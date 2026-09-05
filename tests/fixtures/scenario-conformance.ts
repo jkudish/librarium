@@ -17,17 +17,17 @@ export const SCENARIO_CONFORMANCE_EVIDENCE: Readonly<
       'fans out deterministic shared reserve replacements through the real runtime loop',
   },
   ordered_fallback: {
-    file: 'tests/dispatcher-fallback.test.ts',
-    assertion:
-      'preserves an admitted compatible fallback after a primary failure',
+    file: 'tests/node-canonical-run.test.ts',
+    assertion: 'keeps failed primary presentation when its fallback succeeds',
   },
   source_deduplication: {
     file: 'tests/normalizer.test.ts',
     assertion: 'merges citations that only differ by UTM keys or fragment',
   },
   budget_cutoff: {
-    file: 'tests/dispatcher-budget.test.ts',
-    assertion: 'does not launch a fallback once the budget is exhausted',
+    file: 'tests/coordinator.test.ts',
+    assertion:
+      'uses a zero ceiling to suppress paid slots while permitting zero reservations',
   },
   durable_cancellation: {
     file: 'tests/node-canonical-run.test.ts',

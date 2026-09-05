@@ -4,6 +4,7 @@ import {
 } from '../core/budget.js';
 import { buildProviderMetering } from '../core/metering.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import type { RunPaidWallet } from '../run-paid-wallet.js';
 import type {
   ClaimSupport,
   Config,
@@ -39,6 +40,7 @@ import {
   preferenceFromConfig,
   resolveLlmClients,
 } from './llm-client.js';
+import { paidLlmAttemptHooks } from './paid-llm-attempt.js';
 
 export {
   followupAttemptOrder,
@@ -64,6 +66,7 @@ export interface VerificationInput {
   results: ProviderDispatchResult[];
   reports: ProviderReport[];
   sources: DeduplicatedSource[];
+  wallet?: RunPaidWallet;
   warn?: (message: string) => void;
 }
 export interface VerificationResult {
@@ -143,40 +146,68 @@ function recordLlmAttempt(
 }
 interface LlmRunContext {
   config: Config;
+  wallet?: RunPaidWallet;
   warn: (message: string) => void;
 }
 async function runLlm<T>(
-  { config, warn }: LlmRunContext,
+  context: LlmRunContext,
   stage: VerificationLlmCall['stage'],
   prompt: string,
   budgets: VerificationBudgets,
   calls: VerificationLlmCall[],
   parse?: (text: string) => T,
 ): Promise<LlmResult<T>> {
+  const { config, warn } = context;
   const preference = preferenceFromConfig(config, 'answer', 'refine');
-  const clients = resolveLlmClients(preference, {
+  const resolvedClients = resolveLlmClients(preference, {
     env: process.env,
     config,
     credentials: createNodeCredentialContext(),
   });
+  const clients = context.wallet
+    ? resolvedClients.filter((client) =>
+        context.wallet?.isAuthorized('verification', client),
+      )
+    : resolvedClients;
   if (clients.length === 0)
     throw new Error('no verification LLM provider available');
   let successfulCall: VerificationLlmCall | undefined;
-  const { result } = await callWithCascade<T>({
+  const paid = context.wallet
+    ? paidLlmAttemptHooks({
+        wallet: context.wallet,
+        stage: 'verification',
+        prompt,
+        config,
+        input_ref: 'answer.md',
+        output_ref: 'verification.json',
+      })
+    : undefined;
+  const { result, usage } = await callWithCascade<T>({
     clients,
     prompt,
     action: `claim verification ${stage}`,
-    timeoutMs: verificationTimeoutMs(config),
+    timeoutMs: context.wallet
+      ? Math.min(
+          verificationTimeoutMs(config),
+          Math.max(1, context.wallet.remainingMs()),
+        )
+      : verificationTimeoutMs(config),
     json: Boolean(parse),
     parse,
-    beforeAttempt: (client) => beforeLlmAttempt(client, config, budgets),
+    ...(paid && { signal: paid.signal }),
+    beforeAttempt: (client) => {
+      paid?.beforeAttempt(client);
+      if (!context.wallet) beforeLlmAttempt(client, config, budgets);
+    },
     onAttempt: (attempt) => {
+      paid?.onAttempt(attempt);
       const call = recordLlmAttempt(stage, attempt, config, budgets, calls);
       if (attempt.status === 'success') successfulCall = call;
     },
     onWarning: warn,
   });
   if (!successfulCall) throw new Error(`claim verification ${stage} failed`);
+  paid?.completeSuccess(result, usage);
   return { value: result, call: successfulCall };
 }
 function runLlmJson<T>(
@@ -216,20 +247,25 @@ export async function verifyAnswer(
   const reasons: string[] = [];
   const llmContext: LlmRunContext = {
     config: input.config,
+    ...(input.wallet && { wallet: input.wallet }),
     warn:
       input.warn ??
       ((message) => console.error(`[librarium] verify: ${message}`)),
   };
   const budgets: VerificationBudgets = {
-    reported: createBudgetTracker(input.config.defaults.maxCostUsd),
+    reported: createBudgetTracker(
+      input.wallet ? undefined : input.config.defaults.maxCostUsd,
+    ),
     estimated: createEstimateBudgetTracker(
-      input.config.defaults.maxEstimatedCostUsd,
+      input.wallet ? undefined : input.config.defaults.maxEstimatedCostUsd,
     ),
   };
-  for (const report of input.reports) {
-    budgets.reported.record(report.usage);
-    if (report.status !== 'skipped')
-      budgets.estimated.reserve(report.metering?.estimate);
+  if (!input.wallet) {
+    for (const report of input.reports) {
+      budgets.reported.record(report.usage);
+      if (report.status !== 'skipped')
+        budgets.estimated.reserve(report.metering?.estimate);
+    }
   }
   const empty = (
     matrix: ClaimSupport[] = [],
@@ -309,6 +345,7 @@ export async function verifyAnswer(
       input.config,
       budgets.reported,
       budgets.estimated,
+      input.wallet,
     );
     followUps.push(outcome.followUp);
     if (outcome.evidence) {

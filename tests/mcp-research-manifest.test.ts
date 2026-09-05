@@ -22,6 +22,7 @@ describe('silent research live manifest', () => {
   });
 
   it('writes run.json before dispatch and terminalizes orchestration failures', async () => {
+    const sentinel = 'sentinel-mcp-credential';
     const baseDir = join(
       tmpdir(),
       `librarium-write-ahead-${crypto.randomUUID()}`,
@@ -47,7 +48,13 @@ describe('silent research live manifest', () => {
           schemaVersion: 3,
           coordination_state: { status: 'running' },
         });
-        throw new Error('dispatch exploded');
+        expect(
+          Date.parse(persisted.coordination_state.request_deadline_at) -
+            Date.parse(persisted.coordination_state.created_at),
+        ).toBe(45_000);
+        throw new Error(
+          `dispatch exploded at https://provider.example/run?api_key=${sentinel}`,
+        );
       }),
     };
     registerProvider(provider);
@@ -57,8 +64,9 @@ describe('silent research live manifest', () => {
         outputDir: baseDir,
         maxParallel: 1,
         timeout: 30,
-        asyncTimeout: 1800,
+        asyncTimeout: 30,
         asyncPollInterval: 10,
+        requestDeadlineMs: 45_000,
         mode: 'mixed',
         llmWebSearch: true,
       },
@@ -92,12 +100,33 @@ describe('silent research live manifest', () => {
       status: 'failed',
       errors: [{ code: 'librarium.adapter_execute_failed' }],
     });
-    expect(
-      JSON.parse(readFileSync(join(runDir as string, 'run.json'), 'utf8')),
-    ).toMatchObject({
+    expect(JSON.stringify(result)).not.toContain(sentinel);
+    const persisted = readFileSync(join(runDir as string, 'run.json'), 'utf8');
+    expect(persisted).not.toContain(sentinel);
+    expect(JSON.parse(persisted)).toMatchObject({
       schemaVersion: 3,
       coordination_state: { status: 'unsuccessful' },
       terminal_response: { status: 'failed' },
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(runDir as string, 'paid-attempt-ledger.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      artifact: 'librarium.paid-attempt-ledger',
+      artifact_version: '1.0.0',
+      request_id: result.manifest.request.request_id,
+      canonical_run_ref: 'run.json',
+      stages: [
+        { stage: 'refinement', status: 'not_requested' },
+        { stage: 'research', status: 'requested' },
+        { stage: 'synthesis', status: 'not_requested' },
+        { stage: 'verification', status: 'not_requested' },
+      ],
+      attempts: [{ stage: 'research', provider: 'exa', status: 'failed' }],
     });
     expect(existsSync(join(runDir as string, 'coordination.json'))).toBe(false);
   });

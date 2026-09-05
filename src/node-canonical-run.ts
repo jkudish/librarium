@@ -5,6 +5,7 @@ import { z } from 'zod/v4';
 import { VERSION } from './constants.js';
 import { OpaqueIdSchema, Rfc3339UtcSchema } from './contracts/common.js';
 import {
+  type DurableHandle,
   executionProfilesEqual,
   providerIdentitiesEqual,
   providerIdentityKey,
@@ -15,6 +16,7 @@ import type { ResearchResponse } from './contracts/interchange/research-response
 import { ResearchResponseSchema } from './contracts/interchange/research-response.js';
 import type { CoordinatorDependencies } from './core/coordinator.js';
 import {
+  type AttemptLaunch,
   type CoordinatorState,
   cancelCoordination,
   recordAttemptFinished,
@@ -33,6 +35,8 @@ import type {
   PreparedResearchExecution,
 } from './core/execution-plan.js';
 import type {
+  AttemptExecutionContext,
+  AttemptExecutionResult,
   ExecutionRuntimeResult,
   PersistExecutionSuccessInput,
 } from './core/execution-runtime.js';
@@ -40,6 +44,7 @@ import { runPreparedExecution } from './core/execution-runtime.js';
 import { safeWriteFile } from './core/fs-utils.js';
 import {
   createProviderAttemptBridge,
+  type ProviderAttemptBridge,
   type ProviderAttemptBridgeDependencies,
 } from './core/provider-attempt-bridge.js';
 import {
@@ -50,12 +55,22 @@ import {
   type ResearchResponseProjectionOptions,
 } from './core/research-response-projector.js';
 import {
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
+  writePaidRunLedger,
+} from './node-paid-attempt-ledger.js';
+import {
   DEFAULT_FS,
   resolveContainedPathWithFs,
   resolveRunDirectoryWithFs,
 } from './node-run-artifact-codecs.js';
 import { RUN_JSON_FILE, withRunJsonLock } from './node-run-json-lock.js';
-import type { Provider } from './types.js';
+import {
+  fingerprint,
+  PaidRunAdmissionError,
+  RunPaidWallet,
+} from './run-paid-wallet.js';
+import type { Provider, ProviderResult } from './types.js';
 
 const CANONICAL_RUN_KIND = 'canonical-research-run' as const;
 const CANONICAL_RUN_FORMAT = 'librarium.run-json.v3' as const;
@@ -1115,6 +1130,8 @@ export interface RunCanonicalPreparedExecutionDependencies {
     typeof runPreparedExecution
   >[1]['coordinator'];
   readonly attempt_bridge: ProviderAttemptBridgeDependencies;
+  /** CLI-owned wallet that admits and accounts for each new paid submission. */
+  readonly paid_wallet?: RunPaidWallet;
   /** Optional one-shot refinements, applied before the first launch only. */
   readonly refined_queries_by_slot?: Readonly<Record<string, string>>;
   /** CLI cancellation latch, checked before the first authoritative write. */
@@ -1123,6 +1140,129 @@ export interface RunCanonicalPreparedExecutionDependencies {
   readonly on_state_created?: () => void;
   readonly max_compare_and_swap_attempts?: number;
   readonly projection?: ResearchResponseProjectionOptions;
+}
+
+function paidResearchCompletion(
+  launch: AttemptLaunch,
+  result: AttemptExecutionResult,
+): Parameters<RunPaidWallet['finish']>[1] {
+  const output = result.kind === 'finished' ? result.output : undefined;
+  const providerResult = output as ProviderResult | undefined;
+  return {
+    status:
+      result.kind === 'accepted'
+        ? 'accepted'
+        : result.kind === 'acceptance_unknown'
+          ? 'acceptance_unknown'
+          : result.finished.outcome === 'succeeded'
+            ? 'succeeded'
+            : result.finished.outcome === 'cancelled'
+              ? 'cancelled'
+              : 'failed',
+    ...(providerResult?.usage && { usage: providerResult.usage }),
+    ...(output !== undefined && {
+      output_fingerprint: fingerprint(output),
+      output_ref: `run.json#/provider_outputs_by_attempt/${launch.attempt_id}`,
+    }),
+  };
+}
+
+function paidAttemptBridge(
+  prepared: PreparedResearchExecution,
+  bridge: ProviderAttemptBridge,
+  wallet?: RunPaidWallet,
+) {
+  return {
+    async execute(
+      launch: AttemptLaunch,
+      context: AttemptExecutionContext,
+    ): Promise<AttemptExecutionResult> {
+      if (!wallet) return bridge.execute(launch, context);
+      const plan =
+        prepared.profile_plans_by_identity[
+          providerIdentityKey(launch.profile.identity)
+        ];
+      let paidAttemptId: string;
+      try {
+        paidAttemptId = wallet.begin({
+          stage: 'research',
+          provider: launch.binding.adapter_id,
+          profile: providerIdentityKey(launch.profile.identity),
+          ...(plan?.estimate?.estimated_cost_microusd !== undefined && {
+            estimated_cost_microusd: plan.estimate.estimated_cost_microusd,
+            estimate_source: 'canonical_profile_plan',
+          }),
+          input_fingerprint: fingerprint({
+            query: launch.query,
+            profile: launch.profile,
+          }),
+          parent_attempt_id: launch.attempt_id,
+          input_ref: 'run.json#/coordination_state/attempts',
+        });
+      } catch (error) {
+        if (!(error instanceof PaidRunAdmissionError)) throw error;
+        return {
+          kind: 'finished',
+          finished: {
+            outcome: 'failed',
+            error: {
+              code: error.reasonCode,
+              message: 'The run-wide paid-attempt policy denied this call.',
+              category:
+                error.reasonCode === 'run_cancelled'
+                  ? 'cancelled'
+                  : error.reasonCode === 'run_deadline_exceeded'
+                    ? 'timeout'
+                    : 'budget',
+              retryable: false,
+              fallback_allowed: false,
+            },
+          },
+        };
+      }
+      try {
+        const result = await bridge.execute(launch, context);
+        wallet.finish(paidAttemptId, paidResearchCompletion(launch, result));
+        return result;
+      } catch (error) {
+        wallet.finish(paidAttemptId, { status: 'failed' });
+        throw error;
+      }
+    },
+    async resume(
+      launch: AttemptLaunch,
+      handle: DurableHandle,
+      context: AttemptExecutionContext,
+    ): Promise<AttemptExecutionResult> {
+      if (!bridge.resume) {
+        throw new Error('The exact provider bridge cannot resume this run.');
+      }
+      const result = await bridge.resume(launch, handle, context);
+      if (wallet && result.kind === 'finished') {
+        wallet.reconcileParentAttempt(
+          launch.attempt_id,
+          paidResearchCompletion(launch, result),
+        );
+      }
+      return result;
+    },
+  };
+}
+
+function bridgeWithPaidWalletSignal(
+  dependencies: ProviderAttemptBridgeDependencies,
+  wallet: RunPaidWallet | undefined,
+  allowAfterWalletDeadline = false,
+): ProviderAttemptBridge {
+  if (!wallet || allowAfterWalletDeadline) {
+    return createProviderAttemptBridge(dependencies);
+  }
+  return createProviderAttemptBridge({
+    ...dependencies,
+    signal: dependencies.signal
+      ? AbortSignal.any([dependencies.signal, wallet.signal])
+      : wallet.signal,
+  });
 }
 
 /** Production coordinator dependencies with bounded, collision-resistant ids. */
@@ -1255,21 +1395,14 @@ export async function runCanonicalPreparedExecution(
       return created;
     },
   };
-  const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
+  const bridge = bridgeWithPaidWalletSignal(
+    dependencies.attempt_bridge,
+    dependencies.paid_wallet,
+  );
   const runtime = await runPreparedExecution(prepared, {
     store: executionStore,
     coordinator: dependencies.coordinator,
-    attempts: {
-      async execute(launch, context) {
-        return bridge.execute(launch, context);
-      },
-      resume(launch, handle, context) {
-        if (!bridge.resume) {
-          throw new Error('The exact provider bridge cannot resume this run.');
-        }
-        return bridge.resume(launch, handle, context);
-      },
-    },
+    attempts: paidAttemptBridge(prepared, bridge, dependencies.paid_wallet),
     persist_success: (input) => store.persistSuccess(input),
     max_compare_and_swap_attempts: dependencies.max_compare_and_swap_attempts,
   });
@@ -1394,21 +1527,69 @@ export async function resumeCanonicalPreparedExecution(
   }
   const custodyMode =
     manifest.coordination_state.status !== 'running' && hasRemoteCustody;
-  const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
-  const runtime = await runPreparedExecution(preparedFromManifest(manifest), {
+  const prepared = preparedFromManifest(manifest);
+  const persistedLedger = readPaidRunLedger(
+    dependencies.runs_root,
+    dependencies.run_directory,
+  );
+  if (
+    persistedLedger &&
+    (persistedLedger.request_id !== manifest.request.request_id ||
+      persistedLedger.request_fingerprint !== fingerprint(manifest.request) ||
+      persistedLedger.created_at !== manifest.request.requested_at ||
+      persistedLedger.deadline_at !==
+        new Date(
+          Date.parse(manifest.request.requested_at) +
+            prepared.policy.limits.request_deadline_ms,
+        ).toISOString())
+  ) {
+    throw new Error(
+      'The paid-attempt ledger does not match the canonical run.',
+    );
+  }
+  const wallet =
+    dependencies.paid_wallet ??
+    (persistedLedger
+      ? new RunPaidWallet({
+          request_id: persistedLedger.request_id,
+          request_fingerprint: persistedLedger.request_fingerprint,
+          config_fingerprint: persistedLedger.config_fingerprint,
+          created_at: persistedLedger.created_at,
+          deadline_at: persistedLedger.deadline_at,
+          limits: persistedLedger.limits,
+          stages: persistedLedger.stages,
+          restored_ledger: persistedLedger,
+          now: dependencies.coordinator.clock.now,
+          with_mutation_lock: (action) =>
+            withPaidRunLedgerLock(
+              dependencies.runs_root,
+              dependencies.run_directory,
+              action,
+            ),
+          load_latest: () =>
+            readPaidRunLedger(
+              dependencies.runs_root,
+              dependencies.run_directory,
+            ),
+          on_change: (ledger) =>
+            writePaidRunLedger(
+              dependencies.runs_root,
+              dependencies.run_directory,
+              ledger,
+            ),
+        })
+      : undefined);
+  // Terminal custody reconciliation is a bounded GET-only safety observation,
+  // not a new paid launch, so it retains its historical post-deadline window.
+  const bridge = bridgeWithPaidWalletSignal(
+    dependencies.attempt_bridge,
+    wallet,
+    custodyMode,
+  );
+  const runtime = await runPreparedExecution(prepared, {
     store,
     coordinator: dependencies.coordinator,
-    attempts: {
-      execute(launch, context) {
-        return bridge.execute(launch, context);
-      },
-      resume(launch, handle, context) {
-        if (!bridge.resume) {
-          throw new Error('The exact provider bridge cannot resume this run.');
-        }
-        return bridge.resume(launch, handle, context);
-      },
-    },
+    attempts: paidAttemptBridge(prepared, bridge, wallet),
     resume_existing: true,
     reconcile_terminal_custody: custodyMode,
     persist_custody_observation: (requestId, attemptId, handle) =>

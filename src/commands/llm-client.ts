@@ -6,6 +6,7 @@ import { PROVIDER_ENV_VARS } from '../constants.js';
 import {
   type CredentialContext,
   type EnvRecord,
+  redactCredentialText,
   resolveCredential,
 } from '../core/credentials.js';
 import type { Config, ProviderUsage } from '../types.js';
@@ -138,6 +139,7 @@ export function formatLlmHttpError(
   action: string,
   status: number,
   body: string,
+  knownCredentials: readonly (string | undefined)[] = [],
 ): string {
   let detail = '';
   try {
@@ -163,6 +165,7 @@ export function formatLlmHttpError(
   }
   detail = detail.replace(/\s+/g, ' ').trim();
   detail = redactPerplexityError(detail);
+  detail = redactCredentialText(detail, knownCredentials);
   if (detail.length > 120) detail = `${detail.slice(0, 119)}…`;
   return `${label} ${action} call failed: HTTP ${status}${detail ? ` ${detail}` : ''}`;
 }
@@ -185,6 +188,8 @@ interface CallContext {
    * `answer` wants free-form markdown so leaves this false.
    */
   json: boolean;
+  /** Shared run cancellation in addition to the per-call timeout. */
+  signal?: AbortSignal;
 }
 
 interface LlmHttpResponse {
@@ -248,7 +253,7 @@ async function callOpenAi(
       messages: [{ role: 'user', content: prompt }],
       ...(ctx.json ? { response_format: { type: 'json_object' } } : {}),
     }),
-    signal: AbortSignal.timeout(ctx.timeoutMs),
+    signal: combinedSignal(ctx),
   });
   if (!response.ok) {
     throw new Error(
@@ -257,6 +262,7 @@ async function callOpenAi(
         ctx.action,
         response.status,
         await safeBody(response),
+        [client.apiKey],
       ),
     );
   }
@@ -279,17 +285,20 @@ async function callGemini(
   prompt: string,
   ctx: CallContext,
 ): Promise<LlmHttpResponse> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${client.model}:generateContent?key=${client.apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${client.model}:generateContent`;
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': client.apiKey,
+    },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       ...(ctx.json
         ? { generationConfig: { responseMimeType: 'application/json' } }
         : {}),
     }),
-    signal: AbortSignal.timeout(ctx.timeoutMs),
+    signal: combinedSignal(ctx),
   });
   if (!response.ok) {
     throw new Error(
@@ -298,6 +307,7 @@ async function callGemini(
         ctx.action,
         response.status,
         await safeBody(response),
+        [client.apiKey],
       ),
     );
   }
@@ -328,7 +338,7 @@ async function callPerplexity(
       Authorization: `Bearer ${client.apiKey}`,
     },
     body: JSON.stringify({ input: prompt, ...target }),
-    signal: AbortSignal.timeout(ctx.timeoutMs),
+    signal: combinedSignal(ctx),
   });
   if (!response.ok) {
     throw new Error(
@@ -401,12 +411,19 @@ function callClient(
       : callPerplexity(client, prompt, ctx);
 }
 
+function combinedSignal(ctx: CallContext): AbortSignal {
+  const timeout = AbortSignal.timeout(Math.max(1, ctx.timeoutMs));
+  return ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout;
+}
+
 export interface CallWithCascadeOptions<T> {
   clients: LlmClient[];
   prompt: string;
   action: string;
   timeoutMs: number;
   json: boolean;
+  /** Shared run cancellation signal. */
+  signal?: AbortSignal;
   onWarning?: (message: string) => void;
   /** Runs immediately before each network attempt; a throw aborts the cascade. */
   beforeAttempt?: (client: LlmClient, index: number) => void | Promise<void>;
@@ -447,7 +464,12 @@ export async function callWithCascade<T = string>(
     onAttempt,
     parse,
   } = options;
-  const ctx: CallContext = { action, timeoutMs, json };
+  const ctx: CallContext = {
+    action,
+    timeoutMs,
+    json,
+    ...(options.signal && { signal: options.signal }),
+  };
   const mapText = parse ?? ((text: string) => text as unknown as T);
   let lastError: unknown;
   for (let index = 0; index < clients.length; index++) {
@@ -466,17 +488,19 @@ export async function callWithCascade<T = string>(
       });
       return { client, result, usage: response.usage };
     } catch (e) {
-      lastError = e;
+      const rawMessage = e instanceof Error ? e.message : String(e);
+      const message = redactCredentialText(rawMessage, [client.apiKey]);
+      lastError =
+        e instanceof Error && message === rawMessage ? e : new Error(message);
       onAttempt?.({
         client,
         status: 'error',
         durationMs: Date.now() - started,
         ...(response?.usage ? { usage: response.usage } : {}),
-        error: e instanceof Error ? e.message : String(e),
+        error: message,
       });
       const next = clients[index + 1];
       if (next) {
-        const message = e instanceof Error ? e.message : String(e);
         onWarning?.(`${message}; trying ${next.provider}`);
       }
     }

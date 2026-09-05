@@ -118,6 +118,7 @@ const NODE_EXPORTS = [
   'createCanonicalPreparedValidationExecutor',
   'createFilesystemCandidateAuthority',
   'createNodeCredentialContext',
+  'customProviderLoadConfigFromV2',
   'deterministicReceiptSensibility',
   'executeCanonicalValidationLane',
   'executeFrozenValidationProtocol',
@@ -497,6 +498,7 @@ function verifyDeclarations(installedPackageRoot) {
         type NpmCustomProviderSource,
         type ScriptCustomProviderSource,
         createNodeCredentialContext,
+        customProviderLoadConfigFromV2,
         type LibrariumConfigV2,
         loadConfigV2,
         loadCustomProviders,
@@ -530,11 +532,17 @@ function verifyDeclarations(installedPackageRoot) {
         options,
       );
       declare const v2Config: LibrariumConfigV2;
+      const convertedConfig: CustomProviderLoadConfig =
+        customProviderLoadConfigFromV2(v2Config);
+      const loadedV2: Promise<CustomProviderLoadResult> =
+        loadCustomProviders(v2Config);
       const migrated = loadConfigV2({ global_path: './config.json' });
       saveConfigV2(v2Config, { path: './saved-config.json' });
       const projectPath: string = projectConfigV2Path('.');
       void credentials;
       void loaded;
+      void loadedV2;
+      void convertedConfig;
       void migrated;
       void projectPath;
     `,

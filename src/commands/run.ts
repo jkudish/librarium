@@ -8,16 +8,8 @@ import {
   getExactProvider,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import {
-  parseMode,
-  parseParallel,
-  parseProviders,
-  parseResearchQuery,
-  parseTimeoutSeconds,
-  parseUsdBudget,
-} from '../cli-parsers.js';
+import { parseUsdBudget } from '../cli-parsers.js';
 import { providerIdentityKey } from '../contracts/domain/index.js';
-import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 import { generateSlug } from '../core/prompt-builder.js';
 import { retiredProviderSelectionIssues } from '../core/provider-selection.js';
@@ -29,15 +21,19 @@ import {
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
 import {
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
+  writePaidRunLedger,
+} from '../node-paid-attempt-ledger.js';
+import {
   assertAdmittedAdaptersRegistered,
   emitRequestPreflightNotices,
-  preflightProductionRequest,
 } from '../node-request-preflight.js';
 import { createRunDir } from '../node-run-directory.js';
+import { fingerprint, RunPaidWallet } from '../run-paid-wallet.js';
 import type {
   Config,
   DeduplicatedSource,
-  Defaults,
   ProviderDispatchResult,
   ProviderReport,
   RunManifest,
@@ -63,6 +59,7 @@ import {
   type LineWidths,
   shortenHomePath,
 } from './run-format.js';
+import { addRunRequestArguments, prepareRunRequest } from './run-request.js';
 
 export interface RunOptions {
   providers?: string[];
@@ -109,6 +106,8 @@ export interface PostDispatchContext {
   outputDir: string;
   color: boolean;
   printLine: (line: string) => void;
+  /** Private run-wide paid-call authority shared with helper stages. */
+  wallet?: RunPaidWallet;
 }
 
 export interface PostDispatchResult {
@@ -122,6 +121,11 @@ export interface PostDispatchResult {
 }
 
 export interface ExecuteRunHooks {
+  /** Helper stages requested by this command, frozen before refinement starts. */
+  paidStages?: {
+    synthesis?: boolean;
+    verification?: boolean;
+  };
   /**
    * Runs after sources are deduped and provider outputs are written, before
    * the run summary and run.json are produced. Must never throw (it is the
@@ -156,48 +160,14 @@ export function parseMaxCost(value: string): number {
 }
 
 export function registerRunCommand(program: Command): void {
-  program
-    .command('run')
-    .description('Run a research query across multiple providers')
-    .argument('<query>', 'The research query', parseResearchQuery)
-    .option(
-      '-p, --providers <ids>',
-      'Comma-separated provider IDs',
-      parseProviders,
-    )
-    .option('-g, --group <name>', 'Use a predefined provider group')
-    .option(
-      '-m, --mode <mode>',
-      'Execution mode: sync, async, or mixed',
-      parseMode,
-    )
+  addRunRequestArguments(
+    program
+      .command('run')
+      .description('Run a research query across multiple providers'),
+  )
     .option('-o, --output <dir>', 'Output base directory')
-    .option('--parallel <n>', 'Max parallel requests', parseParallel)
-    .option(
-      '--timeout <n>',
-      'Timeout per provider in seconds',
-      parseTimeoutSeconds,
-    )
-    .option(
-      '--max-cost <usd>',
-      'Stop launching providers once API-reported cost crosses this budget (USD)',
-      parseMaxCost,
-    )
-    .option(
-      '--max-estimated-cost <usd>',
-      'Reserve each provider’s pre-dispatch estimated cost; skip launches once the estimate crosses this ceiling (USD)',
-      parseMaxCost,
-    )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
-    .option(
-      '--no-fallback',
-      'Disable configured provider fallbacks for an exact provider matrix',
-    )
     .option('--json', 'Output run.json to stdout')
-    .option(
-      '--refine',
-      'Rewrite the query into tier-tuned variants with one LLM call before dispatch',
-    )
     .option(
       '--html',
       'Generate a self-contained report.html in the run directory',
@@ -232,6 +202,7 @@ export async function executeRun(
     spinner.stop();
     prettyStream.write(`${line}\n`);
   };
+  let onInterrupt: (() => void) | undefined;
   const retired = retiredProviderSelectionIssues(opts.providers);
   if (retired.length > 0) {
     spinner.fail(retired.map((issue) => issue.message).join(' '));
@@ -239,38 +210,12 @@ export async function executeRun(
     return { exitCode: 2 };
   }
   try {
-    const cliFlags: Partial<Defaults> = {};
-    if (opts.output) cliFlags.outputDir = opts.output;
-    if (opts.parallel) cliFlags.maxParallel = opts.parallel;
-    if (opts.timeout) cliFlags.timeout = opts.timeout;
-    if (opts.mode) cliFlags.mode = opts.mode;
-    if (opts.maxCost !== undefined) cliFlags.maxCostUsd = opts.maxCost;
-    if (opts.maxEstimatedCost !== undefined) {
-      cliFlags.maxEstimatedCostUsd = opts.maxEstimatedCost;
-    }
-    const config = mergeConfigs(
-      loadConfig(),
-      loadProjectConfig(process.cwd()),
-      cliFlags,
-    );
-    const preflight = preflightProductionRequest({
-      config,
-      transport: {
-        kind: 'cli',
-        input: {
-          query,
-          providers: opts.providers,
-          group: opts.group,
-          mode: opts.mode,
-          parallel: opts.parallel,
-          timeoutSeconds: opts.timeout,
-          maxCostUsd: opts.maxCost,
-          maxEstimatedCostUsd: opts.maxEstimatedCost,
-          fallback: opts.fallback,
-          refine: opts.refine,
-        },
-      },
+    const preparation = prepareRunRequest(query, opts, {
+      refinement: Boolean(opts.refine),
+      synthesis: Boolean(hooks?.paidStages?.synthesis),
+      verification: Boolean(hooks?.paidStages?.verification),
     });
+    const { config, preflight, stageDeclarations } = preparation;
     emitRequestPreflightNotices(preflight.notices, (message) =>
       process.stderr.write(`${message}\n`),
     );
@@ -341,30 +286,33 @@ export async function executeRun(
       }
     }
 
-    let refined: RefinedQueries | null = null;
-    if (opts.refine) {
-      spinner.start('Refining query...');
-      try {
-        refined = await refineQuery(
-          query,
-          config,
-          process.env,
-          (message) =>
-            process.stderr.write(
-              `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
-            ),
-          preflight.credentials,
-        );
-      } catch (error) {
-        process.stderr.write(
-          `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
-        );
-      }
-    }
-
     const slug = generateSlug(query);
     const baseDir = resolve(config.defaults.outputDir);
-    let outputDir: string | undefined;
+    const outputDir = createRunDir(baseDir, slug);
+    const createdAt = preflight.prepared.request.requested_at;
+    const wallet = new RunPaidWallet({
+      request_id: preflight.prepared.request.request_id,
+      request_fingerprint: fingerprint(preflight.prepared.request),
+      config_fingerprint: fingerprint({
+        defaults: config.defaults,
+        refine: config.refine,
+        answer: config.answer,
+        providers: config.providers,
+      }),
+      created_at: createdAt,
+      deadline_at: new Date(
+        Date.parse(createdAt) +
+          preflight.prepared.policy.limits.request_deadline_ms,
+      ).toISOString(),
+      ...(preflight.prepared.policy.budgets && {
+        limits: preflight.prepared.policy.budgets,
+      }),
+      stages: stageDeclarations,
+      on_change: (ledger) => writePaidRunLedger(baseDir, outputDir, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(baseDir, outputDir, action),
+      load_latest: () => readPaidRunLedger(baseDir, outputDir),
+    });
     let stateCreated = false;
     let interrupted = false;
     let cancellation: Promise<void> | undefined;
@@ -384,19 +332,40 @@ export async function executeRun(
         .then(() => undefined)
         .catch(() => undefined);
     };
-    const onInterrupt = (): void => {
+    onInterrupt = (): void => {
       if (interrupted) return;
       interrupted = true;
+      wallet.cancel();
       scheduleCancellation();
     };
     process.once('SIGINT', onInterrupt);
-    if (interrupted) {
+    let refined: RefinedQueries | null = null;
+    if (opts.refine) {
+      spinner.start('Refining query...');
+      try {
+        refined = await refineQuery(
+          query,
+          config,
+          process.env,
+          (message) =>
+            process.stderr.write(
+              `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
+            ),
+          preflight.credentials,
+          wallet,
+        );
+      } catch (error) {
+        process.stderr.write(
+          `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
+        );
+      }
+    }
+    if (interrupted || wallet.remainingMs() === 0) {
       process.off('SIGINT', onInterrupt);
       spinner.stop();
-      process.exitCode = 130;
-      return { exitCode: 130 };
+      process.exitCode = interrupted ? 130 : 2;
+      return { exitCode: process.exitCode, outputDir };
     }
-    outputDir = createRunDir(baseDir, slug);
     const refinedQueriesBySlot = Object.fromEntries(
       preflight.prepared.request.slots.flatMap((slot) => {
         const plan =
@@ -425,10 +394,14 @@ export async function executeRun(
         runs_root: baseDir,
         run_directory: outputDir,
         coordinator,
-        attempt_bridge: createRegisteredProviderAttemptBridge(
-          preflight.prepared,
-          resolveExactProvider,
-        ),
+        attempt_bridge: {
+          ...createRegisteredProviderAttemptBridge(
+            preflight.prepared,
+            resolveExactProvider,
+          ),
+          signal: wallet.signal,
+        },
+        paid_wallet: wallet,
         refined_queries_by_slot: refinedQueriesBySlot,
         is_cancelled: () => interrupted,
         on_state_created: () => {
@@ -455,6 +428,7 @@ export async function executeRun(
         } catch {
           // Preserve any unexpected artifact for diagnosis.
         }
+        process.off('SIGINT', onInterrupt);
         process.exitCode = 130;
         return { exitCode: 130 };
       }
@@ -466,8 +440,6 @@ export async function executeRun(
           outputs_by_attempt: {},
         },
       };
-    } finally {
-      process.off('SIGINT', onInterrupt);
     }
     await cancellation;
     if (interrupted && stateCreated) {
@@ -512,6 +484,7 @@ export async function executeRun(
           outputDir,
           color,
           printLine,
+          wallet,
         });
       } catch (error) {
         process.stderr.write(
@@ -519,6 +492,7 @@ export async function executeRun(
         );
       }
     }
+    await cancellation;
     const successful = presentation.reports.filter(
       (report) => report.status === 'success',
     );
@@ -625,9 +599,11 @@ export async function executeRun(
             : 2
         : 0;
     if (opts.open && exitCode !== 2) openPath(reportPath ?? outputDir);
+    process.off('SIGINT', onInterrupt);
     process.exitCode = exitCode;
     return { exitCode, outputDir };
   } catch (error) {
+    if (onInterrupt) process.off('SIGINT', onInterrupt);
     spinner.fail(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
     return { exitCode: 2 };

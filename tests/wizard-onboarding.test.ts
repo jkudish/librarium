@@ -1,3 +1,4 @@
+import * as prompts from '@clack/prompts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from '../src/types.js';
 
@@ -96,6 +97,12 @@ describe('wizard missing-credential onboarding', () => {
   it('does structural admission before consent and opens onboarding for missing credentials', async () => {
     await runWizard();
 
+    expect(vi.mocked(prompts.select).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ initialValue: 'group:quick' }),
+    );
+    expect(vi.mocked(prompts.select).mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({ initialValue: 'sync' }),
+    );
     expect(state.createCredentials).toHaveBeenCalledOnce();
     expect(state.executeRun).not.toHaveBeenCalled();
     expect(state.onboarding).toHaveBeenCalledOnce();

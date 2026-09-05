@@ -68,10 +68,12 @@ export interface ConfigurationMappingOptions {
   /**
    * See ProviderCatalogOptions.assumeCredentialAvailability. This is only for
    * side-effect-free transport admission; runtime credential checks remain
-   * mandatory before the legacy dispatcher can run.
+   * mandatory before canonical execution can run.
    */
   readonly assumeCredentialAvailability?: boolean;
   readonly catalog?: readonly ProviderCatalogEntry[];
+  /** Retain disabled trusted declarations for static discovery only. */
+  readonly includeDisabledCustomProfiles?: boolean;
 }
 
 export interface AuthoredGroupProvenance {
@@ -1181,11 +1183,13 @@ export function mapConfiguration(
     customCandidates,
   );
   const reserveOnly = new Set(preliminaryFallback.reserveOnlyAdapterIds);
-  const eligibleCustomCandidates = customCandidates.filter(
-    (candidate) =>
-      providerConfigs[candidate.adapter_id]?.enabled === true ||
-      reserveOnly.has(candidate.adapter_id),
-  );
+  const eligibleCustomCandidates = options.includeDisabledCustomProfiles
+    ? customCandidates
+    : customCandidates.filter(
+        (candidate) =>
+          providerConfigs[candidate.adapter_id]?.enabled === true ||
+          reserveOnly.has(candidate.adapter_id),
+      );
   const custom = validateCustomCatalogProfiles(
     eligibleCustomCandidates,
     options.catalog ?? BUILTIN_PROVIDER_CATALOG,
@@ -1206,7 +1210,7 @@ export function mapConfiguration(
   ];
   const deadlineMigration = deadlineMigrationContext(
     config,
-    options.requestDeadlineMs,
+    options.requestDeadlineMs ?? config.defaults.requestDeadlineMs,
     issues,
   );
   const budgetResult = exactUsdBudgets(
@@ -1247,6 +1251,9 @@ export function mapConfiguration(
     reserve: fallback.reserve,
     reserveOnlyAdapterIds: fallback.reserveOnlyAdapterIds,
     customProfiles,
+    ...(options.includeDisabledCustomProfiles && {
+      includeDisabledCustomProfiles: true,
+    }),
   });
   const notices = [
     ...canonicalGroups.notices,
@@ -1273,6 +1280,7 @@ export function mapConfiguration(
         timeout: config.defaults.timeout,
         asyncTimeout: config.defaults.asyncTimeout,
         asyncPollInterval: config.defaults.asyncPollInterval,
+        requestDeadlineMs: config.defaults.requestDeadlineMs,
         maxCostUsd: config.defaults.maxCostUsd,
         maxEstimatedCostUsd: config.defaults.maxEstimatedCostUsd,
       },
