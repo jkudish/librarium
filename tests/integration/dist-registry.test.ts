@@ -101,4 +101,68 @@ describe('built package boundaries', () => {
     ).resolves.toMatchObject({ content: 'dist:hello' });
     expect(node).not.toHaveProperty('registerCustomProviders');
   });
+
+  it('composes built loadConfigV2 output with custom-provider loading', async () => {
+    const node = await import(DIST_NODE);
+    const providerId = 'dist-native-provider';
+    const configPath = join(tmpDir, 'config.v2.json');
+    writeNpmProvider(providerId);
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        version: 2,
+        execution_defaults: {
+          mode: 'sync',
+          max_concurrency: 1,
+          inline_attempt_deadline_ms: 30_000,
+          background_attempt_deadline_ms: 1_800_000,
+          poll_interval_ms: 10_000,
+        },
+        providers: { [providerId]: { enabled: true } },
+        custom_providers: {
+          [providerId]: {
+            type: 'npm',
+            module: providerId,
+            execution_profile: {
+              binding_id: `${providerId}.search.v1`,
+              profile: {
+                identity: {
+                  provider_id: `${providerId}-public`,
+                  profile_id: 'search',
+                  target: {
+                    primary: { model_selection: 'not_applicable' },
+                  },
+                },
+                result_kind: 'search_results',
+                observation_mode: 'api_output',
+                corpora: ['web'],
+                retrieval_method: 'search_endpoint',
+                access_mode: 'direct',
+                operator_id: `${providerId}-public`,
+                invocation: 'inline',
+                resumability: 'none',
+              },
+            },
+          },
+        },
+        trusted_provider_ids: [providerId],
+        groups: {},
+        runtime: { output_dir: './runs', llm_web_search: true },
+      }),
+    );
+
+    const loadedConfig = node.loadConfigV2({ global_path: configPath });
+    expect(loadedConfig.ok).toBe(true);
+    if (!loadedConfig.ok) return;
+    const result = await node.loadCustomProviders(loadedConfig.config);
+
+    expect(result).toMatchObject({
+      loadedIds: [providerId],
+      skippedIds: [],
+      warnings: [],
+    });
+    await expect(
+      result.providers[0]?.execute('hello', { timeout: 5 }),
+    ).resolves.toMatchObject({ content: 'dist:hello' });
+  });
 });

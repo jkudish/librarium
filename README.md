@@ -37,13 +37,19 @@ Version 2 separates the product into three import boundaries:
 
 | Import | Use it for | It never does on import |
 | --- | --- | --- |
-| `librarium` | Worker-safe schemas, config migration, and the public catalog | Read the host, load adapters, access credentials, start the CLI, or write files |
-| `librarium/core` | Injected catalog, planning, transport, coordination, and execution ports | Construct concrete provider adapters or a global registry |
-| `librarium/node` | Explicit Node config-file services, trusted custom-provider loading, and canonical validation helpers | Promise a general high-level library runner or a portable persistence layer |
+| `librarium` | Worker-safe schemas, the public catalog, and pure config/contract utilities | Read the host, load adapters, access credentials, start the CLI, or write files |
+| `librarium/core` | Advanced injected planning, transport, coordination, and execution ports | Supply caller-owned runtime dependencies, construct concrete provider adapters, or create a global registry |
+| `librarium/node` | Explicit Node config, credential, trusted custom-provider, and canonical validation services | Provide a turnkey built-in-provider runner or a portable persistence layer |
 
-The `librarium` executable remains the complete Node application for research
-runs. Node package installs require Node.js **22.12 or newer**. Standalone and
-Homebrew binaries include their own runtime.
+These library boundaries are deliberately compositional. A caller using
+`librarium/core` owns the concrete adapters, credential context, clocks,
+coordination store, artifact services, and other runtime dependencies required
+by the ports it invokes. `librarium/node` adds host-specific building blocks;
+it does not assemble the built-in catalog into a high-level runner.
+
+The `librarium` CLI and its MCP stdio server are the complete application
+interfaces for research runs. Node package installs require Node.js **22.12 or newer**.
+Standalone and Homebrew binaries include their own runtime.
 
 ## Quick start
 

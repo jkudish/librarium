@@ -151,6 +151,14 @@ export async function loadCustomProviders(
       continue;
     }
 
+    if (options.providerConfigs[providerId]?.enabled === false) {
+      warnings.push(
+        `Custom provider "${providerId}" is disabled and was skipped`,
+      );
+      skippedIds.push(providerId);
+      continue;
+    }
+
     if (!trusted.has(providerId)) {
       warnings.push(
         `Custom provider "${providerId}" is not trusted (add it to trustedProviderIds to enable loading)`,

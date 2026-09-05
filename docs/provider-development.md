@@ -88,6 +88,49 @@ scripts can execute arbitrary code with the calling process permissions and
 environment. Never treat it as a sandbox or grant trust during automatic
 migration.
 
+### Load a native v2 custom provider
+
+`loadConfigV2()` returns validated, merged native v2 config. Its successful
+`config` value can be passed directly to `loadCustomProviders()`; snake_case
+provider settings, source options, execution profile declarations, and
+credential references are mapped to the existing camelCase custom-provider
+loading contract.
+
+```ts
+import { loadConfigV2, loadCustomProviders } from 'librarium/node';
+
+const loadedConfig = loadConfigV2({
+  global_path: '/absolute/path/to/config.v2.json',
+  // project_path: '/absolute/path/to/.librarium.json',
+});
+
+if (!loadedConfig.ok) {
+  for (const issue of loadedConfig.issues) {
+    console.error(issue.code, issue.path, issue.message);
+  }
+  throw new Error('Invalid Librarium configuration');
+}
+
+for (const notice of loadedConfig.notices) {
+  console.warn(notice.code, notice.path, notice.message);
+}
+
+// Review every trusted_provider_ids entry first. This call imports trusted npm
+// modules and starts trusted scripts; it is execution, not safe inspection.
+const custom = await loadCustomProviders(loadedConfig.config);
+for (const warning of custom.warnings) console.warn(warning);
+
+// The caller owns these instances and decides how to bind them into its runtime.
+const providers = custom.providers;
+```
+
+The loader validates native input again before any import or spawn, skips
+providers configured with `enabled: false`, enforces the explicit trust
+allowlist, and rejects reserved built-in IDs. It does not auto-trust a source.
+Existing callers may continue to pass the camelCase
+`CustomProviderLoadConfig` shape. Use `customProviderLoadConfigFromV2()` when a
+caller needs that converted shape separately rather than loading immediately.
+
 An npm source exports a provider object or a factory that receives its provider
 ID, config, and source options. The returned ID must match the configured ID.
 Inline providers implement `execute`. Background providers also implement
