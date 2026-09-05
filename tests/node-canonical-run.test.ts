@@ -36,6 +36,11 @@ import {
   resumeCanonicalPreparedExecution,
   runCanonicalPreparedExecution,
 } from '../src/node-canonical-run.js';
+import {
+  fingerprint,
+  type PaidStageDeclaration,
+  RunPaidWallet,
+} from '../src/run-paid-wallet.js';
 import type { Provider, ProviderResult } from '../src/types.js';
 
 const START = Date.parse('2026-08-11T12:00:00.000Z');
@@ -313,6 +318,107 @@ describe('canonical v3 run.json', () => {
       terminal_response: { status: 'succeeded' },
     });
     expect(() => readRunManifest(runDirectory)).toThrow(RunManifestError);
+  });
+
+  it('does not invoke the research adapter when the run-wide wallet preserves synthesis reserve', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('budgeted');
+    const plan = prepared([selected]);
+    const profileKey = profileIdentityKey(selected.identity);
+    const frozenPlan = plan.profile_plans_by_identity[profileKey];
+    if (!frozenPlan) throw new Error('missing fixture plan');
+    plan.profile_plans_by_identity[profileKey] = {
+      ...frozenPlan,
+      estimate: { estimated_cost_microusd: '100' },
+    };
+    plan.policy = {
+      ...plan.policy,
+      budgets: {
+        max_estimated_cost_microusd: '100',
+        max_actual_cost_microusd: '100',
+      },
+    };
+    const execute = vi.fn(async () => success('adapter-budgeted'));
+    const stages: PaidStageDeclaration[] = [
+      {
+        stage: 'refinement',
+        requested: false,
+        fallback_authorized: false,
+        prompt_version: 'refine-v1',
+        providers: [],
+      },
+      {
+        stage: 'research',
+        requested: true,
+        fallback_authorized: false,
+        prompt_version: 'research-v1',
+        providers: [
+          {
+            provider: 'adapter-budgeted',
+            profile: profileKey,
+            estimated_cost_microusd: '100',
+          },
+        ],
+      },
+      {
+        stage: 'synthesis',
+        requested: true,
+        fallback_authorized: false,
+        prompt_version: 'synthesis-v1',
+        providers: [
+          {
+            provider: 'openai',
+            model: 'model-a',
+            estimated_cost_microusd: '100',
+          },
+        ],
+        reserve_first_attempt: true,
+      },
+      {
+        stage: 'verification',
+        requested: false,
+        fallback_authorized: false,
+        prompt_version: 'verification-v1',
+        providers: [],
+      },
+    ];
+    const wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date(START).toISOString(),
+      deadline_at: new Date(START + 60_000).toISOString(),
+      limits: plan.policy.budgets,
+      stages,
+      now: () => START,
+    });
+
+    const result = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([selected], {
+        'adapter-budgeted': {
+          id: 'adapter-budgeted',
+          displayName: 'Budgeted',
+          tier: 'ai-grounded',
+          envVar: '',
+          execution: 'inline',
+          execute,
+        },
+      }),
+      paid_wallet: wallet,
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.response?.status).toBe('failed');
+    expect(wallet.snapshot().attempts).toEqual([
+      expect.objectContaining({
+        stage: 'research',
+        status: 'blocked',
+        reason_code: 'estimated_budget_exhausted',
+      }),
+    ]);
   });
 
   it('writes derived artifacts without changing the v3 authority', async () => {

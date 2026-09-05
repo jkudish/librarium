@@ -3,6 +3,7 @@ import { parseResearchQuery } from '../cli-parsers.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext, EnvRecord } from '../core/credentials.js';
 import { createNodeCredentialContext } from '../node-credentials.js';
+import type { RunPaidWallet } from '../run-paid-wallet.js';
 import type { Config, ProviderTier } from '../types.js';
 import {
   callWithCascade,
@@ -10,6 +11,7 @@ import {
   type LlmClient,
   resolveLlmClients,
 } from './llm-client.js';
+import { paidLlmAttemptHooks } from './paid-llm-attempt.js';
 
 /**
  * One-shot LLM query transform for `run --refine` and `librarium refine`.
@@ -154,8 +156,14 @@ export async function refineQuery(
   env: EnvRecord = process.env,
   onWarning?: (message: string) => void,
   credentials?: CredentialContext,
+  wallet?: RunPaidWallet,
 ): Promise<RefinedQueries> {
-  const clients = resolveRefineClients(config, env, credentials);
+  const resolvedClients = resolveRefineClients(config, env, credentials);
+  const clients = wallet
+    ? resolvedClients.filter((client) =>
+        wallet.isAuthorized('refinement', client),
+      )
+    : resolvedClients;
   if (clients.length === 0) {
     throw new Error(
       config.refine?.provider
@@ -163,15 +171,34 @@ export async function refineQuery(
         : 'no refine provider available (set OPENAI_API_KEY, GEMINI_API_KEY, or PERPLEXITY_API_KEY)',
     );
   }
-  const { result } = await callWithCascade<RefinedQueries>({
+  const prompt = `${REFINE_PROMPT}${query}`;
+  const paid = wallet
+    ? paidLlmAttemptHooks({
+        wallet,
+        stage: 'refinement',
+        prompt,
+        config,
+        input_ref: 'run.json#/request/query',
+        output_ref: 'run.json#/coordination_state/slots',
+      })
+    : undefined;
+  const { result, usage } = await callWithCascade<RefinedQueries>({
     clients,
-    prompt: `${REFINE_PROMPT}${query}`,
+    prompt,
     action: 'refine',
-    timeoutMs: REFINE_TIMEOUT_MS,
+    timeoutMs: wallet
+      ? Math.min(REFINE_TIMEOUT_MS, Math.max(1, wallet.remainingMs()))
+      : REFINE_TIMEOUT_MS,
     json: true,
+    ...(paid && {
+      signal: paid.signal,
+      beforeAttempt: paid.beforeAttempt,
+      onAttempt: paid.onAttempt,
+    }),
     onWarning,
     parse: parseRefineResponse,
   });
+  paid?.completeSuccess(result, usage);
   return result;
 }
 

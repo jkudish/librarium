@@ -66,6 +66,10 @@ vi.mock('../src/node-request-preflight.js', () => {
         admittedAdapterIds: ['legacy-provider', 'fallback-provider'],
         prepared: {
           request: {
+            request_id: 'request-1',
+            requested_at: new Date().toISOString(),
+            mode: 'sync',
+            query: 'private query',
             slots: [
               {
                 primary: {
@@ -79,6 +83,19 @@ vi.mock('../src/node-request-preflight.js', () => {
                 },
               },
             ],
+            fallback_reserve: [],
+          },
+          policy: {
+            limits: {
+              max_concurrency: 2,
+              request_deadline_ms: 60_000,
+              inline_attempt_deadline_ms: 30_000,
+              background_attempt_deadline_ms: 30_000,
+              poll_interval_ms: 1_000,
+            },
+            fallback: { kind: 'configured' },
+            exclusions: [],
+            refinement: { kind: 'disabled' },
           },
           profile_plans_by_identity: {
             '["legacy-provider","search","not_applicable",null,null,null,null,null]':
@@ -145,6 +162,10 @@ vi.mock('../src/node-run-directory.js', () => ({
     state.events.push('run-dir');
     return '/tmp/unused-mcp-output';
   },
+}));
+
+vi.mock('../src/node-paid-attempt-ledger.js', () => ({
+  writePaidRunLedger: () => {},
 }));
 
 vi.mock('../src/node-canonical-run.js', () => ({

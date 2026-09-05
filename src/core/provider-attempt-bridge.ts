@@ -44,6 +44,8 @@ export interface ProviderAttemptBridgeDependencies {
     | undefined;
   now?: () => number;
   wait?: (milliseconds: number) => Promise<void>;
+  /** Run-wide cancellation; adapter calls also retain their absolute deadline. */
+  signal?: AbortSignal;
 }
 
 function providerFailure(
@@ -227,9 +229,10 @@ async function beforeDeadline<T>(
   operation: (signal: AbortSignal, remainingMs: number) => Promise<T>,
   launch: AttemptLaunch,
   now: () => number,
+  runSignal?: AbortSignal,
 ): Promise<DeadlineResult<T>> {
   const remainingMs = Date.parse(launch.deadline_at) - now();
-  if (remainingMs <= 0) return { kind: 'deadline' };
+  if (remainingMs <= 0 || runSignal?.aborted) return { kind: 'deadline' };
   const controller = new AbortController();
   return new Promise((resolve) => {
     let settled = false;
@@ -237,12 +240,18 @@ async function beforeDeadline<T>(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      runSignal?.removeEventListener('abort', abortRun);
       resolve(result);
+    };
+    const abortRun = () => {
+      controller.abort();
+      finish({ kind: 'deadline' });
     };
     const timer = setTimeout(() => {
       controller.abort();
       finish({ kind: 'deadline' });
     }, remainingMs);
+    runSignal?.addEventListener('abort', abortRun, { once: true });
     operation(controller.signal, remainingMs).then(
       (value) => finish({ kind: 'value', value }),
       (error: unknown) => finish({ kind: 'error', error }),
@@ -487,6 +496,7 @@ export function createProviderAttemptBridge(
           () => provider.poll(task),
           launch,
           now,
+          dependencies.signal,
         );
         if (polled.kind === 'deadline') {
           return {
@@ -622,6 +632,7 @@ export function createProviderAttemptBridge(
             }),
           launch,
           now,
+          dependencies.signal,
         );
         if (executed.kind === 'deadline') {
           return {
@@ -680,6 +691,7 @@ export function createProviderAttemptBridge(
           }),
         launch,
         now,
+        dependencies.signal,
       );
       if (submitted.kind === 'deadline') {
         // The local deadline fired while POST may already have been in flight.
@@ -777,6 +789,7 @@ export function createProviderAttemptBridge(
           () => provider.poll(task),
           launch,
           now,
+          dependencies.signal,
         );
         if (polled.kind === 'deadline') {
           return {

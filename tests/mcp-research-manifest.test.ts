@@ -108,6 +108,26 @@ describe('silent research live manifest', () => {
       coordination_state: { status: 'unsuccessful' },
       terminal_response: { status: 'failed' },
     });
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(runDir as string, 'paid-attempt-ledger.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      artifact: 'librarium.paid-attempt-ledger',
+      artifact_version: '1.0.0',
+      request_id: result.manifest.request.request_id,
+      canonical_run_ref: 'run.json',
+      stages: [
+        { stage: 'refinement', status: 'not_requested' },
+        { stage: 'research', status: 'requested' },
+        { stage: 'synthesis', status: 'not_requested' },
+        { stage: 'verification', status: 'not_requested' },
+      ],
+      attempts: [{ stage: 'research', provider: 'exa', status: 'failed' }],
+    });
     expect(existsSync(join(runDir as string, 'coordination.json'))).toBe(false);
   });
 

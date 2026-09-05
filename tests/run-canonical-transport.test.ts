@@ -54,7 +54,7 @@ const prepared = {
     interchange_version: '1.0.0',
     message_type: 'request',
     request_id: 'request-1',
-    requested_at: '2026-08-11T12:00:00.000Z',
+    requested_at: new Date().toISOString(),
     mode: 'sync',
     query: 'query',
     slots: [
@@ -155,6 +155,10 @@ vi.mock('../src/core/provider-selection.js', () => ({
 
 vi.mock('../src/node-run-directory.js', () => ({
   createRunDir: () => '/tmp/canonical-transport/run-1',
+}));
+
+vi.mock('../src/node-paid-attempt-ledger.js', () => ({
+  writePaidRunLedger: () => {},
 }));
 
 vi.mock('../src/node-canonical-artifacts.js', () => ({

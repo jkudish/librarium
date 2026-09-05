@@ -19,6 +19,7 @@ import {
 import { providerIdentityKey } from '../contracts/domain/index.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { safeWriteFile } from '../core/fs-utils.js';
+import { buildProviderMetering } from '../core/metering.js';
 import { generateSlug } from '../core/prompt-builder.js';
 import { retiredProviderSelectionIssues } from '../core/provider-selection.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
@@ -28,12 +29,19 @@ import {
   createRegisteredProviderAttemptBridge,
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
+import { writePaidRunLedger } from '../node-paid-attempt-ledger.js';
 import {
   assertAdmittedAdaptersRegistered,
   emitRequestPreflightNotices,
   preflightProductionRequest,
 } from '../node-request-preflight.js';
 import { createRunDir } from '../node-run-directory.js';
+import {
+  costMicrousdFromUsd,
+  fingerprint,
+  type PaidStageDeclaration,
+  RunPaidWallet,
+} from '../run-paid-wallet.js';
 import type {
   Config,
   DeduplicatedSource,
@@ -45,6 +53,8 @@ import type {
 import { generateHtmlReport } from './html-report.js';
 import { generateJsonlReport } from './jsonl-report.js';
 import type { LiveRunTable } from './live-table.js';
+import { preferenceFromConfig, resolveLlmClients } from './llm-client.js';
+import { paidLlmProvider } from './paid-llm-attempt.js';
 import {
   countDeepResearch,
   deepResearchWarning,
@@ -109,6 +119,8 @@ export interface PostDispatchContext {
   outputDir: string;
   color: boolean;
   printLine: (line: string) => void;
+  /** Private run-wide paid-call authority shared with helper stages. */
+  wallet?: RunPaidWallet;
 }
 
 export interface PostDispatchResult {
@@ -122,6 +134,11 @@ export interface PostDispatchResult {
 }
 
 export interface ExecuteRunHooks {
+  /** Helper stages requested by this command, frozen before refinement starts. */
+  paidStages?: {
+    synthesis?: boolean;
+    verification?: boolean;
+  };
   /**
    * Runs after sources are deduped and provider outputs are written, before
    * the run summary and run.json are produced. Must never throw (it is the
@@ -341,30 +358,133 @@ export async function executeRun(
       }
     }
 
-    let refined: RefinedQueries | null = null;
-    if (opts.refine) {
-      spinner.start('Refining query...');
-      try {
-        refined = await refineQuery(
-          query,
-          config,
-          process.env,
-          (message) =>
-            process.stderr.write(
-              `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
-            ),
-          preflight.credentials,
-        );
-      } catch (error) {
-        process.stderr.write(
-          `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
-        );
-      }
-    }
-
     const slug = generateSlug(query);
     const baseDir = resolve(config.defaults.outputDir);
-    let outputDir: string | undefined;
+    const outputDir = createRunDir(baseDir, slug);
+    const fallbackAuthorized =
+      preflight.prepared.policy.fallback.kind !== 'disabled';
+    const resolvedClients = (kind: 'refine' | 'answer') => {
+      const clients = resolveLlmClients(
+        kind === 'refine'
+          ? config.refine
+          : preferenceFromConfig(config, 'answer', 'refine'),
+        {
+          env: process.env,
+          config,
+          credentials: preflight.credentials,
+        },
+      );
+      return fallbackAuthorized ? clients : clients.slice(0, 1);
+    };
+    const refineClients = opts.refine ? resolvedClients('refine') : [];
+    const answerClients =
+      hooks?.paidStages?.synthesis || hooks?.paidStages?.verification
+        ? resolvedClients('answer')
+        : [];
+    const plannedProfiles = [
+      ...preflight.prepared.request.slots.map((slot) => slot.primary),
+      ...preflight.prepared.request.fallback_reserve.map(
+        (candidate) => candidate.profile,
+      ),
+    ];
+    const researchProviders = plannedProfiles.flatMap((profile) => {
+      const plan =
+        preflight.prepared.profile_plans_by_identity[
+          providerIdentityKey(profile.identity)
+        ];
+      return plan
+        ? [
+            {
+              provider: plan.binding.adapter_id,
+              profile: providerIdentityKey(profile.identity),
+              ...(plan.estimate?.estimated_cost_microusd !== undefined && {
+                estimated_cost_microusd: plan.estimate.estimated_cost_microusd,
+                estimate_source: 'canonical_profile_plan',
+              }),
+            },
+          ]
+        : [];
+    });
+    const verificationSearchProviders = Array.from(
+      new Set(researchProviders.map((provider) => provider.provider)),
+    )
+      .filter((id) => {
+        const tier = resolveExactProvider(id)?.tier;
+        return tier === 'ai-grounded' || tier === 'raw-search';
+      })
+      .map((provider) => {
+        const estimate = buildProviderMetering(
+          provider,
+          config.providers[provider],
+        ).estimate;
+        const cost = costMicrousdFromUsd(estimate?.estimatedCostUsd);
+        return {
+          provider,
+          ...(cost !== undefined && { estimated_cost_microusd: cost }),
+          ...(estimate?.pricingVersion && {
+            estimate_source: `pricing:${estimate.pricingVersion}`,
+          }),
+        };
+      });
+    const stages: PaidStageDeclaration[] = [
+      {
+        stage: 'refinement',
+        requested: Boolean(opts.refine),
+        fallback_authorized: fallbackAuthorized,
+        prompt_version: 'refine-v1',
+        providers: refineClients.map((client) =>
+          paidLlmProvider(client, config),
+        ),
+      },
+      {
+        stage: 'research',
+        requested: true,
+        fallback_authorized: fallbackAuthorized,
+        prompt_version: 'canonical-request-v3',
+        providers: researchProviders,
+      },
+      {
+        stage: 'synthesis',
+        requested: Boolean(hooks?.paidStages?.synthesis),
+        fallback_authorized: fallbackAuthorized,
+        prompt_version: 'grounded-synthesis-v1',
+        providers: answerClients.map((client) =>
+          paidLlmProvider(client, config),
+        ),
+        reserve_first_attempt: true,
+      },
+      {
+        stage: 'verification',
+        requested: Boolean(hooks?.paidStages?.verification),
+        fallback_authorized: fallbackAuthorized,
+        prompt_version: 'claim-verification-v1',
+        providers: [
+          ...answerClients.map((client) => paidLlmProvider(client, config)),
+          ...verificationSearchProviders,
+        ],
+      },
+    ];
+    const createdAt = preflight.prepared.request.requested_at;
+    const wallet = new RunPaidWallet({
+      request_id: preflight.prepared.request.request_id,
+      request_fingerprint: fingerprint(preflight.prepared.request),
+      config_fingerprint: fingerprint({
+        defaults: config.defaults,
+        refine: config.refine,
+        answer: config.answer,
+        providers: config.providers,
+      }),
+      created_at: createdAt,
+      deadline_at: new Date(
+        Date.parse(createdAt) +
+          preflight.prepared.policy.limits.request_deadline_ms,
+      ).toISOString(),
+      ...(preflight.prepared.policy.budgets && {
+        limits: preflight.prepared.policy.budgets,
+      }),
+      stages,
+      on_change: (ledger) => writePaidRunLedger(baseDir, outputDir, ledger),
+    });
     let stateCreated = false;
     let interrupted = false;
     let cancellation: Promise<void> | undefined;
@@ -387,16 +507,37 @@ export async function executeRun(
     const onInterrupt = (): void => {
       if (interrupted) return;
       interrupted = true;
+      wallet.cancel();
       scheduleCancellation();
     };
     process.once('SIGINT', onInterrupt);
-    if (interrupted) {
+    let refined: RefinedQueries | null = null;
+    if (opts.refine) {
+      spinner.start('Refining query...');
+      try {
+        refined = await refineQuery(
+          query,
+          config,
+          process.env,
+          (message) =>
+            process.stderr.write(
+              `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
+            ),
+          preflight.credentials,
+          wallet,
+        );
+      } catch (error) {
+        process.stderr.write(
+          `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
+        );
+      }
+    }
+    if (interrupted || wallet.remainingMs() === 0) {
       process.off('SIGINT', onInterrupt);
       spinner.stop();
-      process.exitCode = 130;
-      return { exitCode: 130 };
+      process.exitCode = interrupted ? 130 : 2;
+      return { exitCode: process.exitCode, outputDir };
     }
-    outputDir = createRunDir(baseDir, slug);
     const refinedQueriesBySlot = Object.fromEntries(
       preflight.prepared.request.slots.flatMap((slot) => {
         const plan =
@@ -425,10 +566,14 @@ export async function executeRun(
         runs_root: baseDir,
         run_directory: outputDir,
         coordinator,
-        attempt_bridge: createRegisteredProviderAttemptBridge(
-          preflight.prepared,
-          resolveExactProvider,
-        ),
+        attempt_bridge: {
+          ...createRegisteredProviderAttemptBridge(
+            preflight.prepared,
+            resolveExactProvider,
+          ),
+          signal: wallet.signal,
+        },
+        paid_wallet: wallet,
         refined_queries_by_slot: refinedQueriesBySlot,
         is_cancelled: () => interrupted,
         on_state_created: () => {
@@ -512,6 +657,7 @@ export async function executeRun(
           outputDir,
           color,
           printLine,
+          wallet,
         });
       } catch (error) {
         process.stderr.write(

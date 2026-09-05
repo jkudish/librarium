@@ -4,6 +4,8 @@ import {
   getExactProvider,
   initializeProviders,
 } from '../adapters/node-registry.js';
+import { resolveLlmClients } from '../commands/llm-client.js';
+import { paidLlmProvider } from '../commands/paid-llm-attempt.js';
 import { type RefinedQueries, refineQuery } from '../commands/refine.js';
 import { providerIdentityKey } from '../contracts/domain/index.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
@@ -21,6 +23,7 @@ import {
   createRegisteredProviderAttemptBridge,
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
+import { writePaidRunLedger } from '../node-paid-attempt-ledger.js';
 import {
   assertAdmittedAdaptersRegistered,
   emitRequestPreflightNotices,
@@ -29,6 +32,11 @@ import {
   RequestPreflightError,
 } from '../node-request-preflight.js';
 import { type CreateRunDirDeps, createRunDir } from '../node-run-directory.js';
+import {
+  fingerprint,
+  type PaidStageDeclaration,
+  RunPaidWallet,
+} from '../run-paid-wallet.js';
 import type { Config, Defaults, Provider } from '../types.js';
 
 /**
@@ -188,6 +196,101 @@ export async function runResearchSilent(
     throw error;
   }
 
+  const slug = generateSlug(args.query);
+  const baseDir = resolve(config.defaults.outputDir);
+  // Collision-resistant: exclusive mkdir with ms timestamp + random suffix so
+  // two same-second runs of the same query never share a directory. The actual
+  // created directory is what gets recorded in the manifest below.
+  const outputDir = createRunDir(baseDir, slug, deps.runDirDeps);
+  const fallbackAuthorized =
+    preflight.prepared.policy.fallback.kind !== 'disabled';
+  const refineClients = args.refine
+    ? resolveLlmClients(config.refine, {
+        env: process.env,
+        config,
+        credentials,
+      })
+    : [];
+  const authorizedRefineClients = fallbackAuthorized
+    ? refineClients
+    : refineClients.slice(0, 1);
+  const plannedProfiles = [
+    ...preflight.prepared.request.slots.map((slot) => slot.primary),
+    ...preflight.prepared.request.fallback_reserve.map(
+      (candidate) => candidate.profile,
+    ),
+  ];
+  const stages: PaidStageDeclaration[] = [
+    {
+      stage: 'refinement',
+      requested: Boolean(args.refine),
+      fallback_authorized: fallbackAuthorized,
+      prompt_version: 'refine-v1',
+      providers: authorizedRefineClients.map((client) =>
+        paidLlmProvider(client, config),
+      ),
+    },
+    {
+      stage: 'research',
+      requested: true,
+      fallback_authorized: fallbackAuthorized,
+      prompt_version: 'canonical-request-v3',
+      providers: plannedProfiles.flatMap((profile) => {
+        const plan =
+          preflight.prepared.profile_plans_by_identity[
+            providerIdentityKey(profile.identity)
+          ];
+        return plan
+          ? [
+              {
+                provider: plan.binding.adapter_id,
+                profile: providerIdentityKey(profile.identity),
+                ...(plan.estimate?.estimated_cost_microusd !== undefined && {
+                  estimated_cost_microusd:
+                    plan.estimate.estimated_cost_microusd,
+                  estimate_source: 'canonical_profile_plan',
+                }),
+              },
+            ]
+          : [];
+      }),
+    },
+    {
+      stage: 'synthesis',
+      requested: false,
+      fallback_authorized: false,
+      prompt_version: 'grounded-synthesis-v1',
+      providers: [],
+    },
+    {
+      stage: 'verification',
+      requested: false,
+      fallback_authorized: false,
+      prompt_version: 'claim-verification-v1',
+      providers: [],
+    },
+  ];
+  const createdAt = preflight.prepared.request.requested_at;
+  const wallet = new RunPaidWallet({
+    request_id: preflight.prepared.request.request_id,
+    request_fingerprint: fingerprint(preflight.prepared.request),
+    config_fingerprint: fingerprint({
+      defaults: config.defaults,
+      refine: config.refine,
+      providers: config.providers,
+    }),
+    created_at: createdAt,
+    deadline_at: new Date(
+      Date.parse(createdAt) +
+        preflight.prepared.policy.limits.request_deadline_ms,
+    ).toISOString(),
+    ...(preflight.prepared.policy.budgets && {
+      limits: preflight.prepared.policy.budgets,
+    }),
+    stages,
+    on_change: (ledger) => writePaidRunLedger(baseDir, outputDir, ledger),
+  });
+
   // Optional one-shot LLM refine. Never allowed to break the run.
   let refined: RefinedQueries | null = null;
   if (args.refine) {
@@ -198,6 +301,7 @@ export async function runResearchSilent(
         process.env,
         (message) => onWarn(`[librarium] refine: ${message}`),
         credentials,
+        wallet,
       );
     } catch (e) {
       onWarn(
@@ -206,12 +310,6 @@ export async function runResearchSilent(
     }
   }
 
-  const slug = generateSlug(args.query);
-  const baseDir = resolve(config.defaults.outputDir);
-  // Collision-resistant: exclusive mkdir with ms timestamp + random suffix so
-  // two same-second runs of the same query never share a directory. The actual
-  // created directory is what gets recorded in the manifest below.
-  const outputDir = createRunDir(baseDir, slug, deps.runDirDeps);
   const resolveExactProvider = deps.resolveExactProvider ?? getExactProvider;
   const refinedQueriesBySlot = Object.fromEntries(
     preflight.prepared.request.slots.flatMap((slot) => {
@@ -231,10 +329,14 @@ export async function runResearchSilent(
     runs_root: baseDir,
     run_directory: outputDir,
     coordinator: createNodeCoordinatorDependencies(),
-    attempt_bridge: createRegisteredProviderAttemptBridge(
-      preflight.prepared,
-      resolveExactProvider,
-    ),
+    attempt_bridge: {
+      ...createRegisteredProviderAttemptBridge(
+        preflight.prepared,
+        resolveExactProvider,
+      ),
+      signal: wallet.signal,
+    },
+    paid_wallet: wallet,
     refined_queries_by_slot: refinedQueriesBySlot,
   });
   const presentation = writeCanonicalPresentationArtifacts(

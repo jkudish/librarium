@@ -55,7 +55,12 @@ import {
   resolveRunDirectoryWithFs,
 } from './node-run-artifact-codecs.js';
 import { RUN_JSON_FILE, withRunJsonLock } from './node-run-json-lock.js';
-import type { Provider } from './types.js';
+import {
+  fingerprint,
+  PaidRunAdmissionError,
+  type RunPaidWallet,
+} from './run-paid-wallet.js';
+import type { Provider, ProviderResult } from './types.js';
 
 const CANONICAL_RUN_KIND = 'canonical-research-run' as const;
 const CANONICAL_RUN_FORMAT = 'librarium.run-json.v3' as const;
@@ -1115,6 +1120,8 @@ export interface RunCanonicalPreparedExecutionDependencies {
     typeof runPreparedExecution
   >[1]['coordinator'];
   readonly attempt_bridge: ProviderAttemptBridgeDependencies;
+  /** CLI-owned wallet that admits and accounts for each new paid submission. */
+  readonly paid_wallet?: RunPaidWallet;
   /** Optional one-shot refinements, applied before the first launch only. */
   readonly refined_queries_by_slot?: Readonly<Record<string, string>>;
   /** CLI cancellation latch, checked before the first authoritative write. */
@@ -1261,7 +1268,76 @@ export async function runCanonicalPreparedExecution(
     coordinator: dependencies.coordinator,
     attempts: {
       async execute(launch, context) {
-        return bridge.execute(launch, context);
+        const wallet = dependencies.paid_wallet;
+        if (!wallet) return bridge.execute(launch, context);
+        const plan =
+          prepared.profile_plans_by_identity[
+            providerIdentityKey(launch.profile.identity)
+          ];
+        let paidAttemptId: string;
+        try {
+          paidAttemptId = wallet.begin({
+            stage: 'research',
+            provider: launch.binding.adapter_id,
+            profile: providerIdentityKey(launch.profile.identity),
+            ...(plan?.estimate?.estimated_cost_microusd !== undefined && {
+              estimated_cost_microusd: plan.estimate.estimated_cost_microusd,
+              estimate_source: 'canonical_profile_plan',
+            }),
+            input_fingerprint: fingerprint({
+              query: launch.query,
+              profile: launch.profile,
+            }),
+            parent_attempt_id: launch.attempt_id,
+            input_ref: 'run.json#/coordination_state/attempts',
+          });
+        } catch (error) {
+          if (!(error instanceof PaidRunAdmissionError)) throw error;
+          return {
+            kind: 'finished',
+            finished: {
+              outcome: 'failed',
+              error: {
+                code: error.reasonCode,
+                message: 'The run-wide paid-attempt policy denied this call.',
+                category:
+                  error.reasonCode === 'run_cancelled'
+                    ? ('cancelled' as const)
+                    : error.reasonCode === 'run_deadline_exceeded'
+                      ? ('timeout' as const)
+                      : ('budget' as const),
+                retryable: false,
+                fallback_allowed: false,
+              },
+            },
+          };
+        }
+        try {
+          const result = await bridge.execute(launch, context);
+          const output = result.kind === 'finished' ? result.output : undefined;
+          const providerResult = output as ProviderResult | undefined;
+          wallet.finish(paidAttemptId, {
+            status:
+              result.kind === 'accepted'
+                ? 'accepted'
+                : result.kind === 'acceptance_unknown'
+                  ? 'acceptance_unknown'
+                  : result.finished.outcome === 'succeeded'
+                    ? 'succeeded'
+                    : result.finished.outcome === 'cancelled'
+                      ? 'cancelled'
+                      : 'failed',
+            ...(providerResult?.usage && { usage: providerResult.usage }),
+            ...(output !== undefined && {
+              output_fingerprint: fingerprint(output),
+              output_ref: `run.json#/provider_outputs_by_attempt/${launch.attempt_id}`,
+            }),
+          });
+          return result;
+        } catch (error) {
+          wallet.finish(paidAttemptId, { status: 'failed' });
+          throw error;
+        }
       },
       resume(launch, handle, context) {
         if (!bridge.resume) {

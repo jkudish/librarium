@@ -185,6 +185,8 @@ interface CallContext {
    * `answer` wants free-form markdown so leaves this false.
    */
   json: boolean;
+  /** Shared run cancellation in addition to the per-call timeout. */
+  signal?: AbortSignal;
 }
 
 interface LlmHttpResponse {
@@ -248,7 +250,7 @@ async function callOpenAi(
       messages: [{ role: 'user', content: prompt }],
       ...(ctx.json ? { response_format: { type: 'json_object' } } : {}),
     }),
-    signal: AbortSignal.timeout(ctx.timeoutMs),
+    signal: combinedSignal(ctx),
   });
   if (!response.ok) {
     throw new Error(
@@ -289,7 +291,7 @@ async function callGemini(
         ? { generationConfig: { responseMimeType: 'application/json' } }
         : {}),
     }),
-    signal: AbortSignal.timeout(ctx.timeoutMs),
+    signal: combinedSignal(ctx),
   });
   if (!response.ok) {
     throw new Error(
@@ -328,7 +330,7 @@ async function callPerplexity(
       Authorization: `Bearer ${client.apiKey}`,
     },
     body: JSON.stringify({ input: prompt, ...target }),
-    signal: AbortSignal.timeout(ctx.timeoutMs),
+    signal: combinedSignal(ctx),
   });
   if (!response.ok) {
     throw new Error(
@@ -401,12 +403,19 @@ function callClient(
       : callPerplexity(client, prompt, ctx);
 }
 
+function combinedSignal(ctx: CallContext): AbortSignal {
+  const timeout = AbortSignal.timeout(Math.max(1, ctx.timeoutMs));
+  return ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout;
+}
+
 export interface CallWithCascadeOptions<T> {
   clients: LlmClient[];
   prompt: string;
   action: string;
   timeoutMs: number;
   json: boolean;
+  /** Shared run cancellation signal. */
+  signal?: AbortSignal;
   onWarning?: (message: string) => void;
   /** Runs immediately before each network attempt; a throw aborts the cascade. */
   beforeAttempt?: (client: LlmClient, index: number) => void | Promise<void>;
@@ -447,7 +456,12 @@ export async function callWithCascade<T = string>(
     onAttempt,
     parse,
   } = options;
-  const ctx: CallContext = { action, timeoutMs, json };
+  const ctx: CallContext = {
+    action,
+    timeoutMs,
+    json,
+    ...(options.signal && { signal: options.signal }),
+  };
   const mapText = parse ?? ((text: string) => text as unknown as T);
   let lastError: unknown;
   for (let index = 0; index < clients.length; index++) {
