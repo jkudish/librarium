@@ -1188,6 +1188,30 @@ export function rebuildFrozenValidationEvidence(
   const canonicalMetering = canonicalMeteringMetadata(providerMeta);
   const actualSource = canonicalMetering?.actual_cost_source ?? 'unknown';
   const quality = frozenEvidenceQuality(target, result);
+  // Read only the target's terminal slot/latest attempt, not the lossy
+  // terminal_response.errors or a previous/transient attempt diagnostic.
+  // A sensibility-only lifecycle override must never attach a provider error.
+  const state = result.manifest.coordination_state;
+  const slot = state.slots.find(
+    (candidate) =>
+      canonicalJson(candidate.primary.identity) ===
+      canonicalJson(target.expected_effective_identity),
+  );
+  const attempt = state.attempts.find(
+    (candidate) =>
+      candidate.attempt_id === slot?.latest_attempt_id &&
+      candidate.slot_id === slot?.slot_id &&
+      canonicalJson(candidate.profile.identity) ===
+        canonicalJson(target.expected_effective_identity),
+  );
+  const failure =
+    state.status === 'unsuccessful' &&
+    (slot?.status === 'failed' || slot?.status === 'timed_out')
+      ? (slot.error ??
+        (attempt?.status === 'failed' || attempt?.status === 'timed_out'
+          ? attempt.error
+          : undefined))
+      : undefined;
   const receipt = sanitizeCanonicalReceipt({
     target,
     candidate_fingerprint: gate.approval.candidate.fingerprint,
@@ -1214,6 +1238,7 @@ export function rebuildFrozenValidationEvidence(
     account: protocol.account,
     region: protocol.region,
     lifecycle: lifecycleOverride ?? result.lifecycle,
+    failure,
     response: {
       content: resultBodies.join('\n'),
       citations,

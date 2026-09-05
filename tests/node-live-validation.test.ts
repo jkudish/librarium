@@ -12,7 +12,8 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ParallelChatProvider } from '../src/adapters/parallel.js';
 import { createCliProgram } from '../src/cli-program.js';
 import {
   type ApprovalGate,
@@ -34,6 +35,10 @@ import {
 } from '../src/commands/live-validation.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { profileIdentityKey } from '../src/core/execution-plan.js';
+import {
+  type HttpClient,
+  HttpRequestTimeoutError,
+} from '../src/core/http-client.js';
 import { BUILTIN_PRICING_SNAPSHOT } from '../src/core/pricing-snapshot.js';
 import { buildProviderCatalog } from '../src/core/profile-catalog.js';
 import {
@@ -573,6 +578,107 @@ describe('canonical v3 live validation evidence boundary', () => {
         lifecycle: 'failed',
       }),
     ).toThrow('prohibited material');
+  });
+
+  it('bounds failure metadata at projection and rejects unsafe summaries at the write boundary', () => {
+    const target = buildCanonicalValidationMatrix().targets[0]!;
+    const base = {
+      target,
+      candidate_fingerprint: `sha256:${'a'.repeat(64)}`,
+      request_id: 'failure-receipt',
+      account: 'reviewed-account',
+      region: 'us',
+      lifecycle: 'failed' as const,
+    };
+    const summary = {
+      code: 'provider_reported_error',
+      category: 'provider' as const,
+      retryable: true,
+      fallback_allowed: true,
+    };
+    const failure = {
+      ...summary,
+      message: 'private message',
+      details: [{ detail_code: 'private_detail', message: 'private payload' }],
+      provider_code: 'http_200',
+    };
+    const receipt = sanitizeCanonicalReceipt({ ...base, failure });
+    expect(receipt.failure).toEqual({ ...summary, provider_code: 'http_200' });
+    for (const provider_code of [
+      undefined,
+      'private_value',
+      'secret',
+      'http_099',
+      'http_600',
+      'http_200\n',
+      'x'.repeat(1000),
+    ]) {
+      expect(
+        sanitizeCanonicalReceipt({
+          ...base,
+          failure: { ...failure, provider_code },
+        }).failure,
+      ).toEqual(summary);
+    }
+    for (const lifecycle of ['succeeded', 'cancelled'] as const) {
+      expect(
+        sanitizeCanonicalReceipt({ ...base, lifecycle, failure }),
+      ).not.toHaveProperty('failure');
+    }
+    expect(sanitizeCanonicalReceipt(base)).not.toHaveProperty('failure');
+    for (const invalid of [
+      { code: 'private_value' },
+      { category: 'private_value' },
+      { retryable: 'true' },
+      { fallback_allowed: null },
+    ]) {
+      expect(() =>
+        sanitizeCanonicalReceipt({
+          ...base,
+          failure: { ...failure, ...invalid } as typeof failure,
+        }),
+      ).toThrow('invalid failure summary');
+    }
+    const root = mkdtempSync(join(tmpdir(), 'librarium-failure-receipt-'));
+    roots.push(root);
+    expect(() =>
+      writeSanitizedCanonicalReceipt(
+        root,
+        'succeeded.json',
+        { ...receipt, lifecycle: 'succeeded' },
+        target,
+      ),
+    ).toThrow('Only failed receipts');
+    for (const unsafe of [
+      null,
+      [],
+      Array(257).fill(summary),
+      { ...summary, code: 'private_value' },
+      { ...summary, category: 'private_value' },
+      { ...summary, retryable: 'true' },
+      { ...summary, fallback_allowed: [] },
+      { ...summary, provider_code: 'http_600' },
+      { ...summary, provider_code: 'x'.repeat(1000) },
+      ...[
+        'message',
+        'details',
+        'raw',
+        'payload',
+        'headers',
+        'diagnostics',
+        'secret',
+        'credentials',
+      ].map((key) => ({ ...summary, [key]: 'private' })),
+    ]) {
+      expect(() =>
+        writeSanitizedCanonicalReceipt(
+          root,
+          'unsafe.json',
+          { ...receipt, failure: unsafe },
+          target,
+        ),
+      ).toThrow('invalid failure summary');
+    }
   });
 
   it('admits only frozen provider-namespaced pricing units', () => {
@@ -1355,6 +1461,7 @@ describe('frozen paid protocol (injected, zero-network)', () => {
         readonly billableUnits: number;
       };
     },
+    exactProvider?: Provider,
   ): Promise<string> {
     const entry = BUILTIN_PROVIDER_CATALOG.find(
       (candidate) =>
@@ -1456,13 +1563,14 @@ describe('frozen paid protocol (injected, zero-network)', () => {
           },
           profile,
           catalog_digest: target.catalog_digest,
-          provider,
+          provider: exactProvider ?? provider,
         }),
         now: () => Date.parse('2026-08-13T00:00:00.000Z'),
         wait: async () => {},
       },
     });
-    const raw = JSON.stringify(result.manifest);
+    const raw = readFileSync(join(runDirectory, 'run.json'), 'utf8');
+    expect(JSON.parse(raw)).toEqual(result.manifest);
     fixtureManifests.set(requestId, raw);
     return raw;
   }
@@ -1656,6 +1764,176 @@ describe('frozen paid protocol (injected, zero-network)', () => {
     });
     expect(JSON.stringify(evidence.receipt)).not.toContain('https://');
   });
+
+  it.each([
+    ['invalid-schema', 'provider_reported_error', 'provider', 'http_200'],
+    ['missing-content', 'provider_reported_error', 'provider', 'http_200'],
+    ['timeout', 'provider_timeout', 'timeout', undefined],
+    ['network', 'provider_network_failed', 'network', undefined],
+    ['quality-only', undefined, undefined, undefined],
+  ] as const)(
+    'projects %s through the real adapter, bridge and persisted canonical run offline',
+    async (scenario, code, category, providerCode) => {
+      const restoreNetwork = installOfflineNetworkGuard();
+      try {
+        const { gate: frozen, matrix } = gate();
+        const target = matrix.targets.find(
+          (item) => item.key === 'parallel/chat',
+        )!;
+        const protocol = frozen.approval.targets.find(
+          (item) => item.key === target.key,
+        )!;
+        const privateText = 'private-provider-payload-and-secret';
+        const httpClient = vi.fn(async () => {
+          if (scenario === 'timeout') throw new HttpRequestTimeoutError(1000);
+          if (scenario === 'network') throw new TypeError(privateText);
+          return {
+            status: 200,
+            statusText: 'OK',
+            headers: { authorization: privateText },
+            data: {
+              choices:
+                scenario === 'invalid-schema'
+                  ? []
+                  : scenario === 'missing-content'
+                    ? [{}]
+                    : [{ message: { content: '' } }],
+              error: privateText,
+              diagnostics: { secret: privateText },
+            },
+            durationMs: 1,
+          };
+        });
+        const provider = new ParallelChatProvider({
+          apiKey: 'offline-fixture-key',
+          httpClient: httpClient as HttpClient,
+        });
+        const execute = vi.spyOn(provider, 'execute');
+        const raw = await canonicalManifest(
+          target,
+          frozen.approval.raw_root,
+          `receipt-${scenario}`,
+          'succeeded',
+          undefined,
+          provider,
+        );
+        const manifest = CanonicalRunManifestV3Schema.parse(JSON.parse(raw));
+        const state = manifest.coordination_state;
+        const adapterResult = await execute.mock.results[0]!.value;
+        expect(httpClient).toHaveBeenCalledOnce();
+        expect(state.status).toBe(code ? 'unsuccessful' : 'succeeded');
+        const expected = code
+          ? {
+              code,
+              category,
+              retryable: true,
+              fallback_allowed: true,
+              ...(providerCode && { provider_code: providerCode }),
+            }
+          : undefined;
+        for (const record of [state.slots[0]!, state.attempts[0]!]) {
+          expect(record.status).toBe(code ? 'failed' : 'succeeded');
+          if (expected)
+            expect(record.error).toEqual({
+              ...expected,
+              message: 'The provider returned an error.',
+            });
+          else expect(record.error).toBeUndefined();
+        }
+        if (code)
+          expect(adapterResult.failureDiagnostic).toEqual({
+            kind: category,
+            ...(providerCode && { httpStatus: 200 }),
+          });
+        const terminal = {
+          status: 'terminal' as const,
+          lifecycle: code ? ('failed' as const) : ('succeeded' as const),
+          request_id: manifest.request.request_id,
+          raw_manifest: raw,
+          manifest,
+        };
+        const evidence = rebuildFrozenValidationEvidence(
+          frozen,
+          target,
+          protocol,
+          terminal,
+          'failed',
+        );
+        expect(evidence.receipt.lifecycle).toBe('failed');
+        expect(evidence.quality).toMatchObject({
+          passed: false,
+          content_present: false,
+        });
+        if (expected) expect(evidence.receipt.failure).toEqual(expected);
+        else expect(evidence.receipt).not.toHaveProperty('failure');
+        const serialized = JSON.stringify(evidence.receipt);
+        for (const forbidden of [
+          privateText,
+          'offline-fixture-key',
+          'message',
+          'payload',
+          'headers',
+          'diagnostics',
+          'secret',
+          'failureDiagnostic',
+          'The provider returned an error.',
+          adapterResult.error,
+        ].filter(Boolean)) {
+          expect(serialized).not.toContain(forbidden);
+        }
+        writeSanitizedCanonicalReceipt(
+          frozen.approval.receipt_root,
+          `${scenario}.json`,
+          evidence.receipt,
+          target,
+        );
+        expect(
+          JSON.parse(
+            readFileSync(
+              join(frozen.approval.receipt_root, `${scenario}.json`),
+              'utf8',
+            ),
+          ),
+        ).toEqual(evidence.receipt);
+
+        // Removing the slot copy still projects only its exact latest attempt.
+        if (expected) {
+          state.slots[0]!.error = undefined;
+          manifest.terminal_response!.errors = [];
+          expect(
+            rebuildFrozenValidationEvidence(frozen, target, protocol, terminal)
+              .receipt.failure,
+          ).toEqual(expected);
+          state.slots[0]!.latest_attempt_id = 'another-attempt';
+          expect(
+            rebuildFrozenValidationEvidence(frozen, target, protocol, terminal)
+              .receipt,
+          ).not.toHaveProperty('failure');
+        } else {
+          // Even a stale error must not turn quality rejection into a
+          // reported provider execution failure after canonical success.
+          state.slots[0]!.error = {
+            code: 'provider_timeout',
+            category: 'timeout',
+            retryable: true,
+            fallback_allowed: true,
+            message: 'stale',
+          };
+          expect(
+            rebuildFrozenValidationEvidence(
+              frozen,
+              target,
+              protocol,
+              terminal,
+              'failed',
+            ).receipt,
+          ).not.toHaveProperty('failure');
+        }
+      } finally {
+        restoreNetwork();
+      }
+    },
+  );
 
   it('reports terminal certification with success-only completed results', () => {
     expect(
