@@ -7,7 +7,7 @@ compatibility: Requires Node.js 22.12 or newer and the Librarium 2.x CLI.
 # Librarium -- Multi-Provider Deep Research
 
 Run research queries through Librarium’s v2 public provider/profile catalog.
-There are 33 built-in providers and 40 implemented profiles. Preserve the
+There are 33 built-in providers and 39 implemented profiles. Preserve the
 profile and collection provenance when reporting results; do not turn source
 counts or agreement into a confidence claim.
 

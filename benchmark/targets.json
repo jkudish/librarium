@@ -9,13 +9,6 @@
       "costConfidence": "unknown"
     },
     {
-      "id": "parallel-chat",
-      "tier": "ai-grounded",
-      "envVar": "PARALLEL_API_KEY",
-      "estimatedCostUsd": null,
-      "costConfidence": "unknown"
-    },
-    {
       "id": "parallel-search",
       "tier": "raw-search",
       "envVar": "PARALLEL_API_KEY",
@@ -360,8 +353,7 @@
       "searchapi-perplexity",
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
-      "searchapi-google-ai-overview",
-      "parallel-chat"
+      "searchapi-google-ai-overview"
     ],
     "llm": ["claude", "openai-chat", "gemini-chat", "openrouter-chat"],
     "all": [
@@ -396,7 +388,6 @@
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
-      "parallel-chat",
       "parallel-search",
       "parallel-turbo"
     ]

@@ -83,7 +83,7 @@ export interface ReleaseMatrixTarget {
 }
 
 export interface ReleaseMatrixIdentity {
-  readonly target_count: 40;
+  readonly target_count: 39;
   readonly catalog_digest: string;
   readonly pricing_snapshot_fingerprint: string;
   readonly matrix_fingerprint: string;
@@ -749,7 +749,7 @@ function parseMatrixCore(
   if (!Array.isArray(targetsValue)) {
     fail(labels.targetsArray);
   }
-  if (declaredTargetCount !== 40) {
+  if (declaredTargetCount !== 39) {
     fail(labels.count);
   }
   const targets = targetsValue.map((targetValue, index) => {
@@ -814,8 +814,8 @@ function parseMatrixCore(
   });
   const keys = targets.map((target) => target.key);
   if (
-    targets.length !== 40 ||
-    new Set(keys).size !== 40 ||
+    targets.length !== 39 ||
+    new Set(keys).size !== 39 ||
     canonicalJson(keys) !== canonicalJson([...keys].sort(compareText))
   ) {
     fail(labels.ordering);
@@ -846,7 +846,7 @@ function parseMatrixCore(
     fail(labels.fingerprintMismatch);
   }
   return {
-    target_count: 40,
+    target_count: 39,
     catalog_digest: catalog,
     pricing_snapshot_fingerprint: pricing,
     matrix_fingerprint: fingerprint,
@@ -872,7 +872,7 @@ function matrixIdentity(value: unknown): ReleaseMatrixIdentity {
   }
   return parseMatrixCore(
     matrix.targets,
-    40,
+    39,
     matrix.catalog_digest,
     matrix.pricing_snapshot_fingerprint,
     matrix.fingerprint,
@@ -881,16 +881,16 @@ function matrixIdentity(value: unknown): ReleaseMatrixIdentity {
       targetField: (_index, key, field) =>
         key ? `${key} ${field}` : `Canonical matrix target ${_index} ${field}`,
       targetsArray: 'Canonical matrix targets must be an array.',
-      count: 'Release candidate requires the exact sorted 40-profile matrix.',
+      count: 'Release candidate requires the exact sorted 39-profile matrix.',
       ordering:
-        'Release candidate requires the exact sorted 40-profile matrix.',
+        'Release candidate requires the exact sorted 39-profile matrix.',
       catalog: 'Canonical catalog digest',
       pricing: 'Canonical pricing snapshot fingerprint',
       consistency:
         'Canonical target matrix fingerprints differ from their matrix.',
       fingerprint: 'Canonical matrix fingerprint',
       fingerprintMismatch:
-        'Canonical matrix fingerprint does not match its exact 40 targets.',
+        'Canonical matrix fingerprint does not match its exact 39 targets.',
     },
   );
 }
@@ -918,9 +918,9 @@ function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
       targetRecord: (index) => `Frozen installed-package target ${index}`,
       targetField: (index, _key, field) => `Frozen target ${index} ${field}`,
       targetsArray:
-        'Frozen installed-package identity must contain exactly 40 targets.',
+        'Frozen installed-package identity must contain exactly 39 targets.',
       count:
-        'Frozen installed-package identity must contain exactly 40 targets.',
+        'Frozen installed-package identity must contain exactly 39 targets.',
       ordering: 'Frozen installed-package targets must be unique and sorted.',
       catalog: 'Frozen catalog digest',
       pricing: 'Frozen pricing snapshot fingerprint',
@@ -928,7 +928,7 @@ function parseMatrixIdentity(value: unknown): ReleaseMatrixIdentity {
         'Frozen target matrix fingerprints differ from their matrix.',
       fingerprint: 'Frozen matrix fingerprint',
       fingerprintMismatch:
-        'Frozen matrix fingerprint does not match its exact 40 targets.',
+        'Frozen matrix fingerprint does not match its exact 39 targets.',
     },
   );
 }

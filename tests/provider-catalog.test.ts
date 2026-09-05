@@ -137,7 +137,6 @@ const IMPLEMENTED_MATRIX = [
   ['openai-chat', 'chat'],
   ['gemini-chat', 'chat'],
   ['openrouter', 'chat'],
-  ['parallel', 'chat'],
 ] as const;
 
 const PLANNED_MATRIX: readonly (readonly [string, string])[] = [];
@@ -283,8 +282,7 @@ describe('provider catalog -- declarations', () => {
         key === 'valyu/research' ? true : undefined,
       );
       expect(declaration.features?.json_schema_output).toBe(
-        ['exa/research', 'you-research/research'].includes(key) ||
-          key === 'parallel/chat'
+        ['exa/research', 'you-research/research'].includes(key)
           ? true
           : undefined,
       );
@@ -1910,7 +1908,7 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(14);
+    expect(configurable).toHaveLength(13);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',

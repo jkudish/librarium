@@ -389,7 +389,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
-    'parallel-chat',
   ],
   // Generic LLMs (tier `llm`). Opt-in only: excluded from every default
   // grounded group above and from `all`. They can use provider web search and
@@ -430,7 +429,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
-    'parallel-chat',
     'parallel-search',
     'parallel-turbo',
   ],

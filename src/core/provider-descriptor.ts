@@ -5,7 +5,6 @@ import {
   grokXOnlyOptionsSchema,
 } from '../adapters/grok-options.js';
 import {
-  ParallelChatOptionsSchema,
   ParallelResearchOptionsSchema,
   ParallelSearchOptionsSchema,
   ParallelTurboOptionsSchema,
@@ -160,9 +159,6 @@ export const parallelSearchOptions = commonOptions.merge(
 );
 export const parallelTurboOptions = commonOptions.merge(
   ParallelTurboOptionsSchema,
-);
-export const parallelChatOptions = commonOptions.merge(
-  ParallelChatOptionsSchema,
 );
 export const parallelResearchOptions = commonOptions.merge(
   ParallelResearchOptionsSchema,
@@ -389,26 +385,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     },
     metering: { kind: 'api_unit_priced', unit: 'processor request' },
     capabilities: background(),
-    autoEnable: false,
-  }),
-  define({
-    id: 'parallel-chat',
-    registrationOrder: 20.5,
-    tier: 'ai-grounded',
-    envVar: 'PARALLEL_API_KEY',
-    defaultModel: 'base',
-    optionsSchema: parallelChatOptions,
-    display: {
-      family: 'Parallel',
-      name: 'Parallel Chat',
-      description:
-        'Parallel Chat API answers with model-dependent research basis.',
-      bestFor: 'First-party Parallel chat and structured output.',
-      setupUrl: 'https://docs.parallel.ai/chat-api/chat-quickstart',
-      order: 285,
-    },
-    metering: { kind: 'api_unit_priced', unit: 'request' },
-    capabilities: inline('always'),
     autoEnable: false,
   }),
   define({

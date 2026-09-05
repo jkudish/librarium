@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Removed beta `parallel/chat` from v2 shipping support after repeated
+  incompatible HTTP-success payloads, including after accepting both documented
+  content shapes. Parallel Search, Turbo, and Research remain supported through
+  their separate Search and Task APIs; this is not a live-validation claim.
+
 ## [2.0.0] - 2026-08-27
 
 Version 2 replaces Librarium's provider, configuration, execution, package,
@@ -109,7 +116,7 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
   Research, Perplexity Agent medium and high, Valyu Research, and You Research.
   Durable work can be resumed across processes using provider-scoped handles.
 - Parallel Search profiles for advanced search and turbo search, plus Parallel
-  Chat and Parallel Research. `parallel/turbo` is included in `quick`.
+  Research. `parallel/turbo` is included in `quick`.
 - Valyu Search and Research, You.com Answer, and expanded You.com Research
   profiles with validated options, lifecycle handling, usage, and citations.
 - Configurable Firecrawl Search for web and news sources, locale and time

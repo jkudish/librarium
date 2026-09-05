@@ -66,7 +66,7 @@ and diagnostics go to standard error.
 
 ## V2 catalog
 
-The v2 catalog has **33 built-in providers** and **40 implemented public
+The v2 catalog has **33 built-in providers** and **39 implemented public
 profiles**. A profile is the unit of selection and provenance:
 `provider_id/profile_id`. A provider can expose more than one profile, such as
 `exa/search` and the durable `exa/research` profile. Adapter IDs are a Node
@@ -108,7 +108,7 @@ process state remains available. All other profiles are `inline/none`.
 | Kagi | `kagi-fastgpt/grounded` |
 | OpenAI | `openai-research/research` (background/durable), `openai-chat/chat` |
 | OpenRouter | `openrouter/grounded`, `openrouter/chat` |
-| Parallel | `parallel/search`, `parallel/turbo`, `parallel/chat`, `parallel/research` (background/durable) |
+| Parallel | `parallel/search`, `parallel/turbo`, `parallel/research` (background/durable) |
 | Perplexity | `perplexity-search/search` (raw Search, unchanged), `perplexity-sonar-pro/grounded` (Agent low, inline), `perplexity-deep-research/research` (Agent medium, background/durable), `perplexity-sonar-deep/research` (Agent high, background/durable) |
 | SearchAPI | `searchapi/search`, `searchapi-chatgpt/surface`, `searchapi-gemini/surface`, `searchapi-perplexity/surface`, `searchapi-google-ai-mode/surface`, `searchapi-bing-copilot/surface`, `searchapi-google-ai-overview/surface` |
 | SerpAPI | `serpapi/search` |

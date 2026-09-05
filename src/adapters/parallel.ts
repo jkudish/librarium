@@ -1,21 +1,15 @@
 import { z } from 'zod';
 import { OpaqueIdSchema } from '../contracts/common.js';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
-import {
-  HttpRequestAbortedError,
-  HttpRequestTimeoutError,
-} from '../core/http-client.js';
 import { normalizeUrl } from '../core/normalizer.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
   AsyncTaskStatus,
   Citation,
-  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
-  ProviderUsage,
 } from '../types.js';
 import {
   BackgroundBaseProvider,
@@ -23,7 +17,6 @@ import {
   type BaseProviderOptions,
 } from './base.js';
 import {
-  ParallelChatOptionsSchema,
   ParallelResearchOptionsSchema,
   type ParallelSearchOptions,
   ParallelSearchOptionsSchema,
@@ -32,7 +25,6 @@ import {
 } from './parallel-options.js';
 
 const API = 'https://api.parallel.ai';
-const CHAT_MODELS = new Set(['speed', 'lite', 'base', 'core']);
 const RESEARCH_PROCESSORS = new Set(['pro', 'pro-fast', 'ultra', 'ultra-fast']);
 const STATUS: Record<string, AsyncTaskStatus> = {
   queued: 'pending',
@@ -43,17 +35,6 @@ const STATUS: Record<string, AsyncTaskStatus> = {
   cancelling: 'running',
   cancelled: 'cancelled',
 };
-
-function classifyParallelFailure(
-  status: number,
-): ProviderFailureDiagnostic['kind'] {
-  if (status === 401 || status === 403) return 'authentication';
-  if (status === 402) return 'billing';
-  if (status === 408 || status === 504) return 'timeout';
-  if (status === 429) return 'rate_limit';
-  if (status >= 400 && status < 500) return 'invalid_request';
-  return 'provider';
-}
 
 interface WebResult {
   url?: unknown;
@@ -82,21 +63,6 @@ interface TaskRun {
 interface TaskResult {
   run?: TaskRun;
   output?: { type?: unknown; content?: unknown; basis?: FieldBasis[] };
-}
-interface ChatResponse {
-  id?: string;
-  interaction_id?: string;
-  model?: string;
-  choices?: Array<{
-    message?: { content?: string };
-    delta?: { content?: string | null };
-  }>;
-  basis?: FieldBasis[];
-  usage?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-  };
 }
 
 const fieldBasisSchema = z
@@ -135,36 +101,6 @@ const searchResponseSchema = z
     ),
     warnings: z.unknown().optional(),
     usage: z.unknown().optional(),
-  })
-  .passthrough();
-
-const chatResponseSchema = z
-  .object({
-    id: z.unknown().optional(),
-    interaction_id: z.unknown().optional(),
-    model: z.unknown().optional(),
-    choices: z
-      .array(
-        z
-          .object({
-            message: z.object({ content: z.string() }).passthrough().optional(),
-            delta: z
-              .object({ content: z.string().nullish() })
-              .passthrough()
-              .optional(),
-          })
-          .passthrough(),
-      )
-      .min(1),
-    basis: z.array(fieldBasisSchema).optional(),
-    usage: z
-      .object({
-        prompt_tokens: z.number().int().nonnegative().optional(),
-        completion_tokens: z.number().int().nonnegative().optional(),
-        total_tokens: z.number().int().nonnegative().optional(),
-      })
-      .passthrough()
-      .optional(),
   })
   .passthrough();
 
@@ -469,143 +405,6 @@ export class ParallelTurboProvider extends ParallelSearchProvider {
   }
 }
 
-export class ParallelChatProvider extends BaseProvider {
-  readonly id = 'parallel-chat';
-  readonly tier: ProviderTier = 'ai-grounded';
-  readonly model: string;
-  constructor(
-    options: BaseProviderOptions & {
-      model?: string;
-      configuredOptions?: unknown;
-    } = {},
-  ) {
-    super(options);
-    this.model = options.model?.trim() || 'base';
-    this.options = options.configuredOptions ?? {};
-  }
-  private readonly options: unknown;
-  async execute(
-    query: string,
-    options: ProviderOptions,
-  ): Promise<ProviderResult> {
-    const start = performance.now();
-    const parsed = ParallelChatOptionsSchema.safeParse(this.options);
-    if (!parsed.success || !CHAT_MODELS.has(this.model))
-      return {
-        provider: this.id,
-        tier: this.tier,
-        content: '',
-        citations: [],
-        durationMs: Math.round(performance.now() - start),
-        error: !parsed.success
-          ? `parallel-chat options: ${parsed.error.message}`
-          : 'parallel-chat model must be one of: speed, lite, base, core',
-      };
-    try {
-      const response = await this.request<ChatResponse>(
-        `${API}/v1beta/chat/completions`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${this.getApiKey()}` },
-          body: {
-            model: this.model,
-            messages: [{ role: 'user', content: query }],
-            stream: false,
-            ...(parsed.data.responseFormat && {
-              response_format: {
-                type: 'json_schema',
-                json_schema: parsed.data.responseFormat,
-              },
-            }),
-          },
-          timeout: options.timeout * 1000,
-          signal: options.signal,
-        },
-      );
-      const durationMs = Math.round(performance.now() - start);
-      if (response.status < 200 || response.status >= 300)
-        return this.resultError(
-          durationMs,
-          this.formatError(response.status, response.data),
-          {
-            kind: classifyParallelFailure(response.status),
-            httpStatus: response.status,
-          },
-        );
-      const parsedResponse = chatResponseSchema.safeParse(response.data);
-      if (!parsedResponse.success)
-        return this.resultError(
-          durationMs,
-          'Parallel returned an invalid Chat response',
-          { kind: 'provider', httpStatus: response.status },
-        );
-      const content = parsedResponse.data.choices
-        .flatMap((choice) => [choice.message?.content, choice.delta?.content])
-        .find(
-          (value): value is string =>
-            typeof value === 'string' && value.trim().length > 0,
-        );
-      if (content === undefined)
-        return this.resultError(
-          durationMs,
-          'Parallel returned a Chat response without message content',
-          { kind: 'provider', httpStatus: response.status },
-        );
-      const basis = basisMeta(parsedResponse.data.basis);
-      return {
-        provider: this.id,
-        tier: this.tier,
-        content,
-        citations: citationsFromBasis(parsedResponse.data.basis, this.id),
-        durationMs,
-        model: text(parsedResponse.data.model) ?? this.model,
-        tokenUsage: {
-          input: parsedResponse.data.usage?.prompt_tokens,
-          output: parsedResponse.data.usage?.completion_tokens,
-        },
-        usage: usage(parsedResponse.data.usage),
-        providerMeta: {
-          ...(text(parsedResponse.data.interaction_id) && {
-            'parallel:interaction_id': text(parsedResponse.data.interaction_id),
-          }),
-          ...(basis && { 'parallel:basis': basis }),
-          'parallel:basis_available': parsedResponse.data.basis !== undefined,
-        },
-      };
-    } catch (error) {
-      return this.resultError(
-        Math.round(performance.now() - start),
-        this.formatCatchError(error),
-        {
-          kind:
-            error instanceof HttpRequestTimeoutError ||
-            error instanceof HttpRequestAbortedError ||
-            (error instanceof DOMException && error.name === 'AbortError')
-              ? 'timeout'
-              : error instanceof TypeError
-                ? 'network'
-                : 'provider',
-        },
-      );
-    }
-  }
-  private resultError(
-    durationMs: number,
-    error: string,
-    failureDiagnostic?: ProviderFailureDiagnostic,
-  ): ProviderResult {
-    return {
-      provider: this.id,
-      tier: this.tier,
-      content: '',
-      citations: [],
-      durationMs,
-      error,
-      ...(failureDiagnostic && { failureDiagnostic }),
-    };
-  }
-}
-
 export class ParallelResearchProvider extends BackgroundBaseProvider {
   readonly id = 'parallel-research';
   readonly tier: ProviderTier = 'deep-research';
@@ -845,14 +644,4 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       error,
     };
   }
-}
-
-function usage(value: ChatResponse['usage']): ProviderUsage | undefined {
-  return value
-    ? {
-        inputTokens: value.prompt_tokens,
-        outputTokens: value.completion_tokens,
-        totalTokens: value.total_tokens,
-      }
-    : undefined;
 }

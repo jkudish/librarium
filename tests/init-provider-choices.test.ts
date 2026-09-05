@@ -24,7 +24,6 @@ const NEW_OPT_IN_PROVIDERS = [
 
 const PARALLEL_OPT_IN_PROVIDERS = [
   'parallel-research',
-  'parallel-chat',
   'parallel-search',
   'parallel-turbo',
 ] as const;

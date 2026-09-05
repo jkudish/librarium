@@ -12,8 +12,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ParallelChatProvider } from '../src/adapters/parallel.js';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createCliProgram } from '../src/cli-program.js';
 import {
   type ApprovalGate,
@@ -35,10 +34,6 @@ import {
 } from '../src/commands/live-validation.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { profileIdentityKey } from '../src/core/execution-plan.js';
-import {
-  type HttpClient,
-  HttpRequestTimeoutError,
-} from '../src/core/http-client.js';
 import { BUILTIN_PRICING_SNAPSHOT } from '../src/core/pricing-snapshot.js';
 import { buildProviderCatalog } from '../src/core/profile-catalog.js';
 import {
@@ -87,10 +82,12 @@ afterEach(() => {
 });
 
 describe('canonical v3 live validation matrix', () => {
-  it('derives the exact implemented 40-profile matrix, including durable private adapters', () => {
+  it('derives the exact implemented 39-profile matrix, including durable private adapters', () => {
     const matrix = buildCanonicalValidationMatrix();
-    expect(matrix.targets.length).toBeGreaterThan(0);
-    expect(matrix.targets.length).toBeLessThanOrEqual(40);
+    expect(matrix.targets).toHaveLength(39);
+    expect(matrix.targets.map((target) => target.key)).not.toContain(
+      'parallel/chat',
+    );
     expect(matrix.targets.map((target) => target.key)).toContain(
       'exa/research',
     );
@@ -106,10 +103,10 @@ describe('canonical v3 live validation matrix', () => {
       adapter_id: 'exa-research',
       credential_family: 'EXA_API_KEY',
     });
-    expect(new Set(matrix.targets.map((target) => target.key)).size).toBe(40);
+    expect(new Set(matrix.targets.map((target) => target.key)).size).toBe(39);
     expect(
       new Set(matrix.targets.map((target) => target.adapter_id)).size,
-    ).toBe(40);
+    ).toBe(39);
   });
 
   it('admits only one exact prepared canonical profile and never a legacy selector list', () => {
@@ -211,8 +208,7 @@ describe('canonical v3 live validation matrix', () => {
       catalog_authority: catalog,
     });
     expect(matrix.catalog_digest).toBe(catalog.digest);
-    expect(matrix.targets.length).toBeGreaterThan(0);
-    expect(matrix.targets.length).toBeLessThanOrEqual(40);
+    expect(matrix.targets).toHaveLength(39);
     expect(
       matrix.targets.every(
         (target) => target.catalog_digest === catalog.digest,
@@ -1766,94 +1762,55 @@ describe('frozen paid protocol (injected, zero-network)', () => {
   });
 
   it.each([
-    ['invalid-schema', 'provider_reported_error', 'provider', 'http_200'],
-    ['missing-content', 'provider_reported_error', 'provider', 'http_200'],
-    ['empty-text', 'provider_reported_error', 'provider', 'http_200'],
-    ['empty-delta', 'provider_reported_error', 'provider', 'http_200'],
-    ['timeout', 'provider_timeout', 'timeout', undefined],
-    ['network', 'provider_network_failed', 'network', undefined],
-    ['quality-only', undefined, undefined, undefined],
+    ['provider', 'provider_reported_error', 'http_200'],
+    ['timeout', 'provider_timeout', undefined],
+    ['network', 'provider_network_failed', undefined],
+    [undefined, undefined, undefined],
   ] as const)(
-    'projects %s through the real adapter, bridge and persisted canonical run offline',
-    async (scenario, code, category, providerCode) => {
-      const restoreNetwork = installOfflineNetworkGuard();
+    'preserves canonical receipt diagnostics independently of any removed adapter (%s)',
+    async (kind, code, providerCode) => {
+      const restore = installOfflineNetworkGuard();
       try {
         const { gate: frozen, matrix } = gate();
         const target = matrix.targets.find(
-          (item) => item.key === 'parallel/chat',
+          (item) => item.key === 'brave-answers/grounded',
         )!;
         const protocol = frozen.approval.targets.find(
           (item) => item.key === target.key,
         )!;
         const privateText = 'private-provider-payload-and-secret';
-        const httpClient = vi.fn(async () => {
-          if (scenario === 'timeout') throw new HttpRequestTimeoutError(1000);
-          if (scenario === 'network') throw new TypeError(privateText);
-          return {
-            status: 200,
-            statusText: 'OK',
-            headers: { authorization: privateText },
-            data: {
-              choices:
-                scenario === 'invalid-schema'
-                  ? []
-                  : scenario === 'missing-content'
-                    ? [{}]
-                    : scenario === 'empty-text'
-                      ? [{ message: { content: '' } }]
-                      : scenario === 'empty-delta'
-                        ? [{ delta: { content: '' } }]
-                        : [{ delta: { content: 'Answer without citations.' } }],
-              error: privateText,
-              diagnostics: { secret: privateText },
-            },
-            durationMs: 1,
-          };
-        });
-        const provider = new ParallelChatProvider({
-          apiKey: 'offline-fixture-key',
-          httpClient: httpClient as HttpClient,
-        });
-        const execute = vi.spyOn(provider, 'execute');
         const raw = await canonicalManifest(
           target,
           frozen.approval.raw_root,
-          `receipt-${scenario}`,
+          `receipt-${kind ?? 'quality'}`,
           'succeeded',
           undefined,
-          provider,
+          {
+            id: target.adapter_id,
+            displayName: 'Fixture',
+            envVar: '',
+            tier: 'ai-grounded',
+            execution: 'inline',
+            execute: async () => ({
+              provider: target.adapter_id,
+              tier: 'ai-grounded',
+              content: kind ? '' : 'Answer without citations.',
+              citations: [],
+              durationMs: 1,
+              ...(kind && {
+                error: privateText,
+                failureDiagnostic: {
+                  kind,
+                  ...(providerCode && { httpStatus: 200 }),
+                },
+              }),
+            }),
+          },
         );
         const manifest = CanonicalRunManifestV3Schema.parse(JSON.parse(raw));
-        const state = manifest.coordination_state;
-        const adapterResult = await execute.mock.results[0]!.value;
-        expect(httpClient).toHaveBeenCalledOnce();
-        expect(state.status).toBe(code ? 'unsuccessful' : 'succeeded');
-        const expected = code
-          ? {
-              code,
-              category,
-              retryable: true,
-              fallback_allowed: true,
-              ...(providerCode && { provider_code: providerCode }),
-            }
-          : undefined;
-        for (const record of [state.slots[0]!, state.attempts[0]!]) {
-          expect(record.status).toBe(code ? 'failed' : 'succeeded');
-          if (expected)
-            expect(record.error).toEqual({
-              ...expected,
-              message: 'The provider returned an error.',
-            });
-          else expect(record.error).toBeUndefined();
-        }
-        if (code)
-          expect(adapterResult.failureDiagnostic).toEqual({
-            kind: category,
-            ...(providerCode && { httpStatus: 200 }),
-          });
         const terminal = {
           status: 'terminal' as const,
-          lifecycle: code ? ('failed' as const) : ('succeeded' as const),
+          lifecycle: kind ? ('failed' as const) : ('succeeded' as const),
           request_id: manifest.request.request_id,
           raw_manifest: raw,
           manifest,
@@ -1865,61 +1822,38 @@ describe('frozen paid protocol (injected, zero-network)', () => {
           terminal,
           'failed',
         );
-        expect(evidence.receipt.lifecycle).toBe('failed');
         expect(evidence.quality).toMatchObject({
           passed: false,
-          content_present: scenario === 'quality-only',
+          content_present: !kind,
           citation_requirement_met: false,
         });
-        if (expected) expect(evidence.receipt.failure).toEqual(expected);
-        else expect(evidence.receipt).not.toHaveProperty('failure');
-        const serialized = JSON.stringify(evidence.receipt);
-        for (const forbidden of [
-          privateText,
-          'offline-fixture-key',
-          'message',
-          'payload',
-          'headers',
-          'diagnostics',
-          'secret',
-          'failureDiagnostic',
-          'The provider returned an error.',
-          adapterResult.error,
-        ].filter(Boolean)) {
-          expect(serialized).not.toContain(forbidden);
-        }
-        writeSanitizedCanonicalReceipt(
-          frozen.approval.receipt_root,
-          `${scenario}.json`,
-          evidence.receipt,
-          target,
+        expect(JSON.stringify(evidence.receipt)).not.toContain(privateText);
+        expect(manifest.coordination_state.status).toBe(
+          kind ? 'unsuccessful' : 'succeeded',
         );
-        expect(
-          JSON.parse(
-            readFileSync(
-              join(frozen.approval.receipt_root, `${scenario}.json`),
-              'utf8',
-            ),
-          ),
-        ).toEqual(evidence.receipt);
-
-        // Removing the slot copy still projects only its exact latest attempt.
-        if (expected) {
-          state.slots[0]!.error = undefined;
+        if (kind) {
+          const expected = {
+            code,
+            category: kind,
+            retryable: true,
+            fallback_allowed: true,
+            ...(providerCode && { provider_code: providerCode }),
+          };
+          expect(evidence.receipt.failure).toEqual(expected);
+          manifest.coordination_state.slots[0]!.error = undefined;
           manifest.terminal_response!.errors = [];
           expect(
             rebuildFrozenValidationEvidence(frozen, target, protocol, terminal)
               .receipt.failure,
           ).toEqual(expected);
-          state.slots[0]!.latest_attempt_id = 'another-attempt';
+          manifest.coordination_state.slots[0]!.latest_attempt_id =
+            'another-attempt';
           expect(
             rebuildFrozenValidationEvidence(frozen, target, protocol, terminal)
               .receipt,
           ).not.toHaveProperty('failure');
         } else {
-          // Even a stale error must not turn quality rejection into a
-          // reported provider execution failure after canonical success.
-          state.slots[0]!.error = {
+          manifest.coordination_state.slots[0]!.error = {
             code: 'provider_timeout',
             category: 'timeout',
             retryable: true,
@@ -1936,8 +1870,22 @@ describe('frozen paid protocol (injected, zero-network)', () => {
             ).receipt,
           ).not.toHaveProperty('failure');
         }
+        writeSanitizedCanonicalReceipt(
+          frozen.approval.receipt_root,
+          'diagnostic.json',
+          evidence.receipt,
+          target,
+        );
+        expect(
+          JSON.parse(
+            readFileSync(
+              join(frozen.approval.receipt_root, 'diagnostic.json'),
+              'utf8',
+            ),
+          ),
+        ).toEqual(evidence.receipt);
       } finally {
-        restoreNetwork();
+        restore();
       }
     },
   );
