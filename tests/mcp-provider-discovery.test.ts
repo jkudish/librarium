@@ -1,7 +1,15 @@
-import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { describe, expect, it, vi } from 'vitest';
 import { mapConfiguration } from '../src/core/configuration-mapping.js';
 import { discoverProviders } from '../src/mcp/provider-discovery.js';
 import type { Config } from '../src/types.js';
@@ -162,7 +170,30 @@ describe('MCP provider discovery projection', () => {
   });
 
   it('keeps declared disabled custom profiles and undeclared custom providers truthful without executing either', () => {
-    const marker = join(tmpdir(), `librarium-discovery-${process.pid}`);
+    const fixtureRoot = join(
+      tmpdir(),
+      `librarium-discovery-${process.pid}-${crypto.randomUUID()}`,
+    );
+    mkdirSync(fixtureRoot, { recursive: true });
+    const npmMarker = join(fixtureRoot, 'npm-imported');
+    const scriptMarker = join(fixtureRoot, 'script-spawned');
+    const modulePath = join(fixtureRoot, 'provider.mjs');
+    const scriptPath = join(fixtureRoot, 'provider-script.mjs');
+    writeFileSync(
+      modulePath,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(npmMarker)}, 'imported');`,
+        'export default {};',
+      ].join('\n'),
+    );
+    writeFileSync(
+      scriptPath,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(scriptMarker)}, 'spawned');`,
+      ].join('\n'),
+    );
     const secret = 'literal-secret-sentinel';
     const source = config({
       providers: {
@@ -174,8 +205,8 @@ describe('MCP provider discovery projection', () => {
       customProviders: {
         'acme-adapter': {
           type: 'script',
-          command: marker,
-          args: [secret],
+          command: process.execPath,
+          args: [scriptPath, secret],
           executionProfile: {
             bindingId: 'acme.search.v1',
             profile: customProfile(),
@@ -184,12 +215,12 @@ describe('MCP provider discovery projection', () => {
         },
         'undeclared-adapter': {
           type: 'npm',
-          module: marker,
+          module: modulePath,
           options: { secret },
         },
         'untrusted-adapter': {
           type: 'npm',
-          module: marker,
+          module: modulePath,
           executionProfile: {
             bindingId: 'untrusted.search.v1',
             profile: customProfile('untrusted-provider'),
@@ -197,7 +228,7 @@ describe('MCP provider discovery projection', () => {
         },
         'invalid-adapter': {
           type: 'npm',
-          module: marker,
+          module: modulePath,
           executionProfile: {
             bindingId: 'invalid.search.v1',
             profile: customProfile('exa'),
@@ -211,52 +242,116 @@ describe('MCP provider discovery projection', () => {
       ],
     });
 
-    const result = discoverProviders(
-      source,
-      { detail: 'profiles' },
-      { env: {} },
-    );
-    const acme = result.profiles.find(
-      (profile) => profile.selector === 'acme-provider/search',
-    );
-    expect(acme).toMatchObject({
-      source: 'trusted_custom_declaration',
-      credentialStatus: {
-        requirement: 'required',
-        presence: 'unknown',
-        source: 'keychain',
-        authentication: 'not-checked',
+    const filesBefore = readdirSync(fixtureRoot);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const resolveCredential = vi.fn(() => secret);
+    try {
+      const result = discoverProviders(
+        source,
+        { detail: 'profiles' },
+        { env: {}, resolveCredential },
+      );
+      const acme = result.profiles.find(
+        (profile) => profile.selector === 'acme-provider/search',
+      );
+      expect(acme).toMatchObject({
+        source: 'trusted_custom_declaration',
+        credentialStatus: {
+          requirement: 'required',
+          presence: 'unknown',
+          source: 'keychain',
+          authentication: 'not-checked',
+        },
+        availability: {
+          selectable: false,
+          reasons: ['profile_disabled', 'credential_status_unknown'],
+        },
+      });
+      expect(
+        result.providers.find(
+          (provider) => provider.id === 'undeclared-adapter',
+        ),
+      ).toMatchObject({
+        tier: 'unknown',
+        credentialStatus: { requirement: 'unknown', presence: 'unknown' },
+        planningStatus: 'unplannable',
+        reasons: ['custom_profile_declaration_missing'],
+      });
+      expect(
+        result.providers.find(
+          (provider) => provider.id === 'untrusted-adapter',
+        ),
+      ).toMatchObject({
+        planningStatus: 'unplannable',
+        reasons: ['custom_provider_untrusted'],
+      });
+      expect(
+        result.providers.find((provider) => provider.id === 'invalid-adapter'),
+      ).toMatchObject({
+        planningStatus: 'unplannable',
+        reasons: ['custom_provider_profile_provider_id_reserved'],
+      });
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.toContain(secret);
+      expect(serialized).not.toContain(fixtureRoot);
+      expect(serialized).not.toMatch(
+        /ACME_API_KEY|command|module|args|options/,
+      );
+      expect(readdirSync(fixtureRoot)).toEqual(filesBefore);
+      expect(existsSync(npmMarker)).toBe(false);
+      expect(existsSync(scriptMarker)).toBe(false);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(resolveCredential).not.toHaveBeenCalled();
+
+      const importControl = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          `await import(${JSON.stringify(pathToFileURL(modulePath).href)})`,
+        ],
+        { encoding: 'utf8' },
+      );
+      const scriptControl = spawnSync(process.execPath, [scriptPath], {
+        encoding: 'utf8',
+      });
+      expect(importControl).toMatchObject({ status: 0, stderr: '' });
+      expect(scriptControl).toMatchObject({ status: 0, stderr: '' });
+      expect(existsSync(npmMarker)).toBe(true);
+      expect(existsSync(scriptMarker)).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not inherit custom issue reasons from adapter-id prefixes', () => {
+    const source = config({
+      providers: {
+        acme: { enabled: true },
+        'acme-other': { enabled: true },
       },
-      availability: {
-        selectable: false,
-        reasons: ['profile_disabled', 'credential_status_unknown'],
+      customProviders: {
+        acme: { type: 'npm', module: 'acme' },
+        'acme-other': {
+          type: 'npm',
+          module: 'acme-other',
+          executionProfile: {
+            bindingId: 'acme-other.search.v1',
+            profile: customProfile('exa'),
+          },
+        },
       },
+      trustedProviderIds: ['acme', 'acme-other'],
     });
-    expect(
-      result.providers.find((provider) => provider.id === 'undeclared-adapter'),
-    ).toMatchObject({
-      tier: 'unknown',
-      credentialStatus: { requirement: 'unknown', presence: 'unknown' },
-      planningStatus: 'unplannable',
-      reasons: ['custom_profile_declaration_missing'],
-    });
-    expect(
-      result.providers.find((provider) => provider.id === 'untrusted-adapter'),
-    ).toMatchObject({
-      planningStatus: 'unplannable',
-      reasons: ['custom_provider_untrusted'],
-    });
-    expect(
-      result.providers.find((provider) => provider.id === 'invalid-adapter'),
-    ).toMatchObject({
-      planningStatus: 'unplannable',
-      reasons: ['custom_provider_profile_provider_id_reserved'],
-    });
-    const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain(secret);
-    expect(serialized).not.toContain(marker);
-    expect(serialized).not.toMatch(/ACME_API_KEY|command|module|args|options/);
-    expect(existsSync(marker)).toBe(false);
+
+    const result = discoverProviders(source, { provider: 'acme' });
+    expect(result.providers).toEqual([
+      expect.objectContaining({
+        id: 'acme',
+        reasons: ['custom_profile_declaration_missing'],
+      }),
+    ]);
   });
 
   it('returns stable secret-insensitive revisions that change with public facts', () => {
@@ -280,8 +375,92 @@ describe('MCP provider discovery projection', () => {
     ).not.toContain('secret-one');
   });
 
+  it.each([
+    {
+      name: 'whitespace in an environment reference',
+      apiKey: '$ EXA_API_KEY ',
+      env: { EXA_API_KEY: 'must-not-match-trimmed-name' },
+      source: 'env',
+    },
+    {
+      name: 'an empty keychain reference',
+      apiKey: 'keychain:',
+      env: {},
+      source: 'keychain',
+    },
+    {
+      name: 'an inherited environment property',
+      apiKey: '$EXA_API_KEY',
+      env: Object.create({ EXA_API_KEY: 'must-not-use-prototype' }) as Record<
+        string,
+        string
+      >,
+      source: 'env',
+    },
+  ])(
+    'matches canonical missing-credential availability for $name',
+    (fixture) => {
+      const source = config({
+        providers: { exa: { enabled: true, apiKey: fixture.apiKey } },
+      });
+      const credentials = { env: fixture.env };
+      const discovery = discoverProviders(
+        source,
+        { provider: 'exa', detail: 'profiles' },
+        credentials,
+      );
+      const canonical = mapConfiguration(source, {
+        authoredGroups: { global: source.groups, project: {} },
+        credentials,
+      }).catalog.get('exa', 'search');
+      const profile = discovery.profiles.find(
+        (candidate) => candidate.selector === 'exa/search',
+      );
+
+      expect(canonical).toBeDefined();
+      expect(discovery.providers).toEqual([
+        expect.objectContaining({
+          id: 'exa',
+          keyConfigured: false,
+          credentialStatus: {
+            requirement: 'required',
+            presence: 'missing',
+            source: fixture.source,
+            authentication: 'not-checked',
+          },
+          planningStatus: 'unavailable',
+          reasons: canonical!.availability.reasons,
+        }),
+      ]);
+      expect(profile).toMatchObject({
+        credentialStatus: {
+          presence: 'missing',
+          source: fixture.source,
+          authentication: 'not-checked',
+        },
+        availability: {
+          selectable: canonical!.availability.selectable,
+          reasons: canonical!.availability.reasons,
+        },
+      });
+    },
+  );
+
   it('filters by adapter or canonical provider and rejects unknown filters', () => {
-    const source = config();
+    const source = config({
+      providers: { 'acme-adapter': { enabled: true } },
+      customProviders: {
+        'acme-adapter': {
+          type: 'npm',
+          module: 'must-not-load',
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: customProfile(),
+          },
+        },
+      },
+      trustedProviderIds: ['acme-adapter'],
+    });
     const adapter = discoverProviders(source, {
       provider: 'openrouter-online',
       detail: 'profiles',
@@ -304,6 +483,33 @@ describe('MCP provider discovery projection', () => {
     expect(canonical.profiles.map((profile) => profile.selector)).toEqual([
       'openrouter/grounded',
       'openrouter/chat',
+    ]);
+
+    const customSummary = discoverProviders(source, {
+      provider: 'acme-provider',
+    });
+    expect(customSummary).toEqual({
+      providers: [expect.objectContaining({ id: 'acme-adapter' })],
+    });
+    const customCanonical = discoverProviders(source, {
+      provider: 'acme-provider',
+      detail: 'profiles',
+    });
+    expect(customCanonical.providers.map((provider) => provider.id)).toEqual([
+      'acme-adapter',
+    ]);
+    expect(customCanonical.profiles.map((profile) => profile.selector)).toEqual(
+      ['acme-provider/search'],
+    );
+    const customAdapter = discoverProviders(source, {
+      provider: 'acme-adapter',
+      detail: 'profiles',
+    });
+    expect(customAdapter.providers.map((provider) => provider.id)).toEqual([
+      'acme-adapter',
+    ]);
+    expect(customAdapter.profiles.map((profile) => profile.selector)).toEqual([
+      'acme-provider/search',
     ]);
     expect(() =>
       discoverProviders(source, { provider: 'not-a-provider' }),

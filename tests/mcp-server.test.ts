@@ -300,6 +300,74 @@ describe('mcp tool surface', () => {
     await server.close();
   });
 
+  it('filters declared custom profiles by canonical provider or adapter id', async () => {
+    const customConfig: Config = {
+      ...makeConfig(),
+      providers: { 'acme-adapter': { enabled: true } },
+      customProviders: {
+        'acme-adapter': {
+          type: 'npm',
+          module: 'must-not-load',
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: {
+              identity: {
+                provider_id: 'acme-provider',
+                profile_id: 'search',
+                target: {
+                  primary: { model_selection: 'not_applicable' },
+                },
+              },
+              result_kind: 'search_results',
+              observation_mode: 'api_output',
+              corpora: ['web'],
+              retrieval_method: 'search_endpoint',
+              access_mode: 'direct',
+              operator_id: 'acme-provider',
+              invocation: 'inline',
+              resumability: 'none',
+            },
+          },
+        },
+      },
+      trustedProviderIds: ['acme-adapter'],
+    };
+    const { client, server } = await connect({
+      loadMergedConfig: () => customConfig,
+    });
+
+    const summary = await client.callTool({
+      name: 'list_providers',
+      arguments: { provider: 'acme-provider' },
+    });
+    const summaryPayload = JSON.parse(
+      (summary.content as { text: string }[])[0].text,
+    );
+    expect(summaryPayload).toEqual({
+      providers: [expect.objectContaining({ id: 'acme-adapter' })],
+    });
+
+    for (const provider of ['acme-provider', 'acme-adapter']) {
+      const response = await client.callTool({
+        name: 'list_providers',
+        arguments: { provider, detail: 'profiles' },
+      });
+      const payload = JSON.parse(
+        (response.content as { text: string }[])[0].text,
+      );
+      expect(
+        payload.providers.map((entry: { id: string }) => entry.id),
+      ).toEqual(['acme-adapter']);
+      expect(
+        payload.profiles.map(
+          (profile: { selector: string }) => profile.selector,
+        ),
+      ).toEqual(['acme-provider/search']);
+    }
+
+    await server.close();
+  });
+
   it('passes the merged config to check_async', async () => {
     const config = makeConfig();
     const runDir = join(baseDir, 'check-async');

@@ -6,6 +6,9 @@ import {
 import {
   type CredentialContext,
   describeCredentialReference,
+  hasCredential,
+  isKeychainCredentialRef,
+  keychainCredentialName,
 } from '../core/credentials.js';
 import {
   type AdapterProfileBinding,
@@ -85,31 +88,24 @@ function credentialStatus(
     };
   }
 
-  const description = describeCredentialReference(reference);
-  if (description.source === 'keychain') {
+  if (reference && isKeychainCredentialRef(reference)) {
     return {
       requirement,
-      presence: 'unknown',
+      presence:
+        keychainCredentialName(reference) === undefined ? 'missing' : 'unknown',
       source: 'keychain',
       authentication: 'not-checked',
     };
   }
-  if (description.source === 'env') {
-    const value = description.name
-      ? credentials.env?.[description.name]
-      : undefined;
+
+  const description = describeCredentialReference(reference);
+  if (description.source === 'env' || description.source === 'literal') {
     return {
       requirement,
-      presence: value ? 'present' : 'missing',
-      source: 'env',
-      authentication: 'not-checked',
-    };
-  }
-  if (description.source === 'literal') {
-    return {
-      requirement,
-      presence: 'present',
-      source: 'literal',
+      presence: hasCredential(reference, { env: credentials.env })
+        ? 'present'
+        : 'missing',
+      source: description.source,
       authentication: 'not-checked',
     };
   }
@@ -145,10 +141,14 @@ function customIssueReasons(
   mapped: ConfigurationMappingResult,
 ): string[] {
   const pointer = adapterId.replaceAll('~', '~0').replaceAll('/', '~1');
+  const basePath = `/customProviders/${pointer}`;
   return [
     ...new Set(
       mapped.preflight.issues
-        .filter((issue) => issue.path.startsWith(`/customProviders/${pointer}`))
+        .filter(
+          (issue) =>
+            issue.path === basePath || issue.path.startsWith(`${basePath}/`),
+        )
         .map((issue) => issue.code),
     ),
   ].sort();
@@ -234,6 +234,9 @@ export function discoverProviders(
       custom,
     ]),
   );
+  const customByAdapterId = new Map(
+    mapped.custom_profile_bindings.map((custom) => [custom.adapter_id, custom]),
+  );
   const profileAdapterIds = new Map<string, string>();
   for (const [adapterId, binding] of bindings) {
     profileAdapterIds.set(
@@ -298,9 +301,7 @@ export function discoverProviders(
     ([left], [right]) => (left < right ? -1 : left > right ? 1 : 0),
   )) {
     const providerConfig = config.providers[adapterId];
-    const custom = mapped.custom_profile_bindings.find(
-      (candidate) => candidate.adapter_id === adapterId,
-    );
+    const custom = customByAdapterId.get(adapterId);
     const key = custom
       ? catalogProfileKey(
           custom.profile.identity.provider_id,
@@ -414,7 +415,11 @@ export function discoverProviders(
     if (!filter) return true;
     if (summary.id === filter) return true;
     const binding = bindings.get(summary.id);
-    return binding?.provider_id === filter;
+    const custom = customByAdapterId.get(summary.id);
+    return (
+      binding?.provider_id === filter ||
+      custom?.profile.identity.provider_id === filter
+    );
   };
   const profileMatchesFilter = (
     profile: (typeof profiles)[number],
