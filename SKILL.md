@@ -26,10 +26,11 @@ Do not silently fall back to Librarium 1.x or install a mutable Git branch. If
 npm has no v2 release yet, report that distribution blocker instead. Configure
 available API keys with `librarium init --auto`, then inspect the usable matrix
 offline with `librarium doctor` and `librarium ls --json`. This confirms only
-configuration and credential presence, not authentication or connectivity. Use
-`librarium doctor --live` only when the user explicitly wants live connectivity
-tests; it makes provider network requests and may incur charges. Never print
-secret values.
+configuration and credential presence, not authentication or connectivity, and
+does not load configured custom provider code. Use `librarium doctor --live`
+only when the user explicitly wants live connectivity tests; it loads trusted
+custom providers, makes provider network requests, and may incur charges. Never
+print secret values.
 
 ## 7-Phase Research Workflow
 

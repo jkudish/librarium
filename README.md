@@ -61,8 +61,9 @@ librarium answer "What changed in PostgreSQL 17?" --verify
 ```
 
 Use `librarium doctor` before a paid run to check configuration and credential
-presence offline. Connectivity is not tested unless you explicitly run
-`librarium doctor --live`, which makes provider network requests and may incur
+presence offline without loading configured custom provider code. Connectivity
+is not tested unless you explicitly run `librarium doctor --live`, which loads
+trusted custom providers, makes provider network requests, and may incur
 charges. `librarium run --json` sends only JSON to standard output; progress and
 diagnostics go to standard error. New requests default to the `quick` workflow
 in `sync` mode. Pass `--group`, `--providers`, or `--mode` to override those
@@ -336,12 +337,13 @@ librarium doctor --json
 Package maintainers should also run `npm test` after changing migration or CLI
 behavior. These commands, including both forms of `doctor` shown above, inspect
 configuration and credential presence offline; they do not authenticate with or
-contact providers. Use `librarium doctor --live` only when a connectivity check
-is required, because it makes provider network requests and may incur charges.
-Rollback is normally just deleting the v2 sidecar, because the command never
-changes the v1 source. If you later activate v2 configuration by a separate,
-explicit installation step, restore the v1 backup using that installation
-procedure's rollback.
+contact providers, load custom provider modules, or spawn custom provider
+scripts. Use `librarium doctor --live` only when a connectivity check is
+required, because it loads trusted custom provider code, makes provider network
+requests, and may incur charges. Rollback is normally just deleting the v2
+sidecar, because the command never changes the v1 source. If you later activate
+v2 configuration by a separate, explicit installation step, restore the v1
+backup using that installation procedure's rollback.
 
 On Windows, owner-only writes require the supported Windows PowerShell ACL
 boundary. If Librarium cannot establish and verify a protected current-user-only

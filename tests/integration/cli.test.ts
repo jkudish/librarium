@@ -1,5 +1,7 @@
 import { execSync } from 'node:child_process';
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -19,7 +21,7 @@ afterAll(() => {
   rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-function run(args: string): string {
+function run(args: string, home = TEST_HOME): string {
   try {
     return execSync(`node ${CLI} ${args}`, {
       encoding: 'utf-8',
@@ -27,7 +29,7 @@ function run(args: string): string {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        HOME: TEST_HOME,
+        HOME: home,
       },
     });
   } catch (err: unknown) {
@@ -161,5 +163,96 @@ describe('CLI integration', () => {
     const output = run('doctor --json');
     const parsed = JSON.parse(output);
     expect(typeof parsed).toBe('object');
+  });
+
+  it('doctor text and JSON do not execute trusted custom provider code', () => {
+    const home = mkdtempSync(resolve(tmpdir(), 'librarium-doctor-offline-'));
+    const marker = resolve(home, 'custom-provider-executed');
+    const npmProvider = resolve(home, 'side-effect-provider.mjs');
+    const scriptProvider = resolve(home, 'side-effect-provider-script.mjs');
+    const configDir = resolve(home, '.config/librarium');
+    mkdirSync(configDir, { recursive: true });
+
+    writeFileSync(
+      npmProvider,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(marker)}, 'npm imported');`,
+        'export default {',
+        "  id: 'side-effect-npm',",
+        "  displayName: 'Side Effect NPM',",
+        "  tier: 'raw-search',",
+        "  execution: 'inline',",
+        "  envVar: '',",
+        '  requiresApiKey: false,',
+        '  async execute() { throw new Error("unused"); },',
+        '};',
+      ].join('\n'),
+    );
+    writeFileSync(
+      scriptProvider,
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(marker)}, 'script spawned');`,
+      ].join('\n'),
+    );
+    writeFileSync(
+      resolve(configDir, 'config.json'),
+      JSON.stringify({
+        version: 1,
+        defaults: {
+          outputDir: './agents/librarium',
+          maxParallel: 2,
+          timeout: 30,
+          asyncTimeout: 1800,
+          asyncPollInterval: 10,
+          mode: 'sync',
+          llmWebSearch: true,
+        },
+        providers: {
+          'side-effect-npm': { enabled: true },
+          'side-effect-script': { enabled: true },
+        },
+        customProviders: {
+          'side-effect-npm': { type: 'npm', module: npmProvider },
+          'side-effect-script': {
+            type: 'script',
+            command: process.execPath,
+            args: [scriptProvider],
+          },
+        },
+        trustedProviderIds: ['side-effect-npm', 'side-effect-script'],
+        groups: {},
+      }),
+    );
+
+    try {
+      const text = run('doctor', home);
+      expect(text).toContain('side-effect-npm');
+      expect(text).toContain('side-effect-script');
+      expect(text).toContain(
+        'Credential requirements unknown; connectivity not tested',
+      );
+      expect(existsSync(marker)).toBe(false);
+
+      const results = JSON.parse(run('doctor --json', home));
+      expect(results).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'side-effect-npm',
+            credentialStatus: 'unknown',
+            connectivity: 'unchecked',
+          }),
+          expect.objectContaining({
+            id: 'side-effect-script',
+            credentialStatus: 'unknown',
+            connectivity: 'unchecked',
+          }),
+        ]),
+      );
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
