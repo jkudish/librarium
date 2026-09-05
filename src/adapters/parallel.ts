@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { OpaqueIdSchema } from '../contracts/common.js';
 import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import {
+  HttpRequestAbortedError,
+  HttpRequestTimeoutError,
+} from '../core/http-client.js';
 import { normalizeUrl } from '../core/normalizer.js';
 import type {
   AsyncPollResult,
@@ -526,6 +530,7 @@ export class ParallelChatProvider extends BaseProvider {
         return this.resultError(
           durationMs,
           'Parallel returned an invalid Chat response',
+          { kind: 'provider', httpStatus: response.status },
         );
       const content = parsedResponse.data.choices
         .map((choice) => choice.message?.content)
@@ -534,6 +539,7 @@ export class ParallelChatProvider extends BaseProvider {
         return this.resultError(
           durationMs,
           'Parallel returned a Chat response without message content',
+          { kind: 'provider', httpStatus: response.status },
         );
       const basis = basisMeta(parsedResponse.data.basis);
       return {
@@ -557,14 +563,20 @@ export class ParallelChatProvider extends BaseProvider {
         },
       };
     } catch (error) {
-      return {
-        provider: this.id,
-        tier: this.tier,
-        content: '',
-        citations: [],
-        durationMs: Math.round(performance.now() - start),
-        error: this.formatCatchError(error),
-      };
+      return this.resultError(
+        Math.round(performance.now() - start),
+        this.formatCatchError(error),
+        {
+          kind:
+            error instanceof HttpRequestTimeoutError ||
+            error instanceof HttpRequestAbortedError ||
+            (error instanceof DOMException && error.name === 'AbortError')
+              ? 'timeout'
+              : error instanceof TypeError
+                ? 'network'
+                : 'provider',
+        },
+      );
     }
   }
   private resultError(

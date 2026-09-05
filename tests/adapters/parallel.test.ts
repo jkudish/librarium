@@ -332,9 +332,23 @@ describe('Parallel first-party providers', () => {
         content: '',
         citations: [],
         error: expect.stringContaining(message),
+        failureDiagnostic: { kind: 'provider', httpStatus: 200 },
       });
     },
   );
+
+  it('records a bounded network diagnostic for Chat transport failures', async () => {
+    const result = await new ParallelChatProvider({
+      apiKey: key,
+      httpClient: vi.fn(async () => {
+        throw new TypeError('private network detail');
+      }) as unknown as HttpClient,
+      model: 'base',
+    }).execute('question', { timeout: 9 });
+
+    expect(result.failureDiagnostic).toEqual({ kind: 'network' });
+    expect(result.failureDiagnostic).not.toHaveProperty('message');
+  });
 
   it('has durable Task create, poll, retrieve and terminal mapping', async () => {
     const http = vi
