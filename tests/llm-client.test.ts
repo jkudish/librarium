@@ -6,6 +6,8 @@ import {
   preferenceFromConfig,
   resolveLlmClients,
 } from '../src/commands/llm-client.js';
+import { paidLlmAttemptHooks } from '../src/commands/paid-llm-attempt.js';
+import { fingerprint, RunPaidWallet } from '../src/run-paid-wallet.js';
 import type { Config } from '../src/types.js';
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
@@ -350,6 +352,73 @@ describe('callWithCascade', () => {
         json: true,
       }),
     ).rejects.toThrow('credential [REDACTED] rejected');
+  });
+
+  it('aborts a late fallback at the original run deadline', async () => {
+    const deadlineAt = Date.now() + 150;
+    let calls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        calls += 1;
+        if (calls === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return new Response(JSON.stringify({ error: { message: 'down' } }), {
+            status: 500,
+          });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init.signal as AbortSignal;
+          const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (signal.aborted) abort();
+          else signal.addEventListener('abort', abort, { once: true });
+        });
+      }),
+    );
+    const wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint('request'),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date().toISOString(),
+      deadline_at: new Date(deadlineAt).toISOString(),
+      stages: [
+        {
+          stage: 'synthesis',
+          requested: true,
+          fallback_authorized: true,
+          prompt_version: 'synthesis-v1',
+          providers: clients.map(({ provider, model }) => ({
+            provider,
+            model,
+          })),
+        },
+      ],
+    });
+    const paid = paidLlmAttemptHooks({
+      wallet,
+      stage: 'synthesis',
+      prompt: 'p',
+      config: makeConfig(),
+    });
+    const started = Date.now();
+
+    await expect(
+      callWithCascade({
+        clients,
+        prompt: 'p',
+        action: 'synthesis',
+        timeoutMs: wallet.remainingMs(),
+        json: false,
+        signal: paid.signal,
+        beforeAttempt: paid.beforeAttempt,
+        onAttempt: paid.onAttempt,
+      }),
+    ).rejects.toThrow();
+
+    expect(calls).toBe(2);
+    expect(wallet.signal.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(400);
+    expect(wallet.snapshot().attempts).toHaveLength(2);
   });
 
   it('treats a parse throw as a failure and cascades', async () => {

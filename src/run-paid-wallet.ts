@@ -161,6 +161,12 @@ export interface RunPaidWalletOptions {
   readonly stages: readonly PaidStageDeclaration[];
   readonly on_change?: (ledger: PaidRunLedger) => void;
   readonly now?: () => number;
+  /** Previously validated durable state, used only when resuming a sidecar-bearing run. */
+  readonly restored_ledger?: PaidRunLedger;
+  /** Short cross-process critical section; never held across a provider call. */
+  readonly with_mutation_lock?: <T>(action: () => T) => T;
+  /** Fresh state read inside with_mutation_lock before every mutation. */
+  readonly load_latest?: () => PaidRunLedger | undefined;
 }
 
 /** Sole run-wide admission and accounting authority for every paid call. */
@@ -170,11 +176,46 @@ export class RunPaidWallet {
   readonly #stages: PaidRunLedger['stages'];
   readonly #authorized = new Map<PaidRunStage, Set<string>>();
   readonly #controller = new AbortController();
+  readonly #signal: AbortSignal;
+  readonly #policyFingerprint: string;
   #sequence = 0;
   #cancellationRequestedAt?: string;
 
   constructor(options: RunPaidWalletOptions) {
     this.#options = options;
+    const remainingMs = Date.parse(options.deadline_at) - this.#now();
+    const deadlineSignal =
+      remainingMs <= 0
+        ? AbortSignal.abort(new Error('Run deadline exceeded'))
+        : AbortSignal.timeout(remainingMs);
+    this.#signal = AbortSignal.any([this.#controller.signal, deadlineSignal]);
+    if (options.restored_ledger) {
+      const restored = structuredClone(options.restored_ledger);
+      this.#stages = restored.stages;
+      this.#attempts.push(...restored.attempts);
+      this.#sequence = restored.attempts.reduce((highest, attempt) => {
+        const sequence = Number.parseInt(
+          attempt.attempt_id.replace(/^paid-attempt-/, ''),
+          10,
+        );
+        return Number.isSafeInteger(sequence)
+          ? Math.max(highest, sequence)
+          : highest;
+      }, 0);
+      this.#cancellationRequestedAt = restored.cancellation_requested_at;
+      if (this.#cancellationRequestedAt) this.#controller.abort();
+      for (const stage of restored.stages) {
+        this.#authorized.set(
+          stage.stage,
+          new Set(stage.providers.map(authorizedKey)),
+        );
+      }
+      this.#policyFingerprint = fingerprint({
+        limits: restored.limits,
+        stages: restored.stages,
+      });
+      return;
+    }
     let reserved = '0';
     this.#stages = options.stages.map((declaration) => {
       this.#authorized.set(
@@ -223,11 +264,15 @@ export class RunPaidWallet {
       }
       return { ...declaration, status: 'requested' as const };
     });
+    this.#policyFingerprint = fingerprint({
+      limits: options.limits ?? {},
+      stages: this.#stages,
+    });
     this.#emit();
   }
 
   get signal(): AbortSignal {
-    return this.#controller.signal;
+    return this.#signal;
   }
 
   get deadlineAt(): string {
@@ -251,20 +296,42 @@ export class RunPaidWallet {
     return this.#authorized.get(stage)?.has(authorizedKey(provider)) ?? false;
   }
 
+  fallbackAuthorized(stage: PaidRunStage): boolean {
+    return this.stageStatus(stage)?.fallback_authorized ?? false;
+  }
+
+  authorizedProvider(
+    stage: PaidRunStage,
+    provider: string,
+  ): PaidStageProvider | undefined {
+    const matches = this.stageStatus(stage)?.providers.filter(
+      (candidate) => candidate.provider === provider,
+    );
+    if (!matches || matches.length === 0) return undefined;
+    const distinct = new Set(matches.map(authorizedKey));
+    return distinct.size === 1 ? matches[0] : undefined;
+  }
+
   cancel(): void {
-    if (this.#cancellationRequestedAt) return;
-    this.#cancellationRequestedAt = new Date(this.#now()).toISOString();
-    this.#controller.abort();
-    this.#emit();
+    this.#mutate(() => {
+      if (this.#cancellationRequestedAt) return;
+      this.#cancellationRequestedAt = new Date(this.#now()).toISOString();
+      this.#controller.abort();
+      this.#emit();
+    });
   }
 
   begin(input: PaidAttemptInput): string {
+    return this.#mutate(() => this.#begin(input));
+  }
+
+  #begin(input: PaidAttemptInput): string {
     const now = this.#now();
     const stage = this.stageStatus(input.stage);
     let reasonCode: string | undefined;
     if (stage?.status !== 'requested') {
       reasonCode = stage?.reason_code ?? 'stage_not_requested';
-    } else if (this.signal.aborted) {
+    } else if (this.#cancellationRequestedAt) {
       reasonCode = 'run_cancelled';
     } else if (now >= Date.parse(this.deadlineAt)) {
       reasonCode = 'run_deadline_exceeded';
@@ -334,6 +401,10 @@ export class RunPaidWallet {
   }
 
   finish(attemptId: string, completion: PaidAttemptCompletion): void {
+    this.#mutate(() => this.#finish(attemptId, completion));
+  }
+
+  #finish(attemptId: string, completion: PaidAttemptCompletion): void {
     const index = this.#attempts.findIndex(
       (entry) => entry.attempt_id === attemptId,
     );
@@ -342,7 +413,44 @@ export class RunPaidWallet {
     const reported = costMicrousdFromUsd(completion.usage?.costUsd);
     this.#attempts[index] = {
       ...prior,
-      status: this.signal.aborted ? 'cancelled' : completion.status,
+      status: this.#cancellationRequestedAt ? 'cancelled' : completion.status,
+      finished_at: new Date(this.#now()).toISOString(),
+      reported:
+        reported === undefined
+          ? { state: 'unknown' }
+          : { state: 'known', cost_microusd: reported },
+      ...(completion.output_fingerprint && {
+        output_fingerprint: completion.output_fingerprint,
+      }),
+      ...(completion.output_ref && { output_ref: completion.output_ref }),
+    };
+    this.#emit();
+  }
+
+  reconcileParentAttempt(
+    parentAttemptId: string,
+    completion: PaidAttemptCompletion,
+  ): void {
+    this.#mutate(() =>
+      this.#reconcileParentAttempt(parentAttemptId, completion),
+    );
+  }
+
+  #reconcileParentAttempt(
+    parentAttemptId: string,
+    completion: PaidAttemptCompletion,
+  ): void {
+    const attempt = this.#attempts.findLast(
+      (entry) =>
+        entry.parent_attempt_id === parentAttemptId &&
+        ['running', 'accepted', 'acceptance_unknown'].includes(entry.status),
+    );
+    if (!attempt) return;
+    const index = this.#attempts.indexOf(attempt);
+    const reported = costMicrousdFromUsd(completion.usage?.costUsd);
+    this.#attempts[index] = {
+      ...attempt,
+      status: this.#cancellationRequestedAt ? 'cancelled' : completion.status,
       finished_at: new Date(this.#now()).toISOString(),
       reported:
         reported === undefined
@@ -424,6 +532,50 @@ export class RunPaidWallet {
 
   #now(): number {
     return this.#options.now?.() ?? Date.now();
+  }
+
+  #mutate<T>(action: () => T): T {
+    const mutate = () => {
+      if (this.#options.load_latest) {
+        const latest = this.#options.load_latest();
+        if (!latest) {
+          throw new Error('The required paid-attempt ledger is missing.');
+        }
+        if (
+          latest.request_id !== this.#options.request_id ||
+          latest.request_fingerprint !== this.#options.request_fingerprint ||
+          latest.config_fingerprint !== this.#options.config_fingerprint ||
+          latest.created_at !== this.#options.created_at ||
+          latest.deadline_at !== this.#options.deadline_at ||
+          fingerprint({ limits: latest.limits, stages: latest.stages }) !==
+            this.#policyFingerprint
+        ) {
+          throw new Error(
+            'The paid-attempt ledger no longer matches this run.',
+          );
+        }
+        this.#attempts.splice(
+          0,
+          this.#attempts.length,
+          ...structuredClone(latest.attempts),
+        );
+        this.#sequence = this.#attempts.reduce((highest, attempt) => {
+          const sequence = Number.parseInt(
+            attempt.attempt_id.replace(/^paid-attempt-/, ''),
+            10,
+          );
+          return Number.isSafeInteger(sequence)
+            ? Math.max(highest, sequence)
+            : highest;
+        }, 0);
+        this.#cancellationRequestedAt = latest.cancellation_requested_at;
+        if (this.#cancellationRequestedAt) this.#controller.abort();
+      }
+      return action();
+    };
+    return this.#options.with_mutation_lock
+      ? this.#options.with_mutation_lock(mutate)
+      : mutate();
   }
 
   #emit(): void {

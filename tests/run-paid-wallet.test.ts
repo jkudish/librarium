@@ -1,9 +1,11 @@
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   PaidRunLedgerSchema,
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
   writePaidRunLedger,
 } from '../src/node-paid-attempt-ledger.js';
 import {
@@ -226,5 +228,74 @@ describe('run-wide paid wallet', () => {
     });
     expect(JSON.stringify(parsed)).not.toContain('research input');
     expect(JSON.stringify(parsed)).not.toContain('research output');
+  });
+
+  it('serializes competing resumed-wallet admissions against the freshest balance', () => {
+    const root = join(tmpdir(), `librarium-wallet-${crypto.randomUUID()}`);
+    const runDirectory = join(root, 'run-1');
+    mkdirSync(runDirectory, { recursive: true });
+    roots.push(root);
+    const initial = wallet({
+      max: '10000',
+      onChange: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+    }).snapshot();
+    const restore = () =>
+      new RunPaidWallet({
+        request_id: initial.request_id,
+        request_fingerprint: initial.request_fingerprint,
+        config_fingerprint: initial.config_fingerprint,
+        created_at: initial.created_at,
+        deadline_at: initial.deadline_at,
+        limits: initial.limits,
+        stages: initial.stages,
+        restored_ledger: initial,
+        now: () => Date.parse('2026-09-05T12:00:01.000Z'),
+        with_mutation_lock: (action) =>
+          withPaidRunLedgerLock(root, runDirectory, action),
+        load_latest: () => readPaidRunLedger(root, runDirectory),
+        on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      });
+    const first = restore();
+    const second = restore();
+
+    first.begin({
+      stage: 'research',
+      provider: 'research-a',
+      profile: 'research-a\0default',
+      estimated_cost_microusd: '7000',
+      input_fingerprint: fingerprint('first'),
+    });
+    expect(() =>
+      second.begin({
+        stage: 'research',
+        provider: 'research-a',
+        profile: 'research-a\0default',
+        estimated_cost_microusd: '7000',
+        input_fingerprint: fingerprint('second'),
+      }),
+    ).toThrowError(/estimated_budget_exhausted/);
+
+    expect(readPaidRunLedger(root, runDirectory)?.attempts).toEqual([
+      expect.objectContaining({ status: 'running' }),
+      expect.objectContaining({
+        status: 'blocked',
+        reason_code: 'estimated_budget_exhausted',
+      }),
+    ]);
+  });
+
+  it('fails closed when a run marked ledger-bearing loses its sidecar', () => {
+    const root = join(tmpdir(), `librarium-wallet-${crypto.randomUUID()}`);
+    const runDirectory = join(root, 'run-1');
+    mkdirSync(runDirectory, { recursive: true });
+    roots.push(root);
+    wallet({
+      onChange: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+    });
+    unlinkSync(join(runDirectory, 'paid-attempt-ledger.json'));
+
+    expect(() => readPaidRunLedger(root, runDirectory)).toThrow(
+      'required paid-attempt ledger is missing',
+    );
   });
 });

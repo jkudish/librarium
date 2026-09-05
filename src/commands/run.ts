@@ -29,7 +29,11 @@ import {
   createRegisteredProviderAttemptBridge,
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
-import { writePaidRunLedger } from '../node-paid-attempt-ledger.js';
+import {
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
+  writePaidRunLedger,
+} from '../node-paid-attempt-ledger.js';
 import {
   assertAdmittedAdaptersRegistered,
   emitRequestPreflightNotices,
@@ -249,6 +253,7 @@ export async function executeRun(
     spinner.stop();
     prettyStream.write(`${line}\n`);
   };
+  let onInterrupt: (() => void) | undefined;
   const retired = retiredProviderSelectionIssues(opts.providers);
   if (retired.length > 0) {
     spinner.fail(retired.map((issue) => issue.message).join(' '));
@@ -406,20 +411,26 @@ export async function executeRun(
         : [];
     });
     const verificationSearchProviders = Array.from(
-      new Set(researchProviders.map((provider) => provider.provider)),
+      new Map(
+        researchProviders.map((provider) => [
+          `${provider.provider}\0${provider.profile ?? ''}`,
+          provider,
+        ]),
+      ).values(),
     )
-      .filter((id) => {
-        const tier = resolveExactProvider(id)?.tier;
+      .filter((provider) => {
+        const tier = resolveExactProvider(provider.provider)?.tier;
         return tier === 'ai-grounded' || tier === 'raw-search';
       })
-      .map((provider) => {
+      .map((declared) => {
         const estimate = buildProviderMetering(
-          provider,
-          config.providers[provider],
+          declared.provider,
+          config.providers[declared.provider],
         ).estimate;
         const cost = costMicrousdFromUsd(estimate?.estimatedCostUsd);
         return {
-          provider,
+          provider: declared.provider,
+          ...(declared.profile && { profile: declared.profile }),
           ...(cost !== undefined && { estimated_cost_microusd: cost }),
           ...(estimate?.pricingVersion && {
             estimate_source: `pricing:${estimate.pricingVersion}`,
@@ -484,6 +495,9 @@ export async function executeRun(
       }),
       stages,
       on_change: (ledger) => writePaidRunLedger(baseDir, outputDir, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(baseDir, outputDir, action),
+      load_latest: () => readPaidRunLedger(baseDir, outputDir),
     });
     let stateCreated = false;
     let interrupted = false;
@@ -504,7 +518,7 @@ export async function executeRun(
         .then(() => undefined)
         .catch(() => undefined);
     };
-    const onInterrupt = (): void => {
+    onInterrupt = (): void => {
       if (interrupted) return;
       interrupted = true;
       wallet.cancel();
@@ -600,6 +614,7 @@ export async function executeRun(
         } catch {
           // Preserve any unexpected artifact for diagnosis.
         }
+        process.off('SIGINT', onInterrupt);
         process.exitCode = 130;
         return { exitCode: 130 };
       }
@@ -611,8 +626,6 @@ export async function executeRun(
           outputs_by_attempt: {},
         },
       };
-    } finally {
-      process.off('SIGINT', onInterrupt);
     }
     await cancellation;
     if (interrupted && stateCreated) {
@@ -665,6 +678,7 @@ export async function executeRun(
         );
       }
     }
+    await cancellation;
     const successful = presentation.reports.filter(
       (report) => report.status === 'success',
     );
@@ -771,9 +785,11 @@ export async function executeRun(
             : 2
         : 0;
     if (opts.open && exitCode !== 2) openPath(reportPath ?? outputDir);
+    process.off('SIGINT', onInterrupt);
     process.exitCode = exitCode;
     return { exitCode, outputDir };
   } catch (error) {
+    if (onInterrupt) process.off('SIGINT', onInterrupt);
     spinner.fail(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
     return { exitCode: 2 };

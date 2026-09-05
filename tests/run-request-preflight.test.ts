@@ -164,9 +164,17 @@ vi.mock('../src/node-run-directory.js', () => ({
   },
 }));
 
-vi.mock('../src/node-paid-attempt-ledger.js', () => ({
-  writePaidRunLedger: () => {},
-}));
+vi.mock('../src/node-paid-attempt-ledger.js', () => {
+  let ledger: unknown;
+  return {
+    writePaidRunLedger: (_root: string, _run: string, next: unknown) => {
+      ledger = structuredClone(next);
+    },
+    readPaidRunLedger: () => structuredClone(ledger),
+    withPaidRunLedgerLock: <T>(_root: string, _run: string, action: () => T) =>
+      action(),
+  };
+});
 
 vi.mock('../src/node-canonical-run.js', () => ({
   createNodeCoordinatorDependencies: () => ({

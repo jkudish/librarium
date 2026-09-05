@@ -23,7 +23,11 @@ import {
   createRegisteredProviderAttemptBridge,
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
-import { writePaidRunLedger } from '../node-paid-attempt-ledger.js';
+import {
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
+  writePaidRunLedger,
+} from '../node-paid-attempt-ledger.js';
 import {
   assertAdmittedAdaptersRegistered,
   emitRequestPreflightNotices,
@@ -289,6 +293,9 @@ export async function runResearchSilent(
     }),
     stages,
     on_change: (ledger) => writePaidRunLedger(baseDir, outputDir, ledger),
+    with_mutation_lock: (action) =>
+      withPaidRunLedgerLock(baseDir, outputDir, action),
+    load_latest: () => readPaidRunLedger(baseDir, outputDir),
   });
 
   // Optional one-shot LLM refine. Never allowed to break the run.

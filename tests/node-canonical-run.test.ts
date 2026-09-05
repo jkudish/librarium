@@ -37,6 +37,11 @@ import {
   runCanonicalPreparedExecution,
 } from '../src/node-canonical-run.js';
 import {
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
+  writePaidRunLedger,
+} from '../src/node-paid-attempt-ledger.js';
+import {
   fingerprint,
   type PaidStageDeclaration,
   RunPaidWallet,
@@ -241,6 +246,42 @@ function exactBindings(
     now: () => START,
     wait: async () => {},
   };
+}
+
+function durablePaidStages(
+  providers: PaidStageDeclaration['providers'],
+  fallbackAuthorized = false,
+): PaidStageDeclaration[] {
+  return [
+    {
+      stage: 'refinement',
+      requested: false,
+      fallback_authorized: false,
+      prompt_version: 'refine-v1',
+      providers: [],
+    },
+    {
+      stage: 'research',
+      requested: true,
+      fallback_authorized: fallbackAuthorized,
+      prompt_version: 'canonical-request-v3',
+      providers,
+    },
+    {
+      stage: 'synthesis',
+      requested: false,
+      fallback_authorized: false,
+      prompt_version: 'synthesis-v1',
+      providers: [],
+    },
+    {
+      stage: 'verification',
+      requested: false,
+      fallback_authorized: false,
+      prompt_version: 'verification-v1',
+      providers: [],
+    },
+  ];
 }
 
 describe('canonical v3 run.json', () => {
@@ -657,17 +698,42 @@ describe('canonical v3 run.json', () => {
       retrieve,
     };
 
-    const accepted = await runCanonicalPreparedExecution(
-      prepared([durableProfile], 'async'),
-      {
-        runs_root: root,
-        run_directory: runDirectory,
-        coordinator: coordinator(),
-        attempt_bridge: exactBindings([durableProfile], {
-          'adapter-durable': provider,
-        }),
-      },
-    );
+    const plan = prepared([durableProfile], 'async');
+    const profileKey = profileIdentityKey(durableProfile.identity);
+    const frozenPlan = plan.profile_plans_by_identity[profileKey];
+    if (!frozenPlan) throw new Error('missing durable fixture plan');
+    plan.profile_plans_by_identity[profileKey] = {
+      ...frozenPlan,
+      estimate: { estimated_cost_microusd: '125000' },
+    };
+    const wallet = new RunPaidWallet({
+      request_id: plan.request.request_id,
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date(START).toISOString(),
+      deadline_at: new Date(START + 60_000).toISOString(),
+      stages: durablePaidStages([
+        {
+          provider: 'adapter-durable',
+          profile: profileKey,
+          estimated_cost_microusd: '125000',
+        },
+      ]),
+      now: () => START,
+      on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(root, runDirectory, action),
+      load_latest: () => readPaidRunLedger(root, runDirectory),
+    });
+    const accepted = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([durableProfile], {
+        'adapter-durable': provider,
+      }),
+      paid_wallet: wallet,
+    });
     expect(accepted.response).toBeUndefined();
     expect(accepted.runtime.state.attempts[0]).toMatchObject({
       status: 'submitted',
@@ -691,7 +757,259 @@ describe('canonical v3 run.json', () => {
     expect(poll).toHaveBeenCalledOnce();
     expect(retrieve).toHaveBeenCalledOnce();
     expect(resumed.response?.status).toBe('succeeded');
-    expect(readdirSync(runDirectory).sort()).toEqual(['run.json']);
+    expect(readdirSync(runDirectory).sort()).toEqual([
+      'paid-attempt-ledger.json',
+      'paid-attempt-ledger.required',
+      'run.json',
+    ]);
+    expect(readPaidRunLedger(root, runDirectory)?.attempts).toEqual([
+      expect.objectContaining({
+        parent_attempt_id: accepted.runtime.state.attempts[0]?.attempt_id,
+        status: 'succeeded',
+        reported: { state: 'known', cost_microusd: '125000' },
+      }),
+    ]);
+  });
+
+  it('restores prior stage spend before admitting a fallback after restart', async () => {
+    const { root, runDirectory } = directories();
+    const primary = profile('durable-primary', 'background');
+    const fallback = profile('recovery-fallback', 'background');
+    const plan = prepared([primary], 'async');
+    const primaryKey = profileIdentityKey(primary.identity);
+    const fallbackKey = profileIdentityKey(fallback.identity);
+    const primaryPlan = plan.profile_plans_by_identity[primaryKey];
+    if (!primaryPlan) throw new Error('missing primary plan');
+    plan.profile_plans_by_identity[primaryKey] = {
+      ...primaryPlan,
+      estimate: { estimated_cost_microusd: '100' },
+    };
+    plan.profile_plans_by_identity[fallbackKey] = {
+      profile_key: fallbackKey,
+      identity: fallback.identity,
+      binding: {
+        adapter_id: 'adapter-recovery-fallback',
+        binding_id: 'binding-recovery-fallback',
+      },
+      estimate: { estimated_cost_microusd: '100' },
+    };
+    plan.request.fallback_reserve = [
+      {
+        candidate_id: 'candidate-1',
+        position: 0,
+        profile: fallback,
+        eligible_slot_ids: ['slot-0'],
+      },
+    ];
+    plan.policy = {
+      ...plan.policy,
+      budgets: {
+        max_estimated_cost_microusd: '250',
+        max_actual_cost_microusd: '250',
+      },
+      fallback: {
+        kind: 'explicit',
+        reserve: [fallback.identity],
+      },
+    };
+    const submit = vi.fn(async () => ({
+      provider: 'adapter-durable-primary',
+      taskId: 'durable-task',
+      query: plan.request.query,
+      submittedAt: START,
+      status: 'pending' as const,
+    }));
+    const fallbackSubmit = vi.fn(async () => ({
+      provider: 'adapter-recovery-fallback',
+      taskId: 'fallback-task',
+      query: plan.request.query,
+      submittedAt: START,
+      status: 'pending' as const,
+    }));
+    const providers: Record<string, Provider> = {
+      'adapter-durable-primary': {
+        id: 'adapter-durable-primary',
+        displayName: 'Durable primary',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit,
+        poll: vi.fn(async () => ({ status: 'completed' as const })),
+        retrieve: vi.fn(async () => ({
+          ...success('adapter-durable-primary'),
+          error: 'accepted task failed',
+          usage: { costUsd: 0.0001 },
+        })),
+      },
+      'adapter-recovery-fallback': {
+        id: 'adapter-recovery-fallback',
+        displayName: 'Recovery fallback',
+        tier: 'ai-grounded',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: fallbackSubmit,
+        poll: vi.fn(async () => ({ status: 'completed' as const })),
+        retrieve: vi.fn(async () => success('adapter-recovery-fallback')),
+      },
+    };
+    const stages = durablePaidStages(
+      [
+        {
+          provider: 'adapter-durable-primary',
+          profile: primaryKey,
+          estimated_cost_microusd: '100',
+        },
+        {
+          provider: 'adapter-recovery-fallback',
+          profile: fallbackKey,
+          estimated_cost_microusd: '100',
+        },
+      ],
+      true,
+    );
+    stages[0] = {
+      stage: 'refinement',
+      requested: true,
+      fallback_authorized: false,
+      prompt_version: 'refine-v1',
+      providers: [
+        {
+          provider: 'openai',
+          model: 'helper-model',
+          estimated_cost_microusd: '100',
+        },
+      ],
+    };
+    const wallet = new RunPaidWallet({
+      request_id: plan.request.request_id,
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date(START).toISOString(),
+      deadline_at: new Date(START + 60_000).toISOString(),
+      limits: plan.policy.budgets,
+      stages,
+      now: () => START,
+      on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(root, runDirectory, action),
+      load_latest: () => readPaidRunLedger(root, runDirectory),
+    });
+    const refinement = wallet.begin({
+      stage: 'refinement',
+      provider: 'openai',
+      model: 'helper-model',
+      estimated_cost_microusd: '100',
+      input_fingerprint: fingerprint('refinement'),
+    });
+    wallet.finish(refinement, {
+      status: 'succeeded',
+      usage: { costUsd: 0.0001 },
+    });
+
+    const accepted = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([primary, fallback], providers),
+      paid_wallet: wallet,
+    });
+    expect(accepted.response).toBeUndefined();
+
+    const resumed = await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('resume-'),
+      attempt_bridge: exactBindings([primary, fallback], providers),
+    });
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(fallbackSubmit).not.toHaveBeenCalled();
+    expect(resumed.response?.status).toBe('failed');
+    expect(readPaidRunLedger(root, runDirectory)?.attempts).toEqual([
+      expect.objectContaining({ stage: 'refinement', status: 'succeeded' }),
+      expect.objectContaining({
+        stage: 'research',
+        provider: 'adapter-durable-primary',
+        status: 'failed',
+      }),
+      expect.objectContaining({
+        stage: 'research',
+        provider: 'adapter-recovery-fallback',
+        status: 'blocked',
+        reason_code: 'estimated_budget_exhausted',
+      }),
+    ]);
+  });
+
+  it('reconciles an accepted attempt after same-process sync completion', async () => {
+    const { root, runDirectory } = directories();
+    const durable = profile('same-process', 'background');
+    const plan = prepared([durable]);
+    const profileKey = profileIdentityKey(durable.identity);
+    const frozenPlan = plan.profile_plans_by_identity[profileKey];
+    if (!frozenPlan) throw new Error('missing same-process fixture plan');
+    plan.profile_plans_by_identity[profileKey] = {
+      ...frozenPlan,
+      estimate: { estimated_cost_microusd: '125000' },
+    };
+    const wallet = new RunPaidWallet({
+      request_id: plan.request.request_id,
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date(START).toISOString(),
+      deadline_at: new Date(START + 60_000).toISOString(),
+      stages: durablePaidStages([
+        {
+          provider: 'adapter-same-process',
+          profile: profileKey,
+          estimated_cost_microusd: '125000',
+        },
+      ]),
+      now: () => START,
+      on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(root, runDirectory, action),
+      load_latest: () => readPaidRunLedger(root, runDirectory),
+    });
+    const provider: Provider = {
+      id: 'adapter-same-process',
+      displayName: 'Same process',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-same-process',
+        taskId: 'same-process-task',
+        query: plan.request.query,
+        submittedAt: START,
+        status: 'pending' as const,
+      })),
+      poll: vi.fn(async () => ({ status: 'completed' as const })),
+      retrieve: vi.fn(async () => success('adapter-same-process')),
+    };
+
+    const result = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([durable], {
+        'adapter-same-process': provider,
+      }),
+      paid_wallet: wallet,
+    });
+
+    expect(result.response?.status).toBe('succeeded');
+    expect(provider.submit).toHaveBeenCalledOnce();
+    expect(provider.poll).toHaveBeenCalledOnce();
+    expect(readPaidRunLedger(root, runDirectory)?.attempts).toEqual([
+      expect.objectContaining({
+        status: 'succeeded',
+        reported: { state: 'known', cost_microusd: '125000' },
+      }),
+    ]);
   });
 
   it('routes v3 check_async through one idempotent canonical resume pass', async () => {

@@ -8,6 +8,12 @@ import {
   selectMaterialClaims,
   verifyAnswer,
 } from '../src/commands/claim-verification.js';
+import { runFollowup } from '../src/commands/claim-verification-follow-up.js';
+import {
+  createBudgetTracker,
+  createEstimateBudgetTracker,
+} from '../src/core/budget.js';
+import { fingerprint, RunPaidWallet } from '../src/run-paid-wallet.js';
 import type {
   Config,
   Provider,
@@ -950,5 +956,94 @@ describe('claim verification boundaries', () => {
       error: 'skipped: estimated cost budget reached',
     });
     expect(result.metadata.usage.estimatedCostUsd).toBe(0);
+  });
+
+  it('does not turn independent research primaries into verification fallbacks', async () => {
+    const first = vi.fn(async () => {
+      throw new Error('first primary failed');
+    });
+    const second = vi.fn(async () => successResult('second-primary'));
+    registerProvider(provider('first-primary', first, 'raw-search'));
+    registerProvider(provider('second-primary', second, 'raw-search'));
+    const wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint('request'),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date().toISOString(),
+      deadline_at: new Date(Date.now() + 60_000).toISOString(),
+      stages: [
+        {
+          stage: 'verification',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'claim-verification-v1',
+          providers: [
+            { provider: 'first-primary', profile: 'first-frozen-profile' },
+            { provider: 'second-primary', profile: 'second-frozen-profile' },
+          ],
+        },
+      ],
+    });
+
+    await runFollowup(
+      CLAIM,
+      ['first-primary', 'second-primary'],
+      config({}),
+      createBudgetTracker(),
+      createEstimateBudgetTracker(),
+      wallet,
+    );
+
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).not.toHaveBeenCalled();
+    expect(wallet.snapshot().attempts).toEqual([
+      expect.objectContaining({
+        provider: 'first-primary',
+        profile: 'first-frozen-profile',
+      }),
+    ]);
+  });
+
+  it('does not guess between multiple frozen profiles for one adapter', async () => {
+    const execute = vi.fn(async () => successResult('shared-adapter'));
+    registerProvider(provider('shared-adapter', execute, 'raw-search'));
+    const wallet = new RunPaidWallet({
+      request_id: 'request-1',
+      request_fingerprint: fingerprint('request'),
+      config_fingerprint: fingerprint('config'),
+      created_at: new Date().toISOString(),
+      deadline_at: new Date(Date.now() + 60_000).toISOString(),
+      stages: [
+        {
+          stage: 'verification',
+          requested: true,
+          fallback_authorized: false,
+          prompt_version: 'claim-verification-v1',
+          providers: [
+            { provider: 'shared-adapter', profile: 'profile-a' },
+            { provider: 'shared-adapter', profile: 'profile-b' },
+          ],
+        },
+      ],
+    });
+
+    const outcome = await runFollowup(
+      CLAIM,
+      ['shared-adapter'],
+      config({}),
+      createBudgetTracker(),
+      createEstimateBudgetTracker(),
+      wallet,
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(outcome.followUp.attempts).toEqual([
+      expect.objectContaining({
+        provider: 'shared-adapter',
+        status: 'error',
+        error: expect.stringContaining('multiple frozen profiles'),
+      }),
+    ]);
+    expect(wallet.snapshot().attempts).toEqual([]);
   });
 });
