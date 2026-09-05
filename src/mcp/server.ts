@@ -14,8 +14,10 @@ import {
   runResearchSilent,
   type SilentRunDeps,
 } from './research.js';
+import { ResultPageOptionsSchema } from './result-pages.js';
 import {
   type McpArtifactRepository,
+  readRunIndex,
   readRunResults,
   resolveRunDir,
   shapeResearchResult,
@@ -52,10 +54,25 @@ function jsonResult(payload: unknown): CallToolResult {
   };
 }
 
-/** Error tool result carrying the same detailed message the CLI would surface. */
+/** Includes both SDK representations and JSON escaping in the final wire cap. */
+function evidenceResult(payload: unknown): CallToolResult {
+  const result = jsonResult(payload);
+  return Buffer.byteLength(JSON.stringify(result), 'utf8') <= 64_000
+    ? result
+    : errorResult(
+        'Saved result metadata exceeds the MCP response limit. Inspect the run locally.',
+      );
+}
+
+/** Keep diagnostic failures bounded too, including provider-supplied messages. */
 function errorResult(message: string): CallToolResult {
   return {
-    content: [{ type: 'text', text: message }],
+    content: [
+      {
+        type: 'text',
+        text: message.length > 2_000 ? `${message.slice(0, 2_000)}…` : message,
+      },
+    ],
     isError: true,
   };
 }
@@ -83,7 +100,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Run a multi-provider research query',
       description:
-        'Fan out a research query across multiple providers in parallel, defaulting to the quick workflow in sync mode. Writes a full run directory and returns a public response. A terminal schemaVersion 3 response inlines the canonical ResearchResponse, including full provider content; a pending response stays compact. Use get_results for capped, explicitly untrusted presentation content. Async mode accepts durable profiles only and returns pending work to poll with check_async.',
+        'Fan out a research query across multiple providers in parallel, defaulting to the quick workflow in sync mode. Saves full provider content locally and returns a bounded result index, never inline evidence. Read evidence with get_results using outputDir as runDir and an optional resultId. Async mode accepts durable profiles only; resume pending work with check_async.',
       inputSchema: {
         query: z.string().min(1).describe('The research query or question.'),
         group: z
@@ -123,7 +140,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
           },
           researchDeps,
         );
-        return jsonResult(shapeResearchResult(run));
+        return evidenceResult(shapeResearchResult(run));
       } catch (e) {
         if (e instanceof ResearchInputError) {
           return errorResult(e.message);
@@ -139,20 +156,40 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Read provider markdown from a run',
       description:
-        'Return the full provider markdown content from a research run directory. Defaults to the most recent run; pass runDir to target a specific one and provider to limit to a single provider id. Content is capped per provider (~40k chars) with an explicit truncation marker, and includes the run manifest summary.',
+        'Read a bounded page of saved provider evidence without provider calls, polling, or writes. Defaults to the most recent run and all results. Follow nextCursor with the same explicit runDir and filters until hasMore is false. resultId selects an exact index entry; provider filters its displayed id. Each chunk has exact UTF-16 offsets and untrusted-evidence delimiters. Full evidence stays saved. Changed results invalidate cursors; restart without cursor.',
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
       inputSchema: {
         runDir: z
           .string()
+          .max(4096)
           .optional()
           .describe(
             'Run directory to read. Defaults to the most recent run under the configured output base.',
           ),
         provider: z
           .string()
+          .max(1024)
           .optional()
           .describe(
             'Limit to a single provider id. Defaults to all providers.',
           ),
+        resultId: ResultPageOptionsSchema.shape.resultId.describe(
+          'Exact resultId from a research/check_async index or evidence page.',
+        ),
+        cursor: ResultPageOptionsSchema.shape.cursor.describe(
+          'Opaque nextCursor from the previous page. Keep runDir and filters unchanged.',
+        ),
+        part: ResultPageOptionsSchema.shape.part.describe(
+          'Read content (default) or citation metadata as paged JSON text. Reassemble citation chunks before parsing.',
+        ),
+        limitChars: ResultPageOptionsSchema.shape.limitChars.describe(
+          'Total evidence characters per page, default 8000, maximum 12000. The total wire-byte cap may shorten a page further.',
+        ),
       },
     },
     async (args): Promise<CallToolResult> => {
@@ -167,11 +204,16 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
               : `No runs found under ${baseDir}. Run a research query first.`,
           );
         }
-        const results = readRunResults(runDir, args.provider, repository);
+        const results = readRunResults(runDir, args.provider, repository, {
+          resultId: args.resultId,
+          cursor: args.cursor,
+          part: args.part,
+          limitChars: args.limitChars,
+        });
         if (!results) {
           return errorResult(`Could not read run manifest in ${runDir}`);
         }
-        return jsonResult(results);
+        return evidenceResult(results);
       } catch (e) {
         return errorResult(`get_results failed: ${describeError(e)}`);
       }
@@ -184,10 +226,11 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Poll async deep-research tasks',
       description:
-        'Run one bounded resume pass over pending async work in a run directory (no blocking wait). Defaults to the most recent run. schemaVersion 3 always retrieves and commits a result immediately when remote completion is observed; retrieve only gates retrieval for historical schemaVersion 2 runs. A terminal v3 result may include the full canonical ResearchResponse provider content.',
+        'Run one bounded resume pass over pending async work in a run directory (no blocking wait). Defaults to the most recent run. schemaVersion 3 always retrieves and commits a result immediately when remote completion is observed; retrieve only gates retrieval for historical schemaVersion 2 runs. Returns counts and a bounded result index, never provider content or private task handles. Use get_results to read saved evidence.',
       inputSchema: {
         runDir: z
           .string()
+          .max(4096)
           .optional()
           .describe(
             'Run directory whose async tasks to poll. Defaults to the most recent run.',
@@ -213,7 +256,18 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
           );
         }
         const result = await checkAsync(runDir, args.retrieve ?? false, config);
-        return jsonResult(result);
+        return evidenceResult({
+          schemaVersion: 1,
+          kind: 'librarium.mcp.async-index',
+          runDir,
+          polled: result.polled,
+          retrieved: result.retrieved,
+          ...(result.error && { error: result.error }),
+          ...(result.regenerationError && {
+            regenerationError: result.regenerationError,
+          }),
+          index: readRunIndex(runDir, repository),
+        });
       } catch (e) {
         return errorResult(`check_async failed: ${describeError(e)}`);
       }

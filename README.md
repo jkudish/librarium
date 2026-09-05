@@ -446,12 +446,47 @@ claude mcp add librarium -- librarium mcp
 ```
 
 The MCP server exposes five tools: `research`, `get_results`, `check_async`,
-`list_providers`, and `list_groups`. `research` writes a run directory and
-returns a compact result. `get_results` returns presentation content with a
-per-provider cap and marks it untrusted. `check_async` performs one bounded
-resume pass; for canonical schema version 3 it retrieves an observed completed
-result immediately, while its `retrieve` flag applies only to historical
-schema version 2 runs.
+`list_providers`, and `list_groups`. Full evidence stays in the run directory;
+MCP clients fetch only what they need:
+
+1. Call `research`. Its result index contains provider statuses, canonical
+   identities when available, source counts, known/unknown costs, and an
+   `outputDir`. No provider content or private task handles are inlined.
+2. Call `get_results` with that `outputDir` as `runDir`. Optionally select an
+   exact `resultId` from the index, or filter by the displayed `provider` id.
+3. While `hasMore` is true, pass `nextCursor` as `cursor` with the same explicit
+   `runDir`, `provider`, `resultId`, and `part`. Each chunk carries its own
+   untrusted-evidence delimiters and exact UTF-16 `offset`/`endOffset` values.
+   Remove only the outer delimiters when assembling chunks by `resultId`.
+
+`get_results` defaults to `part: content`. Use `part: citations` for citation
+metadata as paged JSON text; assemble all chunks for a result before parsing.
+`limitChars` defaults to 8,000 (allowed range 256–12,000) across the whole
+page, not per provider. Pages and indexes contain at most 20 entries and
+16,000 UTF-8 bytes of pretty-printed payload; the complete MCP tool result,
+including its text and structured copies, is capped at 64,000 bytes. Metadata
+and escaping can shorten pages further. A truncated index still permits
+reading every result through unfiltered pages. `available: false` distinguishes
+missing evidence from a saved empty result. Oversized metadata returns a
+bounded error rather than an oversized response.
+
+Reads make no provider calls, polls, or artifact writes. Changed evidence
+invalidates existing cursors: restart without a cursor. Missing or unsafe
+artifacts are not fetched remotely. Historical schema version 2 runs and
+canonical schema version 3 runs use the same paging interface.
+
+`check_async` still performs one bounded resume pass. For canonical schema
+version 3 it retrieves an observed completed result immediately; its `retrieve`
+flag applies only to historical schema version 2 runs. It returns counts and
+an `index`, not full evidence.
+
+**MCP response migration:** result indexes, async indexes, and evidence pages
+have `schemaVersion: 1` and distinct `librarium.mcp.*` kinds. These are MCP
+envelope versions, not artifact versions. Clients that previously consumed an
+inline canonical `response`, async `tasks`, source lists, or a single capped
+`get_results` response must use the index and paging flow above. Existing
+`runDir`/`provider` inputs remain supported; saved artifacts and public
+Node/PHP interchange contracts are unchanged.
 
 ### Amp orbs
 
