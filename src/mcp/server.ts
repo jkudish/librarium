@@ -87,14 +87,14 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Run a multi-provider research query',
       description:
-        'Fan out a research query across multiple search and deep-research providers in parallel. Writes a full run directory and returns a public response. A terminal schemaVersion 3 response inlines the canonical ResearchResponse, including full provider content; a pending response stays compact. Use get_results for capped, explicitly untrusted presentation content. Deep-research providers in async or mixed mode may return pending work to poll with check_async.',
+        'Fan out a research query across multiple providers in parallel, defaulting to the quick workflow in sync mode. Writes a full run directory and returns a public response. A terminal schemaVersion 3 response inlines the canonical ResearchResponse, including full provider content; a pending response stays compact. Use get_results for capped, explicitly untrusted presentation content. Async mode accepts durable profiles only and returns pending work to poll with check_async.',
       inputSchema: {
         query: z.string().min(1).describe('The research query or question.'),
         group: z
           .string()
           .optional()
           .describe(
-            'A configured provider group (e.g. deep, quick, raw, all). Ignored when providers is given.',
+            'A configured provider group (e.g. deep, quick, raw, all). Defaults to quick when neither group nor providers is given. Ignored when providers is given.',
           ),
         providers: z
           .array(z.string())
@@ -104,7 +104,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
           .enum(['sync', 'async', 'mixed'])
           .optional()
           .describe(
-            'Execution mode. mixed (default) submits deep-research async and runs the rest synchronously.',
+            'Execution mode. sync (default) runs selected providers concurrently and waits for them. async accepts durable profiles only and returns pending work. mixed is retained for legacy compatibility and migrates to async with a notice.',
           ),
         refine: z
           .boolean()

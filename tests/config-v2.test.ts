@@ -77,6 +77,27 @@ describe('private adapter ids', () => {
   );
 });
 
+describe('execution defaults', () => {
+  it('defaults omitted legacy and native configuration modes to sync', () => {
+    const legacy = v1();
+    delete (legacy.defaults as { mode?: string }).mode;
+    const migratedLegacy = migrateConfig({ global: legacy });
+    expect(migratedLegacy.ok).toBe(true);
+    if (!migratedLegacy.ok) return;
+    expect(migratedLegacy.config.execution_defaults.mode).toBe('sync');
+    expect(migratedLegacy.notices).not.toContainEqual(
+      expect.objectContaining({ code: 'legacy_mixed_mode_migrated' }),
+    );
+
+    const nativeSource = v2();
+    delete (nativeSource.execution_defaults as { mode?: string }).mode;
+    const native = validateConfigV2(nativeSource);
+    expect(native.ok).toBe(true);
+    if (!native.ok) return;
+    expect(native.config.execution_defaults.mode).toBe('sync');
+  });
+});
+
 function customSource(
   providerId: string,
   overrides: Record<string, unknown> = {},

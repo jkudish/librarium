@@ -73,7 +73,7 @@ const DEFAULT_CONFIG: Config = {
     timeout: 30,
     asyncTimeout: 1800,
     asyncPollInterval: 30,
-    mode: 'mixed',
+    mode: 'sync',
     llmWebSearch: true,
   },
   providers: {},

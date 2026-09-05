@@ -158,6 +158,51 @@ function profileKeys(result: ReturnType<typeof compile>) {
 }
 
 describe('private request compilation', () => {
+  it('defaults new CLI and MCP requests to the quick workflow in sync mode', () => {
+    const source = config({
+      providers: {
+        exa: { enabled: true },
+        'brave-answers': { enabled: true },
+        tavily: { enabled: true },
+      },
+    });
+
+    for (const kind of ['cli', 'mcp', 'silent_mcp'] as const) {
+      const result = compile(source, {
+        kind,
+        input: { query: 'default quick request' },
+      });
+      expect(profileKeys(result)).toEqual([
+        'brave-answers/grounded',
+        'exa/search',
+      ]);
+      if (!result.ok) continue;
+      expect(result.prepared.request.mode).toBe('sync');
+      expect(profileKeys(result)).not.toContain('tavily/search');
+      expect(profileKeys(result)).not.toContain('exa/research');
+      expect(result.notices).toContainEqual(
+        expect.objectContaining({ code: 'workflow_profile_unavailable' }),
+      );
+    }
+  });
+
+  it('diagnoses an unavailable quick workflow instead of broadening to another enabled provider', () => {
+    const result = compile(
+      config({ providers: { tavily: { enabled: true } } }),
+      { kind: 'cli', input: { query: 'no quick providers' } },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'selection_empty' }),
+    );
+    expect(result.notices).toContainEqual(
+      expect.objectContaining({ code: 'workflow_profile_unavailable' }),
+    );
+    expect(JSON.stringify(result)).not.toContain('tavily/search');
+  });
+
   it('resolves exact adapter ids, display names, qualified profiles, and split OpenRouter targets', () => {
     const result = compile(
       config({
@@ -541,7 +586,7 @@ describe('private request compilation', () => {
     }
   });
 
-  it('plans trusted custom profiles by adapter, qualified identity, group, and default without loading code', () => {
+  it('plans trusted custom profiles by adapter, qualified identity, and group without loading code', () => {
     const source = customSource({ groups: { team: ['acme-adapter'] } });
     for (const transport of [
       {
@@ -556,7 +601,6 @@ describe('private request compilation', () => {
         kind: 'mcp' as const,
         input: { query: 'group', group: 'team' },
       },
-      { kind: 'mcp' as const, input: { query: 'default' } },
     ]) {
       const result = compile(source, transport);
       expect(profileKeys(result)).toEqual(['acme/search']);

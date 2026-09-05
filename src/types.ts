@@ -384,7 +384,7 @@ export const DefaultsSchema = z.object({
   asyncPollInterval: z.number().default(30),
   // Compatibility projection of the native v2 run-wide deadline.
   requestDeadlineMs: z.number().optional(),
-  mode: LegacyExecutionModeSchema.default('mixed'),
+  mode: LegacyExecutionModeSchema.default('sync'),
   llmWebSearch: z.boolean().default(true),
   // Optional runtime spend circuit breaker. Honest budget: only API-reported
   // costs count toward it (see src/core/budget.ts). Unset means no limit.

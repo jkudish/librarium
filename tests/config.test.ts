@@ -122,7 +122,7 @@ describe('loadConfig', () => {
     expect(config.defaults.asyncTimeout).toBe(1800);
     expect(config.defaults.asyncPollInterval).toBe(30);
     expect(config.defaults.requestDeadlineMs).toBeUndefined();
-    expect(config.defaults.mode).toBe('mixed');
+    expect(config.defaults.mode).toBe('sync');
     expect(config.defaults.llmWebSearch).toBe(true);
     expect(config.customProviders).toEqual({});
     expect(config.trustedProviderIds).toEqual([]);
@@ -163,6 +163,18 @@ describe('loadConfig', () => {
     expect(config.providers['perplexity-sonar-pro'].enabled).toBe(true);
     // Default groups should be merged in
     expect(config.groups).toHaveProperty('deep');
+  });
+
+  it('defaults an omitted authored v1 mode to sync', () => {
+    const parsed = ConfigSchema.parse({
+      ...storedConfig(),
+      defaults: {
+        ...storedConfig().defaults,
+        mode: undefined,
+      },
+    });
+
+    expect(parsed.defaults.mode).toBe('sync');
   });
 
   it('accepts a saved v1 migration through the normal compatibility loader', () => {

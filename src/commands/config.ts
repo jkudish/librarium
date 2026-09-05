@@ -340,19 +340,19 @@ async function promptMode(config: Config): Promise<Config | null> {
     message: 'Choose the default execution mode',
     options: [
       {
-        value: 'mixed',
-        label: 'mixed',
-        hint: 'Run sync providers and poll async research providers',
-      },
-      {
         value: 'sync',
         label: 'sync',
-        hint: 'Run only synchronous providers',
+        hint: 'Run providers concurrently and wait for all results',
       },
       {
         value: 'async',
         label: 'async',
-        hint: 'Submit only async deep-research providers',
+        hint: 'Submit only durable research providers and return immediately',
+      },
+      {
+        value: 'mixed',
+        label: 'mixed (legacy)',
+        hint: 'Migrates to async; use sync to wait for results',
       },
     ],
     initialValue: config.defaults.mode,

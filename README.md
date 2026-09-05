@@ -53,8 +53,8 @@ npm install -g librarium
 # Configure credentials and select providers interactively.
 librarium init
 
-# Run a bounded selection.
-librarium run "PostgreSQL connection pooling" --group quick
+# Run the default quick workflow and wait for its providers concurrently.
+librarium run "PostgreSQL connection pooling"
 
 # Or make an evidence-bounded answer from the quick workflow.
 librarium answer "What changed in PostgreSQL 17?" --verify
@@ -62,7 +62,9 @@ librarium answer "What changed in PostgreSQL 17?" --verify
 
 Use `librarium doctor` before a paid run when you want to check configured
 providers. `librarium run --json` sends only JSON to standard output; progress
-and diagnostics go to standard error.
+and diagnostics go to standard error. New requests default to the `quick`
+workflow in `sync` mode. Pass `--group`, `--providers`, or `--mode` to override
+those defaults; saved configuration preferences are also honored.
 
 ## V2 catalog
 
@@ -150,7 +152,7 @@ librarium run <query> [options]
 | --- | --- |
 | `--providers <ids>` | Comma-separated provider IDs for the Node CLI compatibility layer |
 | `--group <name>` | Select a group or v2 workflow |
-| `--mode <mode>` | `sync`, `async`, or `mixed` execution |
+| `--mode <mode>` | `sync` (default; concurrent and awaited), `async` (durable profiles only), or legacy `mixed` (migrated to `async` with a notice) |
 | `--output <dir>` | Run-directory base path |
 | `--parallel <n>` / `--timeout <n>` | Concurrency and per-provider timeout limits |
 | `--max-cost <usd>` | Stop launching not-yet-started calls once provider-reported spend crosses this bound |
@@ -163,6 +165,10 @@ bounded and opt-in. It may use successful evidence from the run and limited
 follow-up searches, but it does not make a result verified merely because a
 model produced it. It leaves the original answer intact when verification is
 incomplete, budget-limited, or fails.
+
+When neither `--providers` nor `--group` is supplied, `run` selects the curated
+`quick` workflow. Unavailable quick providers are omitted with preflight
+diagnostics; Librarium does not broaden the request to every enabled provider.
 
 Other public commands are `live-validation`, `status`, `usage`, `browse`,
 `html`, `jsonl`, `refine`, `completions`, `ls`, `groups`, `init`, `doctor`,

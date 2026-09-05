@@ -133,6 +133,7 @@ export async function runWizard(): Promise<void> {
   // Provider scope: enabled set, a group, or hand-picked providers.
   const scope = await p.select<string>({
     message: 'Which providers?',
+    initialValue: 'group:quick',
     options: [
       {
         value: 'enabled',
@@ -141,7 +142,7 @@ export async function runWizard(): Promise<void> {
       },
       ...Object.entries(config.groups).map(([name, ids]) => ({
         value: `group:${name}`,
-        label: `group: ${name}`,
+        label: `group: ${name}${name === 'quick' ? ' (recommended)' : ''}`,
         hint: groupHint(ids, tierById),
       })),
       {
@@ -173,22 +174,22 @@ export async function runWizard(): Promise<void> {
 
   const mode = await p.select<'mixed' | 'sync' | 'async'>({
     message: 'Execution mode',
-    initialValue: 'mixed',
+    initialValue: 'sync',
     options: [
       {
-        value: 'mixed',
-        label: 'mixed',
-        hint: 'fast providers answer now, deep research runs in the background (recommended)',
-      },
-      {
         value: 'sync',
-        label: 'sync',
-        hint: 'wait for everything to finish, deep research can take several minutes',
+        label: 'sync (recommended)',
+        hint: 'run providers concurrently and wait for all results',
       },
       {
         value: 'async',
         label: 'async',
-        hint: 'submit everything and return immediately, collect later with librarium status',
+        hint: 'submit durable research jobs and return immediately, collect later with librarium status',
+      },
+      {
+        value: 'mixed',
+        label: 'mixed (legacy)',
+        hint: 'migrates to async; use sync to wait for results',
       },
     ],
   });
@@ -225,7 +226,7 @@ export async function runWizard(): Promise<void> {
     ? `group "${group}"`
     : providers
       ? `${providers.length} hand-picked providers`
-      : 'all enabled providers';
+      : 'the quick workflow';
   const confirmed = await p.confirm({
     message: `Fan out "${query.trim()}" to ${scopeLabel} in ${mode} mode?`,
   });

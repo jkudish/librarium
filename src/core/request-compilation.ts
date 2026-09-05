@@ -1,6 +1,8 @@
 import type { Config } from '../types.js';
 import {
+  type BuiltinWorkflowId,
   REMOVED_BUILTIN_WORKFLOW_IDS,
+  RESERVED_WORKFLOW_IDS,
   resolveWorkflowSelection,
 } from './builtin-workflows.js';
 import {
@@ -427,6 +429,26 @@ export function compileRequest(
     mapped.group_aliases,
   );
   const rawProviders = input.transport.input.providers;
+  // New requests use the curated quick workflow rather than broadening to
+  // every enabled profile. Keep an explicitly supplied group on the authored
+  // alias path, while an omitted selection always names the built-in workflow.
+  const effectiveGroup =
+    rawProviders === undefined && rawGroup === undefined
+      ? 'quick'
+      : group.group;
+  const workflowNotices: PreparationNotice[] =
+    rawProviders === undefined &&
+    effectiveGroup !== undefined &&
+    RESERVED_WORKFLOW_IDS.has(effectiveGroup)
+      ? mapped.catalog
+          .workflow(effectiveGroup as BuiltinWorkflowId)
+          .omitted.map(({ profile_key, reason }) => ({
+            code: 'workflow_profile_unavailable',
+            phase: 'selection' as const,
+            path: '/selector/group_id',
+            message: `Workflow "${effectiveGroup}" omitted unavailable profile "${profile_key}" (${reason}).`,
+          }))
+      : [];
   // Providers own CLI/MCP selector precedence, so a competing group is
   // intentionally ignored rather than independently migrated.
   const effectiveGroupNotices =
@@ -462,6 +484,7 @@ export function compileRequest(
       notices: sortPreparationDiagnostics([
         ...mapperNotices,
         ...effectiveGroupNotices,
+        ...workflowNotices,
         ...resolved.notices,
       ]),
     };
@@ -471,7 +494,7 @@ export function compileRequest(
     input.transport,
     mapped.unresolved_transport_defaults,
     rawProviders === undefined ? undefined : resolved.targets,
-    group.group,
+    effectiveGroup,
   );
   if (!normalized.ok) {
     return {
@@ -480,6 +503,7 @@ export function compileRequest(
       notices: sortPreparationDiagnostics([
         ...mapperNotices,
         ...effectiveGroupNotices,
+        ...workflowNotices,
         ...resolved.notices,
         ...normalized.notices,
       ]),
@@ -513,6 +537,7 @@ export function compileRequest(
       notices: sortPreparationDiagnostics([
         ...mapperNotices,
         ...effectiveGroupNotices,
+        ...workflowNotices,
         ...resolved.notices,
         ...normalized.notices,
         ...admitted.notices,
@@ -542,6 +567,7 @@ export function compileRequest(
     const notices = sortPreparationDiagnostics([
       ...mapperNotices,
       ...effectiveGroupNotices,
+      ...workflowNotices,
       ...resolved.notices,
       ...normalized.notices,
       ...compiled.notices,
@@ -599,6 +625,7 @@ export function compileRequest(
   const notices = sortPreparationDiagnostics([
     ...mapperNotices,
     ...effectiveGroupNotices,
+    ...workflowNotices,
     ...resolved.notices,
     ...normalized.notices,
     ...derived.notices,
