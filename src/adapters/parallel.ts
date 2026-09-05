@@ -87,7 +87,10 @@ interface ChatResponse {
   id?: string;
   interaction_id?: string;
   model?: string;
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{
+    message?: { content?: string };
+    delta?: { content?: string | null };
+  }>;
   basis?: FieldBasis[];
   usage?: {
     prompt_tokens?: number;
@@ -145,6 +148,10 @@ const chatResponseSchema = z
         z
           .object({
             message: z.object({ content: z.string() }).passthrough().optional(),
+            delta: z
+              .object({ content: z.string().nullish() })
+              .passthrough()
+              .optional(),
           })
           .passthrough(),
       )
@@ -533,8 +540,11 @@ export class ParallelChatProvider extends BaseProvider {
           { kind: 'provider', httpStatus: response.status },
         );
       const content = parsedResponse.data.choices
-        .map((choice) => choice.message?.content)
-        .find((value): value is string => typeof value === 'string');
+        .flatMap((choice) => [choice.message?.content, choice.delta?.content])
+        .find(
+          (value): value is string =>
+            typeof value === 'string' && value.trim().length > 0,
+        );
       if (content === undefined)
         return this.resultError(
           durationMs,

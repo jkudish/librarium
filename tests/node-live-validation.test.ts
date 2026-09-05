@@ -1768,6 +1768,8 @@ describe('frozen paid protocol (injected, zero-network)', () => {
   it.each([
     ['invalid-schema', 'provider_reported_error', 'provider', 'http_200'],
     ['missing-content', 'provider_reported_error', 'provider', 'http_200'],
+    ['empty-text', 'provider_reported_error', 'provider', 'http_200'],
+    ['empty-delta', 'provider_reported_error', 'provider', 'http_200'],
     ['timeout', 'provider_timeout', 'timeout', undefined],
     ['network', 'provider_network_failed', 'network', undefined],
     ['quality-only', undefined, undefined, undefined],
@@ -1797,7 +1799,11 @@ describe('frozen paid protocol (injected, zero-network)', () => {
                   ? []
                   : scenario === 'missing-content'
                     ? [{}]
-                    : [{ message: { content: '' } }],
+                    : scenario === 'empty-text'
+                      ? [{ message: { content: '' } }]
+                      : scenario === 'empty-delta'
+                        ? [{ delta: { content: '' } }]
+                        : [{ delta: { content: 'Answer without citations.' } }],
               error: privateText,
               diagnostics: { secret: privateText },
             },
@@ -1862,7 +1868,8 @@ describe('frozen paid protocol (injected, zero-network)', () => {
         expect(evidence.receipt.lifecycle).toBe('failed');
         expect(evidence.quality).toMatchObject({
           passed: false,
-          content_present: false,
+          content_present: scenario === 'quality-only',
+          citation_requirement_met: false,
         });
         if (expected) expect(evidence.receipt.failure).toEqual(expected);
         else expect(evidence.receipt).not.toHaveProperty('failure');
