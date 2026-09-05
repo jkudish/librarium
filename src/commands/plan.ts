@@ -169,7 +169,7 @@ function handlePlanCliExit(error: CommanderError, command: Command): never {
   (json ? process.stdout : process.stderr).write(
     json
       ? `${JSON.stringify(receipt, null, 2)}\n`
-      : `Plan blocked\n  ${issue.code} ${issue.path}: ${issue.message}\n`,
+      : `Cannot plan: ${issue.message}\n`,
   );
   process.exitCode = 2;
   throw error;
@@ -521,78 +521,136 @@ export function buildPlanReceipt(
 }
 
 function humanTargetSlot(slot: ProfileTargetSlot): string {
-  if (slot.model_selection === 'not_applicable') return 'not applicable';
-  const target =
-    slot.target_id === undefined
-      ? `${slot.kind ?? 'target'} provider-managed`
-      : `${slot.kind ?? 'target'} ${slot.target_id}`;
-  return `${target} (${slot.model_selection})`;
+  if (slot.model_selection === 'not_applicable') return '';
+  return slot.target_id === undefined
+    ? `provider-selected ${slot.kind ?? 'target'}`
+    : `${slot.kind ?? 'target'} ${slot.target_id}`;
 }
 
 function humanTarget(target: ProfileTarget): string {
-  const primary = humanTargetSlot(target.primary);
-  return target.underlying
-    ? `${primary}; underlying ${humanTargetSlot(target.underlying)}`
-    : primary;
+  return [
+    humanTargetSlot(target.primary),
+    target.underlying && humanTargetSlot(target.underlying),
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function humanCost(microusd: string): string {
+  return `$${usdFromMicrousd(microusd).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function humanDuration(ms: number): string {
+  return ms % 60_000 === 0 ? `${ms / 60_000}m` : `${ms / 1_000}s`;
+}
+
+const STAGE_LABELS = {
+  refinement: 'Refine query',
+  research: 'Research',
+  synthesis: 'Write answer',
+  verification: 'Verify answer',
+} as const;
+
+function humanReason(reason: string): string {
+  const reasons: Record<string, string> = {
+    no_authorized_provider: 'no configured provider available',
+    unknown_cost_under_hard_budget: 'cost unknown under a hard budget',
+    stage_reservation_exceeds_budget: 'answer reserve exceeds the budget',
+    estimated_budget_exhausted: 'estimated budget too small',
+    actual_budget_exhausted: 'spending budget too small',
+    profile_disabled: 'disabled',
+    credential_missing: 'credentials missing',
+    configuration_invalid: 'configuration needs attention',
+    profile_not_implemented: 'not supported yet',
+  };
+  return reasons[reason] ?? reason.replaceAll('_', ' ');
 }
 
 function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
-  const paidAttemptBlocked = receipt.paid_stages.some(
-    ({ initial_attempt_admission }) =>
-      initial_attempt_admission.status === 'blocked',
-  );
+  const limits = receipt.effective_settings.limits.value;
+  const budgets = receipt.effective_settings.budgets.value;
+  const profiles = [...receipt.primary_profiles, ...receipt.fallback_reserve];
+  const timeouts = [
+    profiles.some(({ invocation }) => invocation === 'inline') &&
+      `${humanDuration(limits.inline_attempt_deadline_ms)} per inline call`,
+    profiles.some(({ invocation }) => invocation === 'background') &&
+      `${humanDuration(limits.background_attempt_deadline_ms)} per background call`,
+    `${humanDuration(limits.request_deadline_ms)} total`,
+  ].filter(Boolean);
+  const profileLine = (profile: (typeof receipt.primary_profiles)[number]) => {
+    const target = humanTarget(profile.target);
+    const cost = profile.estimate.cost_microusd;
+    return `${profile.provider_id}/${profile.profile_id}${target ? ` (${target})` : ''} · ${cost === undefined ? 'estimate unknown' : `est. ${humanCost(cost)}`}`;
+  };
+  const budgetLabels = [
+    budgets?.max_estimated_cost_microusd !== undefined &&
+      `${humanCost(budgets.max_estimated_cost_microusd)} estimated`,
+    budgets?.max_actual_cost_microusd !== undefined &&
+      `${humanCost(budgets.max_actual_cost_microusd)} spending cap`,
+  ].filter(Boolean);
+  const reserve = receipt.paid_stages.find(({ stage }) => stage === 'synthesis')
+    ?.synthesis_reservation?.cost_microusd;
   const lines = [
-    paidAttemptBlocked
-      ? 'Plan preflight ready — paid attempt blocked'
-      : 'Plan ready — preflight only',
-    'No provider requests, adapter loading, custom code, or run artifacts.',
+    receipt.warnings.length > 0
+      ? 'Research plan — needs attention'
+      : 'Research plan',
     '',
-    `Selection: ${receipt.selector.kind === 'providers' ? receipt.selector.requested.join(', ') : receipt.selector.effective} (${receipt.selector.source})`,
-    `Mode: ${receipt.effective_settings.mode.value} (${receipt.effective_settings.mode.source})`,
-    '',
-    'Primary research:',
     ...receipt.primary_profiles.map(
-      (profile) =>
-        `  ${profile.provider_id}/${profile.profile_id}  target ${humanTarget(profile.target)}  ${profile.invocation}/${profile.resumability}  estimate ${profile.estimate.state === 'known' ? `$${profile.estimate.cost_usd}` : 'unknown'}`,
+      (profile, index) =>
+        `${index === 0 ? 'Providers  ' : '           '}${profileLine(profile)}`,
     ),
+    `Steps      ${receipt.paid_stages
+      .filter(({ requested }) => requested)
+      .map(
+        ({ stage, status }) =>
+          `${STAGE_LABELS[stage]}${status === 'skipped' ? ' (skipped)' : ''}`,
+      )
+      .join(' → ')}`,
+    `Execution  ${receipt.effective_settings.mode.value === 'async' ? 'Background' : 'Concurrent'} · up to ${limits.max_concurrency} requests`,
+    `Timeouts   ${timeouts.join(' · ')}`,
+    `Budget     ${budgetLabels.length ? `${budgetLabels.join(' · ')} (shared)` : 'No cap'}${reserve !== undefined ? ` · ${humanCost(reserve)} reserved for answer` : ''}`,
   ];
+  if (receipt.fallback_reserve.length > 0) {
+    lines.push('Backups');
+    lines.push(
+      ...receipt.fallback_reserve.map(
+        (profile) =>
+          `  ${profileLine(profile)}; for ${profile.eligible_primary_profiles.join(', ')}`,
+      ),
+    );
+  } else if (receipt.effective_settings.fallback.value === 'disabled') {
+    lines.push('Backups    Disabled');
+  }
   if (receipt.workflow_omissions.length > 0) {
-    lines.push('', 'Workflow omissions:');
+    lines.push('', 'Unavailable:');
     lines.push(
       ...receipt.workflow_omissions.map(
         (item) =>
-          `  ${item.profile ?? 'profile'} — ${item.reason ?? item.message}`,
+          `  ${item.profile ?? 'Profile'} — ${humanReason(item.reason ?? item.message)}`,
       ),
     );
   }
-  lines.push('', 'Fallback reserve:');
-  lines.push(
-    ...(receipt.fallback_reserve.length === 0
-      ? ['  none']
-      : receipt.fallback_reserve.map(
-          (profile) =>
-            `  ${profile.provider_id}/${profile.profile_id}  target ${humanTarget(profile.target)}  estimate ${profile.estimate.state === 'known' ? `$${profile.estimate.cost_usd}` : 'unknown'}  for ${profile.eligible_primary_profiles.join(', ')}`,
-        )),
+  const warnings = new Set(
+    receipt.warnings.map((warning) => {
+      const stage = STAGE_LABELS[warning.stage];
+      if (warning.code === 'paid_stage_skipped') {
+        return `${stage} skipped: ${humanReason(warning.reason ?? 'unavailable')}.`;
+      }
+      if (warning.code === 'paid_stage_initial_attempt_blocked') {
+        const conditional = receipt.paid_stages.find(
+          ({ stage }) => stage === warning.stage,
+        )?.initial_attempt_admission.conditional_on_prior_attempts;
+        return `${stage}: ${conditional ? 'may be blocked' : 'first call blocked'} — ${humanReason(warning.reason ?? 'unavailable')}.`;
+      }
+      return `${stage}: unknown-cost calls cannot run within this budget.`;
+    }),
   );
-  lines.push('', 'Paid stages:');
-  lines.push(
-    ...receipt.paid_stages.map(
-      (stage) =>
-        `  ${stage.stage}: ${stage.status}${stage.reason_code ? ` (${stage.reason_code})` : ''}${stage.synthesis_reservation?.state === 'known' ? `; reserved $${stage.synthesis_reservation.cost_usd}` : ''}${stage.initial_attempt_admission.status === 'blocked' ? `; empty-ledger attempt BLOCKED (${stage.initial_attempt_admission.reason_code})` : ''}${stage.initial_attempt_admission.status !== 'not_applicable' && stage.initial_attempt_admission.conditional_on_prior_attempts ? '; actual admission depends on prior paid attempts' : ''}`,
-    ),
-  );
-  if (receipt.warnings.length > 0) {
-    lines.push('', 'WARNINGS:');
-    lines.push(...receipt.warnings.map((warning) => `  ! ${warning.message}`));
+  if (warnings.size > 0) {
+    lines.push('', ...Array.from(warnings, (warning) => `! ${warning}`));
   }
   lines.push(
     '',
-    `Limits: ${JSON.stringify(receipt.effective_settings.limits.value)}`,
-    `Budgets: ${receipt.effective_settings.budgets.value ? JSON.stringify(receipt.effective_settings.budgets.value) : 'none'}`,
-    `Diagnostics: ${receipt.diagnostics.length === 0 ? 'none' : receipt.diagnostics.map(({ code }) => code).join(', ')}`,
-    '',
-    'Credentials: local presence/reference resolution only; OS keychain lookup may occur.',
-    'Not checked: provider authentication, live availability, final pricing, or final bill.',
+    'Preview only. No calls made; credentials untested; costs may change.',
   );
   return `${lines.join('\n')}\n`;
 }
@@ -653,7 +711,7 @@ export async function executePlan(
     (options.json ? stdout : stderr).write(
       options.json
         ? `${JSON.stringify(receipt, null, 2)}\n`
-        : `Plan blocked\n  verification_requires_answer: --verify requires --answer because verification operates on the synthesized answer.\n`,
+        : 'Cannot plan: --verify requires --answer.\n',
     );
     process.exitCode = 2;
     return receipt;
@@ -688,7 +746,7 @@ export async function executePlan(
     (options.json ? stdout : stderr).write(
       options.json
         ? `${JSON.stringify(receipt, null, 2)}\n`
-        : `Plan blocked\n${receipt.issues.map((issue) => `  ${issue.code} ${issue.path || '/'}: ${issue.message}`).join('\n')}\n`,
+        : `Cannot plan:\n${receipt.issues.map((issue) => `  ${issue.message}`).join('\n')}\n`,
     );
     process.exitCode = 2;
     return receipt;

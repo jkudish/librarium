@@ -185,9 +185,18 @@ describe('plan command', () => {
       }),
       expect.objectContaining({ stage: 'verification', status: 'requested' }),
     ]);
-    expect(output.output().stdout).toContain('Plan ready — preflight only');
-    expect(output.output().stdout).toContain('verification: requested');
-    expect(output.output().stdout).toContain('reserved $0.002000');
+    expect(output.output().stdout).toContain('Research plan');
+    expect(output.output().stdout).toContain(
+      'Research → Write answer → Verify answer',
+    );
+    expect(output.output().stdout).toContain('$0.002 reserved for answer');
+    expect(output.output().stdout).toContain('30s per inline call · 5m total');
+    expect(output.output().stdout).not.toMatch(
+      /[{}]|microusd|not_applicable|not_requested|Diagnostics:/,
+    );
+    expect(
+      output.output().stdout.trim().split('\n').length,
+    ).toBeLessThanOrEqual(12);
   });
 
   it('warns prominently when a requested unknown-cost helper is skipped', async () => {
@@ -229,9 +238,9 @@ describe('plan command', () => {
         stage: 'synthesis',
       }),
     );
-    expect(output.output().stdout).toContain('WARNINGS:');
+    expect(output.output().stdout).toContain('Research plan — needs attention');
     expect(output.output().stdout).toContain(
-      'Requested synthesis will be skipped',
+      '! Write answer skipped: cost unknown under a hard budget.',
     );
   });
 
@@ -281,7 +290,9 @@ describe('plan command', () => {
       expect(receipt.issues).toContainEqual(
         expect.objectContaining({ code: testCase.code }),
       );
-      expect(output.output().stderr).toContain(testCase.code);
+      expect(output.output().stderr).toContain('Cannot plan:');
+      expect(output.output().stderr).toContain(receipt.issues[0].message);
+      expect(output.output().stderr).not.toContain(testCase.code);
       expect(process.exitCode).toBe(2);
     }
   });
@@ -733,9 +744,6 @@ describe('plan command', () => {
       preparation.preflight.prepared.request.slots[0]?.primary.identity.target,
     );
     expect(receipt.primary_profiles[0]?.target).toEqual(target);
-    expect(output.output().stdout).toContain('preset pro (configurable)');
-    expect(output.output().stdout).toContain(
-      'underlying model model-v2 (configurable)',
-    );
+    expect(output.output().stdout).toContain('preset pro, model model-v2');
   });
 });

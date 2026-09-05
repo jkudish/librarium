@@ -65,9 +65,10 @@ describe('built plan CLI', () => {
   it('renders text and sanitized JSON without run artifacts', () => {
     const human = plan('human output', '--providers', 'brave-search');
     expect(human.status).toBe(0);
-    expect(human.stdout).toContain('Plan ready — preflight only');
+    expect(human.stdout).toContain('Research plan');
     expect(human.stdout).toContain('brave-search/search');
-    expect(human.stdout).toContain('authentication');
+    expect(human.stdout).toContain('credentials untested');
+    expect(human.stdout).not.toMatch(/[{}]|microusd|Diagnostics:/);
 
     const json = plan(
       'private json query',
@@ -164,7 +165,7 @@ describe('built plan CLI', () => {
     const invalidPlan = plan('parser value', '--parallel', 'not-a-number');
     expect(invalidPlan.status).toBe(2);
     expect(invalidPlan.stdout).toBe('');
-    expect(invalidPlan.stderr).toContain('Plan blocked');
+    expect(invalidPlan.stderr).toContain('Cannot plan:');
     expect(invalidPlan.stderr).not.toContain('not-a-number');
 
     const invalidOtherCommand = spawnSync(
