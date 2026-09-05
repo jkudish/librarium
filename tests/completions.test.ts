@@ -48,7 +48,7 @@ describe('shell completions', () => {
     expect(script).toContain('--html');
     expect(script).toContain(GROUPS.join(' '));
     expect(script).toContain(
-      'if [[ " run answer " == *" ${cmd} "* && ( "${prev}" == "-g" || "${prev}" == "--group" ) ]]; then',
+      'if [[ " run plan answer " == *" ${cmd} "* && ( "${prev}" == "-g" || "${prev}" == "--group" ) ]]; then',
     );
   });
 

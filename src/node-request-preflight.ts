@@ -203,13 +203,14 @@ export function assertAdmittedAdaptersRegistered(
   );
 }
 
-function requireCompiled(
-  compiled: ReturnType<typeof compileRequest>,
-): PreparedResearchExecution {
+function requireCompiled(compiled: ReturnType<typeof compileRequest>): {
+  readonly prepared: PreparedResearchExecution;
+  readonly notices: readonly PreparationNotice[];
+} {
   if (!compiled.ok) {
     throw new RequestPreflightError(compiled.issues, compiled.notices);
   }
-  return compiled.prepared;
+  return { prepared: compiled.prepared, notices: compiled.notices };
 }
 
 /** Validate and compile a request without reading environment or keychain credentials. */
@@ -221,7 +222,7 @@ export function preflightProductionRequestStructure(
     authoredGroups: configGroupProvenance(input.config),
   };
   try {
-    const prepared = requireCompiled(
+    const compiled = requireCompiled(
       compileRequest({
         ...common,
         assumeCredentialAvailability: true,
@@ -229,10 +230,11 @@ export function preflightProductionRequestStructure(
         preparation: requestPreparation(),
       }),
     );
+    const { prepared } = compiled;
     assertPreparedResearchResponseProjectable(prepared);
     return {
       prepared,
-      notices: prepared.notices,
+      notices: compiled.notices,
       admittedAdapterIds: admittedAdapterIds(prepared),
     };
   } catch (error) {
@@ -271,18 +273,19 @@ export function preflightProductionRequest(
 
   const credentials = (deps.createCredentials ?? createNodeCredentialContext)();
   try {
-    const prepared = requireCompiled(
+    const compiled = requireCompiled(
       compileRequest({
         ...common,
         credentials,
         preparation: requestPreparation(),
       }),
     );
+    const { prepared } = compiled;
     const admittedIds = admittedAdapterIds(prepared);
     return {
       prepared,
       credentials,
-      notices: prepared.notices,
+      notices: compiled.notices,
       admittedAdapterIds: admittedIds,
     };
   } catch (error) {

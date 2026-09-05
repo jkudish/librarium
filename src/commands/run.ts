@@ -8,18 +8,9 @@ import {
   getExactProvider,
   initializeProviders,
 } from '../adapters/node-registry.js';
-import {
-  parseMode,
-  parseParallel,
-  parseProviders,
-  parseResearchQuery,
-  parseTimeoutSeconds,
-  parseUsdBudget,
-} from '../cli-parsers.js';
+import { parseUsdBudget } from '../cli-parsers.js';
 import { providerIdentityKey } from '../contracts/domain/index.js';
-import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { safeWriteFile } from '../core/fs-utils.js';
-import { buildProviderMetering } from '../core/metering.js';
 import { generateSlug } from '../core/prompt-builder.js';
 import { retiredProviderSelectionIssues } from '../core/provider-selection.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
@@ -37,19 +28,12 @@ import {
 import {
   assertAdmittedAdaptersRegistered,
   emitRequestPreflightNotices,
-  preflightProductionRequest,
 } from '../node-request-preflight.js';
 import { createRunDir } from '../node-run-directory.js';
-import {
-  costMicrousdFromUsd,
-  fingerprint,
-  type PaidStageDeclaration,
-  RunPaidWallet,
-} from '../run-paid-wallet.js';
+import { fingerprint, RunPaidWallet } from '../run-paid-wallet.js';
 import type {
   Config,
   DeduplicatedSource,
-  Defaults,
   ProviderDispatchResult,
   ProviderReport,
   RunManifest,
@@ -57,8 +41,6 @@ import type {
 import { generateHtmlReport } from './html-report.js';
 import { generateJsonlReport } from './jsonl-report.js';
 import type { LiveRunTable } from './live-table.js';
-import { preferenceFromConfig, resolveLlmClients } from './llm-client.js';
-import { paidLlmProvider } from './paid-llm-attempt.js';
 import {
   countDeepResearch,
   deepResearchWarning,
@@ -77,6 +59,7 @@ import {
   type LineWidths,
   shortenHomePath,
 } from './run-format.js';
+import { addRunRequestArguments, prepareRunRequest } from './run-request.js';
 
 export interface RunOptions {
   providers?: string[];
@@ -177,48 +160,14 @@ export function parseMaxCost(value: string): number {
 }
 
 export function registerRunCommand(program: Command): void {
-  program
-    .command('run')
-    .description('Run a research query across multiple providers')
-    .argument('<query>', 'The research query', parseResearchQuery)
-    .option(
-      '-p, --providers <ids>',
-      'Comma-separated provider IDs',
-      parseProviders,
-    )
-    .option('-g, --group <name>', 'Use a predefined provider group')
-    .option(
-      '-m, --mode <mode>',
-      'Execution mode: sync, async, or mixed',
-      parseMode,
-    )
+  addRunRequestArguments(
+    program
+      .command('run')
+      .description('Run a research query across multiple providers'),
+  )
     .option('-o, --output <dir>', 'Output base directory')
-    .option('--parallel <n>', 'Max parallel requests', parseParallel)
-    .option(
-      '--timeout <n>',
-      'Timeout per provider in seconds',
-      parseTimeoutSeconds,
-    )
-    .option(
-      '--max-cost <usd>',
-      'Stop launching providers once API-reported cost crosses this budget (USD)',
-      parseMaxCost,
-    )
-    .option(
-      '--max-estimated-cost <usd>',
-      'Reserve each provider’s pre-dispatch estimated cost; skip launches once the estimate crosses this ceiling (USD)',
-      parseMaxCost,
-    )
     .option('-y, --yes', 'Skip the deep-research pre-flight confirm')
-    .option(
-      '--no-fallback',
-      'Disable configured provider fallbacks for an exact provider matrix',
-    )
     .option('--json', 'Output run.json to stdout')
-    .option(
-      '--refine',
-      'Rewrite the query into tier-tuned variants with one LLM call before dispatch',
-    )
     .option(
       '--html',
       'Generate a self-contained report.html in the run directory',
@@ -261,38 +210,12 @@ export async function executeRun(
     return { exitCode: 2 };
   }
   try {
-    const cliFlags: Partial<Defaults> = {};
-    if (opts.output) cliFlags.outputDir = opts.output;
-    if (opts.parallel) cliFlags.maxParallel = opts.parallel;
-    if (opts.timeout) cliFlags.timeout = opts.timeout;
-    if (opts.mode) cliFlags.mode = opts.mode;
-    if (opts.maxCost !== undefined) cliFlags.maxCostUsd = opts.maxCost;
-    if (opts.maxEstimatedCost !== undefined) {
-      cliFlags.maxEstimatedCostUsd = opts.maxEstimatedCost;
-    }
-    const config = mergeConfigs(
-      loadConfig(),
-      loadProjectConfig(process.cwd()),
-      cliFlags,
-    );
-    const preflight = preflightProductionRequest({
-      config,
-      transport: {
-        kind: 'cli',
-        input: {
-          query,
-          providers: opts.providers,
-          group: opts.group,
-          mode: opts.mode,
-          parallel: opts.parallel,
-          timeoutSeconds: opts.timeout,
-          maxCostUsd: opts.maxCost,
-          maxEstimatedCostUsd: opts.maxEstimatedCost,
-          fallback: opts.fallback,
-          refine: opts.refine,
-        },
-      },
+    const preparation = prepareRunRequest(query, opts, {
+      refinement: Boolean(opts.refine),
+      synthesis: Boolean(hooks?.paidStages?.synthesis),
+      verification: Boolean(hooks?.paidStages?.verification),
     });
+    const { config, preflight, stageDeclarations } = preparation;
     emitRequestPreflightNotices(preflight.notices, (message) =>
       process.stderr.write(`${message}\n`),
     );
@@ -366,115 +289,6 @@ export async function executeRun(
     const slug = generateSlug(query);
     const baseDir = resolve(config.defaults.outputDir);
     const outputDir = createRunDir(baseDir, slug);
-    const fallbackAuthorized =
-      preflight.prepared.policy.fallback.kind !== 'disabled';
-    const resolvedClients = (kind: 'refine' | 'answer') => {
-      const clients = resolveLlmClients(
-        kind === 'refine'
-          ? config.refine
-          : preferenceFromConfig(config, 'answer', 'refine'),
-        {
-          env: process.env,
-          config,
-          credentials: preflight.credentials,
-        },
-      );
-      return fallbackAuthorized ? clients : clients.slice(0, 1);
-    };
-    const refineClients = opts.refine ? resolvedClients('refine') : [];
-    const answerClients =
-      hooks?.paidStages?.synthesis || hooks?.paidStages?.verification
-        ? resolvedClients('answer')
-        : [];
-    const plannedProfiles = [
-      ...preflight.prepared.request.slots.map((slot) => slot.primary),
-      ...preflight.prepared.request.fallback_reserve.map(
-        (candidate) => candidate.profile,
-      ),
-    ];
-    const researchProviders = plannedProfiles.flatMap((profile) => {
-      const plan =
-        preflight.prepared.profile_plans_by_identity[
-          providerIdentityKey(profile.identity)
-        ];
-      return plan
-        ? [
-            {
-              provider: plan.binding.adapter_id,
-              profile: providerIdentityKey(profile.identity),
-              ...(plan.estimate?.estimated_cost_microusd !== undefined && {
-                estimated_cost_microusd: plan.estimate.estimated_cost_microusd,
-                estimate_source: 'canonical_profile_plan',
-              }),
-            },
-          ]
-        : [];
-    });
-    const verificationSearchProviders = Array.from(
-      new Map(
-        researchProviders.map((provider) => [
-          `${provider.provider}\0${provider.profile ?? ''}`,
-          provider,
-        ]),
-      ).values(),
-    )
-      .filter((provider) => {
-        const tier = resolveExactProvider(provider.provider)?.tier;
-        return tier === 'ai-grounded' || tier === 'raw-search';
-      })
-      .map((declared) => {
-        const estimate = buildProviderMetering(
-          declared.provider,
-          config.providers[declared.provider],
-        ).estimate;
-        const cost = costMicrousdFromUsd(estimate?.estimatedCostUsd);
-        return {
-          provider: declared.provider,
-          ...(declared.profile && { profile: declared.profile }),
-          ...(cost !== undefined && { estimated_cost_microusd: cost }),
-          ...(estimate?.pricingVersion && {
-            estimate_source: `pricing:${estimate.pricingVersion}`,
-          }),
-        };
-      });
-    const stages: PaidStageDeclaration[] = [
-      {
-        stage: 'refinement',
-        requested: Boolean(opts.refine),
-        fallback_authorized: fallbackAuthorized,
-        prompt_version: 'refine-v1',
-        providers: refineClients.map((client) =>
-          paidLlmProvider(client, config),
-        ),
-      },
-      {
-        stage: 'research',
-        requested: true,
-        fallback_authorized: fallbackAuthorized,
-        prompt_version: 'canonical-request-v3',
-        providers: researchProviders,
-      },
-      {
-        stage: 'synthesis',
-        requested: Boolean(hooks?.paidStages?.synthesis),
-        fallback_authorized: fallbackAuthorized,
-        prompt_version: 'grounded-synthesis-v1',
-        providers: answerClients.map((client) =>
-          paidLlmProvider(client, config),
-        ),
-        reserve_first_attempt: true,
-      },
-      {
-        stage: 'verification',
-        requested: Boolean(hooks?.paidStages?.verification),
-        fallback_authorized: fallbackAuthorized,
-        prompt_version: 'claim-verification-v1',
-        providers: [
-          ...answerClients.map((client) => paidLlmProvider(client, config)),
-          ...verificationSearchProviders,
-        ],
-      },
-    ];
     const createdAt = preflight.prepared.request.requested_at;
     const wallet = new RunPaidWallet({
       request_id: preflight.prepared.request.request_id,
@@ -493,7 +307,7 @@ export async function executeRun(
       ...(preflight.prepared.policy.budgets && {
         limits: preflight.prepared.policy.budgets,
       }),
-      stages,
+      stages: stageDeclarations,
       on_change: (ledger) => writePaidRunLedger(baseDir, outputDir, ledger),
       with_mutation_lock: (action) =>
         withPaidRunLedgerLock(baseDir, outputDir, action),

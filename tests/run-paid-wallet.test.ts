@@ -12,6 +12,7 @@ import {
   fingerprint,
   PaidRunAdmissionError,
   type PaidStageDeclaration,
+  preparePaidStages,
   RunPaidWallet,
 } from '../src/run-paid-wallet.js';
 
@@ -84,6 +85,18 @@ function wallet(
 }
 
 describe('run-wide paid wallet', () => {
+  it('exposes side-effect-free preparation identical to constructor admission', () => {
+    const declarations = stages();
+    const limits = {
+      max_estimated_cost_microusd: '10000',
+      max_actual_cost_microusd: '10000',
+    };
+
+    expect(preparePaidStages(declarations, limits)).toEqual(
+      wallet({ max: '10000', stages: declarations }).snapshot().stages,
+    );
+  });
+
   it('reserves requested synthesis before research can spend the hard budget', () => {
     const subject = wallet({ max: '10000' });
 

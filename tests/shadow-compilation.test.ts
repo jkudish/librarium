@@ -1258,6 +1258,7 @@ describe('private request compilation', () => {
       .map(([path]) => path)
       .sort();
     expect(diagnosticImporters).toEqual([
+      'src/commands/run-request.ts',
       'src/commands/run.ts',
       'src/commands/wizard.ts',
       'src/mcp/research.ts',

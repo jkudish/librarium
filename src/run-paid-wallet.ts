@@ -169,6 +169,62 @@ export interface RunPaidWalletOptions {
   readonly load_latest?: () => PaidRunLedger | undefined;
 }
 
+export type PreparedPaidStage = PaidRunLedger['stages'][number];
+
+/** Apply deterministic stage admission without timers, signals, writers, or locks. */
+export function preparePaidStages(
+  declarations: readonly PaidStageDeclaration[],
+  limits: PaidRunLedger['limits'] = {},
+): readonly PreparedPaidStage[] {
+  const hasHardLimit =
+    limits.max_estimated_cost_microusd !== undefined ||
+    limits.max_actual_cost_microusd !== undefined;
+  let reserved = '0';
+  return declarations.map((declaration) => {
+    if (!declaration.requested) {
+      return { ...declaration, status: 'not_requested' as const };
+    }
+    if (declaration.providers.length === 0) {
+      return {
+        ...declaration,
+        status: 'skipped' as const,
+        reason_code: 'no_authorized_provider',
+      };
+    }
+    if (!declaration.reserve_first_attempt) {
+      return { ...declaration, status: 'requested' as const };
+    }
+    const estimate = declaration.providers[0]?.estimated_cost_microusd;
+    if (hasHardLimit && estimate === undefined) {
+      return {
+        ...declaration,
+        status: 'skipped' as const,
+        reason_code: 'unknown_cost_under_hard_budget',
+      };
+    }
+    if (estimate !== undefined) {
+      const next = add(reserved, estimate);
+      if (
+        exceeds(next, limits.max_estimated_cost_microusd) ||
+        exceeds(next, limits.max_actual_cost_microusd)
+      ) {
+        return {
+          ...declaration,
+          status: 'skipped' as const,
+          reason_code: 'stage_reservation_exceeds_budget',
+        };
+      }
+      reserved = next;
+      return {
+        ...declaration,
+        status: 'requested' as const,
+        reserved_cost_microusd: estimate,
+      };
+    }
+    return { ...declaration, status: 'requested' as const };
+  });
+}
+
 /** Sole run-wide admission and accounting authority for every paid call. */
 export class RunPaidWallet {
   readonly #options: RunPaidWalletOptions;
@@ -216,54 +272,13 @@ export class RunPaidWallet {
       });
       return;
     }
-    let reserved = '0';
-    this.#stages = options.stages.map((declaration) => {
+    this.#stages = preparePaidStages(options.stages, options.limits);
+    for (const declaration of options.stages) {
       this.#authorized.set(
         declaration.stage,
         new Set(declaration.providers.map(authorizedKey)),
       );
-      if (!declaration.requested) {
-        return { ...declaration, status: 'not_requested' as const };
-      }
-      if (declaration.providers.length === 0) {
-        return {
-          ...declaration,
-          status: 'skipped' as const,
-          reason_code: 'no_authorized_provider',
-        };
-      }
-      if (!declaration.reserve_first_attempt) {
-        return { ...declaration, status: 'requested' as const };
-      }
-      const estimate = declaration.providers[0]?.estimated_cost_microusd;
-      if (this.hasHardLimit() && estimate === undefined) {
-        return {
-          ...declaration,
-          status: 'skipped' as const,
-          reason_code: 'unknown_cost_under_hard_budget',
-        };
-      }
-      if (estimate !== undefined) {
-        const next = add(reserved, estimate);
-        if (
-          exceeds(next, options.limits?.max_estimated_cost_microusd) ||
-          exceeds(next, options.limits?.max_actual_cost_microusd)
-        ) {
-          return {
-            ...declaration,
-            status: 'skipped' as const,
-            reason_code: 'stage_reservation_exceeds_budget',
-          };
-        }
-        reserved = next;
-        return {
-          ...declaration,
-          status: 'requested' as const,
-          reserved_cost_microusd: estimate,
-        };
-      }
-      return { ...declaration, status: 'requested' as const };
-    });
+    }
     this.#policyFingerprint = fingerprint({
       limits: options.limits ?? {},
       stages: this.#stages,
