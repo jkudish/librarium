@@ -13,17 +13,25 @@ interface DoctorResult {
   displayName: string;
   enabled: boolean;
   hasApiKey: boolean;
-  connectivity: 'pass' | 'fail' | 'skip' | 'no-test';
+  connectivity: 'pass' | 'fail' | 'skip' | 'unchecked' | 'no-test';
   error?: string;
 }
 
 export function registerDoctorCommand(program: Command): void {
   program
     .command('doctor')
-    .description('Health check: test provider API connectivity')
+    .description('Check provider configuration and credential presence offline')
     .option('--json', 'Output JSON')
+    .option(
+      '--live',
+      'Test provider connectivity (makes network requests and may incur provider charges)',
+    )
     .action(async (opts) => {
-      const spinner = ora('Running health checks...').start();
+      const spinner = ora(
+        opts.live
+          ? 'Running live provider checks...'
+          : 'Running offline checks...',
+      ).start();
 
       try {
         const globalConfig = loadConfig();
@@ -83,6 +91,17 @@ export function registerDoctorCommand(program: Command): void {
             continue;
           }
 
+          if (!opts.live) {
+            results.push({
+              id: provider.id,
+              displayName: provider.displayName,
+              enabled: true,
+              hasApiKey: true,
+              connectivity: 'unchecked',
+            });
+            continue;
+          }
+
           spinner.text = `Testing ${provider.displayName}...`;
 
           try {
@@ -118,6 +137,16 @@ export function registerDoctorCommand(program: Command): void {
               config.providers[provider.id] === undefined,
           )
           .map((provider) => provider.id);
+        const passCount = results.filter(
+          (r) => r.connectivity === 'pass',
+        ).length;
+        const failCount = results.filter(
+          (r) => r.connectivity === 'fail',
+        ).length;
+
+        if (failCount > 0) {
+          process.exitCode = 1;
+        }
 
         if (opts.json) {
           console.log(JSON.stringify(results, null, 2));
@@ -143,9 +172,13 @@ export function registerDoctorCommand(program: Command): void {
               statusIcon = '[SKIP]';
               statusText = 'Not enabled';
               break;
+            case 'unchecked':
+              statusIcon = '[----]';
+              statusText = 'Credential present; connectivity not tested';
+              break;
             case 'no-test':
               statusIcon = '[----]';
-              statusText = 'No test endpoint';
+              statusText = 'Credential present; no connectivity test available';
               break;
           }
 
@@ -154,23 +187,19 @@ export function registerDoctorCommand(program: Command): void {
           );
         }
 
-        const passCount = results.filter(
-          (r) => r.connectivity === 'pass',
-        ).length;
-        const failCount = results.filter(
-          (r) => r.connectivity === 'fail',
-        ).length;
-        console.log(`\n${passCount} passed, ${failCount} failed\n`);
+        if (opts.live) {
+          console.log(`\n${passCount} passed, ${failCount} failed\n`);
+        } else {
+          console.log(
+            `\nOffline check only; connectivity was not tested. Use \`librarium doctor --live\` to make live requests (provider charges may apply).\n`,
+          );
+        }
 
         if (missingFromConfig.length > 0) {
           console.log(
             `[WARN] ${missingFromConfig.length} builtin provider(s) missing from your config: ${missingFromConfig.join(', ')}`,
           );
           console.log('       Run `librarium init --auto` to add them.\n');
-        }
-
-        if (failCount > 0) {
-          process.exitCode = 1;
         }
       } catch (e) {
         spinner.fail(e instanceof Error ? e.message : String(e));
