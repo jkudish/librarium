@@ -117,11 +117,6 @@ function compatibilityConfigFromV2(raw: unknown, path: string): Config {
     throw new Error(`Invalid Librarium v2 config in ${path}: ${diagnostics}`);
   }
   const native = validated.config;
-  if (native.execution_defaults.request_deadline_ms !== undefined) {
-    throw new Error(
-      'Native v2 request_deadline_ms is not supported by the compatibility CLI.',
-    );
-  }
   return ConfigSchema.parse({
     version: 1,
     defaults: {
@@ -131,6 +126,9 @@ function compatibilityConfigFromV2(raw: unknown, path: string): Config {
       asyncTimeout:
         native.execution_defaults.background_attempt_deadline_ms / 1_000,
       asyncPollInterval: native.execution_defaults.poll_interval_ms / 1_000,
+      ...(native.execution_defaults.request_deadline_ms !== undefined && {
+        requestDeadlineMs: native.execution_defaults.request_deadline_ms,
+      }),
       mode: native.execution_defaults.mode,
       llmWebSearch: native.runtime.llm_web_search,
       ...(native.execution_defaults.max_actual_cost_microusd !== undefined && {

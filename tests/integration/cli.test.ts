@@ -108,9 +108,20 @@ describe('CLI integration', () => {
     expect(migrated.version).toBe(2);
     expect(JSON.parse(readFileSync(destination, 'utf8')).version).toBe(2);
     expect(statSync(destination).mode & 0o777).toBe(0o600);
+    writeFileSync(
+      destination,
+      JSON.stringify({
+        ...migrated,
+        execution_defaults: {
+          ...migrated.execution_defaults,
+          request_deadline_ms: 1_900_000,
+        },
+      }),
+    );
 
     const configured = JSON.parse(run('config --json'));
     expect(configured.providers.exa.enabled).toBe(false);
+    expect(configured.defaults.requestDeadlineMs).toBe(1_900_000);
     expect(Array.isArray(JSON.parse(run('doctor --json')))).toBe(true);
 
     const preflight = run(

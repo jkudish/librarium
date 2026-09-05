@@ -119,6 +119,26 @@ describe('Node production request preflight', () => {
     expect(createCredentials).not.toHaveBeenCalled();
   });
 
+  it('rejects an invalid configured request deadline before constructing credentials', () => {
+    const createCredentials = vi.fn(() => ({ env: {} }));
+
+    expect(() =>
+      preflightProductionRequest(
+        request(
+          config({
+            defaults: {
+              ...config().defaults,
+              requestDeadlineMs: 299_999,
+            },
+          }),
+        ),
+        { createCredentials },
+      ),
+    ).toThrow(/configuration_request_deadline_less_than_attempt_deadline/);
+
+    expect(createCredentials).not.toHaveBeenCalled();
+  });
+
   it('checks a keychain-backed credential only after structural admission', () => {
     const resolveCredential = vi.fn((value: string) =>
       value === 'keychain:EXA_API_KEY' ? 'present' : undefined,

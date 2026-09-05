@@ -1206,7 +1206,7 @@ export function mapConfiguration(
   ];
   const deadlineMigration = deadlineMigrationContext(
     config,
-    options.requestDeadlineMs,
+    options.requestDeadlineMs ?? config.defaults.requestDeadlineMs,
     issues,
   );
   const budgetResult = exactUsdBudgets(
@@ -1273,6 +1273,7 @@ export function mapConfiguration(
         timeout: config.defaults.timeout,
         asyncTimeout: config.defaults.asyncTimeout,
         asyncPollInterval: config.defaults.asyncPollInterval,
+        requestDeadlineMs: config.defaults.requestDeadlineMs,
         maxCostUsd: config.defaults.maxCostUsd,
         maxEstimatedCostUsd: config.defaults.maxEstimatedCostUsd,
       },

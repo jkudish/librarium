@@ -121,6 +121,7 @@ describe('loadConfig', () => {
     expect(config.defaults.timeout).toBe(30);
     expect(config.defaults.asyncTimeout).toBe(1800);
     expect(config.defaults.asyncPollInterval).toBe(30);
+    expect(config.defaults.requestDeadlineMs).toBeUndefined();
     expect(config.defaults.mode).toBe('mixed');
     expect(config.defaults.llmWebSearch).toBe(true);
     expect(config.customProviders).toEqual({});
@@ -263,6 +264,46 @@ describe('loadConfig', () => {
       'Refusing to overwrite native v2 configuration through the legacy config writer.',
     );
     expect(JSON.parse(readFileSync(configPath, 'utf8')).version).toBe(2);
+  });
+
+  it('preserves a native v2 request deadline through the compatibility loader', () => {
+    const migrated = migrateConfig({ global: storedConfig() });
+    expect(migrated.ok, JSON.stringify(migrated)).toBe(true);
+    if (!migrated.ok) return;
+    const configPath = join(tmpDir, 'request-deadline-v2.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...migrated.config,
+        execution_defaults: {
+          ...migrated.config.execution_defaults,
+          request_deadline_ms: 1_900_000,
+        },
+      }),
+    );
+
+    expect(loadConfig(configPath).defaults.requestDeadlineMs).toBe(1_900_000);
+  });
+
+  it('rejects an invalid native v2 request deadline during config loading', () => {
+    const migrated = migrateConfig({ global: storedConfig() });
+    expect(migrated.ok, JSON.stringify(migrated)).toBe(true);
+    if (!migrated.ok) return;
+    const configPath = join(tmpDir, 'invalid-request-deadline-v2.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...migrated.config,
+        execution_defaults: {
+          ...migrated.config.execution_defaults,
+          request_deadline_ms: 1_799_999,
+        },
+      }),
+    );
+
+    expect(() => loadConfig(configPath)).toThrow(
+      /Request deadline cannot be shorter than an attempt deadline/,
+    );
   });
 
   it('refuses native v2 budgets that the compatibility number shape would change', () => {
@@ -971,15 +1012,18 @@ describe('mergeConfigs', () => {
       defaults: {
         outputDir: './research',
         timeout: 60,
+        requestDeadlineMs: 2_000_000,
       },
     };
     const merged = mergeConfigs(baseGlobal, project, {
       timeout: 120,
+      requestDeadlineMs: 2_500_000,
     });
     // CLI overrides project
     expect(merged.defaults.timeout).toBe(120);
     // Project overrides global
     expect(merged.defaults.outputDir).toBe('./research');
+    expect(merged.defaults.requestDeadlineMs).toBe(2_500_000);
     // Global defaults preserved
     expect(merged.defaults.maxParallel).toBe(6);
     expect(merged.defaults.mode).toBe('mixed');

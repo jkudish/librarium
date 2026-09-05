@@ -382,6 +382,8 @@ export const DefaultsSchema = z.object({
   timeout: z.number().default(30),
   asyncTimeout: z.number().default(1800),
   asyncPollInterval: z.number().default(30),
+  // Compatibility projection of the native v2 run-wide deadline.
+  requestDeadlineMs: z.number().optional(),
   mode: LegacyExecutionModeSchema.default('mixed'),
   llmWebSearch: z.boolean().default(true),
   // Optional runtime spend circuit breaker. Honest budget: only API-reported
@@ -471,6 +473,8 @@ export const ProjectConfigSchema = z.object({
       timeout: z.number().optional(),
       asyncTimeout: z.number().optional(),
       asyncPollInterval: z.number().optional(),
+      // Compatibility spelling for the native v2 run-wide deadline.
+      requestDeadlineMs: z.number().optional(),
       mode: LegacyExecutionModeSchema.optional(),
       llmWebSearch: z.boolean().optional(),
       maxCostUsd: z.number().optional(),

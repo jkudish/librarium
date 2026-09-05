@@ -47,6 +47,10 @@ describe('silent research live manifest', () => {
           schemaVersion: 3,
           coordination_state: { status: 'running' },
         });
+        expect(
+          Date.parse(persisted.coordination_state.request_deadline_at) -
+            Date.parse(persisted.coordination_state.created_at),
+        ).toBe(45_000);
         throw new Error('dispatch exploded');
       }),
     };
@@ -57,8 +61,9 @@ describe('silent research live manifest', () => {
         outputDir: baseDir,
         maxParallel: 1,
         timeout: 30,
-        asyncTimeout: 1800,
+        asyncTimeout: 30,
         asyncPollInterval: 10,
+        requestDeadlineMs: 45_000,
         mode: 'mixed',
         llmWebSearch: true,
       },

@@ -56,6 +56,7 @@ function prepared(
   primaries: readonly ExecutionProfile[],
   reserve: readonly ExecutionProfile[] = [],
   mode: 'sync' | 'async' = 'sync',
+  limits: Partial<PreparedResearchExecution['policy']['limits']> = {},
 ): PreparedResearchExecution {
   const all = [...primaries, ...reserve];
   const plans = Object.fromEntries(
@@ -103,6 +104,7 @@ function prepared(
         inline_attempt_deadline_ms: 10_000,
         background_attempt_deadline_ms: 20_000,
         poll_interval_ms: 1_000,
+        ...limits,
       },
       fallback: reserve.length
         ? { kind: 'explicit', reserve: [] }
@@ -1351,6 +1353,68 @@ describe('private prepared execution runtime', () => {
       expect(reserveExecute).toHaveBeenCalledOnce();
       expect(aborted).toBe(true);
       expect(result.state.status).toBe('succeeded');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps one request deadline across primary and fallback attempts', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(start);
+    try {
+      const hungProvider = (id: string): Provider => ({
+        id: `adapter-${id}`,
+        displayName: id,
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: vi.fn(
+          (_query, options) =>
+            new Promise<ProviderResult>((_resolve, reject) => {
+              options.signal?.addEventListener(
+                'abort',
+                () => reject(new Error('aborted by deadline')),
+                { once: true },
+              );
+            }),
+        ),
+      });
+      const primary = hungProvider('primary');
+      const reserve = hungProvider('reserve');
+      const running = runPreparedExecution(
+        prepared([profile('primary')], [profile('reserve')], 'sync', {
+          request_deadline_ms: 15_000,
+        }),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: systemCoordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-primary'
+                ? resolvedBinding('primary', primary)
+                : binding.adapter_id === 'adapter-reserve'
+                  ? resolvedBinding('reserve', reserve)
+                  : undefined,
+            now: Date.now,
+          }),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(primary.execute).toHaveBeenCalledOnce();
+      expect(reserve.execute).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await running;
+
+      expect(result.state.request_deadline_at).toBe(
+        new Date(start + 15_000).toISOString(),
+      );
+      expect(result.state.attempts).toHaveLength(2);
+      expect(result.state.status).toBe('unsuccessful');
+      expect(result.state.attempts.at(-1)).toMatchObject({
+        status: 'timed_out',
+        error: { code: 'request_deadline_exceeded' },
+      });
     } finally {
       vi.useRealTimers();
     }

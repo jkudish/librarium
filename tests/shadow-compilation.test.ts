@@ -967,6 +967,30 @@ describe('private request compilation', () => {
     expect(dependencies.calls()).toBe(3);
   });
 
+  it('carries a configured request deadline identically through CLI and MCP preparation', () => {
+    const source = config({
+      providers: { exa: { enabled: true } },
+      defaults: { requestDeadlineMs: 450_000 },
+    });
+    const prepared = (['cli', 'mcp', 'silent_mcp'] as const).map((kind) => {
+      const result = compileRequest({
+        config: source,
+        authoredGroups: { global: source.groups, project: {} },
+        credentials: credentials(),
+        transport: {
+          kind,
+          input: { query: 'configured deadline', providers: ['exa'] },
+        },
+        preparation: preparation(),
+      });
+      if (!result.ok) throw new Error(JSON.stringify(result.issues));
+      expect(result.prepared.policy.limits.request_deadline_ms).toBe(450_000);
+      return JSON.stringify(result.prepared);
+    });
+
+    expect(new Set(prepared).size).toBe(1);
+  });
+
   it('sorts merged diagnostics globally and prepares CLI, MCP, and silent MCP identically', () => {
     const source = config({ providers: { exa: { enabled: true } } });
     const invalid = compile(source, {

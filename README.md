@@ -241,6 +241,7 @@ only the documented optional fields.
     "max_concurrency": 4,
     "inline_attempt_deadline_ms": 30000,
     "background_attempt_deadline_ms": 1800000,
+    "request_deadline_ms": 1800000,
     "poll_interval_ms": 10000
   },
   "providers": { "exa": { "enabled": true } },
@@ -250,6 +251,9 @@ only the documented optional fields.
   "runtime": { "output_dir": "./agents/librarium", "llm_web_search": true }
 }
 ```
+
+`request_deadline_ms` is optional. When set, it bounds the entire canonical
+run across primary and fallback attempts; it is not a per-provider timeout.
 
 `migrateConfig()` accepts v1 or v2 data and returns either an immutable v2
 configuration plus notices or structured issues. It does not rewrite source
