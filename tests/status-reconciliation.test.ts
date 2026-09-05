@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { registerProvider } from '../src/adapters/index.js';
 import { reconcilePendingTasksOnce } from '../src/commands/status.js';
-import { saveAsyncTasks } from '../src/core/async-manager.js';
 import type { Provider } from '../src/types.js';
+import { seedHistoricalV2AsyncTasks } from './fixtures/historical-v2-run.js';
 
 describe('status reconciliation', () => {
   const dirs: string[] = [];
@@ -62,7 +62,7 @@ describe('status reconciliation', () => {
       status: 'running' as const,
       outputDir: dir,
     };
-    saveAsyncTasks(dir, [task]);
+    seedHistoricalV2AsyncTasks(dir, [task]);
 
     await reconcilePendingTasksOnce([task]);
 
