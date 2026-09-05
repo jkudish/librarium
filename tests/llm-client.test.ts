@@ -181,8 +181,16 @@ describe('callWithCascade', () => {
   }
 
   const clients: LlmClient[] = [
-    { provider: 'openai', model: 'gpt-5-mini', apiKey: 'a' },
-    { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: 'b' },
+    {
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      apiKey: 'fake-openai-credential',
+    },
+    {
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      apiKey: 'fake-gemini-credential',
+    },
   ];
 
   it('returns the first client text and cascades on failure', async () => {
@@ -320,6 +328,28 @@ describe('callWithCascade', () => {
     expect(diagnostics).toContain('access_token=[REDACTED]&attempt=7');
     expect(diagnostics).not.toContain(openAiKey);
     expect(diagnostics).not.toContain(geminiKey);
+  });
+
+  it('redacts a short configured credential from the final error', async () => {
+    const shortKey = 'abc123';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error(`credential ${shortKey} rejected`);
+      }),
+    );
+
+    await expect(
+      callWithCascade({
+        clients: [
+          { provider: 'openai', model: 'gpt-5-mini', apiKey: shortKey },
+        ],
+        prompt: 'p',
+        action: 'refine',
+        timeoutMs: 1000,
+        json: true,
+      }),
+    ).rejects.toThrow('credential [REDACTED] rejected');
   });
 
   it('treats a parse throw as a failure and cascades', async () => {

@@ -8,6 +8,10 @@ import {
 } from '../src/commands/refine.js';
 import type { Config } from '../src/types.js';
 
+const OPENAI_KEY = 'fake-openai-credential';
+const GEMINI_KEY = 'fake-gemini-credential';
+const PERPLEXITY_KEY = 'fake-perplexity-credential';
+
 const VALID = JSON.stringify({
   deepResearch:
     'Investigate postgres connection pooling strategies, covering pgbouncer, built-in poolers, and cloud offerings.',
@@ -220,7 +224,11 @@ describe('refine cascade', () => {
     const refined = await refineQuery(
       'scale postgres',
       makeConfig(),
-      { OPENAI_API_KEY: 'a', GEMINI_API_KEY: 'b', PERPLEXITY_API_KEY: 'c' },
+      {
+        OPENAI_API_KEY: OPENAI_KEY,
+        GEMINI_API_KEY: GEMINI_KEY,
+        PERPLEXITY_API_KEY: PERPLEXITY_KEY,
+      },
       (w) => warnings.push(w),
     );
     expect(refined.tierQueries['raw-search']).toContain('pgbouncer');
@@ -243,7 +251,11 @@ describe('refine cascade', () => {
       refineQuery(
         'scale postgres',
         makeConfig(),
-        { OPENAI_API_KEY: 'a', GEMINI_API_KEY: 'b', PERPLEXITY_API_KEY: 'c' },
+        {
+          OPENAI_API_KEY: OPENAI_KEY,
+          GEMINI_API_KEY: GEMINI_KEY,
+          PERPLEXITY_API_KEY: PERPLEXITY_KEY,
+        },
         (w) => warnings.push(w),
       ),
     ).rejects.toThrow(/Perplexity refine call failed: HTTP 500/);
@@ -261,7 +273,7 @@ describe('refine cascade', () => {
       refineQuery(
         'scale postgres',
         makeConfig({ provider: 'openai' }),
-        { OPENAI_API_KEY: 'a', GEMINI_API_KEY: 'b' },
+        { OPENAI_API_KEY: OPENAI_KEY, GEMINI_API_KEY: GEMINI_KEY },
         (w) => warnings.push(w),
       ),
     ).rejects.toThrow(/insufficient_quota/);

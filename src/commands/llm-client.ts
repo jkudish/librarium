@@ -30,11 +30,6 @@ export interface LlmClient {
   apiKey: string;
 }
 
-function knownCredential(client: LlmClient): readonly string[] {
-  // Do not let malformed short placeholders corrupt ordinary error text.
-  return client.apiKey.length >= 8 ? [client.apiKey] : [];
-}
-
 /** Provider preference (provider + model) read from a config key. */
 export interface LlmClientPreference {
   provider?: LlmProvider;
@@ -267,7 +262,7 @@ async function callOpenAi(
         ctx.action,
         response.status,
         await safeBody(response),
-        knownCredential(client),
+        [client.apiKey],
       ),
     );
   }
@@ -312,7 +307,7 @@ async function callGemini(
         ctx.action,
         response.status,
         await safeBody(response),
-        knownCredential(client),
+        [client.apiKey],
       ),
     );
   }
@@ -494,7 +489,7 @@ export async function callWithCascade<T = string>(
       return { client, result, usage: response.usage };
     } catch (e) {
       const rawMessage = e instanceof Error ? e.message : String(e);
-      const message = redactCredentialText(rawMessage, knownCredential(client));
+      const message = redactCredentialText(rawMessage, [client.apiKey]);
       lastError =
         e instanceof Error && message === rawMessage ? e : new Error(message);
       onAttempt?.({
