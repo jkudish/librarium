@@ -130,13 +130,23 @@ export async function initializeProviders(
   }
 
   // Reuse the public trust-filtered loader, then keep the legacy global
-  // registration step private to the CLI compatibility path.
+  // registration step private to the CLI compatibility path. An explicit
+  // canonical admission includes reserve-only fallbacks, so project only those
+  // exact custom IDs as loadable without mutating the caller's enabled state.
   const customResult = await loadCustomProviders({
     customProviders,
     trustedProviderIds: (config.trustedProviderIds ?? []).filter(
       (id) => permittedCustomProviderIds?.has(id) ?? true,
     ),
-    providers: config.providers ?? {},
+    providers: Object.fromEntries(
+      Object.keys(customProviders).map((id) => [
+        id,
+        {
+          ...(config.providers?.[id] ?? {}),
+          ...(permittedCustomProviderIds !== undefined && { enabled: true }),
+        },
+      ]),
+    ),
   });
   if (permittedCustomProviderIds !== undefined) {
     assertCustomProviderDeclarationMatch(

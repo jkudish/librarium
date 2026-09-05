@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { preflightProductionRequest } from '../src/node-request-preflight.js';
+import type { Config } from '../src/types.js';
 
 describe('custom providers', () => {
   let tmpDir: string;
@@ -67,6 +69,112 @@ describe('custom providers', () => {
     expect(result.skippedCustomProviders).toContain('untrusted-provider');
     expect(result.warnings.join('\n')).toContain('not trusted');
     expect(getProvider('untrusted-provider')).toBeUndefined();
+  });
+
+  it('loads an admitted disabled fallback reserve without loading other disabled custom code', async () => {
+    const admittedId = 'admitted-reserve';
+    const unadmittedId = 'unadmitted-disabled';
+    const admittedMarker = join(tmpDir, 'admitted-loaded');
+    const unadmittedMarker = join(tmpDir, 'unadmitted-loaded');
+
+    const writeProvider = (id: string, markerPath: string): string => {
+      const modulePath = join(tmpDir, `${id}.mjs`);
+      writeFileSync(
+        modulePath,
+        [
+          "import { writeFileSync } from 'node:fs';",
+          `writeFileSync(${JSON.stringify(markerPath)}, 'loaded');`,
+          'export default {',
+          `  id: '${id}',`,
+          `  displayName: '${id}',`,
+          "  tier: 'raw-search',",
+          "  execution: 'inline',",
+          "  envVar: '',",
+          '  requiresApiKey: false,',
+          '  async execute(query) {',
+          `    return { provider: '${id}', tier: 'raw-search', content: query, citations: [], durationMs: 1 };`,
+          '  },',
+          '};',
+        ].join('\n'),
+      );
+      return modulePath;
+    };
+    const customSource = (id: string, module: string) => ({
+      type: 'npm' as const,
+      module,
+      executionProfile: {
+        bindingId: `${id}.search.v1`,
+        profile: {
+          identity: {
+            provider_id: `${id}-public`,
+            profile_id: 'search',
+            target: {
+              primary: { model_selection: 'not_applicable' as const },
+            },
+          },
+          result_kind: 'search_results' as const,
+          observation_mode: 'api_output' as const,
+          corpora: ['web' as const],
+          retrieval_method: 'search_endpoint' as const,
+          access_mode: 'direct' as const,
+          operator_id: `${id}-public`,
+          invocation: 'inline' as const,
+          resumability: 'none' as const,
+        },
+      },
+    });
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: './runs',
+        maxParallel: 2,
+        timeout: 30,
+        asyncTimeout: 300,
+        asyncPollInterval: 5,
+        mode: 'sync',
+        llmWebSearch: true,
+      },
+      providers: {
+        exa: { enabled: true, fallback: admittedId },
+        [admittedId]: { enabled: false },
+        [unadmittedId]: { enabled: false },
+      },
+      customProviders: {
+        [admittedId]: customSource(
+          admittedId,
+          writeProvider(admittedId, admittedMarker),
+        ),
+        [unadmittedId]: customSource(
+          unadmittedId,
+          writeProvider(unadmittedId, unadmittedMarker),
+        ),
+      },
+      trustedProviderIds: [admittedId, unadmittedId],
+      groups: {},
+    };
+    const preflight = preflightProductionRequest(
+      {
+        config,
+        transport: {
+          kind: 'cli',
+          input: { query: 'fallback reserve', providers: ['exa'] },
+        },
+      },
+      { createCredentials: () => ({ env: { EXA_API_KEY: 'test-key' } }) },
+    );
+
+    expect(preflight.admittedAdapterIds).toEqual(['exa', admittedId]);
+    const result = await initializeProviders(
+      { ...config, credentials: preflight.credentials },
+      { customProviderIds: preflight.admittedAdapterIds },
+    );
+
+    expect(result.loadedCustomProviders).toContain(admittedId);
+    expect(result.loadedCustomProviders).not.toContain(unadmittedId);
+    expect(getProvider(admittedId)?.id).toBe(admittedId);
+    expect(getProvider(unadmittedId)).toBeUndefined();
+    expect(readFileSync(admittedMarker, 'utf8')).toBe('loaded');
+    expect(() => readFileSync(unadmittedMarker, 'utf8')).toThrow();
   });
 
   it('loads trusted npm provider from project node_modules', async () => {
