@@ -10,9 +10,11 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod/v4';
-import type {
-  ExecutionProfile,
-  ProviderIdentity,
+import {
+  ErrorCategorySchema,
+  type ExecutionProfile,
+  type ProviderIdentity,
+  type StructuredError,
 } from './contracts/domain/index.js';
 import {
   canonicalJson,
@@ -740,6 +742,7 @@ export function writeSanitizedCanonicalReceipt(
     'request_fingerprint',
     'run_evidence_sha256',
     'lifecycle',
+    'failure',
     'response',
     'usage',
     'metering',
@@ -749,6 +752,11 @@ export function writeSanitizedCanonicalReceipt(
   if (Object.keys(receipt).some((key) => !allowed.has(key))) {
     throw new CanonicalLiveValidationError(
       'Public receipt contains a non-allowlisted field.',
+    );
+  }
+  if (receipt.failure !== undefined && receipt.lifecycle !== 'failed') {
+    throw new CanonicalLiveValidationError(
+      'Only failed receipts may contain a failure summary.',
     );
   }
   if (
@@ -1414,11 +1422,57 @@ const SAFE_PROVIDER_PRICING_UNIT =
 const PRICING_UNIT_RECEIPT_PATH =
   /^receipt\.pricing_quote\.missing_units\[\d+\]$/;
 
+// Closed public vocabulary of terminal coordinator/runtime/bridge failures.
+// StructuredError.code/provider_code are open strings in the domain contract;
+// accepting their general grammar here would allow private text to escape.
+const ReceiptFailureSchema = z.strictObject({
+  code: z.enum([
+    'provider_authentication_failed',
+    'provider_plan_required',
+    'provider_billing_failed',
+    'provider_rate_limited',
+    'provider_invalid_request',
+    'provider_network_failed',
+    'provider_timeout',
+    'provider_reported_error',
+    'provider_result_invalid',
+    'provider_task_failed',
+    'provider_task_cancelled',
+    'adapter_execute_failed',
+    'adapter_retrieve_failed',
+    'frozen_adapter_binding_unavailable',
+    'frozen_adapter_execution_mismatch',
+    'budget_reservation_exceeded',
+    'request_cancelled',
+    'attempt_deadline_exceeded',
+    'accepted_durable_attempt_deadline_exceeded',
+    'request_deadline_exceeded',
+    'attempt_execution_failed',
+    'non_durable_execution_interrupted',
+  ]),
+  category: ErrorCategorySchema,
+  retryable: z.boolean(),
+  fallback_allowed: z.boolean(),
+  provider_code: z
+    .string()
+    .length(8)
+    .regex(/^http_[1-5][0-9]{2}$/)
+    .optional(),
+});
+
 function assertSafeReceiptValue(
   value: unknown,
   path = 'receipt',
   frozenPricingUnits: ReadonlySet<string> = new Set(),
 ): void {
+  if (
+    path === 'receipt.failure' &&
+    !ReceiptFailureSchema.safeParse(value).success
+  ) {
+    throw new CanonicalLiveValidationError(
+      'Public receipt has an invalid failure summary.',
+    );
+  }
   if (
     value === null ||
     typeof value === 'boolean' ||
@@ -1500,6 +1554,8 @@ export function sanitizeCanonicalReceipt(input: {
   readonly account: string;
   readonly region: string;
   readonly lifecycle: 'succeeded' | 'failed' | 'cancelled';
+  /** Trusted terminal canonical error, never an adapter diagnostic or message. */
+  readonly failure?: StructuredError;
   readonly response?: {
     readonly content?: string;
     readonly citations?: readonly {
@@ -1533,6 +1589,21 @@ export function sanitizeCanonicalReceipt(input: {
     pricing_snapshot_fingerprint: input.target.pricing_snapshot_fingerprint,
     pricing_quote: input.pricing_quote,
     lifecycle: input.lifecycle,
+    failure:
+      input.lifecycle === 'failed' && input.failure
+        ? {
+            code: input.failure.code,
+            category: input.failure.category,
+            retryable: input.failure.retryable,
+            fallback_allowed: input.failure.fallback_allowed,
+            ...(input.failure.provider_code !== undefined &&
+              ReceiptFailureSchema.shape.provider_code.safeParse(
+                input.failure.provider_code,
+              ).success && {
+                provider_code: input.failure.provider_code,
+              }),
+          }
+        : undefined,
     response: input.response
       ? {
           content_sha256: input.response.content
