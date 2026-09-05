@@ -198,10 +198,15 @@ verification and requires `--answer`. The command accepts the request-shaping
 `run` controls: `--providers`, `--group`, `--mode`, `--parallel`, `--timeout`,
 `--max-cost`, `--max-estimated-cost`, `--no-fallback`, and `--refine`.
 `--json` emits a sanitized, versioned planning receipt with exact selected
-profiles, workflow omissions, fallback reserve, all four paid stages,
-known/unknown estimates, effective limits and their sources, warnings, and
-diagnostics. A blocked plan exits with status 2; it is never presented as an
-admitted partial plan.
+profiles and configured targets, workflow omissions, fallback reserve, all four
+paid stages, known/unknown estimates, effective limits and their sources,
+warnings, and diagnostics. For each requested paid stage it also applies the
+real wallet admission calculation to the first declared provider on an empty
+paid-attempt ledger, while retaining future synthesis reservations. Later
+stages are marked conditional because earlier paid attempts can consume budget.
+A blocked plan exits with status 2; it is never presented as an admitted partial
+plan. Invalid `plan` syntax also exits 2 and remains structured and sanitized in
+`--json` mode.
 
 “Plan ready” means only that local preflight admitted the request. It is not an
 authentication check, provider availability check, executable frozen plan,
@@ -409,7 +414,10 @@ With either flag, the shared wallet requires and reserves a known estimate
 before each paid attempt. `--max-estimated-cost` compares those admissions to
 committed estimates. `--max-cost` also stops launching new work when
 accumulated provider-reported actual spend reaches its bound. Already in-flight
-work can still finish and exceed either bound.
+work can still finish and exceed either bound. `plan` previews the same
+calculation against an empty paid-attempt ledger and reports reservation-driven
+first-attempt blocks. Admission for later stages remains conditional on the
+estimates and provider-reported costs accumulated by earlier attempts.
 
 Estimated cost, provider-reported actual cost, and unknown cost are separate
 facts. An estimate is not a quote, and neither budget flag guarantees the final

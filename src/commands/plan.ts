@@ -1,8 +1,15 @@
-import type { Command } from 'commander';
-import { providerIdentityKey } from '../contracts/domain/index.js';
+import type { Command, CommanderError } from 'commander';
+import {
+  type ProfileTarget,
+  type ProfileTargetSlot,
+  providerIdentityKey,
+} from '../contracts/domain/index.js';
 import { getBuiltinProviderDefinition } from '../core/provider-descriptor.js';
 import type { PreparationDiagnostic } from '../core/research-request.js';
-import type { PreparedPaidStage } from '../run-paid-wallet.js';
+import {
+  evaluatePaidAttemptBudgetAdmission,
+  type PreparedPaidStage,
+} from '../run-paid-wallet.js';
 import type { Config } from '../types.js';
 import {
   addRunRequestArguments,
@@ -52,6 +59,121 @@ const GUARANTEES: PlanGuarantees = {
   run_artifacts_created: false,
   executable_plan_created: false,
 };
+
+const PLAN_CLI_EXIT_HANDLED = Symbol('plan-cli-exit-handled');
+
+type HandledPlanCliExit = CommanderError & {
+  [PLAN_CLI_EXIT_HANDLED]?: true;
+};
+
+export function isHandledPlanCliExit(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      (error as HandledPlanCliExit)[PLAN_CLI_EXIT_HANDLED],
+  );
+}
+
+function handlePlanCliExit(error: CommanderError, command: Command): never {
+  Object.defineProperty(error, PLAN_CLI_EXIT_HANDLED, { value: true });
+  if (
+    error.code === 'commander.helpDisplayed' ||
+    error.code === 'commander.version'
+  ) {
+    process.exitCode = 0;
+    throw error;
+  }
+
+  let root = command;
+  while (root.parent) root = root.parent;
+  const rawArgs = (root as Command & { readonly rawArgs: readonly string[] })
+    .rawArgs;
+  const optionTerminator = rawArgs.indexOf('--');
+  const optionArgs =
+    optionTerminator === -1 ? rawArgs : rawArgs.slice(0, optionTerminator);
+  const json = optionArgs.includes('--json');
+  const valueOptions = new Set([
+    '-p',
+    '--providers',
+    '-g',
+    '--group',
+    '-m',
+    '--mode',
+    '--parallel',
+    '--timeout',
+    '--max-cost',
+    '--max-estimated-cost',
+  ]);
+  const missingValueBeforeJson = optionArgs.some(
+    (argument, index) =>
+      valueOptions.has(argument) &&
+      (optionArgs[index + 1] === undefined ||
+        optionArgs[index + 1] === '--json'),
+  );
+  const issue = (() => {
+    switch (error.code) {
+      case 'commander.missingArgument':
+        return {
+          code: 'plan_cli_missing_query',
+          path: '/query',
+          message: 'A research query is required.',
+        };
+      case 'commander.optionMissingArgument':
+        return {
+          code: 'plan_cli_missing_option_value',
+          path: '/options',
+          message: 'A plan option is missing its required value.',
+        };
+      case 'commander.unknownOption':
+        return {
+          code: 'plan_cli_unknown_option',
+          path: '/options',
+          message: 'An unsupported plan option was provided.',
+        };
+      case 'commander.excessArguments':
+        return {
+          code: 'plan_cli_excess_arguments',
+          path: '/query',
+          message: 'Only one research query may be provided.',
+        };
+      default:
+        if (missingValueBeforeJson) {
+          return {
+            code: 'plan_cli_missing_option_value',
+            path: '/options',
+            message: 'A plan option is missing its required value.',
+          };
+        }
+        return {
+          code: 'plan_cli_invalid_argument',
+          path: '/options',
+          message: 'A plan argument has an invalid value.',
+        };
+    }
+  })();
+  const receipt = {
+    schema_version: 1 as const,
+    artifact: 'librarium.plan' as const,
+    status: 'blocked' as const,
+    ready: false as const,
+    issues: [{ ...issue, phase: 'transport' as const }],
+    diagnostics: [],
+    credential_check: {
+      semantics: 'not_checked' as const,
+      structural_validation_ran_first: false as const,
+      keychain_lookup_allowed: false as const,
+      authentication_tested: false as const,
+    },
+    guarantees: GUARANTEES,
+  };
+  (json ? process.stdout : process.stderr).write(
+    json
+      ? `${JSON.stringify(receipt, null, 2)}\n`
+      : `Plan blocked\n  ${issue.code} ${issue.path}: ${issue.message}\n`,
+  );
+  process.exitCode = 2;
+  throw error;
+}
 
 interface EstimateOutput {
   readonly state: 'known' | 'unknown';
@@ -107,6 +229,7 @@ function planProfile(
   return {
     provider_id: profile.identity.provider_id,
     profile_id: profile.identity.profile_id,
+    target: profile.identity.target,
     adapter_id: plan.binding.adapter_id,
     binding_id: plan.binding.binding_id,
     result_kind: profile.result_kind,
@@ -144,7 +267,34 @@ function totalEstimate(profiles: readonly { estimate: EstimateOutput }[]) {
   };
 }
 
-function stageOutput(stage: PreparedPaidStage) {
+function stageOutput(
+  stage: PreparedPaidStage,
+  stages: PreparedRunRequest['stages'],
+  limits: PreparedRunRequest['preflight']['prepared']['policy']['budgets'],
+  conditionalOnPriorAttempts: boolean,
+) {
+  const provider = stage.providers[0];
+  const initialAttemptAdmission =
+    stage.status !== 'requested' || !provider
+      ? {
+          status: 'not_applicable' as const,
+          basis: 'empty_paid_attempt_ledger' as const,
+          conditional_on_prior_attempts: conditionalOnPriorAttempts,
+          ...(stage.reason_code && { reason_code: stage.reason_code }),
+        }
+      : {
+          ...evaluatePaidAttemptBudgetAdmission(
+            {
+              stage: stage.stage,
+              estimated_cost_microusd: provider.estimated_cost_microusd,
+            },
+            stages,
+            [],
+            limits,
+          ),
+          basis: 'empty_paid_attempt_ledger' as const,
+          conditional_on_prior_attempts: conditionalOnPriorAttempts,
+        };
   return {
     stage: stage.stage,
     status: stage.status,
@@ -158,6 +308,7 @@ function stageOutput(stage: PreparedPaidStage) {
         stage.providers[0]?.estimate_source,
       ),
     }),
+    initial_attempt_admission: initialAttemptAdmission,
     providers: stage.providers.map((provider) => ({
       provider: provider.provider,
       ...(provider.profile && { profile: provider.profile }),
@@ -220,7 +371,10 @@ function effectiveSelector(
   };
 }
 
-function planWarnings(preparation: PreparedRunRequest) {
+function planWarnings(
+  preparation: PreparedRunRequest,
+  paidStages: readonly ReturnType<typeof stageOutput>[],
+) {
   const hardBudget =
     preparation.preflight.prepared.policy.budgets !== undefined;
   const warnings: Array<{
@@ -259,6 +413,18 @@ function planWarnings(preparation: PreparedRunRequest) {
       });
     }
   }
+  for (const stage of paidStages) {
+    const admission = stage.initial_attempt_admission;
+    if (admission.status !== 'blocked') continue;
+    warnings.push({
+      code: 'paid_stage_initial_attempt_blocked',
+      stage: stage.stage,
+      reason: admission.reason_code,
+      message: admission.conditional_on_prior_attempts
+        ? `${stage.stage} is blocked on an empty paid-attempt ledger (${admission.reason_code}); actual admission also depends on prior paid attempts.`
+        : `The initial ${stage.stage} attempt will be blocked (${admission.reason_code}).`,
+    });
+  }
   return warnings;
 }
 
@@ -288,6 +454,17 @@ export function buildPlanReceipt(
     }),
   );
   const notices = preparation.preflight.notices;
+  let priorRequestedStage = false;
+  const paidStages = preparation.stages.map((stage) => {
+    const output = stageOutput(
+      stage,
+      preparation.stages,
+      prepared.policy.budgets,
+      priorRequestedStage,
+    );
+    if (stage.status === 'requested') priorRequestedStage = true;
+    return output;
+  });
   return {
     schema_version: 1 as const,
     artifact: 'librarium.plan' as const,
@@ -330,8 +507,8 @@ export function buildPlanReceipt(
         source: preparation.settingSources.fallback,
       },
     },
-    paid_stages: preparation.stages.map(stageOutput),
-    warnings: planWarnings(preparation),
+    paid_stages: paidStages,
+    warnings: planWarnings(preparation, paidStages),
     diagnostics: notices,
     credential_check: {
       semantics: 'local_presence_or_reference_resolution_only' as const,
@@ -343,9 +520,31 @@ export function buildPlanReceipt(
   };
 }
 
+function humanTargetSlot(slot: ProfileTargetSlot): string {
+  if (slot.model_selection === 'not_applicable') return 'not applicable';
+  const target =
+    slot.target_id === undefined
+      ? `${slot.kind ?? 'target'} provider-managed`
+      : `${slot.kind ?? 'target'} ${slot.target_id}`;
+  return `${target} (${slot.model_selection})`;
+}
+
+function humanTarget(target: ProfileTarget): string {
+  const primary = humanTargetSlot(target.primary);
+  return target.underlying
+    ? `${primary}; underlying ${humanTargetSlot(target.underlying)}`
+    : primary;
+}
+
 function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
+  const paidAttemptBlocked = receipt.paid_stages.some(
+    ({ initial_attempt_admission }) =>
+      initial_attempt_admission.status === 'blocked',
+  );
   const lines = [
-    'Plan ready — preflight only',
+    paidAttemptBlocked
+      ? 'Plan preflight ready — paid attempt blocked'
+      : 'Plan ready — preflight only',
     'No provider requests, adapter loading, custom code, or run artifacts.',
     '',
     `Selection: ${receipt.selector.kind === 'providers' ? receipt.selector.requested.join(', ') : receipt.selector.effective} (${receipt.selector.source})`,
@@ -354,7 +553,7 @@ function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
     'Primary research:',
     ...receipt.primary_profiles.map(
       (profile) =>
-        `  ${profile.provider_id}/${profile.profile_id}  ${profile.invocation}/${profile.resumability}  estimate ${profile.estimate.state === 'known' ? `$${profile.estimate.cost_usd}` : 'unknown'}`,
+        `  ${profile.provider_id}/${profile.profile_id}  target ${humanTarget(profile.target)}  ${profile.invocation}/${profile.resumability}  estimate ${profile.estimate.state === 'known' ? `$${profile.estimate.cost_usd}` : 'unknown'}`,
     ),
   ];
   if (receipt.workflow_omissions.length > 0) {
@@ -372,14 +571,14 @@ function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
       ? ['  none']
       : receipt.fallback_reserve.map(
           (profile) =>
-            `  ${profile.provider_id}/${profile.profile_id}  estimate ${profile.estimate.state === 'known' ? `$${profile.estimate.cost_usd}` : 'unknown'}  for ${profile.eligible_primary_profiles.join(', ')}`,
+            `  ${profile.provider_id}/${profile.profile_id}  target ${humanTarget(profile.target)}  estimate ${profile.estimate.state === 'known' ? `$${profile.estimate.cost_usd}` : 'unknown'}  for ${profile.eligible_primary_profiles.join(', ')}`,
         )),
   );
   lines.push('', 'Paid stages:');
   lines.push(
     ...receipt.paid_stages.map(
       (stage) =>
-        `  ${stage.stage}: ${stage.status}${stage.reason_code ? ` (${stage.reason_code})` : ''}${stage.synthesis_reservation?.state === 'known' ? `; reserved $${stage.synthesis_reservation.cost_usd}` : ''}`,
+        `  ${stage.stage}: ${stage.status}${stage.reason_code ? ` (${stage.reason_code})` : ''}${stage.synthesis_reservation?.state === 'known' ? `; reserved $${stage.synthesis_reservation.cost_usd}` : ''}${stage.initial_attempt_admission.status === 'blocked' ? `; empty-ledger attempt BLOCKED (${stage.initial_attempt_admission.reason_code})` : ''}${stage.initial_attempt_admission.status !== 'not_applicable' && stage.initial_attempt_admission.conditional_on_prior_attempts ? '; actual admission depends on prior paid attempts' : ''}`,
     ),
   );
   if (receipt.warnings.length > 0) {
@@ -497,13 +696,14 @@ export async function executePlan(
 }
 
 export function registerPlanCommand(program: Command): void {
-  addRunRequestArguments(
-    program
-      .command('plan')
-      .description(
-        'Preview exact research, answer, and verification admission offline',
-      ),
-  )
+  const command = program
+    .command('plan')
+    .description(
+      'Preview exact research, answer, and verification admission offline',
+    )
+    .configureOutput({ writeErr: () => undefined });
+  command.exitOverride((error) => handlePlanCliExit(error, command));
+  addRunRequestArguments(command)
     .option('--answer', 'Include grounded answer synthesis in the preview')
     .option(
       '--verify',

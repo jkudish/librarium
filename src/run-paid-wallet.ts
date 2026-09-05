@@ -171,6 +171,129 @@ export interface RunPaidWalletOptions {
 
 export type PreparedPaidStage = PaidRunLedger['stages'][number];
 
+export interface PaidAttemptBudgetAdmission {
+  readonly status: 'admitted' | 'blocked';
+  readonly reason_code?:
+    | 'unknown_cost_under_hard_budget'
+    | 'estimated_budget_exhausted'
+    | 'actual_budget_exhausted';
+  readonly committed_estimated_cost_microusd: string;
+  readonly committed_actual_cost_microusd: string;
+  readonly future_reserved_cost_microusd: string;
+  readonly projected_estimated_cost_microusd?: string;
+  readonly projected_actual_cost_microusd?: string;
+}
+
+function hasHardLimit(limits: PaidRunLedger['limits']): boolean {
+  return (
+    limits.max_estimated_cost_microusd !== undefined ||
+    limits.max_actual_cost_microusd !== undefined
+  );
+}
+
+function committedEstimated(
+  attempts: readonly PaidAttemptLedgerEntry[],
+): string {
+  return attempts.reduce(
+    (total, attempt) =>
+      attempt.status === 'blocked' || attempt.estimate.state === 'unknown'
+        ? total
+        : add(total, attempt.estimate.cost_microusd),
+    '0',
+  );
+}
+
+function committedActual(attempts: readonly PaidAttemptLedgerEntry[]): string {
+  return attempts.reduce((total, attempt) => {
+    if (attempt.status === 'blocked') return total;
+    if (attempt.reported.state === 'known') {
+      return add(total, attempt.reported.cost_microusd);
+    }
+    return attempt.estimate.state === 'known'
+      ? add(total, attempt.estimate.cost_microusd)
+      : total;
+  }, '0');
+}
+
+function futureReservations(
+  activeStage: PaidRunStage,
+  stages: PaidRunLedger['stages'],
+  attempts: readonly PaidAttemptLedgerEntry[],
+): string {
+  return stages.reduce((total, stage) => {
+    if (
+      stage.stage === activeStage ||
+      stage.status !== 'requested' ||
+      stage.reserved_cost_microusd === undefined ||
+      attempts.some(
+        (attempt) =>
+          attempt.stage === stage.stage && attempt.status !== 'blocked',
+      )
+    ) {
+      return total;
+    }
+    return add(total, stage.reserved_cost_microusd);
+  }, '0');
+}
+
+/**
+ * Apply the wallet's hard-budget check to one paid attempt. Planning passes an
+ * empty ledger; execution passes the live ledger immediately before admission.
+ */
+export function evaluatePaidAttemptBudgetAdmission(
+  input: Pick<PaidAttemptInput, 'stage' | 'estimated_cost_microusd'>,
+  stages: PaidRunLedger['stages'],
+  attempts: readonly PaidAttemptLedgerEntry[],
+  limits: PaidRunLedger['limits'] = {},
+): PaidAttemptBudgetAdmission {
+  const committedEstimatedCost = committedEstimated(attempts);
+  const committedActualCost = committedActual(attempts);
+  const futureReservedCost = futureReservations(input.stage, stages, attempts);
+  const common = {
+    committed_estimated_cost_microusd: committedEstimatedCost,
+    committed_actual_cost_microusd: committedActualCost,
+    future_reserved_cost_microusd: futureReservedCost,
+  };
+  if (hasHardLimit(limits) && input.estimated_cost_microusd === undefined) {
+    return {
+      status: 'blocked',
+      reason_code: 'unknown_cost_under_hard_budget',
+      ...common,
+    };
+  }
+
+  const estimate = input.estimated_cost_microusd ?? '0';
+  const projectedEstimate = add(
+    add(committedEstimatedCost, futureReservedCost),
+    estimate,
+  );
+  const projectedActual = add(
+    add(committedActualCost, futureReservedCost),
+    estimate,
+  );
+  const projections = {
+    projected_estimated_cost_microusd: projectedEstimate,
+    projected_actual_cost_microusd: projectedActual,
+  };
+  if (exceeds(projectedEstimate, limits.max_estimated_cost_microusd)) {
+    return {
+      status: 'blocked',
+      reason_code: 'estimated_budget_exhausted',
+      ...common,
+      ...projections,
+    };
+  }
+  if (exceeds(projectedActual, limits.max_actual_cost_microusd)) {
+    return {
+      status: 'blocked',
+      reason_code: 'actual_budget_exhausted',
+      ...common,
+      ...projections,
+    };
+  }
+  return { status: 'admitted', ...common, ...projections };
+}
+
 /** Apply deterministic stage admission without timers, signals, writers, or locks. */
 export function preparePaidStages(
   declarations: readonly PaidStageDeclaration[],
@@ -352,33 +475,13 @@ export class RunPaidWallet {
       reasonCode = 'run_deadline_exceeded';
     } else if (!this.#authorized.get(input.stage)?.has(authorizedKey(input))) {
       reasonCode = 'provider_not_authorized';
-    } else if (
-      this.hasHardLimit() &&
-      input.estimated_cost_microusd === undefined
-    ) {
-      reasonCode = 'unknown_cost_under_hard_budget';
     } else {
-      const estimate = input.estimated_cost_microusd ?? '0';
-      const projectedEstimate = add(
-        add(this.#committedEstimated(), this.#futureReservations(input.stage)),
-        estimate,
-      );
-      const projectedActual = add(
-        add(this.#committedActual(), this.#futureReservations(input.stage)),
-        estimate,
-      );
-      if (
-        exceeds(
-          projectedEstimate,
-          this.#options.limits?.max_estimated_cost_microusd,
-        )
-      ) {
-        reasonCode = 'estimated_budget_exhausted';
-      } else if (
-        exceeds(projectedActual, this.#options.limits?.max_actual_cost_microusd)
-      ) {
-        reasonCode = 'actual_budget_exhausted';
-      }
+      reasonCode = evaluatePaidAttemptBudgetAdmission(
+        input,
+        this.#stages,
+        this.#attempts,
+        this.#options.limits,
+      ).reason_code;
     }
 
     const attemptId = `paid-attempt-${++this.#sequence}`;
@@ -509,52 +612,6 @@ export class RunPaidWallet {
       stages: this.#stages,
       attempts: this.#attempts,
     });
-  }
-
-  private hasHardLimit(): boolean {
-    return Boolean(
-      this.#options.limits?.max_estimated_cost_microusd !== undefined ||
-        this.#options.limits?.max_actual_cost_microusd !== undefined,
-    );
-  }
-
-  #committedEstimated(): string {
-    return this.#attempts.reduce(
-      (total, attempt) =>
-        attempt.status === 'blocked' || attempt.estimate.state === 'unknown'
-          ? total
-          : add(total, attempt.estimate.cost_microusd),
-      '0',
-    );
-  }
-
-  #committedActual(): string {
-    return this.#attempts.reduce((total, attempt) => {
-      if (attempt.status === 'blocked') return total;
-      if (attempt.reported.state === 'known') {
-        return add(total, attempt.reported.cost_microusd);
-      }
-      return attempt.estimate.state === 'known'
-        ? add(total, attempt.estimate.cost_microusd)
-        : total;
-    }, '0');
-  }
-
-  #futureReservations(activeStage: PaidRunStage): string {
-    return this.#stages.reduce((total, stage) => {
-      if (
-        stage.stage === activeStage ||
-        stage.status !== 'requested' ||
-        stage.reserved_cost_microusd === undefined ||
-        this.#attempts.some(
-          (attempt) =>
-            attempt.stage === stage.stage && attempt.status !== 'blocked',
-        )
-      ) {
-        return total;
-      }
-      return add(total, stage.reserved_cost_microusd);
-    }, '0');
   }
 
   #now(): number {

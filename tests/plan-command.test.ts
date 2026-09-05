@@ -526,4 +526,206 @@ describe('plan command', () => {
     expect(wallet.snapshot().limits).toEqual(prepared.policy.budgets);
     expect(wallet.snapshot().stages).toEqual(preparation.stages);
   });
+
+  it.each([
+    ['maxEstimatedCost', 'estimated_budget_exhausted'],
+    ['maxCost', 'actual_budget_exhausted'],
+  ] as const)(
+    'matches real first-attempt wallet rejection for %s',
+    (limit, reasonCode) => {
+      const source = config({
+        providers: {
+          'brave-search': { enabled: true },
+          'openai-chat': {
+            enabled: true,
+            options: { perRequestUsd: 0.002 },
+          },
+        },
+      });
+      const options = {
+        providers: ['brave-search'],
+        answer: true,
+        [limit]: 0.006,
+      } satisfies PlanOptions;
+      const preparation = prepareRunRequest(
+        'wallet attempt parity',
+        options,
+        { refinement: false, synthesis: true, verification: false },
+        deps(source, {
+          BRAVE_API_KEY: 'brave',
+          OPENAI_API_KEY: '[REDACTED:api-key]',
+        }),
+      );
+      const receipt = buildPlanReceipt(preparation, options);
+      const research = receipt.paid_stages.find(
+        ({ stage }) => stage === 'research',
+      );
+      expect(research?.initial_attempt_admission).toMatchObject({
+        status: 'blocked',
+        reason_code: reasonCode,
+        basis: 'empty_paid_attempt_ledger',
+        conditional_on_prior_attempts: false,
+        future_reserved_cost_microusd: '2000',
+      });
+      expect(receipt.warnings).toContainEqual(
+        expect.objectContaining({
+          code: 'paid_stage_initial_attempt_blocked',
+          stage: 'research',
+          reason: reasonCode,
+        }),
+      );
+
+      const prepared = preparation.preflight.prepared;
+      const wallet = new RunPaidWallet({
+        request_id: prepared.request.request_id,
+        request_fingerprint: fingerprint(prepared.request),
+        config_fingerprint: fingerprint(preparation.config),
+        created_at: prepared.request.requested_at,
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+        limits: prepared.policy.budgets,
+        stages: preparation.stageDeclarations,
+      });
+      const provider = preparation.stages.find(
+        ({ stage }) => stage === 'research',
+      )?.providers[0];
+      expect(provider).toBeDefined();
+      expect(() =>
+        wallet.begin({
+          stage: 'research',
+          provider: provider?.provider ?? '',
+          profile: provider?.profile,
+          model: provider?.model,
+          estimated_cost_microusd: provider?.estimated_cost_microusd,
+          estimate_source: provider?.estimate_source,
+          input_fingerprint: fingerprint('research'),
+        }),
+      ).toThrowError(reasonCode);
+      expect(wallet.snapshot().attempts[0]?.reason_code).toBe(reasonCode);
+    },
+  );
+
+  it('accounts for synthesis reserve when previewing refinement admission', () => {
+    const source = config({
+      providers: {
+        'brave-search': { enabled: true },
+        'openai-chat': {
+          enabled: true,
+          options: { perRequestUsd: 0.005 },
+        },
+      },
+    });
+    const options = {
+      providers: ['brave-search'],
+      refine: true,
+      answer: true,
+      maxEstimatedCost: 0.006,
+    } satisfies PlanOptions;
+    const preparation = prepareRunRequest(
+      'refinement reserve parity',
+      options,
+      { refinement: true, synthesis: true, verification: false },
+      deps(source, {
+        BRAVE_API_KEY: 'brave',
+        OPENAI_API_KEY: '[REDACTED:api-key]',
+      }),
+    );
+    const receipt = buildPlanReceipt(preparation, options);
+
+    expect(receipt.paid_stages[0]?.initial_attempt_admission).toMatchObject({
+      status: 'blocked',
+      reason_code: 'estimated_budget_exhausted',
+      conditional_on_prior_attempts: false,
+      future_reserved_cost_microusd: '5000',
+      projected_estimated_cost_microusd: '10000',
+    });
+    expect(receipt.paid_stages[1]?.initial_attempt_admission).toMatchObject({
+      conditional_on_prior_attempts: true,
+    });
+
+    const prepared = preparation.preflight.prepared;
+    const wallet = new RunPaidWallet({
+      request_id: prepared.request.request_id,
+      request_fingerprint: fingerprint(prepared.request),
+      config_fingerprint: fingerprint(preparation.config),
+      created_at: prepared.request.requested_at,
+      deadline_at: new Date(Date.now() + 60_000).toISOString(),
+      limits: prepared.policy.budgets,
+      stages: preparation.stageDeclarations,
+    });
+    const provider = preparation.stages[0]?.providers[0];
+    expect(provider).toBeDefined();
+    expect(() =>
+      wallet.begin({
+        stage: 'refinement',
+        provider: provider?.provider ?? '',
+        profile: provider?.profile,
+        model: provider?.model,
+        estimated_cost_microusd: provider?.estimated_cost_microusd,
+        estimate_source: provider?.estimate_source,
+        input_fingerprint: fingerprint('refinement'),
+      }),
+    ).toThrowError('estimated_budget_exhausted');
+    expect(wallet.snapshot().attempts[0]?.reason_code).toBe(
+      receipt.paid_stages[0]?.initial_attempt_admission.reason_code,
+    );
+  });
+
+  it('reports the exact canonical configurable preset and underlying model', async () => {
+    const target = {
+      primary: {
+        model_selection: 'configurable' as const,
+        kind: 'preset' as const,
+        target_id: 'pro',
+      },
+      underlying: {
+        model_selection: 'configurable' as const,
+        kind: 'model' as const,
+        target_id: 'model-v2',
+      },
+    };
+    const source = config({
+      providers: { 'acme-adapter': { enabled: true } },
+      customProviders: {
+        'acme-adapter': {
+          type: 'npm',
+          module: 'not-loaded',
+          executionProfile: {
+            bindingId: 'acme.search.v1',
+            profile: {
+              ...customExecutionProfile(),
+              identity: {
+                provider_id: 'acme',
+                profile_id: 'search',
+                target,
+              },
+            },
+          },
+        },
+      },
+      trustedProviderIds: ['acme-adapter'],
+    });
+    const preparation = prepareRunRequest(
+      'target agreement',
+      { providers: ['acme-adapter'] },
+      { refinement: false, synthesis: false, verification: false },
+      deps(source),
+    );
+    const output = capture();
+    const receipt = await executePlan(
+      'target agreement',
+      { providers: ['acme-adapter'] },
+      { ...deps(source), stdout: output.stdout, stderr: output.stderr },
+    );
+
+    expect(receipt.status).toBe('ready');
+    if (receipt.status !== 'ready') return;
+    expect(receipt.primary_profiles[0]?.target).toEqual(
+      preparation.preflight.prepared.request.slots[0]?.primary.identity.target,
+    );
+    expect(receipt.primary_profiles[0]?.target).toEqual(target);
+    expect(output.output().stdout).toContain('preset pro (configurable)');
+    expect(output.output().stdout).toContain(
+      'underlying model model-v2 (configurable)',
+    );
+  });
 });

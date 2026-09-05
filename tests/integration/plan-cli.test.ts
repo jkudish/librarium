@@ -113,4 +113,65 @@ describe('built plan CLI', () => {
     expect(blocked.stderr).toBe('');
     expect(existsSync(RUNS)).toBe(false);
   });
+
+  it.each([
+    [
+      ['parser value', '--parallel', 'not-a-number', '--json'],
+      'plan_cli_invalid_argument',
+    ],
+    [
+      ['parser value', '--json', '--mode', 'not-a-mode'],
+      'plan_cli_invalid_argument',
+    ],
+    [
+      ['parser value', '--providers', ',secret-provider-value', '--json'],
+      'plan_cli_invalid_argument',
+    ],
+    [['--json'], 'plan_cli_missing_query'],
+    [['parser value', '--json', '--timeout'], 'plan_cli_missing_option_value'],
+    [['parser value', '--max-cost', '--json'], 'plan_cli_missing_option_value'],
+    [
+      ['parser value', '--json', '--secret-option-value'],
+      'plan_cli_unknown_option',
+    ],
+    [
+      ['parser value', '--secret-option-value', '--json'],
+      'plan_cli_unknown_option',
+    ],
+  ])('sanitizes parser failure %# as a blocked JSON receipt', (args, code) => {
+    const result = plan(...args);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      schema_version: 1,
+      artifact: 'librarium.plan',
+      status: 'blocked',
+      ready: false,
+      issues: [{ code }],
+      credential_check: {
+        semantics: 'not_checked',
+        structural_validation_ran_first: false,
+        keychain_lookup_allowed: false,
+      },
+    });
+    expect(result.stdout).not.toContain('not-a-number');
+    expect(result.stdout).not.toContain('not-a-mode');
+    expect(result.stdout).not.toContain('secret-provider-value');
+    expect(result.stdout).not.toContain('secret-option-value');
+  });
+
+  it('preserves human parser failures as exit 2 without changing other commands', () => {
+    const invalidPlan = plan('parser value', '--parallel', 'not-a-number');
+    expect(invalidPlan.status).toBe(2);
+    expect(invalidPlan.stdout).toBe('');
+    expect(invalidPlan.stderr).toContain('Plan blocked');
+    expect(invalidPlan.stderr).not.toContain('not-a-number');
+
+    const invalidOtherCommand = spawnSync(
+      process.execPath,
+      [CLI, 'run', 'query', '--parallel', 'not-a-number'],
+      { cwd: HOME, encoding: 'utf8', env: { HOME, PATH: process.env.PATH } },
+    );
+    expect(invalidOtherCommand.status).toBe(1);
+  });
 });
