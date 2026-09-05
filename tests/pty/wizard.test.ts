@@ -13,12 +13,13 @@ import {
 const describeMaybe = ptyAvailable() ? describe : describe.skip;
 
 /**
- * Number of `↓` presses from the top of the provider-scope menu to reach the
- * committed `smoke` group. The menu is: "all enabled" (0), each default group,
- * then user groups, then "pick specific providers". Derive the offset from the
- * source-of-truth roster; the confirm assertion below still guards menu drift.
+ * Number of `↓` presses from the default quick group to the committed smoke
+ * group. Default groups precede user groups; derive the distance from the
+ * source-of-truth roster. Assertions below guard default and menu drift.
  */
-const DOWN_TO_SMOKE = Object.keys(DEFAULT_GROUPS).length + 1;
+const DOWN_TO_SMOKE =
+  Object.keys(DEFAULT_GROUPS).length -
+  Object.keys(DEFAULT_GROUPS).indexOf('quick');
 
 describeMaybe(
   `wizard (bare invocation) [${ptyAvailable() ? 'pty' : skipReason()}]`,
@@ -49,23 +50,23 @@ describeMaybe(
 
       // Provider scope: navigate to the committed `smoke` group and select it.
       await session.waitForText('Which providers?');
+      await session.waitForText('● group: quick (recommended)');
       for (let i = 0; i < DOWN_TO_SMOKE; i += 1) {
         session.write(KEY.DOWN);
         await delay(40);
       }
       session.write(KEY.ENTER);
 
-      // Execution mode: select sync. The canonical gate makes legacy mixed
-      // async-only, while this inline mock provider has no durable handle.
+      // Keep the default sync mode: this inline mock has no durable handle.
       await session.waitForText('Execution mode');
-      session.write(KEY.DOWN);
-      await delay(40);
+      await session.waitForText('● sync (recommended)');
       session.write(KEY.ENTER);
 
       // Confirm before credential-dependent options. The summary line must
       // name the smoke group (guards the navigation count above).
       await session.waitForText('Fan out');
       expect(session.plain()).toContain('group "smoke"');
+      expect(session.plain()).toContain('in sync mode?');
       session.write(KEY.ENTER);
 
       // Credential-dependent toggles appear only after consent. Decline both.
