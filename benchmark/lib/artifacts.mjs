@@ -13,6 +13,256 @@ function readOptional(path) {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 }
 
+function canonicalProfileKey(identity) {
+  const primary = identity?.target?.primary ?? {};
+  const underlying = identity?.target?.underlying;
+  return JSON.stringify([
+    identity?.provider_id,
+    identity?.profile_id,
+    primary.model_selection,
+    primary.kind ?? null,
+    primary.target_id ?? null,
+    underlying?.model_selection ?? null,
+    underlying?.kind ?? null,
+    underlying?.target_id ?? null,
+  ]);
+}
+
+function canonicalTier(resultKind) {
+  if (resultKind === 'research_report') return 'deep-research';
+  if (resultKind === 'search_results') return 'raw-search';
+  if (resultKind === 'model_answer') return 'llm';
+  return 'ai-grounded';
+}
+
+function canonicalContent(result) {
+  return typeof result.content === 'string'
+    ? result.content
+    : `\`\`\`json\n${JSON.stringify(result.content, null, 2)}\n\`\`\``;
+}
+
+function canonicalUsage(usage) {
+  if (!usage) return null;
+  const costUsd =
+    usage.currency === 'USD' && usage.actual_cost !== undefined
+      ? Number(usage.actual_cost)
+      : undefined;
+  const projected = {
+    ...(usage.prompt_tokens !== undefined && {
+      inputTokens: usage.prompt_tokens,
+    }),
+    ...(usage.completion_tokens !== undefined && {
+      outputTokens: usage.completion_tokens,
+    }),
+    ...(Number.isFinite(costUsd) && { costUsd }),
+  };
+  return Object.keys(projected).length > 0 ? projected : null;
+}
+
+function canonicalSources(providerOutputs) {
+  const sources = new Map();
+  for (const output of providerOutputs) {
+    for (const citation of output.citations) {
+      const normalizedUrl = canonicalUrl(citation.url);
+      if (!normalizedUrl) continue;
+      const existing = sources.get(normalizedUrl);
+      if (existing) {
+        existing.citationCount += 1;
+        if (!existing.providers.includes(output.provider)) {
+          existing.providers.push(output.provider);
+        }
+        if (!existing.title && citation.title) existing.title = citation.title;
+      } else {
+        sources.set(normalizedUrl, {
+          url: citation.url,
+          normalizedUrl,
+          title: citation.title,
+          providers: [output.provider],
+          citationCount: 1,
+          validUrl: true,
+        });
+      }
+    }
+  }
+  return [...sources.values()].sort(
+    (left, right) => right.citationCount - left.citationCount,
+  );
+}
+
+function invalidCanonicalRun(runDir, reason) {
+  throw new Error(
+    `${runDir} is not a comparable canonical Librarium run: ${reason}`,
+  );
+}
+
+function parseCanonicalRun(runDir, manifest) {
+  if (
+    manifest.kind !== 'canonical-research-run' ||
+    manifest.format !== 'librarium.run-json.v3' ||
+    manifest.artifact_name !== 'run_manifest' ||
+    manifest.artifact_version !== '3.0.0'
+  ) {
+    invalidCanonicalRun(runDir, 'the run manifest discriminator is invalid');
+  }
+  const request = manifest.request;
+  const state = manifest.coordination_state;
+  const response = manifest.terminal_response;
+  if (
+    !request ||
+    !Array.isArray(request.slots) ||
+    !Array.isArray(request.fallback_reserve) ||
+    !state ||
+    !Array.isArray(state.slots) ||
+    !Array.isArray(state.attempts) ||
+    !Array.isArray(state.reserve) ||
+    !Array.isArray(state.pending_fallbacks) ||
+    !state.profile_plans_by_identity ||
+    typeof state.profile_plans_by_identity !== 'object' ||
+    request.slots.length !== state.slots.length
+  ) {
+    invalidCanonicalRun(runDir, 'the canonical request or state is malformed');
+  }
+  if (state.status === 'running' || !response) {
+    invalidCanonicalRun(runDir, 'the run has not reached a terminal response');
+  }
+  if (
+    !['succeeded', 'partial', 'failed'].includes(response.status) ||
+    !Array.isArray(response.results) ||
+    !Array.isArray(response.errors) ||
+    request.request_id !== state.request_id ||
+    response.request_id !== state.request_id
+  ) {
+    invalidCanonicalRun(
+      runDir,
+      'the terminal response is malformed or mismatched',
+    );
+  }
+  if (
+    request.fallback_reserve.length > 0 ||
+    state.reserve.length > 0 ||
+    state.pending_fallbacks.length > 0 ||
+    state.attempts.some(
+      (attempt) =>
+        attempt.attempt_number !== 1 ||
+        attempt.replaces_attempt_id ||
+        attempt.candidate_id,
+    ) ||
+    response.results.some((result) => result.fallback_reason)
+  ) {
+    invalidCanonicalRun(
+      runDir,
+      'benchmark artifacts must not enable or contain provider fallbacks',
+    );
+  }
+
+  const responseResults = new Map(
+    response.results.map((result) => [result.id, result]),
+  );
+  const stateSlots = new Map(state.slots.map((slot) => [slot.slot_id, slot]));
+  const providerOutputs = [...request.slots]
+    .sort((left, right) => left.position - right.position)
+    .map((requestSlot) => {
+      const slot = stateSlots.get(requestSlot.slot_id);
+      const profileKey = canonicalProfileKey(requestSlot.primary?.identity);
+      const plan = Object.hasOwn(state.profile_plans_by_identity, profileKey)
+        ? state.profile_plans_by_identity[profileKey]
+        : undefined;
+      const attempts = state.attempts.filter(
+        (attempt) => attempt.slot_id === requestSlot.slot_id,
+      );
+      const attempt = attempts[0];
+      if (
+        !slot ||
+        slot.position !== requestSlot.position ||
+        canonicalProfileKey(slot.primary?.identity) !== profileKey ||
+        !plan ||
+        plan.profile_key !== profileKey ||
+        canonicalProfileKey(plan.identity) !== profileKey ||
+        typeof plan.binding?.adapter_id !== 'string' ||
+        attempts.length !== 1 ||
+        canonicalProfileKey(attempt.profile?.identity) !== profileKey
+      ) {
+        invalidCanonicalRun(
+          runDir,
+          `slot ${requestSlot.slot_id ?? '(unknown)'} does not preserve its exact provider/profile binding`,
+        );
+      }
+      const result = slot.result_id
+        ? responseResults.get(slot.result_id)
+        : undefined;
+      const succeeded = slot.status === 'succeeded';
+      if (
+        succeeded !== (attempt.status === 'succeeded') ||
+        (succeeded &&
+          (!result ||
+            result.id !== attempt.result_id ||
+            result.requested_profile !==
+              requestSlot.primary.identity.profile_id ||
+            result.provider !== attempt.profile.identity.provider_id ||
+            result.profile !== attempt.profile.identity.profile_id)) ||
+        (!succeeded && result)
+      ) {
+        invalidCanonicalRun(
+          runDir,
+          `slot ${requestSlot.slot_id} has inconsistent terminal evidence`,
+        );
+      }
+      const citations = result
+        ? (Array.isArray(result.citations) ? result.citations : []).flatMap(
+            (citation) =>
+              citation.source?.url
+                ? [
+                    {
+                      url: citation.source.url,
+                      title: citation.source.title,
+                      snippet: citation.excerpt,
+                    },
+                  ]
+                : [],
+          )
+        : [];
+      const durationMs = result?.provider_meta?.['librarium:duration_ms'];
+      return {
+        provider: plan.binding.adapter_id,
+        profile: `${requestSlot.primary.identity.provider_id}/${requestSlot.primary.identity.profile_id}`,
+        tier: canonicalTier(
+          result?.provenance?.result_kind ?? requestSlot.primary.result_kind,
+        ),
+        status: succeeded
+          ? 'success'
+          : attempt.status === 'timed_out'
+            ? 'timeout'
+            : 'error',
+        durationMs:
+          typeof durationMs === 'number' && Number.isFinite(durationMs)
+            ? durationMs
+            : 0,
+        error: attempt.error?.message ?? slot.error?.message,
+        model: result?.model ?? null,
+        content: result ? canonicalContent(result) : '',
+        citations,
+        usage: canonicalUsage(result?.usage),
+        metering: null,
+        rawFiles: { output: null, meta: null },
+      };
+    });
+  if (
+    responseResults.size !==
+    providerOutputs.filter((output) => output.status === 'success').length
+  ) {
+    invalidCanonicalRun(
+      runDir,
+      'the terminal response contains unbound results',
+    );
+  }
+  return {
+    runDir,
+    manifest,
+    providerOutputs,
+    sources: canonicalSources(providerOutputs),
+  };
+}
+
 function isContained(root, candidate) {
   const pathFromRoot = relative(root, candidate);
   return (
@@ -58,8 +308,11 @@ export function parseLibrariumRun(runDirectory) {
   const manifest = readJson(
     resolveArtifactReference(runDir, 'run.json', 'run manifest'),
   );
+  if (manifest.schemaVersion === 3) {
+    return parseCanonicalRun(runDir, manifest);
+  }
   if (manifest.version !== 1 || !Array.isArray(manifest.providers)) {
-    throw new Error(`${runDir} is not a Librarium v1 run artifact`);
+    throw new Error(`${runDir} is not a supported Librarium run artifact`);
   }
   const pending = manifest.providers.filter(
     (provider) => provider.status === 'async-pending',

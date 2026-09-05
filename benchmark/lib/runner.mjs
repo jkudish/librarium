@@ -175,7 +175,7 @@ export function buildLiveCaseArguments({
   ];
 }
 
-function assertExactTargetRun(parsedRun, target) {
+export function assertExactTargetRun(parsedRun, target) {
   const expected = [...target.members].sort();
   const actual = parsedRun.providerOutputs
     .map((output) => output.provider)
