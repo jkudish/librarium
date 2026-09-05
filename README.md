@@ -59,6 +59,9 @@ npm install -g librarium
 # Configure credentials and select providers interactively.
 librarium init
 
+# Inspect the exact offline preflight plan before anything runs.
+librarium plan "PostgreSQL connection pooling"
+
 # Run the default quick workflow and wait for its providers concurrently.
 librarium run "PostgreSQL connection pooling"
 
@@ -164,8 +167,8 @@ librarium run <query> [options]
 | `--mode <mode>` | `sync` (default; concurrent and awaited), `async` (durable profiles only), or legacy `mixed` (migrated to `async` with a notice) |
 | `--output <dir>` | Run-directory base path |
 | `--parallel <n>` / `--timeout <n>` | Concurrency and per-provider timeout limits |
-| `--max-cost <usd>` | Stop launching not-yet-started calls once provider-reported spend crosses this bound |
-| `--max-estimated-cost <usd>` | Reserve only known exact pre-dispatch estimates; do not interpret an omitted estimate as free |
+| `--max-cost <usd>` | Require bounded network-free primary/reserve estimates at admission, then stop new launches when provider-reported spend reaches the bound |
+| `--max-estimated-cost <usd>` | Require bounded network-free primary/reserve estimates and admit only when the complete primary plan fits |
 | `--yes` / `--no-fallback` | Skip the deep preflight confirmation / require the exact primary matrix |
 | `--json` / `--refine` / `--html` / `--jsonl` / `--open` | Machine output, optional query refinement, and presentation artifacts |
 
@@ -174,6 +177,37 @@ bounded and opt-in. It may use successful evidence from the run and limited
 follow-up searches, but it does not make a result verified merely because a
 model produced it. It leaves the original answer intact when verification is
 incomplete, budget-limited, or fails.
+
+### `plan`
+
+```bash
+librarium plan <query> [--answer] [--verify] [run selection options]
+```
+
+`plan` runs the same canonical request compilation, local credential-reference
+resolution, budget admission, and paid-stage reservation policy as execution,
+but stops before adapter initialization. It makes no provider requests or
+tests, imports no custom provider modules, spawns no custom scripts, performs
+no refinement or synthesis, and creates no run directory or ledger. OS
+keychain lookup is allowed after structural validation. A reported credential
+is therefore only locally present or reference-resolvable; it has not been
+authenticated.
+
+The default previews research. `--answer` adds synthesis, and `--verify` adds
+verification and requires `--answer`. The command accepts the request-shaping
+`run` controls: `--providers`, `--group`, `--mode`, `--parallel`, `--timeout`,
+`--max-cost`, `--max-estimated-cost`, `--no-fallback`, and `--refine`.
+`--json` emits a sanitized, versioned planning receipt with exact selected
+profiles, workflow omissions, fallback reserve, all four paid stages,
+known/unknown estimates, effective limits and their sources, warnings, and
+diagnostics. A blocked plan exits with status 2; it is never presented as an
+admitted partial plan.
+
+“Plan ready” means only that local preflight admitted the request. It is not an
+authentication check, provider availability check, executable frozen plan,
+price quote, or final-bill guarantee. In particular, requested helper stages
+can be skipped when their estimate is unknown under a hard budget even when
+the research plan itself can proceed.
 
 When neither `--providers` nor `--group` is supplied, `run` selects the curated
 `quick` workflow. Unavailable quick providers are omitted with preflight
@@ -190,6 +224,7 @@ that are not in the `run` table above.
 
 | Command | Options |
 | --- | --- |
+| `plan` | `--providers`, `--group`, `--mode`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--no-fallback`, `--refine`, `--answer`, `--verify`, `--json` |
 | `answer` | `--providers`, `--group`, `--mode`, `--output`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--yes`, `--no-fallback`, `--json`, `--refine`, `--verify`, `--html`, `--jsonl`, `--open` |
 | `live-validation` | `--targets`, `--approval`, `--confirm`, `--paid`, `--continue`, `--candidate-root`, `--artifact-root`, `--artifact`, `--fixture` |
 | `status` | `--wait`, `--retrieve`, `--json` |
@@ -367,9 +402,21 @@ environment. Review and trust that code deliberately. See
 Librarium can record provider-reported use and can reserve an exact,
 network-free price when a reviewed price definition makes that possible. A
 missing estimate, missing reported cost, API unit, or token price is unknown —
-never a zero-cost guarantee. `--max-cost` is a lower-bound circuit breaker;
-in-flight work can still finish and incur cost. `--max-estimated-cost` admits
-only calls with an exact known estimate under its reserve.
+never a zero-cost guarantee. Both hard-budget flags require a bounded,
+network-free estimate for every primary and fallback-reserve profile, and the
+complete primary estimate must fit before execution is admitted.
+With either flag, the shared wallet requires and reserves a known estimate
+before each paid attempt. `--max-estimated-cost` compares those admissions to
+committed estimates. `--max-cost` also stops launching new work when
+accumulated provider-reported actual spend reaches its bound. Already in-flight
+work can still finish and exceed either bound.
+
+Estimated cost, provider-reported actual cost, and unknown cost are separate
+facts. An estimate is not a quote, and neither budget flag guarantees the final
+bill. Refinement, synthesis, and verification share the run-wide paid wallet,
+but their spending is not inherently fixed: a helper with no bounded estimate
+is skipped or blocked under a hard budget, while provider-reported cost may
+arrive only after an admitted attempt finishes.
 
 Every provider call can send a query and selected options to that provider.
 Retention, billing, and account-specific behavior belong to the upstream
