@@ -1249,6 +1249,22 @@ function paidAttemptBridge(
   };
 }
 
+function bridgeWithPaidWalletSignal(
+  dependencies: ProviderAttemptBridgeDependencies,
+  wallet: RunPaidWallet | undefined,
+  allowAfterWalletDeadline = false,
+): ProviderAttemptBridge {
+  if (!wallet || allowAfterWalletDeadline) {
+    return createProviderAttemptBridge(dependencies);
+  }
+  return createProviderAttemptBridge({
+    ...dependencies,
+    signal: dependencies.signal
+      ? AbortSignal.any([dependencies.signal, wallet.signal])
+      : wallet.signal,
+  });
+}
+
 /** Production coordinator dependencies with bounded, collision-resistant ids. */
 export function createNodeCoordinatorDependencies(
   now: () => number = Date.now,
@@ -1379,7 +1395,10 @@ export async function runCanonicalPreparedExecution(
       return created;
     },
   };
-  const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
+  const bridge = bridgeWithPaidWalletSignal(
+    dependencies.attempt_bridge,
+    dependencies.paid_wallet,
+  );
   const runtime = await runPreparedExecution(prepared, {
     store: executionStore,
     coordinator: dependencies.coordinator,
@@ -1508,7 +1527,6 @@ export async function resumeCanonicalPreparedExecution(
   }
   const custodyMode =
     manifest.coordination_state.status !== 'running' && hasRemoteCustody;
-  const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
   const prepared = preparedFromManifest(manifest);
   const persistedLedger = readPaidRunLedger(
     dependencies.runs_root,
@@ -1561,6 +1579,13 @@ export async function resumeCanonicalPreparedExecution(
             ),
         })
       : undefined);
+  // Terminal custody reconciliation is a bounded GET-only safety observation,
+  // not a new paid launch, so it retains its historical post-deadline window.
+  const bridge = bridgeWithPaidWalletSignal(
+    dependencies.attempt_bridge,
+    wallet,
+    custodyMode,
+  );
   const runtime = await runPreparedExecution(prepared, {
     store,
     coordinator: dependencies.coordinator,

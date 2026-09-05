@@ -351,12 +351,14 @@ async function retrieveCompletedTask(
   launch: AttemptLaunch,
   handle: DurableHandle,
   now: () => number,
+  runSignal?: AbortSignal,
 ): Promise<AttemptExecutionResult> {
   const completedHandle = observedHandle(handle, 'succeeded', now);
   const retrieved = await beforeDeadline(
     () => provider.retrieve(task),
     launch,
     now,
+    runSignal,
   );
   if (retrieved.kind === 'deadline') {
     return {
@@ -488,7 +490,14 @@ export function createProviderAttemptBridge(
         if (context.custody_only) {
           return { kind: 'accepted', durable_handle: handle };
         }
-        return retrieveCompletedTask(provider, task, launch, handle, now);
+        return retrieveCompletedTask(
+          provider,
+          task,
+          launch,
+          handle,
+          now,
+          dependencies.signal,
+        );
       }
       let latestHandle = handle;
       for (;;) {
@@ -540,6 +549,7 @@ export function createProviderAttemptBridge(
             launch,
             latestHandle,
             now,
+            dependencies.signal,
           );
         }
         if (poll.status === 'failed') {
@@ -763,7 +773,14 @@ export function createProviderAttemptBridge(
         };
       }
       if (task.status === 'completed') {
-        return retrieveCompletedTask(provider, task, launch, handle, now);
+        return retrieveCompletedTask(
+          provider,
+          task,
+          launch,
+          handle,
+          now,
+          dependencies.signal,
+        );
       }
       if (context.mode === 'async') return { kind: 'accepted' };
 
@@ -828,6 +845,7 @@ export function createProviderAttemptBridge(
             launch,
             latestHandle,
             now,
+            dependencies.signal,
           );
         }
         if (poll.status === 'failed') {

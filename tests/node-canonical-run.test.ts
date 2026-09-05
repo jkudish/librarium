@@ -1041,6 +1041,161 @@ describe('canonical v3 run.json', () => {
     ]);
   });
 
+  it('does not poll accepted work past the restored wallet deadline', async () => {
+    const { root, runDirectory } = directories();
+    const durable = profile('wallet-deadline', 'background');
+    const plan = prepared([durable], 'async');
+    plan.request.requested_at = new Date(START).toISOString();
+    const researchStartedAt = START + 55_000;
+    let now = researchStartedAt;
+    const profileKey = profileIdentityKey(durable.identity);
+    const frozenPlan = plan.profile_plans_by_identity[profileKey];
+    if (!frozenPlan) throw new Error('missing wallet deadline fixture plan');
+    plan.profile_plans_by_identity[profileKey] = {
+      ...frozenPlan,
+      estimate: { estimated_cost_microusd: '100' },
+    };
+    const wallet = new RunPaidWallet({
+      request_id: plan.request.request_id,
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: plan.request.requested_at,
+      deadline_at: new Date(START + 60_000).toISOString(),
+      stages: durablePaidStages([
+        {
+          provider: 'adapter-wallet-deadline',
+          profile: profileKey,
+          estimated_cost_microusd: '100',
+        },
+      ]),
+      now: () => now,
+      on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(root, runDirectory, action),
+      load_latest: () => readPaidRunLedger(root, runDirectory),
+    });
+    const submit = vi.fn(async () => ({
+      provider: 'adapter-wallet-deadline',
+      taskId: 'wallet-deadline-task',
+      query: plan.request.query,
+      submittedAt: now,
+      status: 'pending' as const,
+    }));
+    const poll = vi.fn(async () => ({ status: 'completed' as const }));
+    const provider: Provider = {
+      id: 'adapter-wallet-deadline',
+      displayName: 'Wallet deadline',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit,
+      poll,
+      retrieve: vi.fn(async () => success('adapter-wallet-deadline')),
+    };
+    const bindings = {
+      ...exactBindings([durable], { 'adapter-wallet-deadline': provider }),
+      now: () => now,
+    };
+    const firstCoordinator = {
+      ...coordinator(),
+      clock: { now: () => now },
+    };
+
+    const accepted = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: firstCoordinator,
+      attempt_bridge: bindings,
+      paid_wallet: wallet,
+    });
+    expect(accepted.response).toBeUndefined();
+    expect(submit).toHaveBeenCalledOnce();
+
+    now = START + 61_000;
+    await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: {
+        ...coordinator('deadline-resume-'),
+        clock: { now: () => now },
+      },
+      attempt_bridge: bindings,
+    });
+
+    expect(poll).not.toHaveBeenCalled();
+    expect(provider.retrieve).not.toHaveBeenCalled();
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it('stops waiting for completed-task retrieval when the wallet aborts', async () => {
+    const { root, runDirectory } = directories();
+    const durable = profile('retrieve-abort', 'background');
+    const plan = prepared([durable]);
+    const profileKey = profileIdentityKey(durable.identity);
+    const frozenPlan = plan.profile_plans_by_identity[profileKey];
+    if (!frozenPlan) throw new Error('missing retrieve abort fixture plan');
+    plan.profile_plans_by_identity[profileKey] = {
+      ...frozenPlan,
+      estimate: { estimated_cost_microusd: '100' },
+    };
+    let wallet: RunPaidWallet;
+    const retrieve = vi.fn(() => {
+      wallet.cancel();
+      return new Promise<ProviderResult>(() => {});
+    });
+    const provider: Provider = {
+      id: 'adapter-retrieve-abort',
+      displayName: 'Retrieve abort',
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: 'adapter-retrieve-abort',
+        taskId: 'retrieve-abort-task',
+        query: plan.request.query,
+        submittedAt: START,
+        status: 'completed' as const,
+      })),
+      poll: vi.fn(),
+      retrieve,
+    };
+    wallet = new RunPaidWallet({
+      request_id: plan.request.request_id,
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: plan.request.requested_at,
+      deadline_at: new Date(START + 60_000).toISOString(),
+      stages: durablePaidStages([
+        {
+          provider: 'adapter-retrieve-abort',
+          profile: profileKey,
+          estimated_cost_microusd: '100',
+        },
+      ]),
+      now: () => START,
+      on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(root, runDirectory, action),
+      load_latest: () => readPaidRunLedger(root, runDirectory),
+    });
+
+    const result = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      attempt_bridge: exactBindings([durable], {
+        'adapter-retrieve-abort': provider,
+      }),
+      paid_wallet: wallet,
+    });
+
+    expect(retrieve).toHaveBeenCalledOnce();
+    expect(wallet.signal.aborted).toBe(true);
+    expect(result.response?.status).toBe('failed');
+  });
+
   it('routes v3 check_async through one idempotent canonical resume pass', async () => {
     const { root, runDirectory } = directories();
     const durableProfile = profile('durable', 'background');
