@@ -160,58 +160,78 @@ describe('Parallel first-party providers', () => {
     });
   });
 
-  it('maps chat basis only when the response reports it and supports JSON schema output', async () => {
-    const http = client({
-      id: 'chat_record_1',
-      interaction_id: 'interaction_1',
-      model: 'base',
-      choices: [{ message: { content: '{"answer":"yes"}' } }],
-      basis: [
-        {
-          field: 'output',
-          reasoning: 'Confirmed by the source.',
-          confidence: 'high',
-          citations: [
-            { url: 'https://example.test/source', excerpts: ['Evidence.'] },
-          ],
+  it.each(['message', 'delta'] as const)(
+    'maps chat %s content, basis, usage and JSON schema output',
+    async (field) => {
+      const http = client({
+        id: 'chat_record_1',
+        interaction_id: 'interaction_1',
+        model: 'base',
+        choices: [{ [field]: { content: '{"answer":"yes"}' } }],
+        basis: [
+          {
+            field: 'output',
+            reasoning: 'Confirmed by the source.',
+            confidence: 'high',
+            citations: [
+              { url: 'https://example.test/source', excerpts: ['Evidence.'] },
+            ],
+          },
+        ],
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+      });
+      const provider = new ParallelChatProvider({
+        apiKey: key,
+        httpClient: http,
+        model: 'base',
+        configuredOptions: {
+          responseFormat: {
+            name: 'answer',
+            schema: { type: 'object' },
+            strict: true,
+          },
         },
-      ],
-      usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
-    });
-    const provider = new ParallelChatProvider({
-      apiKey: key,
-      httpClient: http,
-      model: 'base',
-      configuredOptions: {
-        responseFormat: {
-          name: 'answer',
-          schema: { type: 'object' },
-          strict: true,
+      });
+      const result = await provider.execute('question', { timeout: 9 });
+      expect(result.error).toBeUndefined();
+      expect(result).toMatchObject({
+        content: '{"answer":"yes"}',
+        model: 'base',
+        tokenUsage: { input: 11, output: 7 },
+        usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+      });
+      expect(result.citations).toEqual([
+        expect.objectContaining({
+          url: 'https://example.test/source',
+          snippet: 'Evidence.',
+        }),
+      ]);
+      expect(result.providerMeta).toMatchObject({
+        'parallel:interaction_id': 'interaction_1',
+        'parallel:basis_available': true,
+        'parallel:basis': [
+          {
+            field: 'output',
+            reasoning: 'Confirmed by the source.',
+            confidence: 'high',
+            citations: [
+              { url: 'https://example.test/source', excerpts: ['Evidence.'] },
+            ],
+          },
+        ],
+      });
+      const [, request] = (http as unknown as ReturnType<typeof vi.fn>).mock
+        .calls[0] as [string, HttpRequestOptions];
+      expect(request.body).toMatchObject({
+        model: 'base',
+        stream: false,
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'answer', strict: true },
         },
-      },
-    });
-    const result = await provider.execute('question', { timeout: 9 });
-    expect(result.citations).toEqual([
-      expect.objectContaining({
-        url: 'https://example.test/source',
-        snippet: 'Evidence.',
-      }),
-    ]);
-    expect(result.providerMeta).toMatchObject({
-      'parallel:interaction_id': 'interaction_1',
-      'parallel:basis_available': true,
-    });
-    const [, request] = (http as unknown as ReturnType<typeof vi.fn>).mock
-      .calls[0] as [string, HttpRequestOptions];
-    expect(request.body).toMatchObject({
-      model: 'base',
-      stream: false,
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'answer', strict: true },
-      },
-    });
-  });
+      });
+    },
+  );
 
   it('does not expose invalid basis URLs in Chat citations or provider metadata', async () => {
     const result = await new ParallelChatProvider({
@@ -317,8 +337,94 @@ describe('Parallel first-party providers', () => {
   );
 
   it.each([
+    [
+      { message: { content: ' Message. ' }, delta: { content: 'Delta.' } },
+      ' Message. ',
+    ],
+    [{ message: { content: 'Same.' }, delta: { content: 'Same.' } }, 'Same.'],
+    [{ message: { content: '' }, delta: { content: ' Delta. ' } }, ' Delta. '],
+    [{ message: { content: ' \n ' }, delta: { content: 'Delta.' } }, 'Delta.'],
+    [
+      { message: { content: 'Message.' }, delta: { content: null } },
+      'Message.',
+    ],
+    [{ message: { content: 'Message.' }, delta: {} }, 'Message.'],
+  ])('selects Chat content deterministically (%o)', async (choice, content) => {
+    const result = await new ParallelChatProvider({
+      apiKey: key,
+      httpClient: client({ choices: [choice] }),
+    }).execute('question', { timeout: 9 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe(content);
+    expect(result.providerMeta).toEqual({ 'parallel:basis_available': false });
+  });
+
+  it('selects the first nonblank Chat choice without combining answers', async () => {
+    const result = await new ParallelChatProvider({
+      apiKey: key,
+      httpClient: client({
+        choices: [
+          { delta: { content: null } },
+          { message: { content: ' ' } },
+          { delta: { content: 'First answer.' } },
+          { message: { content: 'Later answer.' } },
+        ],
+      }),
+    }).execute('question', { timeout: 9 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('First answer.');
+  });
+
+  it.each([
     [{ choices: [] }, 'invalid Chat response'],
     [{ choices: [{ message: {} }] }, 'invalid Chat response'],
+    [{ choices: [{ delta: null }] }, 'invalid Chat response'],
+    [{ choices: [{ delta: [] }] }, 'invalid Chat response'],
+    [{ choices: [{ message: 'private-response' }] }, 'invalid Chat response'],
+    [{ choices: [{ delta: 'private-response' }] }, 'invalid Chat response'],
+    ...['message', 'delta'].flatMap((field) =>
+      [42, false, ['private-response'], { text: 'private-response' }].map(
+        (content) => [
+          { choices: [{ [field]: { content } }] },
+          'invalid Chat response',
+        ],
+      ),
+    ),
+    [
+      {
+        choices: [{ message: { content: null }, delta: { content: 'Valid.' } }],
+      },
+      'invalid Chat response',
+    ],
+    [
+      { choices: [{ message: { content: 'Valid.' }, delta: { content: 42 } }] },
+      'invalid Chat response',
+    ],
+    [
+      {
+        choices: [{ delta: { content: 'Valid.' } }],
+        usage: { total_tokens: '18' },
+      },
+      'invalid Chat response',
+    ],
+    [
+      { choices: [{ delta: { content: 'Valid.' } }], basis: {} },
+      'invalid Chat response',
+    ],
+    ...[
+      {},
+      { delta: {} },
+      { delta: { content: null } },
+      { delta: { content: '' } },
+      { delta: { content: ' \n ' } },
+      { message: { content: '' } },
+      { message: { content: ' \n ' } },
+    ].map((choice) => [
+      { choices: [choice], content: 'private-response' },
+      'without message content',
+    ]),
   ])(
     'rejects malformed successful Chat payloads (%o)',
     async (data, message) => {
@@ -334,6 +440,11 @@ describe('Parallel first-party providers', () => {
         error: expect.stringContaining(message),
         failureDiagnostic: { kind: 'provider', httpStatus: 200 },
       });
+      expect(result.failureDiagnostic).toEqual({
+        kind: 'provider',
+        httpStatus: 200,
+      });
+      expect(JSON.stringify(result)).not.toContain('private-response');
     },
   );
 
