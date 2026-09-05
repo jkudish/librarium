@@ -109,11 +109,6 @@ export function registerAnswerCommand(program: Command): void {
       'Open the output directory (or report.html with --html) when the run completes',
     )
     .action(async (query: string, opts: RunOptions) => {
-      // Default to the quick group when the user did not pick providers/group.
-      const runOpts: RunOptions = { ...opts };
-      if (!runOpts.providers && !runOpts.group) {
-        runOpts.group = 'quick';
-      }
       const hooks: ExecuteRunHooks = {
         paidStages: {
           synthesis: true,
@@ -124,7 +119,7 @@ export function registerAnswerCommand(program: Command): void {
             ? synthesizeAndVerifyAnswer(context)
             : synthesizeAnswer(context),
       };
-      await executeRun(query, runOpts, hooks);
+      await executeRun(query, opts, hooks);
     });
 }
 

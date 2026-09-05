@@ -10,6 +10,7 @@ import {
   synthesizeAnswer,
 } from '../src/commands/answer.js';
 import type { PostDispatchContext } from '../src/commands/run.js';
+import * as runCommand from '../src/commands/run.js';
 import { fingerprint, RunPaidWallet } from '../src/run-paid-wallet.js';
 import type {
   Config,
@@ -112,6 +113,33 @@ describe('answer command --max-cost flag', () => {
     expect(parseAnswer(['some query']).verify).toBeUndefined();
     expect(parseAnswer(['some query', '--verify']).verify).toBe(true);
   });
+
+  it.each([
+    { args: [], group: undefined },
+    { args: ['--group', 'quick'], group: 'quick' },
+  ])(
+    'preserves omitted versus explicit selectors: $args',
+    async ({ args, group }) => {
+      const execute = vi
+        .spyOn(runCommand, 'executeRun')
+        .mockResolvedValue({ exitCode: 0 });
+      try {
+        const program = new Command();
+        registerAnswerCommand(program);
+        await program.parseAsync([
+          'node',
+          'librarium',
+          'answer',
+          'query',
+          ...args,
+        ]);
+        expect(execute).toHaveBeenCalledOnce();
+        expect(execute.mock.calls[0]?.[1].group).toBe(group);
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
 });
 
 describe('synthesizeAnswer', () => {
