@@ -25,7 +25,7 @@ export const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json');
 
 /**
  * Only authored groups are meaningful to the v2 catalog. `loadConfig` still
- * injects DEFAULT_GROUPS for the unchanged v1 dispatcher, so retain the two
+ * injects DEFAULT_GROUPS for legacy config compatibility, so retain the two
  * authored layers out-of-band instead of making injected defaults look like
  * custom user workflows.
  */

@@ -1,7 +1,7 @@
 import type { ProviderResult, ProviderUsage } from '../types.js';
 
 /**
- * Normalize adapter usage without importing the retired v1 dispatcher.
+ * Normalize adapter usage for canonical execution and historical readers.
  * Rich usage wins; otherwise lift the legacy token pair.
  */
 export function normalizeUsage(

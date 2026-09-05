@@ -1226,7 +1226,7 @@ describe('private request compilation', () => {
       ),
     ].join('\n');
     expect(graph).not.toMatch(
-      /(?:node:|execution-runtime|coordinator(?:-store)?|bridge|dispatcher|research-run|node-registry|(?:^|\/)commands(?:\/|$)|(?:^|\/)mcp(?:\/|$))/,
+      /(?:node:|execution-runtime|coordinator(?:-store)?|bridge|node-registry|(?:^|\/)commands(?:\/|$)|(?:^|\/)mcp(?:\/|$))/,
     );
     const productionEntryPoints = [
       fileURLToPath(new URL('../src/cli.ts', import.meta.url)),

@@ -297,7 +297,7 @@ describe('production request preflight transport ordering', () => {
     expect(state.events).not.toContain('dispatch');
   });
 
-  it('passes the frozen canonical plan rather than legacy dispatcher config', async () => {
+  it('passes the frozen canonical plan rather than mutable provider config', async () => {
     const outcome = await executeRun('private query', { json: true });
 
     expect(outcome.exitCode).toBe(0);

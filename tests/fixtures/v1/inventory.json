@@ -131,7 +131,7 @@
       "source": {
         "classification": "repository_behavior_scenario",
         "references": [
-          "tests/dispatcher-fallback.test.ts",
+          "tests/v1-baseline.test.ts",
           "tests/run-manifest.test.ts",
           "src/core/run-manifest.ts"
         ]
@@ -152,7 +152,7 @@
       "source": {
         "classification": "repository_behavior_scenario",
         "references": [
-          "tests/dispatcher-fallback.test.ts",
+          "tests/v1-baseline.test.ts",
           "tests/run-manifest.test.ts"
         ]
       },
@@ -172,7 +172,7 @@
       "source": {
         "classification": "repository_behavior_scenario",
         "references": [
-          "tests/research-run.test.ts",
+          "tests/v1-baseline.test.ts",
           "tests/run-manifest.test.ts"
         ]
       },

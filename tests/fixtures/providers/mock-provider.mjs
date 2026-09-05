@@ -79,7 +79,7 @@ async function main() {
         displayName,
         tier,
         execution: 'inline',
-        // Keyless: the mock never needs a credential, so the dispatcher runs
+        // Keyless: the mock never needs a credential, so canonical execution runs
         // it without any environment setup.
         requiresApiKey: false,
         capabilities: { execute: true, test: true },

@@ -21,7 +21,7 @@ import {
 export interface RefinedQueries {
   // Partial: refine only produces variants for grounded tiers. The `llm` tier
   // has no refined variant -- its providers fall back to the base query in the
-  // dispatcher (llm-tier providers use the prompt as-is).
+  // execution runtime (llm-tier providers use the prompt as-is).
   tierQueries: Partial<Record<ProviderTier, string>>;
   suggestedGroup?: string;
 }

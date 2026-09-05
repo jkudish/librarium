@@ -188,7 +188,7 @@ export interface ProviderResult {
   preventFallback?: true;
 }
 
-// Structured result returned by the core dispatcher for library consumers
+// Structured result projected from canonical execution for presentation consumers
 export interface ProviderDispatchResult {
   provider: string;
   tier: ProviderTier;
@@ -672,20 +672,4 @@ export interface DeduplicatedSource {
   title?: string;
   providers: string[];
   citationCount: number;
-}
-
-// Progress events from dispatcher
-export interface ProgressEvent {
-  providerId: string;
-  event:
-    | 'started'
-    | 'completed'
-    | 'error'
-    | 'async-submitted'
-    | 'fallback-started';
-  // Populated on 'completed', 'error', and 'async-submitted' (the report for
-  // providerId) and on 'fallback-started' (the failed primary's error report).
-  report?: ProviderReport;
-  /** Present on `async-submitted` so callers can persist the handle first. */
-  task?: AsyncTaskHandle;
 }

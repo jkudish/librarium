@@ -195,7 +195,7 @@ export class GeminiDeepProvider extends BackgroundBaseProvider {
 
   /**
    * Submit a background interaction. Returns a real pending handle (the
-   * interaction id); the dispatcher queues it and `librarium status` polls and
+   * interaction id); the runtime records it and `librarium status` polls and
    * retrieves it. Submission failures are terminal because the remote service
    * may have accepted the paid background job even when no response arrived.
    */

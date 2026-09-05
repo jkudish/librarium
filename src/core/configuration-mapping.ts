@@ -68,7 +68,7 @@ export interface ConfigurationMappingOptions {
   /**
    * See ProviderCatalogOptions.assumeCredentialAvailability. This is only for
    * side-effect-free transport admission; runtime credential checks remain
-   * mandatory before the legacy dispatcher can run.
+   * mandatory before canonical execution can run.
    */
   readonly assumeCredentialAvailability?: boolean;
   readonly catalog?: readonly ProviderCatalogEntry[];
