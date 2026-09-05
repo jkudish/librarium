@@ -254,15 +254,18 @@ export function evaluatePaidAttemptBudgetAdmission(
     committed_actual_cost_microusd: committedActualCost,
     future_reserved_cost_microusd: futureReservedCost,
   };
-  if (hasHardLimit(limits) && input.estimated_cost_microusd === undefined) {
-    return {
-      status: 'blocked',
-      reason_code: 'unknown_cost_under_hard_budget',
-      ...common,
-    };
+  if (input.estimated_cost_microusd === undefined) {
+    // Unbounded admission is allowed, but an unknown estimate is not a zero projection.
+    return hasHardLimit(limits)
+      ? {
+          status: 'blocked',
+          reason_code: 'unknown_cost_under_hard_budget',
+          ...common,
+        }
+      : { status: 'admitted', ...common };
   }
 
-  const estimate = input.estimated_cost_microusd ?? '0';
+  const estimate = input.estimated_cost_microusd;
   const projectedEstimate = add(
     add(committedEstimatedCost, futureReservedCost),
     estimate,

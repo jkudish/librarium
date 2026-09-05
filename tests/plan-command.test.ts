@@ -362,6 +362,16 @@ describe('plan command', () => {
         ],
         guarantees: { custom_code_loaded: false },
       });
+      if (receipt.status === 'ready') {
+        const admission = receipt.paid_stages.find(
+          ({ stage }) => stage === 'research',
+        )?.initial_attempt_admission;
+        expect(admission).toMatchObject({ status: 'admitted' });
+        expect(admission).not.toHaveProperty(
+          'projected_estimated_cost_microusd',
+        );
+        expect(admission).not.toHaveProperty('projected_actual_cost_microusd');
+      }
       expect(existsSync(marker)).toBe(false);
     }
   });
