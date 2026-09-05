@@ -372,7 +372,7 @@ export class ValyuResearchProvider extends BackgroundBaseProvider {
     } catch (error) {
       return {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: this.formatCatchError(error),
       };
     }
   }

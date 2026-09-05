@@ -122,7 +122,7 @@ export class YouResearchProvider extends BaseProvider {
     } catch (err) {
       return {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: this.formatCatchError(err),
       };
     }
   }

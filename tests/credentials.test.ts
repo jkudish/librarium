@@ -4,6 +4,7 @@ import {
   hasCredential,
   keychainCredentialName,
   keychainCredentialRef,
+  redactCredentialText,
   resolveCredential,
 } from '../src/core/credentials.js';
 
@@ -74,5 +75,18 @@ describe('credential references', () => {
     expect(resolveCredential('$ACME_API_KEY', { env: inherited })).toBe(
       'own-key',
     );
+  });
+
+  it('redacts only supplied credentials and credential URL parameters', () => {
+    const sentinel = 'sentinel-resolved-credential';
+    const redacted = redactCredentialText(
+      `request ${sentinel} failed at https://example.com/run?api_key=other-secret&attempt=4`,
+      [sentinel],
+    );
+
+    expect(redacted).toContain('request [REDACTED] failed');
+    expect(redacted).toContain('api_key=[REDACTED]&attempt=4');
+    expect(redacted).not.toContain(sentinel);
+    expect(redacted).not.toContain('other-secret');
   });
 });

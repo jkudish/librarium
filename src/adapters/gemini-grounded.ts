@@ -68,9 +68,10 @@ export class GeminiGroundedProvider extends BaseProvider {
 
     try {
       const response = await this.request<GeminiGroundedResponse>(
-        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
         {
           method: 'POST',
+          headers: { 'x-goog-api-key': apiKey },
           body: {
             contents: [{ parts: [{ text: query }] }],
             tools: [{ googleSearch: {} }],
@@ -101,7 +102,9 @@ export class GeminiGroundedProvider extends BaseProvider {
           content: '',
           citations: [],
           durationMs,
-          error: `Gemini error: ${data.error.message ?? data.error.code}`,
+          error: this.redactErrorText(
+            `Gemini error: ${data.error.message ?? data.error.code}`,
+          ),
         };
       }
 

@@ -85,13 +85,38 @@ describe('grounded providers', () => {
     ]);
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain(
-      'models/gemini-2.5-flash:generateContent?key=gemini-key',
-    );
+    expect(url).toContain('models/gemini-2.5-flash:generateContent');
+    expect(url).not.toContain('gemini-key');
+    expect(new URL(url).searchParams.has('key')).toBe(false);
+    expect(options.headers).toMatchObject({
+      'x-goog-api-key': 'gemini-key',
+    });
     expect(JSON.parse(options.body as string)).toEqual({
       contents: [{ parts: [{ text: 'who is cited?' }] }],
       tools: [{ googleSearch: {} }],
     });
+  });
+
+  it('redacts Gemini credentials echoed in a successful error envelope', async () => {
+    const sentinel = 'sentinel-gemini-credential';
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        error: {
+          code: 400,
+          message: `invalid key ${sentinel} at https://provider.example/call?key=other-secret&request=9`,
+        },
+      }),
+    );
+    const provider = new GeminiGroundedProvider({
+      credentials: { env: { GEMINI_API_KEY: sentinel } },
+    });
+
+    const result = await provider.execute('query', { timeout: 10 });
+
+    expect(result.error).toContain('Gemini error: invalid key [REDACTED]');
+    expect(result.error).toContain('key=[REDACTED]&request=9');
+    expect(result.error).not.toContain(sentinel);
+    expect(result.error).not.toContain('other-secret');
   });
 
   it('calls OpenRouter online search and extracts URL annotations', async () => {
@@ -219,7 +244,7 @@ describe('grounded providers', () => {
         credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
         model: 'gemini-2.5-pro',
       }),
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=gemini-key',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
     ],
     [
       'OpenRouter online',

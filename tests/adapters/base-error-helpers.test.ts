@@ -26,6 +26,10 @@ class TestProvider extends BaseProvider {
 
 describe('BaseProvider error helpers', () => {
   const provider = new TestProvider();
+  const sentinel = 'sentinel-credential-value';
+  const credentialProvider = new TestProvider({
+    credentials: { env: { BRAVE_ANSWERS_API_KEY: sentinel } },
+  });
 
   describe('formatError', () => {
     it('includes status and body', () => {
@@ -51,6 +55,29 @@ describe('BaseProvider error helpers', () => {
       const longData = { error: 'x'.repeat(500) };
       const result = provider.testFormatError(400, longData);
       expect(result.length).toBeLessThan(300);
+    });
+
+    it('redacts known credentials and credential-bearing URL parameters before truncating', () => {
+      const result = credentialProvider.testFormatError(429, {
+        error: `quota rejected ${sentinel}`,
+        diagnostic:
+          'https://provider.example/request?api_key=upstream-value&attempt=7',
+      });
+
+      expect(result).toContain('API returned 429');
+      expect(result).toContain('quota rejected [REDACTED]');
+      expect(result).toContain('api_key=[REDACTED]&attempt=7');
+      expect(result).not.toContain(sentinel);
+      expect(result).not.toContain('upstream-value');
+    });
+
+    it('does not expose a credential prefix at the truncation boundary', () => {
+      const result = credentialProvider.testFormatError(500, {
+        error: `${'x'.repeat(175)}${sentinel}`,
+      });
+
+      expect(result).toContain('[REDACTED]');
+      expect(result).not.toContain(sentinel.slice(0, 8));
     });
 
     it('handles non-serializable data gracefully', () => {
@@ -111,6 +138,19 @@ describe('BaseProvider error helpers', () => {
     it('handles non-Error values', () => {
       const result = provider.testFormatCatchError('string error');
       expect(result).toBe('string error');
+    });
+
+    it('redacts credentials from non-network exception messages', () => {
+      const result = credentialProvider.testFormatCatchError(
+        new Error(
+          `request ${sentinel} failed at https://provider.example/status?access_token=other-secret&attempt=8`,
+        ),
+      );
+
+      expect(result).toContain('request [REDACTED] failed');
+      expect(result).toContain('access_token=[REDACTED]&attempt=8');
+      expect(result).not.toContain(sentinel);
+      expect(result).not.toContain('other-secret');
     });
   });
 });

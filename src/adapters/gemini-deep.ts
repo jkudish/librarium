@@ -402,7 +402,7 @@ export class GeminiDeepProvider extends BackgroundBaseProvider {
     } catch (err) {
       return {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: this.formatCatchError(err),
       };
     }
   }

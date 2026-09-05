@@ -77,3 +77,18 @@ export function hasCredential(
   const resolved = resolveCredential(value, context);
   return resolved !== undefined && resolved.length > 0;
 }
+
+/** Redact resolved credentials and narrowly named credential URL parameters. */
+export function redactCredentialText(
+  value: string,
+  knownCredentials: readonly (string | undefined)[] = [],
+): string {
+  let redacted = value;
+  for (const credential of knownCredentials) {
+    if (credential) redacted = redacted.split(credential).join('[REDACTED]');
+  }
+  return redacted.replace(
+    /([?&](?:api[_-]?key|key|access[_-]?token)=)[^&#\s"'\\]+/gi,
+    '$1[REDACTED]',
+  );
+}

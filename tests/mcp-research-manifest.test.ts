@@ -22,6 +22,7 @@ describe('silent research live manifest', () => {
   });
 
   it('writes run.json before dispatch and terminalizes orchestration failures', async () => {
+    const sentinel = 'sentinel-mcp-credential';
     const baseDir = join(
       tmpdir(),
       `librarium-write-ahead-${crypto.randomUUID()}`,
@@ -51,7 +52,9 @@ describe('silent research live manifest', () => {
           Date.parse(persisted.coordination_state.request_deadline_at) -
             Date.parse(persisted.coordination_state.created_at),
         ).toBe(45_000);
-        throw new Error('dispatch exploded');
+        throw new Error(
+          `dispatch exploded at https://provider.example/run?api_key=${sentinel}`,
+        );
       }),
     };
     registerProvider(provider);
@@ -97,9 +100,10 @@ describe('silent research live manifest', () => {
       status: 'failed',
       errors: [{ code: 'librarium.adapter_execute_failed' }],
     });
-    expect(
-      JSON.parse(readFileSync(join(runDir as string, 'run.json'), 'utf8')),
-    ).toMatchObject({
+    expect(JSON.stringify(result)).not.toContain(sentinel);
+    const persisted = readFileSync(join(runDir as string, 'run.json'), 'utf8');
+    expect(persisted).not.toContain(sentinel);
+    expect(JSON.parse(persisted)).toMatchObject({
       schemaVersion: 3,
       coordination_state: { status: 'unsuccessful' },
       terminal_response: { status: 'failed' },
