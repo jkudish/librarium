@@ -189,8 +189,4 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     evidence: ['tests/adapters/llm-providers.test.ts'],
     lanes: [...base, 'options'],
   },
-  'parallel/chat': {
-    evidence: ['tests/adapters/parallel.test.ts'],
-    lanes: [...grounded, 'options'],
-  },
 };

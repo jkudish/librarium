@@ -107,13 +107,6 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     rates: [rate('processor_requests', '0.1')],
     reference: 'official:docs.parallel.ai/getting-started/pricing',
   }),
-  definition('parallel', 'chat', {
-    target: { kind: 'model', target_id: 'base' },
-    expected: ['requests'],
-    fixed: { requests: '1' },
-    rates: [rate('requests', '0.01')],
-    reference: 'official:docs.parallel.ai/getting-started/pricing',
-  }),
   unavailable(
     'parallel',
     'search',
@@ -439,6 +432,6 @@ export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:7d0bb6bf5049bb68bdf3c5836fd57eb2f6d73b262911e736f5d36cfb48019d5a',
+      'sha256:87f793e4b1f2fdccb17f36c8fb1fb523ea82949ccae2030cab05f0e244ef986d',
     definitions: DEFINITIONS,
   });

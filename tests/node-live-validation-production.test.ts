@@ -265,7 +265,6 @@ describe('production live-validation binding (injected, offline)', () => {
       'grok-combined/combined',
       'grok-x-only/x',
       'grok/web',
-      'parallel/chat',
       'parallel/research',
       'perplexity-deep-research/research',
       'perplexity-sonar-deep/research',
@@ -548,11 +547,14 @@ describe('production live-validation binding (injected, offline)', () => {
 });
 
 describe('production paid matrix and candidate attribution', () => {
-  it('requires the exact canonical 40-target binding inventory', () => {
+  it('requires the exact canonical 39-target binding inventory', () => {
     const matrix = productionValidationMatrix(
       loadConfig(join(tmpdir(), 'librarium-missing-matrix-config.json')),
     );
-    expect(matrix.targets).toHaveLength(40);
+    expect(matrix.targets).toHaveLength(39);
+    expect(matrix.targets.map((target) => target.key)).not.toContain(
+      'parallel/chat',
+    );
     expect(matrix.targets.map((target) => target.key)).toStrictEqual(
       buildCanonicalValidationMatrix().targets.map((target) => target.key),
     );
@@ -575,7 +577,7 @@ describe('production paid matrix and candidate attribution', () => {
       (target) => target.key === search.key,
     );
 
-    expect(optionBound.targets).toHaveLength(40);
+    expect(optionBound.targets).toHaveLength(39);
     expect(optionBound.catalog_digest).not.toBe(baseline.catalog_digest);
     expect(boundSearch?.catalog_digest).toBe(optionBound.catalog_digest);
   });

@@ -96,19 +96,6 @@ export const ParallelSearchOptionsSchema = ParallelSearchControlsSchema.extend({
 /** Turbo locks Search API `mode` to `turbo`; callers cannot override it. */
 export const ParallelTurboOptionsSchema = ParallelSearchControlsSchema;
 
-export const ParallelChatOptionsSchema = z
-  .object({
-    responseFormat: z
-      .object({
-        name: z.string().trim().min(1).max(64),
-        schema: z.record(z.string(), z.json()),
-        strict: z.boolean().optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-
 export const ParallelResearchOptionsSchema = z
   .object({
     processor: z.enum(['pro', 'pro-fast', 'ultra', 'ultra-fast']).optional(),
@@ -133,7 +120,6 @@ export const ParallelResearchOptionsSchema = z
 
 export type ParallelSearchOptions = z.infer<typeof ParallelSearchOptionsSchema>;
 export type ParallelTurboOptions = z.infer<typeof ParallelTurboOptionsSchema>;
-export type ParallelChatOptions = z.infer<typeof ParallelChatOptionsSchema>;
 export type ParallelResearchOptions = z.infer<
   typeof ParallelResearchOptionsSchema
 >;

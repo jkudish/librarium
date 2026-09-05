@@ -11,7 +11,6 @@ import {
   openRouterGroundedOptions,
   openRouterOptions as openRouterOptionsSchema,
   type ProviderDescriptorDefinition,
-  parallelChatOptions,
   parallelResearchOptions,
   parallelSearchOptions,
   parallelTurboOptions,
@@ -51,7 +50,6 @@ import type { OpenRouterProviderOptions } from './openrouter.js';
 import { OpenRouterChatProvider } from './openrouter-chat.js';
 import { OpenRouterOnlineProvider } from './openrouter-online.js';
 import {
-  ParallelChatProvider,
   ParallelResearchProvider,
   ParallelSearchProvider,
   ParallelTurboProvider,
@@ -195,7 +193,6 @@ function parallelOptions<
   T extends z.output<
     | typeof parallelSearchOptions
     | typeof parallelTurboOptions
-    | typeof parallelChatOptions
     | typeof parallelResearchOptions
   >,
 >(
@@ -218,14 +215,6 @@ const factories: Record<string, ProviderFactory> = {
       new ParallelResearchProvider({
         model:
           configuredModel(context) ?? context.options.processor ?? undefined,
-        configuredOptions: parallelOptions(context.options),
-      }),
-  ),
-  'parallel-chat': typedFactory(
-    parallelChatOptions,
-    (context) =>
-      new ParallelChatProvider({
-        model: configuredModel(context),
         configuredOptions: parallelOptions(context.options),
       }),
   ),

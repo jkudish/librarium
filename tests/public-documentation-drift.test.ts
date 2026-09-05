@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import * as parallelAdapters from '../src/adapters/parallel.js';
 import { createCliProgram } from '../src/cli-program.js';
 import { ARTIFACTS_VERSION } from '../src/contracts/artifacts/versions.js';
 import {
@@ -7,6 +8,9 @@ import {
   QUICK_WORKFLOW_ROSTER,
   VISIBILITY_WORKFLOW_ROSTER,
 } from '../src/core/builtin-workflows.js';
+import { BUILTIN_PRICING_SNAPSHOT } from '../src/core/pricing-snapshot.js';
+import { BUILTIN_PROFILE_BINDING_SPECS } from '../src/core/profile-bindings.js';
+import { BUILTIN_PROVIDER_DEFINITIONS } from '../src/core/provider-descriptor.js';
 import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
 import { SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION } from '../src/node-entry.js';
 
@@ -43,15 +47,57 @@ const mcpTools = [
 describe('public v2 documentation drift', () => {
   it('keeps the generated catalog facts in README aligned with source', () => {
     expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(33);
-    expect(profileKeys).toHaveLength(40);
+    expect(profileKeys).toHaveLength(39);
     expect(README).toMatch(
-      /\*\*33 built-in providers\*\* and \*\*40 implemented public\s+profiles\*\*/,
+      /\*\*33 built-in providers\*\* and \*\*39 implemented public\s+profiles\*\*/,
+    );
+    expect(SKILL).toContain(
+      '33 built-in providers and 39 implemented profiles',
     );
 
     for (const provider of BUILTIN_PROVIDER_CATALOG) {
       expect(README).toContain(`${provider.provider_id}/`);
     }
     for (const key of profileKeys) expect(README).toContain(`\`${key}\``);
+  });
+
+  it('excludes beta Parallel Chat from every shipping authority and public claim', () => {
+    const retained = ['parallel/research', 'parallel/search', 'parallel/turbo'];
+    expect(
+      profileKeys.filter((key) => key.startsWith('parallel/')).sort(),
+    ).toEqual(retained);
+    for (const definitions of [
+      BUILTIN_PROFILE_BINDING_SPECS,
+      BUILTIN_PRICING_SNAPSHOT.definitions,
+    ]) {
+      expect(
+        definitions
+          .filter(({ provider_id }) => provider_id === 'parallel')
+          .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
+          .sort(),
+      ).toEqual(retained);
+    }
+    expect(
+      BUILTIN_PROVIDER_DEFINITIONS.filter(({ id }) =>
+        id.startsWith('parallel-'),
+      )
+        .map(({ id }) => id)
+        .sort(),
+    ).toEqual(retained.map((key) => key.replace('/', '-')));
+    expect(Object.keys(parallelAdapters).sort()).toEqual([
+      'ParallelResearchProvider',
+      'ParallelSearchProvider',
+      'ParallelTurboProvider',
+    ]);
+    for (const document of [
+      README,
+      SKILL,
+      PROVIDER_GUIDE,
+      CONTRACTS_GUIDE,
+      read('benchmark/targets.json'),
+    ]) {
+      expect(document).not.toMatch(/parallel[\s/-]+chat|ParallelChatProvider/i);
+    }
   });
 
   it('keeps workflow names and curated rosters aligned with source', () => {
