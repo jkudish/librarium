@@ -7,6 +7,7 @@ import type {
   AsyncTaskHandle,
   AsyncTaskStatus,
   Citation,
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -38,6 +39,17 @@ const STATUS: Record<string, AsyncTaskStatus> = {
   cancelling: 'running',
   cancelled: 'cancelled',
 };
+
+function classifyParallelFailure(
+  status: number,
+): ProviderFailureDiagnostic['kind'] {
+  if (status === 401 || status === 403) return 'authentication';
+  if (status === 402) return 'billing';
+  if (status === 408 || status === 504) return 'timeout';
+  if (status === 429) return 'rate_limit';
+  if (status >= 400 && status < 500) return 'invalid_request';
+  return 'provider';
+}
 
 interface WebResult {
   url?: unknown;
@@ -501,14 +513,14 @@ export class ParallelChatProvider extends BaseProvider {
       );
       const durationMs = Math.round(performance.now() - start);
       if (response.status < 200 || response.status >= 300)
-        return {
-          provider: this.id,
-          tier: this.tier,
-          content: '',
-          citations: [],
+        return this.resultError(
           durationMs,
-          error: this.formatError(response.status, response.data),
-        };
+          this.formatError(response.status, response.data),
+          {
+            kind: classifyParallelFailure(response.status),
+            httpStatus: response.status,
+          },
+        );
       const parsedResponse = chatResponseSchema.safeParse(response.data);
       if (!parsedResponse.success)
         return this.resultError(
@@ -555,7 +567,11 @@ export class ParallelChatProvider extends BaseProvider {
       };
     }
   }
-  private resultError(durationMs: number, error: string): ProviderResult {
+  private resultError(
+    durationMs: number,
+    error: string,
+    failureDiagnostic?: ProviderFailureDiagnostic,
+  ): ProviderResult {
     return {
       provider: this.id,
       tier: this.tier,
@@ -563,6 +579,7 @@ export class ParallelChatProvider extends BaseProvider {
       citations: [],
       durationMs,
       error,
+      ...(failureDiagnostic && { failureDiagnostic }),
     };
   }
 }
