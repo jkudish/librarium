@@ -1514,6 +1514,21 @@ export async function resumeCanonicalPreparedExecution(
     dependencies.runs_root,
     dependencies.run_directory,
   );
+  if (
+    persistedLedger &&
+    (persistedLedger.request_id !== manifest.request.request_id ||
+      persistedLedger.request_fingerprint !== fingerprint(manifest.request) ||
+      persistedLedger.created_at !== manifest.request.requested_at ||
+      persistedLedger.deadline_at !==
+        new Date(
+          Date.parse(manifest.request.requested_at) +
+            prepared.policy.limits.request_deadline_ms,
+        ).toISOString())
+  ) {
+    throw new Error(
+      'The paid-attempt ledger does not match the canonical run.',
+    );
+  }
   const wallet =
     dependencies.paid_wallet ??
     (persistedLedger

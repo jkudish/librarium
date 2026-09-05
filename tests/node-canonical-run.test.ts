@@ -699,6 +699,8 @@ describe('canonical v3 run.json', () => {
     };
 
     const plan = prepared([durableProfile], 'async');
+    // Refinement/preparation can consume time before coordinator creation.
+    plan.request.requested_at = new Date(START - 5_000).toISOString();
     const profileKey = profileIdentityKey(durableProfile.identity);
     const frozenPlan = plan.profile_plans_by_identity[profileKey];
     if (!frozenPlan) throw new Error('missing durable fixture plan');
@@ -710,8 +712,8 @@ describe('canonical v3 run.json', () => {
       request_id: plan.request.request_id,
       request_fingerprint: fingerprint(plan.request),
       config_fingerprint: fingerprint('config'),
-      created_at: new Date(START).toISOString(),
-      deadline_at: new Date(START + 60_000).toISOString(),
+      created_at: plan.request.requested_at,
+      deadline_at: new Date(START + 55_000).toISOString(),
       stages: durablePaidStages([
         {
           provider: 'adapter-durable',
@@ -743,6 +745,33 @@ describe('canonical v3 run.json', () => {
       readBrowseRunView(runDirectory)?.presentation.providers[0];
     expect(pendingBrowse?.report.status).toBe('async-pending');
     expect(Object.hasOwn(pendingBrowse ?? {}, 'content')).toBe(false);
+
+    const originalLedger = readPaidRunLedger(root, runDirectory);
+    if (!originalLedger) throw new Error('missing fixture ledger');
+    for (const mismatch of [
+      { request_id: 'another-request' },
+      { request_fingerprint: fingerprint('another request') },
+      { created_at: new Date(START - 1_000).toISOString() },
+      { deadline_at: new Date(START + 120_000).toISOString() },
+    ]) {
+      writePaidRunLedger(root, runDirectory, {
+        ...originalLedger,
+        ...mismatch,
+      });
+      await expect(
+        resumeCanonicalPreparedExecution({
+          runs_root: root,
+          run_directory: runDirectory,
+          coordinator: coordinator('mismatch-'),
+          attempt_bridge: exactBindings([durableProfile], {
+            'adapter-durable': provider,
+          }),
+        }),
+      ).rejects.toThrow('paid-attempt ledger does not match the canonical run');
+      expect(poll).not.toHaveBeenCalled();
+      expect(retrieve).not.toHaveBeenCalled();
+    }
+    writePaidRunLedger(root, runDirectory, originalLedger);
 
     const resumed = await resumeCanonicalPreparedExecution({
       runs_root: root,

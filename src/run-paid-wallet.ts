@@ -443,18 +443,30 @@ export class RunPaidWallet {
     const attempt = this.#attempts.findLast(
       (entry) =>
         entry.parent_attempt_id === parentAttemptId &&
-        ['running', 'accepted', 'acceptance_unknown'].includes(entry.status),
+        entry.status !== 'blocked',
     );
     if (!attempt) return;
     const index = this.#attempts.indexOf(attempt);
     const reported = costMicrousdFromUsd(completion.usage?.costUsd);
+    if (['succeeded', 'failed', 'cancelled'].includes(attempt.status)) {
+      // Local termination does not imply that a remote task was free. Retain
+      // later reported billing without rewriting the local terminal receipt.
+      if (reported !== undefined) {
+        this.#attempts[index] = {
+          ...attempt,
+          reported: { state: 'known', cost_microusd: reported },
+        };
+        this.#emit();
+      }
+      return;
+    }
     this.#attempts[index] = {
       ...attempt,
       status: this.#cancellationRequestedAt ? 'cancelled' : completion.status,
       finished_at: new Date(this.#now()).toISOString(),
       reported:
         reported === undefined
-          ? { state: 'unknown' }
+          ? attempt.reported
           : { state: 'known', cost_microusd: reported },
       ...(completion.output_fingerprint && {
         output_fingerprint: completion.output_fingerprint,

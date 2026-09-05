@@ -284,6 +284,37 @@ describe('run-wide paid wallet', () => {
     ]);
   });
 
+  it.each(['cancelled', 'failed'] as const)(
+    'retains a late reported bill after local %s without rewriting the local outcome',
+    (status) => {
+      const subject = wallet();
+      const attemptId = subject.begin({
+        stage: 'research',
+        provider: 'research-a',
+        profile: 'research-a\0default',
+        estimated_cost_microusd: '7000',
+        input_fingerprint: fingerprint('research'),
+        parent_attempt_id: 'canonical-attempt-1',
+      });
+      subject.finish(attemptId, { status });
+      subject.reconcileParentAttempt('canonical-attempt-1', {
+        status: 'succeeded',
+        usage: { costUsd: 0.009 },
+      });
+      subject.reconcileParentAttempt('canonical-attempt-1', {
+        status: 'failed',
+      });
+
+      expect(subject.snapshot().attempts).toEqual([
+        expect.objectContaining({
+          attempt_id: attemptId,
+          status,
+          reported: { state: 'known', cost_microusd: '9000' },
+        }),
+      ]);
+    },
+  );
+
   it('fails closed when a run marked ledger-bearing loses its sidecar', () => {
     const root = join(tmpdir(), `librarium-wallet-${crypto.randomUUID()}`);
     const runDirectory = join(root, 'run-1');
