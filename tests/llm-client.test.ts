@@ -224,6 +224,104 @@ describe('callWithCascade', () => {
     ).rejects.toThrow(/Gemini synthesis call failed: HTTP 500/);
   });
 
+  it('redacts returned HTTP errors and sends Gemini credentials in a header', async () => {
+    const openAiKey = 'sentinel-openai-http-credential';
+    const geminiKey = 'sentinel-gemini-http-credential';
+    const warnings: string[] = [];
+    const attempts: string[] = [];
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        requests.push({ url, init });
+        const isOpenAi = url.includes('openai.com');
+        const key = isOpenAi ? openAiKey : geminiKey;
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: isOpenAi ? 'invalid_api_key' : 'PERMISSION_DENIED',
+              message: `credential ${key} rejected at https://provider.example/request?key=other-secret&attempt=6`,
+            },
+          }),
+          { status: isOpenAi ? 401 : 403 },
+        );
+      }),
+    );
+
+    const call = callWithCascade({
+      clients: [
+        { provider: 'openai', model: 'gpt-5-mini', apiKey: openAiKey },
+        { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: geminiKey },
+      ],
+      prompt: 'p',
+      action: 'synthesis',
+      timeoutMs: 1000,
+      json: false,
+      onWarning: (message) => warnings.push(message),
+      onAttempt: (attempt) => attempts.push(attempt.error ?? ''),
+    });
+
+    await expect(call).rejects.toThrow(
+      /Gemini synthesis call failed: HTTP 403/,
+    );
+    const diagnostics = JSON.stringify({ warnings, attempts });
+    expect(diagnostics).toContain('OpenAI synthesis call failed: HTTP 401');
+    expect(diagnostics).toContain('[REDACTED_URL]');
+    expect(diagnostics).not.toContain(openAiKey);
+    expect(diagnostics).not.toContain(geminiKey);
+    expect(diagnostics).not.toContain('other-secret');
+
+    const geminiRequest = requests.find(({ url }) =>
+      url.includes('generativelanguage.googleapis.com'),
+    );
+    expect(geminiRequest?.url).not.toContain(geminiKey);
+    expect(new URL(geminiRequest?.url ?? '').searchParams.has('key')).toBe(
+      false,
+    );
+    expect(geminiRequest?.init.headers).toMatchObject({
+      'x-goog-api-key': geminiKey,
+    });
+  });
+
+  it('redacts thrown transport URLs from warnings, attempts, and the final error', async () => {
+    const openAiKey = 'sentinel-openai-transport-credential';
+    const geminiKey = 'sentinel-gemini-transport-credential';
+    const warnings: string[] = [];
+    const attempts: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        const headers = init.headers as Record<string, string>;
+        const key =
+          headers.Authorization?.replace(/^Bearer /, '') ??
+          headers['x-goog-api-key'];
+        throw new Error(
+          `transport rejected ${url}?access_token=${key}&attempt=7`,
+        );
+      }),
+    );
+
+    const call = callWithCascade({
+      clients: [
+        { provider: 'openai', model: 'gpt-5-mini', apiKey: openAiKey },
+        { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: geminiKey },
+      ],
+      prompt: 'p',
+      action: 'refine',
+      timeoutMs: 1000,
+      json: true,
+      onWarning: (message) => warnings.push(message),
+      onAttempt: (attempt) => attempts.push(attempt.error ?? ''),
+    });
+
+    await expect(call).rejects.toThrow('access_token=[REDACTED]&attempt=7');
+    const diagnostics = JSON.stringify({ warnings, attempts });
+    expect(diagnostics).toContain('trying gemini');
+    expect(diagnostics).toContain('access_token=[REDACTED]&attempt=7');
+    expect(diagnostics).not.toContain(openAiKey);
+    expect(diagnostics).not.toContain(geminiKey);
+  });
+
   it('treats a parse throw as a failure and cascades', async () => {
     const getCalls = stubFetch(() => ({
       status: 200,
