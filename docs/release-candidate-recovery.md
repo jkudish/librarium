@@ -2,6 +2,14 @@
 
 The release-candidate workflow certifies exact bytes but has no publication authority. The release workflow promotes those bytes without changing source, package metadata, tags, artifacts, or provenance. It is owner-only and uses the `release` environment.
 
+This is an operator procedure for the workflows committed in this repository,
+not a record that v2 has been certified or published. A `2.0.0` source version
+does not establish an npm dist-tag, GitHub release, standalone download, or
+Homebrew version. Verify each channel read-only before directing users to it.
+Certification dispatch and publication each require explicit authorization;
+documentation review grants neither. Historical release records remain
+history, not evidence that the current source is distributed.
+
 ## Required repository setup
 
 Before publication, a repository administrator must create the `release` environment in **Settings → Environments** and configure:
@@ -16,8 +24,8 @@ The token is exposed only to the recovery step that restores an expected npm dis
 
 Certification requires an explicit, default-free `release_kind`:
 
-- `rc` requires the committed package and lock identity `X.Y.Z-rc.N` and publishes npm with dist-tag `rc` plus a prerelease GitHub release;
-- `stable` requires the separately committed package and lock identity `X.Y.Z` and publishes npm with dist-tag `latest` plus a non-prerelease GitHub release.
+- `rc` requires the committed package and lock identity `X.Y.Z-rc.N`; subsequent authorized promotion uses npm dist-tag `rc` plus a prerelease GitHub release;
+- `stable` requires the separately committed package and lock identity `X.Y.Z`; subsequent authorized promotion uses npm dist-tag `latest` plus a non-prerelease GitHub release.
 
 Both modes run the same package, SEA, installer, Homebrew, and distribution proofs and produce the same immutable candidate archive shape. Promotion derives behavior from the certified version and rejects a mismatched kind or dist-tag. It never renames an RC tarball to stable: npm package identity is inside the bytes, so stable publication requires a newly reviewed stable-version commit and successful stable certification run.
 
