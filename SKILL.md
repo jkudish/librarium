@@ -109,8 +109,8 @@ that limit; `--timeout` is the inline-attempt limit, not a new total deadline.
 `--max-cost <usd>` and `--max-estimated-cost <usd>` impose one shared run-wide
 budget across refinement, research (including fallbacks), synthesis, and
 verification. Admission includes committed attempts and future reservations;
-the first synthesis attempt can reserve budget before research. Unknown-cost
-attempts are blocked under a hard budget. Inspect skipped/blocked stages rather
+the first synthesis attempt can reserve budget before research. Attempts without
+a bounded estimate are blocked under a hard budget. Inspect skipped/blocked stages rather
 than promising an answer. No cap is implied when none is configured.
 
 Estimates are not quotes. Missing estimates, usage, or reported charges are
@@ -132,7 +132,7 @@ cancel command is provided. Do not resubmit ambiguous work merely to retry.
 ## Read complete evidence, not indexes
 
 MCP runs over stdio with `librarium mcp`. `research` saves evidence and returns a
-bounded index (counts, result IDs, previews, artifact references), not full text.
+bounded index (statuses, counts, result IDs, costs, and output directory), not text previews.
 `check_async` performs one bounded resume pass, can call providers and write, and
 returns an index too; it does not block waiting for completion. Pass explicit
 `runDir` rather than relying on whichever run is most recent.
@@ -155,8 +155,10 @@ label that evidence partial rather than treating the whole run as complete.
 Default run output is `./agents/librarium/{timestamp}-{slug}/`: inspect
 `summary.md`, `sources.json`, provider `.md`/`.meta.json`, and (if requested)
 `answer.md`. Public result views/exports are distinct from private `run.json`
-schemaVersion 3, which holds coordination state, durable handles, and paid-attempt
-accounting needed to resume. Keep it under local custody; never publish it as a
+schemaVersion 3, which holds coordination state and durable handles. Paid-attempt
+accounting lives in `paid-attempt-ledger.json`; `paid-attempt-ledger.required`
+makes missing ledger state fail closed. Preserve the entire run directory for recovery.
+Keep private state under local custody; never publish it as a
 shareable results file. Public evidence can still contain sensitive query/source
 content: review before sharing. Keep partial/failed/skipped outcomes visible.
 
