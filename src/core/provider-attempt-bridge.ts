@@ -13,7 +13,9 @@ import type {
   ProviderFailureDiagnostic,
   ProviderFailureKind,
   ProviderResult,
+  ProviderUsage,
 } from '../types.js';
+import { costMicrousdFromUsd } from './budget.js';
 import type { AttemptLaunch } from './coordinator.js';
 import type { AdapterBindingIdentity } from './execution-plan.js';
 import type {
@@ -46,6 +48,8 @@ export interface ProviderAttemptBridgeDependencies {
   wait?: (milliseconds: number) => Promise<void>;
   /** Run-wide cancellation; adapter calls also retain their absolute deadline. */
   signal?: AbortSignal;
+  /** Reconcile reported billing even when completion wins a remote cancel race. */
+  onCancellationUsage?: (launch: AttemptLaunch, usage: ProviderUsage) => void;
 }
 
 function providerFailure(
@@ -285,6 +289,7 @@ function resultOutcome(
   result: ProviderResult,
   completedHandle?: DurableHandle,
 ): AttemptExecutionResult {
+  const cost = reportedCost(result.usage);
   if (result.error) {
     const diagnostic = validatedFailureDiagnostic(result.failureDiagnostic);
     return {
@@ -296,6 +301,7 @@ function resultOutcome(
           result.preventFallback !== true,
         ),
         ...(completedHandle && { durable_handle: completedHandle }),
+        ...cost,
       },
       output: result,
     };
@@ -307,8 +313,56 @@ function resultOutcome(
       // Attempt ids are already bounded, opaque, and unique per request.
       result_id: launch.attempt_id,
       ...(completedHandle && { durable_handle: completedHandle }),
+      ...cost,
     },
     output: result,
+  };
+}
+
+function reportedCost(usage: ProviderUsage | undefined): {
+  readonly actual_cost_microusd?: string;
+} {
+  const cost = costMicrousdFromUsd(usage?.costUsd);
+  return cost === undefined ? {} : { actual_cost_microusd: cost };
+}
+
+/** Terminal task receipts carry billing, never successful research content. */
+function taskFailureOutcome(
+  provider: BackgroundProvider,
+  task: Pick<AsyncTaskHandle, 'status' | 'failureDiagnostic' | 'usage'>,
+  handle: DurableHandle,
+  now: () => number,
+): AttemptExecutionResult {
+  const outcome = task.status === 'cancelled' ? 'cancelled' : 'failed';
+  const error =
+    outcome === 'cancelled'
+      ? providerFailure(
+          'provider_task_cancelled',
+          'The durable provider task was cancelled.',
+          false,
+          false,
+          'cancelled',
+        )
+      : durableProviderFailure(task.failureDiagnostic, true);
+  return {
+    kind: 'finished',
+    finished: {
+      outcome,
+      error,
+      durable_handle: observedHandle(handle, outcome, now),
+      ...reportedCost(task.usage),
+    },
+    ...(task.usage && {
+      output: {
+        provider: provider.id,
+        tier: provider.tier,
+        content: '',
+        citations: [],
+        durationMs: 0,
+        error: error.message,
+        usage: task.usage,
+      } satisfies ProviderResult,
+    }),
   };
 }
 
@@ -458,6 +512,9 @@ export function createProviderAttemptBridge(
       }
       const task = taskFromDurableHandle(launch, handle, provider.id);
       const cancelled = await provider.cancel(task);
+      if (cancelled.usage) {
+        dependencies.onCancellationUsage?.(launch, cancelled.usage);
+      }
       return cancelled.status === 'cancelled'
         ? observedHandle(handle, 'cancelled', now)
         : undefined;
@@ -552,31 +609,8 @@ export function createProviderAttemptBridge(
             dependencies.signal,
           );
         }
-        if (poll.status === 'failed') {
-          return {
-            kind: 'finished',
-            finished: {
-              outcome: 'failed',
-              error: durableProviderFailure(poll.failureDiagnostic, true),
-              durable_handle: observedHandle(latestHandle, 'failed', now),
-            },
-          };
-        }
-        if (poll.status === 'cancelled') {
-          return {
-            kind: 'finished',
-            finished: {
-              outcome: 'cancelled',
-              error: providerFailure(
-                'provider_task_cancelled',
-                'The durable provider task was cancelled.',
-                false,
-                false,
-                'cancelled',
-              ),
-              durable_handle: observedHandle(latestHandle, 'cancelled', now),
-            },
-          };
+        if (poll.status === 'failed' || poll.status === 'cancelled') {
+          return taskFailureOutcome(provider, poll, latestHandle, now);
         }
         latestHandle = observedHandle(
           latestHandle,
@@ -746,31 +780,8 @@ export function createProviderAttemptBridge(
         return { kind: 'acceptance_unknown' };
       }
 
-      if (task.status === 'failed') {
-        return {
-          kind: 'finished',
-          finished: {
-            outcome: 'failed',
-            error: durableProviderFailure(task.failureDiagnostic, true),
-            durable_handle: observedHandle(handle, 'failed', now),
-          },
-        };
-      }
-      if (task.status === 'cancelled') {
-        return {
-          kind: 'finished',
-          finished: {
-            outcome: 'cancelled',
-            error: providerFailure(
-              'provider_task_cancelled',
-              'The durable provider task was cancelled.',
-              false,
-              false,
-              'cancelled',
-            ),
-            durable_handle: observedHandle(handle, 'cancelled', now),
-          },
-        };
+      if (task.status === 'failed' || task.status === 'cancelled') {
+        return taskFailureOutcome(provider, task, handle, now);
       }
       if (task.status === 'completed') {
         return retrieveCompletedTask(
@@ -848,31 +859,8 @@ export function createProviderAttemptBridge(
             dependencies.signal,
           );
         }
-        if (poll.status === 'failed') {
-          return {
-            kind: 'finished',
-            finished: {
-              outcome: 'failed',
-              error: durableProviderFailure(poll.failureDiagnostic, true),
-              durable_handle: observedHandle(latestHandle, 'failed', now),
-            },
-          };
-        }
-        if (poll.status === 'cancelled') {
-          return {
-            kind: 'finished',
-            finished: {
-              outcome: 'cancelled',
-              error: providerFailure(
-                'provider_task_cancelled',
-                'The durable provider task was cancelled.',
-                false,
-                false,
-                'cancelled',
-              ),
-              durable_handle: observedHandle(latestHandle, 'cancelled', now),
-            },
-          };
+        if (poll.status === 'failed' || poll.status === 'cancelled') {
+          return taskFailureOutcome(provider, poll, latestHandle, now);
         }
         await wait(Math.min(context.poll_interval_ms, timeoutFor(launch, now)));
       }

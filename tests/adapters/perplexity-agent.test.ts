@@ -308,8 +308,42 @@ describe('Perplexity Agent API adapters', () => {
       status: 'completed',
       rawStatus: 'completed',
       progress: 100,
+      usage: expect.objectContaining({ costUsd: 0.125 }),
     });
   });
+
+  it.each([undefined, { input_tokens: 10 }, { cost: { total_cost: 0 } }])(
+    'preserves absent, unpriced, or zero usage %j across failed adapter boundaries',
+    async (usage) => {
+      const body = { ...failed('unpriced-task', 'provider_error'), usage };
+      const { client, calls } = queuedClient(
+        Array.from({ length: 5 }, () => ({ data: body })),
+      );
+      const provider = new PerplexityDeepResearchProvider({
+        apiKey: 'synthetic',
+        httpClient: client,
+      });
+      const results = [
+        await provider.execute('question', { timeout: 10 }),
+        await provider.submit('question', { timeout: 10 }),
+        await provider.poll(handle('unpriced-task')),
+        await provider.retrieve(handle('unpriced-task')),
+        await provider.cancel(handle('unpriced-task')),
+      ];
+      for (const result of results) {
+        expect(result.usage?.costUsd).toBe(
+          usage && 'cost' in usage ? 0 : undefined,
+        );
+        if (usage && 'input_tokens' in usage)
+          expect(result.usage?.inputTokens).toBe(10);
+        if (!usage) expect(result.usage).toBeUndefined();
+        expect(JSON.stringify(result)).not.toMatch(
+          /secret-value|private\.example|Bearer/,
+        );
+      }
+      expect(calls).toHaveLength(5);
+    },
+  );
 
   it('preserves an accepted task id before parsing terminal output', async () => {
     const { client } = queuedClient([
@@ -318,6 +352,7 @@ describe('Perplexity Agent API adapters', () => {
           id: 'accepted-task',
           status: 'completed',
           output: [{ type: 'unknown_future_item' }],
+          usage: { cost: { total_cost: -1 } },
         },
       },
     ]);
@@ -331,6 +366,7 @@ describe('Perplexity Agent API adapters', () => {
       status: 'completed',
       providerStatus: 'completed',
     });
+    expect(submitted.usage).toBeUndefined();
   });
 
   it.each([

@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
+import { costMicrousdFromUsd } from './core/budget.js';
 import type { ProviderUsage } from './types.js';
+
+export { costMicrousdFromUsd } from './core/budget.js';
 
 export type PaidRunStage =
   | 'refinement'
@@ -113,15 +116,6 @@ export function fingerprint(value: unknown): string {
   return createHash('sha256')
     .update(typeof value === 'string' ? value : canonicalJson(value))
     .digest('hex');
-}
-
-export function costMicrousdFromUsd(
-  value: number | undefined,
-): string | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    return undefined;
-  }
-  return BigInt(Math.ceil(value * 1_000_000)).toString();
 }
 
 function canonicalJson(value: unknown): string {

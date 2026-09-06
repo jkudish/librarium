@@ -671,6 +671,7 @@ async function submitAgent(
   readonly id: string;
   readonly status?: AgentStatus;
   readonly failureDiagnostic?: ProviderFailureDiagnostic;
+  readonly usage?: ProviderUsage;
 }> {
   const value = await postAgentPayload(
     transport,
@@ -699,10 +700,19 @@ async function submitAgent(
           }
         })()
       : undefined;
+  let usage: ProviderUsage | undefined;
+  if (root.usage !== undefined) {
+    try {
+      usage = toUsage(parseUsage(root.usage));
+    } catch {
+      // Malformed optional usage cannot discard an already accepted task id.
+    }
+  }
   return {
     id,
     ...(status === undefined ? {} : { status }),
     ...(diagnostic === undefined ? {} : { failureDiagnostic: diagnostic }),
+    ...(usage === undefined ? {} : { usage }),
   };
 }
 
@@ -804,6 +814,7 @@ function resultFromResponse(
       durationMs,
       error: redactPerplexityError(statusMessage),
       failureDiagnostic: responseFailureDiagnostic(response),
+      usage: toUsage(response.usage),
     };
   }
   return {
@@ -834,32 +845,37 @@ function resultFromResponse(
 }
 
 function pollResult(response: ParsedAgentResponse): AsyncPollResult {
+  const usage = toUsage(response.usage);
+  const common = {
+    rawStatus: response.status,
+    ...(usage === undefined ? {} : { usage }),
+  };
   switch (response.status) {
     case 'queued':
-      return { status: 'pending', rawStatus: response.status };
+      return { status: 'pending', ...common };
     case 'in_progress':
-      return { status: 'running', rawStatus: response.status };
+      return { status: 'running', ...common };
     case 'cancelling':
-      return { status: 'running', rawStatus: response.status };
+      return { status: 'running', ...common };
     case 'completed':
-      return { status: 'completed', rawStatus: response.status, progress: 100 };
+      return { status: 'completed', ...common, progress: 100 };
     case 'cancelled':
       return {
         status: 'cancelled',
-        rawStatus: response.status,
+        ...common,
         message: 'Perplexity Agent task was cancelled.',
       };
     case 'incomplete':
       return {
         status: 'failed',
-        rawStatus: response.status,
+        ...common,
         message: 'Perplexity Agent task was incomplete.',
         failureDiagnostic: responseFailureDiagnostic(response),
       };
     case 'failed':
       return {
         status: 'failed',
-        rawStatus: response.status,
+        ...common,
         message: 'Perplexity Agent task failed.',
         failureDiagnostic: responseFailureDiagnostic(response),
       };
@@ -986,6 +1002,7 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         ...(response.failureDiagnostic === undefined
           ? {}
           : { failureDiagnostic: response.failureDiagnostic }),
+        ...(response.usage === undefined ? {} : { usage: response.usage }),
       };
     } catch (error) {
       void error;
