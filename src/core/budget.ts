@@ -1,5 +1,14 @@
 import type { MeteringEstimate, ProviderUsage } from '../types.js';
 
+export function costMicrousdFromUsd(
+  value: number | undefined,
+): string | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return BigInt(Math.ceil(value * 1_000_000)).toString();
+}
+
 /**
  * Runtime spend circuit breaker for a dispatch.
  *
