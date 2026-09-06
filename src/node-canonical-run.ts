@@ -709,7 +709,19 @@ export async function cancelCanonicalRun(
     Parameters<typeof recordDurableCustodyObservation>[2]
   >();
   if (dependencies.attempt_bridge) {
-    const bridge = createProviderAttemptBridge(dependencies.attempt_bridge);
+    const wallet = restoreCanonicalPaidWallet(current, dependencies);
+    const bridge = createProviderAttemptBridge({
+      ...dependencies.attempt_bridge,
+      onCancellationUsage: (launch, usage) => {
+        // A cancellation response may report a charge even when the provider
+        // completed instead. Reconciliation preserves any prior terminal receipt.
+        wallet?.reconcileParentAttempt(launch.attempt_id, {
+          status: 'cancelled',
+          usage,
+        });
+        dependencies.attempt_bridge?.onCancellationUsage?.(launch, usage);
+      },
+    });
     for (const attempt of current.coordination_state.attempts) {
       const handle = attempt.durable_handle;
       if (
