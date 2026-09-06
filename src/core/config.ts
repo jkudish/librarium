@@ -105,19 +105,13 @@ function exactMicrousdToUsd(value: string | undefined): number | undefined {
   return usd;
 }
 
-function compatibilityConfigFromV2(raw: unknown, path: string): Config {
+function compatibilityConfigFromV2(raw: unknown, path: string): unknown {
   const validated = validateConfigV2(raw);
   if (!validated.ok) {
-    const diagnostics = validated.issues
-      .map(
-        ({ code, path: issuePath, message }) =>
-          `${code} ${issuePath}: ${message}`,
-      )
-      .join('; ');
-    throw new Error(`Invalid Librarium v2 config in ${path}: ${diagnostics}`);
+    throw new Error(`Invalid Librarium v2 config in ${path}.`);
   }
   const native = validated.config;
-  return ConfigSchema.parse({
+  return {
     version: 1,
     defaults: {
       outputDir: native.runtime.output_dir,
@@ -187,7 +181,7 @@ function compatibilityConfigFromV2(raw: unknown, path: string): Config {
     ...(native.runtime.answer !== undefined && {
       answer: native.runtime.answer,
     }),
-  });
+  };
 }
 
 /**
@@ -256,18 +250,21 @@ export function loadConfig(globalPath?: string): Config {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch (e) {
-    throw new Error(
-      `Invalid JSON in ${path}: ${e instanceof Error ? e.message : e}`,
-    );
+  } catch {
+    throw new Error(`Unable to read valid JSON from ${path}.`);
   }
-  const config =
+  const parsed = ConfigSchema.safeParse(
     typeof raw === 'object' &&
-    raw !== null &&
-    Object.hasOwn(raw, 'version') &&
-    (raw as { version?: unknown }).version === 2
+      raw !== null &&
+      Object.hasOwn(raw, 'version') &&
+      (raw as { version?: unknown }).version === 2
       ? compatibilityConfigFromV2(raw, path)
-      : ConfigSchema.parse(raw);
+      : raw,
+  );
+  if (!parsed.success) {
+    throw new Error(`Invalid Librarium config in ${path}.`);
+  }
+  const config = parsed.data;
   // Keep the authored spelling for the pure v2 mapper. v1 still mutates
   // config.groups below, but doing that here would erase alias provenance
   // before the mapper can issue its structured migration diagnostic.
@@ -315,12 +312,14 @@ export function loadProjectConfig(cwd: string): ProjectConfig | null {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch (e) {
-    throw new Error(
-      `Invalid JSON in ${path}: ${e instanceof Error ? e.message : e}`,
-    );
+  } catch {
+    throw new Error(`Unable to read valid JSON from ${path}.`);
   }
-  return ProjectConfigSchema.parse(raw);
+  const parsed = ProjectConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`Invalid Librarium project config in ${path}.`);
+  }
+  return parsed.data;
 }
 
 /**
