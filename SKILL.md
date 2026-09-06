@@ -97,7 +97,7 @@ returns pending work; it rejects inline selections. Legacy `mixed` migrates to
 
 Native v2 JSON config supports execution defaults, exact profiles, custom
 declarations, and policy. CLI `config` is a compatibility view, not a lossless
-native-v2 editor; `init`/`config menu` use the legacy writer and refuse to overwrite
+native-v2 editor; `init`/`config --menu` use the legacy writer and refuse to overwrite
 native v2 files. `config migrate --from <path>` previews; writing requires an
 explicit separate `--output`, with no project merge write. Inspect/validate native
 config rather than round-tripping it through legacy output. There is no CLI/MCP
