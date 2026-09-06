@@ -1359,6 +1359,136 @@ describe('canonical v3 run.json', () => {
   });
 
   it.each([
+    'cancelled',
+    'completed',
+    'completion-race',
+    'mismatched-ledger',
+    'missing-ledger',
+  ] as const)(
+    'restores and reconciles cancel-response billing for %s without changing a winning success',
+    async (scenario) => {
+      const { root, runDirectory } = directories();
+      const selected = profile('cancel-billing', 'background');
+      const plan = prepared([selected], 'async');
+      const cancelStarted = Promise.withResolvers<void>();
+      const releaseCancel = Promise.withResolvers<void>();
+      const provider: Provider = {
+        id: 'adapter-cancel-billing',
+        displayName: 'Cancel billing',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-cancel-billing',
+          taskId: 'cancel-billing-task',
+          query: plan.request.query,
+          submittedAt: START,
+          status: 'running' as const,
+        })),
+        poll: vi.fn(async () => ({ status: 'completed' as const })),
+        retrieve: vi.fn(async () => success('adapter-cancel-billing')),
+        cancel: vi.fn(async () => {
+          cancelStarted.resolve();
+          await releaseCancel.promise;
+          return {
+            status: scenario === 'cancelled' ? 'cancelled' : 'completed',
+            usage: { costUsd: 0.25 },
+          };
+        }),
+      };
+      const wallet = new RunPaidWallet({
+        request_id: plan.request.request_id,
+        request_fingerprint: fingerprint(plan.request),
+        config_fingerprint: fingerprint('config'),
+        created_at: plan.request.requested_at,
+        deadline_at: new Date(START + 60_000).toISOString(),
+        stages: durablePaidStages([
+          {
+            provider: provider.id,
+            profile: profileIdentityKey(selected.identity),
+          },
+        ]),
+        now: () => START,
+        on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+        with_mutation_lock: (action) =>
+          withPaidRunLedgerLock(root, runDirectory, action),
+        load_latest: () => readPaidRunLedger(root, runDirectory),
+      });
+      const onCancellationUsage = vi.fn();
+      const bindings = {
+        ...exactBindings([selected], { [provider.id]: provider }),
+        onCancellationUsage,
+      };
+      await runCanonicalPreparedExecution(plan, {
+        runs_root: root,
+        run_directory: runDirectory,
+        coordinator: coordinator(),
+        attempt_bridge: bindings,
+        paid_wallet: wallet,
+      });
+      if (scenario === 'mismatched-ledger' || scenario === 'missing-ledger') {
+        if (scenario === 'missing-ledger') {
+          rmSync(join(runDirectory, 'paid-attempt-ledger.json'));
+        } else {
+          writePaidRunLedger(root, runDirectory, {
+            ...wallet.snapshot(),
+            request_id: 'different-request',
+          });
+        }
+        await expect(
+          cancelCanonicalRun({
+            runs_root: root,
+            run_directory: runDirectory,
+            coordinator: coordinator('cancel-'),
+            attempt_bridge: bindings,
+          }),
+        ).rejects.toThrow(/ledger/);
+        expect(provider.cancel).not.toHaveBeenCalled();
+        return;
+      }
+      const cancellation = cancelCanonicalRun({
+        runs_root: root,
+        run_directory: runDirectory,
+        coordinator: coordinator('cancel-'),
+        attempt_bridge: bindings,
+      });
+      await cancelStarted.promise;
+      if (scenario === 'completion-race') {
+        const completed = await resumeCanonicalPreparedExecution({
+          runs_root: root,
+          run_directory: runDirectory,
+          coordinator: coordinator('resume-'),
+          attempt_bridge: bindings,
+        });
+        expect(completed.response?.status).toBe('succeeded');
+      }
+      releaseCancel.resolve();
+      const result = await cancellation;
+      expect(result.coordination_state.status).toBe(
+        scenario === 'completion-race' ? 'succeeded' : 'cancelled',
+      );
+      expect(readPaidRunLedger(root, runDirectory)?.attempts).toEqual([
+        expect.objectContaining({
+          status: scenario === 'completion-race' ? 'succeeded' : 'cancelled',
+          reported: { state: 'known', cost_microusd: '250000' },
+        }),
+      ]);
+      expect(onCancellationUsage).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          attempt_id: result.coordination_state.attempts[0]?.attempt_id,
+        }),
+        { costUsd: 0.25 },
+      );
+      expect(provider.submit).toHaveBeenCalledOnce();
+      expect(provider.cancel).toHaveBeenCalledOnce();
+      expect(result.terminal_response?.results).toHaveLength(
+        scenario === 'completion-race' ? 1 : 0,
+      );
+    },
+  );
+
+  it.each([
     ['no-hook', undefined],
     [
       'cancel-error',
