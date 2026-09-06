@@ -5,23 +5,24 @@ import type { Command } from 'commander';
 import { VERSION } from '../constants.js';
 import { safeWriteFile } from '../core/fs-utils.js';
 
+// Both CLI builds embed the root SKILL.md; no independently maintained copy.
+declare const __BUNDLED_SKILL__: string;
+
 const SKILL_DIR = join(homedir(), '.claude', 'skills', 'librarium');
 const SKILL_FILE = join(SKILL_DIR, 'SKILL.md');
-const SKILL_URL_VERSIONED = `https://raw.githubusercontent.com/jkudish/librarium/v${VERSION}/SKILL.md`;
 
 interface InstallSkillDependencies {
   readonly skill_dir: string;
   readonly skill_file: string;
-  readonly skill_url: string;
-  readonly fetch_skill: typeof fetch;
+  readonly skill_content: string;
   readonly write_atomically: (path: string, content: string) => void;
 }
 
 const defaultDependencies: InstallSkillDependencies = {
   skill_dir: SKILL_DIR,
   skill_file: SKILL_FILE,
-  skill_url: SKILL_URL_VERSIONED,
-  fetch_skill: fetch,
+  skill_content:
+    typeof __BUNDLED_SKILL__ === 'undefined' ? '' : __BUNDLED_SKILL__,
   write_atomically: safeWriteFile,
 };
 
@@ -30,6 +31,7 @@ function isCompleteLibrariumSkill(content: string): boolean {
   const normalized = content.replaceAll('\r\n', '\n');
   const frontmatter = normalized.match(/^---\n([\s\S]*?)\n---\n/);
   if (!frontmatter?.[1].match(/^description:\s*\S.+$/m)) return false;
+  if (!/^name: librarium$/m.test(frontmatter[1])) return false;
   const body = normalized.slice(frontmatter[0].length);
   return /^# Librarium\b/m.test(body) && /\blibrarium run\b/.test(body);
 }
@@ -75,36 +77,17 @@ export function registerInstallSkillCommand(
         }
 
         if (opts.dryRun) {
-          console.log(`Would download skill from:\n  ${resolved.skill_url}`);
+          console.log(
+            `Would install the bundled skill for version ${VERSION}.`,
+          );
           console.log(`Would install to:\n  ${resolved.skill_file}`);
           return;
         }
 
-        console.log('Downloading librarium skill...');
-        let response: Response;
-        try {
-          response = await resolved.fetch_skill(resolved.skill_url);
-        } catch {
-          throw new Error(
-            `Failed to download the librarium skill for version ${VERSION}.`,
-          );
-        }
-        if (!response.ok) {
-          throw new Error(
-            `The librarium skill tag for version ${VERSION} is unavailable.`,
-          );
-        }
-        let content: string;
-        try {
-          content = await response.text();
-        } catch {
-          throw new Error(
-            `Failed to download the librarium skill for version ${VERSION}.`,
-          );
-        }
+        const content = resolved.skill_content;
         if (!isCompleteLibrariumSkill(content)) {
           throw new Error(
-            `The downloaded librarium skill for version ${VERSION} is invalid.`,
+            `The bundled librarium skill for version ${VERSION} is missing or invalid. Reinstall the CLI from a complete build.`,
           );
         }
 
