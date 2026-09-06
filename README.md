@@ -511,7 +511,10 @@ estimates and provider-reported costs accumulated by earlier attempts.
 The actual-cost admission calculation uses reported cost when known and retains
 the committed estimate while reported cost is unknown. Known provider-reported
 failure costs count against the actual budget too: a failed helper, submission,
-or polled job is not automatically free. A known first synthesis attempt is
+or polled job is not automatically free. Known terminal charges also survive
+failed or timed-out retrieval and cancellation. Late coordinator receipts can
+fill unknown accounting without reopening the attempt; repeated receipts do not
+add an already-recorded charge again. A known first synthesis attempt is
 reserved before research or refinement can spend that capacity; this is not a
 reservation for every possible retry or verification call.
 
