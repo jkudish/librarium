@@ -145,9 +145,12 @@ export async function checkAsyncTasks(
           resolveExactProvider,
         ),
       });
-      const afterResults =
-        canonical.manifest.terminal_response?.results.length ?? 0;
-      const beforeResults = before.terminal_response?.results.length ?? 0;
+      const retrieved = Object.keys(
+        canonical.manifest.provider_outputs_by_attempt,
+      ).filter(
+        (attemptId) =>
+          !Object.hasOwn(before.provider_outputs_by_attempt, attemptId),
+      ).length;
       const activeBefore = before.coordination_state.attempts.filter(
         (attempt) =>
           attempt.durable_handle &&
@@ -163,7 +166,7 @@ export async function checkAsyncTasks(
       return {
         runDir,
         polled: activeBefore,
-        retrieved: Math.max(0, afterResults - beforeResults),
+        retrieved,
         tasks: [],
         state:
           canonical.manifest.coordination_state.status === 'running'
