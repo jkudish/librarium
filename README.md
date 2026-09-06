@@ -509,9 +509,11 @@ first-attempt blocks. Admission for later stages remains conditional on the
 estimates and provider-reported costs accumulated by earlier attempts.
 
 The actual-cost admission calculation uses reported cost when known and retains
-the committed estimate while reported cost is unknown. A known first synthesis
-attempt is reserved before research or refinement can spend that capacity;
-this is not a reservation for every possible retry or verification call.
+the committed estimate while reported cost is unknown. Known provider-reported
+failure costs count against the actual budget too: a failed helper, submission,
+or polled job is not automatically free. A known first synthesis attempt is
+reserved before research or refinement can spend that capacity; this is not a
+reservation for every possible retry or verification call.
 
 Estimated cost, provider-reported actual cost, and unknown cost are separate
 facts. An estimate is not a quote, and neither budget flag guarantees the final
@@ -583,6 +585,13 @@ and escaping can shorten pages further. A truncated index still permits
 reading every result through unfiltered pages. `available: false` distinguishes
 missing evidence from a saved empty result. Oversized metadata returns a
 bounded error rather than an oversized response.
+
+Completed, saved results can be read while other providers in the same run are
+still pending; readers do not have to wait for a terminal run-wide response.
+`get_results` exposes safe diagnostics, never historical raw provider error
+strings. Malformed configuration and run JSON diagnostics do not echo source
+fragments that could contain credentials. These diagnostic protections do not
+make provider evidence trusted or safe to execute.
 
 Reads make no provider calls, polls, or artifact writes. Changed evidence
 invalidates existing cursors: restart without a cursor. Missing or unsafe
