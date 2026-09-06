@@ -309,3 +309,173 @@ it.each([
     expect(httpClient).toHaveBeenCalledOnce();
   },
 );
+
+describe.each(['submit', 'poll', 'resume'])(
+  'completed %s billing survives retrieval',
+  (boundary) => {
+    it.each([
+      'error',
+      'throw',
+      'abort',
+      'unpriced',
+      'token-only',
+      'repriced',
+      'zero',
+    ])(
+      '%s retrieval keeps or authoritatively replaces the terminal charge',
+      async (retrieval) => {
+        const completed = {
+          id: 'retrieval-task',
+          status: 'completed',
+          model: 'openai/gpt-5.6-luna',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: 'Completed' }],
+            },
+          ],
+          usage: { cost: { total_cost: 0.02 } },
+        };
+        const receipts =
+          boundary === 'submit'
+            ? [completed]
+            : [{ id: 'retrieval-task', status: 'queued' }, completed];
+        const httpClient = vi.fn<HttpClient>(async () => {
+          const data = receipts.shift();
+          if (!data) throw new Error('Unexpected provider request');
+          return {
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            durationMs: 1,
+            data,
+          };
+        });
+        const provider = new PerplexityDeepResearchProvider({
+          apiKey: 'synthetic',
+          httpClient,
+        });
+        const interrupted = new AbortController();
+        const retrieve = vi
+          .spyOn(provider, 'retrieve')
+          .mockImplementation(async () => {
+            if (retrieval === 'throw')
+              throw new Error('Retrieval transport failed');
+            if (retrieval === 'abort') {
+              interrupted.abort();
+              return new Promise(() => {});
+            }
+            return {
+              ...canonicalFixtureResult(provider.id),
+              ...(retrieval === 'error' && {
+                error: 'Retrieval failed',
+                content: '',
+              }),
+              ...(retrieval === 'token-only' && {
+                usage: { outputTokens: 12 },
+              }),
+              ...(retrieval === 'repriced' && { usage: { costUsd: 0.03 } }),
+              ...(retrieval === 'zero' && { usage: { costUsd: 0 } }),
+            };
+          });
+        const profile = canonicalFixtureProfile(provider.id, 'background');
+        const plan = canonicalFixturePrepared([profile], {
+          mode: boundary === 'resume' ? 'async' : 'sync',
+          requestedAtMs: Date.now(),
+        });
+        const profileKey = profileIdentityKey(profile.identity);
+        plan.profile_plans_by_identity[profileKey] = {
+          ...plan.profile_plans_by_identity[profileKey]!,
+          binding: { adapter_id: provider.id, binding_id: profileKey },
+          estimate: { estimated_cost_microusd: '1000' },
+        };
+        plan.policy.budgets = { max_actual_cost_microusd: '10000' };
+        const root = mkdtempSync(
+          join(tmpdir(), 'librarium-retrieval-billing-'),
+        );
+        roots.push(root);
+        const runDirectory = join(root, 'run');
+        mkdirSync(runDirectory);
+        const wallet = new RunPaidWallet({
+          request_id: plan.request.request_id,
+          request_fingerprint: fingerprint(plan.request),
+          config_fingerprint: fingerprint('config'),
+          created_at: plan.request.requested_at,
+          deadline_at: new Date(
+            Date.parse(plan.request.requested_at) + 60_000,
+          ).toISOString(),
+          limits: plan.policy.budgets,
+          stages: (
+            ['refinement', 'research', 'synthesis', 'verification'] as const
+          ).map((stage) => ({
+            stage,
+            requested: stage === 'research',
+            fallback_authorized: false,
+            prompt_version: 'v1',
+            providers: [{ provider: provider.id, profile: profileKey }],
+          })),
+          on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+          load_latest: () => readPaidRunLedger(root, runDirectory),
+          with_mutation_lock: (action) =>
+            withPaidRunLedgerLock(root, runDirectory, action),
+        });
+        const dependencies = {
+          runs_root: root,
+          run_directory: runDirectory,
+          coordinator: createNodeCoordinatorDependencies(),
+          attempt_bridge: {
+            ...createRegisteredProviderAttemptBridge(plan, () => provider),
+            signal: interrupted.signal,
+          },
+        };
+        let result = await runCanonicalPreparedExecution(plan, {
+          ...dependencies,
+          paid_wallet: wallet,
+        });
+        if (boundary === 'resume')
+          result = await resumeCanonicalPreparedExecution(dependencies);
+        const cost =
+          retrieval === 'zero'
+            ? '0'
+            : retrieval === 'repriced'
+              ? '30000'
+              : '20000';
+        const succeeded = !['error', 'throw', 'abort'].includes(retrieval);
+        expect(result.manifest.coordination_state.attempts[0]).toMatchObject({
+          status: succeeded
+            ? 'succeeded'
+            : retrieval === 'abort'
+              ? 'timed_out'
+              : 'failed',
+          actual_cost_microusd: cost,
+          durable_handle: { status: 'succeeded' },
+        });
+        expect(result.response?.results).toHaveLength(succeeded ? 1 : 0);
+        expect(
+          Object.keys(result.manifest.provider_outputs_by_attempt),
+        ).toHaveLength(succeeded ? 1 : 0);
+        const ledger = readPaidRunLedger(root, runDirectory)!;
+        expect(ledger.attempts[0]?.reported).toEqual({
+          state: 'known',
+          cost_microusd: cost,
+        });
+        const restored = new RunPaidWallet({
+          ...ledger,
+          restored_ledger: ledger,
+        });
+        const next = () =>
+          restored.begin({
+            stage: 'research',
+            provider: provider.id,
+            profile: profileKey,
+            estimated_cost_microusd: '2000',
+            input_fingerprint: fingerprint('next'),
+          });
+        if (retrieval === 'zero') expect(next).not.toThrow();
+        else expect(next).toThrow('actual_budget_exhausted');
+        expect(retrieve).toHaveBeenCalledOnce();
+        expect(httpClient).toHaveBeenCalledTimes(boundary === 'submit' ? 1 : 2);
+      },
+    );
+  },
+);

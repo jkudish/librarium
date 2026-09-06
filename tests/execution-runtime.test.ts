@@ -1542,6 +1542,102 @@ describe('private prepared execution runtime', () => {
     }
   });
 
+  it.each([
+    ['submit', 'hung'],
+    ['poll', 'hung'],
+    ['poll', 'failed'],
+    ['poll', 'unpriced'],
+  ])(
+    'blocks the next walletless launch after billed completed %s and %s retrieval',
+    async (boundary, retrieval) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(start);
+      try {
+        const durable: Provider = {
+          id: 'adapter-durable',
+          displayName: 'Durable',
+          tier: 'deep-research',
+          envVar: '',
+          execution: 'background',
+          execute: vi.fn(),
+          submit: vi.fn(async () => ({
+            provider: 'adapter-durable',
+            taskId: 'billed-completed',
+            query: 'runtime query',
+            submittedAt: start,
+            status:
+              boundary === 'submit'
+                ? ('completed' as const)
+                : ('pending' as const),
+            ...(boundary === 'submit' && { usage: { costUsd: 0.02 } }),
+          })),
+          poll: vi.fn(async () => ({
+            status: 'completed' as const,
+            usage: { costUsd: 0.02 },
+          })),
+          retrieve: vi.fn(async () => {
+            if (retrieval === 'hung') return new Promise<never>(() => {});
+            if (retrieval === 'failed') throw new Error('Retrieval failed');
+            return successfulResult('adapter-durable');
+          }),
+        };
+        const next: Provider = {
+          id: 'adapter-next',
+          displayName: 'Next',
+          tier: 'raw-search',
+          envVar: '',
+          execution: 'inline',
+          execute: vi.fn(async () => successfulResult('adapter-next')),
+        };
+        const plan = prepared(
+          [profile('durable', 'background'), profile('next')],
+          [],
+          'sync',
+          { max_concurrency: 1, background_attempt_deadline_ms: 50 },
+        );
+        plan.policy.budgets = { max_actual_cost_microusd: '10000' };
+        for (const profilePlan of Object.values(plan.profile_plans_by_identity))
+          profilePlan.estimate = { estimated_cost_microusd: '1000' };
+        const store = new InMemoryCoordinationStateStore();
+        const running = runPreparedExecution(plan, {
+          store,
+          coordinator: systemCoordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-durable'
+                ? resolvedBinding('durable', durable)
+                : resolvedBinding('next', next),
+            now: Date.now,
+          }),
+        });
+        await vi.advanceTimersByTimeAsync(50);
+        const result = await running;
+        expect(result.state.attempts).toHaveLength(1);
+        expect(result.state.attempts[0]).toMatchObject({
+          status:
+            retrieval === 'hung'
+              ? 'timed_out'
+              : retrieval === 'failed'
+                ? 'failed'
+                : 'succeeded',
+          actual_cost_microusd: '20000',
+        });
+        expect(result.state.budget.actual_cost_microusd).toBe('20000');
+        expect(next.execute).not.toHaveBeenCalled();
+        expect(durable.submit).toHaveBeenCalledOnce();
+        expect(durable.poll).toHaveBeenCalledTimes(
+          boundary === 'submit' ? 0 : 1,
+        );
+        expect(durable.retrieve).toHaveBeenCalledOnce();
+        expect((await store.load(plan.request.request_id))?.state).toEqual(
+          result.state,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('preserves a succeeded handle when retrieval fails and permits fallback', async () => {
     const durable: Provider = {
       id: 'adapter-durable',
