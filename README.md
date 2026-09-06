@@ -554,8 +554,10 @@ path that may construct its frozen paid target.
 
 ## For agents
 
-Run `librarium install-skill` to install the shipped skill for Claude Code, or
-use the MCP stdio server:
+Run `librarium install-skill` to install the shipped skill for Claude Code.
+Both npm and standalone builds embed the root `SKILL.md` at build time, so
+installation works offline without a release tag and uses version-matched
+instructions. This does not upgrade the CLI. Alternatively, use the MCP stdio server:
 
 ```bash
 claude mcp add librarium -- librarium mcp
