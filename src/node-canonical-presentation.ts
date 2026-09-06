@@ -7,7 +7,9 @@ import {
   providerIdentityKey,
 } from './contracts/domain/index.js';
 import type { ResearchResult } from './contracts/interchange/research-result.js';
+import type { CoordinatorState } from './core/coordinator.js';
 import { deduplicateSources } from './core/normalizer.js';
+import { projectSucceededResearchResults } from './core/research-response-projector.js';
 import type { CanonicalRunManifestV3 } from './node-canonical-run.js';
 import { providerArtifactFileNames } from './node-provider-artifact-names.js';
 import type {
@@ -121,7 +123,12 @@ export function projectCanonicalRunPresentation(
   outputDir: string,
   slug: string,
 ): CanonicalRunPresentation {
-  const responseResults = manifest.terminal_response?.results ?? [];
+  const responseResults =
+    manifest.terminal_response?.results ??
+    projectSucceededResearchResults(
+      manifest.coordination_state as CoordinatorState,
+      manifest.provider_outputs_by_attempt,
+    );
   const resultById = new Map(
     responseResults.map((result) => [result.id, result]),
   );

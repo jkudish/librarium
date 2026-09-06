@@ -15,6 +15,7 @@ import {
   CitationSchema,
   ProviderMetaSchema,
   type ResearchResult,
+  ResearchResultSchema,
   UsageSchema,
 } from '../contracts/interchange/research-result.js';
 import type {
@@ -685,16 +686,12 @@ export interface ResearchResponseProjectionOptions {
   readonly generator_version: string;
 }
 
-/** Deterministically project private coordinator state into the public receipt. */
-export function projectResearchResponse(
+/** Project committed successes without requiring or inventing a terminal state. */
+export function projectSucceededResearchResults(
   state: CoordinatorState,
   outputsByAttempt: Readonly<Record<string, CanonicalProviderOutput>>,
-  options: ResearchResponseProjectionOptions,
-): ResearchResponse {
-  if (state.status === 'running') {
-    throw new Error('A running coordinator state has no terminal response.');
-  }
-  const results = [...state.slots]
+): ResearchResult[] {
+  return [...state.slots]
     .sort((left, right) => left.position - right.position)
     .flatMap((slot) => {
       if (slot.status !== 'succeeded') return [];
@@ -708,8 +705,22 @@ export function projectResearchResponse(
           `Succeeded attempt ${attempt.attempt_id} has no durable provider output.`,
         );
       }
-      return [projectResult(state, slot, attempt, output)];
+      return [
+        ResearchResultSchema.parse(projectResult(state, slot, attempt, output)),
+      ];
     });
+}
+
+/** Deterministically project private coordinator state into the public receipt. */
+export function projectResearchResponse(
+  state: CoordinatorState,
+  outputsByAttempt: Readonly<Record<string, CanonicalProviderOutput>>,
+  options: ResearchResponseProjectionOptions,
+): ResearchResponse {
+  if (state.status === 'running') {
+    throw new Error('A running coordinator state has no terminal response.');
+  }
+  const results = projectSucceededResearchResults(state, outputsByAttempt);
   const errors = terminalErrors(state);
   const status =
     results.length > 0

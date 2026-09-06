@@ -1,4 +1,3 @@
-import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { projectCanonicalRunPresentation } from '../node-canonical-presentation.js';
 import {
@@ -337,23 +336,9 @@ function readRunEvidence(
   const runsRoot = dirname(resolve(runDir));
   if (readRunJsonSchemaVersion(runsRoot, runDir) === 3) {
     const manifest = readCanonicalRunManifest(runsRoot, runDir);
-    const evidence = canonicalEvidence(manifest, runDir);
-    for (const entry of evidence.entries) {
-      try {
-        const path = resolveContainedFile(runDir, entry.report.outputFile);
-        const metadata = lstatSync(path);
-        if (!metadata.isFile() || metadata.isSymbolicLink()) {
-          throw new PathContainmentError(
-            'Derived canonical provider output must be a regular file.',
-          );
-        }
-        entry.content = readFileSync(path, 'utf8');
-        entry.available = true;
-      } catch {
-        // Derived files are optional. Canonical safe output is authoritative.
-      }
-    }
-    return evidence;
+    // A derived file may be stale, empty, or replaced. Only committed canonical
+    // output supplies v3 evidence; reading never repairs presentation files.
+    return canonicalEvidence(manifest, runDir);
   }
   let snapshot: ReturnType<RunArtifactRepository['readSnapshot']>;
   try {
