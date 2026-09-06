@@ -1,7 +1,7 @@
 ---
 name: librarium
 description: "Runs evidence-aware, multi-provider research with the Librarium v2 CLI. Use for deep research, competitive research, answer-engine visibility checks, or questions needing grounded multi-source coverage."
-compatibility: Requires Node.js 22.12 or newer and the Librarium 2.x CLI.
+compatibility: Requires the Librarium 2.x CLI. npm installs require Node.js 22.12 or newer; standalone binaries include their runtime.
 ---
 
 # Librarium — Evidence-Aware Research
