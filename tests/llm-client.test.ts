@@ -441,6 +441,170 @@ describe('callWithCascade', () => {
     expect(getCalls()).toHaveLength(1);
   });
 
+  it.each(['incomplete', 'failed'])(
+    'accounts for billed Perplexity %s responses before rejecting later paid work',
+    async (status) => {
+      const getCalls = stubFetch(() => ({
+        status: 200,
+        body: {
+          id: 'billed-failure',
+          status,
+          usage: { input_tokens: 10, cost: { total_cost: 0.02 } },
+        },
+      }));
+      const wallet = new RunPaidWallet({
+        request_id: 'billed-failure',
+        request_fingerprint: fingerprint('request'),
+        config_fingerprint: fingerprint('config'),
+        created_at: new Date().toISOString(),
+        deadline_at: new Date(Date.now() + 60_000).toISOString(),
+        limits: { max_actual_cost_microusd: '10000' },
+        stages: [
+          {
+            stage: 'refinement',
+            requested: true,
+            fallback_authorized: false,
+            prompt_version: 'refine-v1',
+            providers: [{ provider: 'perplexity', model: 'low' }],
+          },
+          {
+            stage: 'research',
+            requested: true,
+            fallback_authorized: false,
+            prompt_version: 'research-v1',
+            providers: [{ provider: 'research' }],
+          },
+        ],
+      });
+      const paid = paidLlmAttemptHooks({
+        wallet,
+        stage: 'refinement',
+        prompt: 'p',
+        config: makeConfig({
+          providers: {
+            'perplexity-sonar-pro': {
+              enabled: true,
+              options: { perRequestUsd: 0.001 },
+            },
+          },
+        }),
+      });
+      const parse = vi.fn();
+      const onAttempt = vi.fn(paid.onAttempt);
+
+      await expect(
+        callWithCascade({
+          clients: [{ provider: 'perplexity', model: 'low', apiKey: 'fake' }],
+          prompt: 'p',
+          action: 'refine',
+          timeoutMs: 1000,
+          json: true,
+          parse,
+          signal: paid.signal,
+          beforeAttempt: paid.beforeAttempt,
+          onAttempt,
+        }),
+      ).rejects.toThrow(`not completed (status: ${status})`);
+
+      expect(parse).not.toHaveBeenCalled();
+      expect(onAttempt).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          status: 'error',
+          usage: expect.objectContaining({ inputTokens: 10, costUsd: 0.02 }),
+        }),
+      );
+      expect(wallet.snapshot().attempts[0]).toMatchObject({
+        status: 'failed',
+        estimate: { state: 'known', cost_microusd: '1000' },
+        reported: { state: 'known', cost_microusd: '20000' },
+      });
+      expect(() =>
+        wallet.begin({
+          stage: 'research',
+          provider: 'research',
+          estimated_cost_microusd: '2000',
+          input_fingerprint: fingerprint('next'),
+        }),
+      ).toThrow('actual_budget_exhausted');
+      expect(getCalls()).toHaveLength(1);
+    },
+  );
+
+  it.each([undefined, { input_tokens: 10 }])(
+    'does not invent reported cost from Perplexity failure usage %j',
+    async (usage) => {
+      stubFetch(() => ({
+        status: 200,
+        body: { id: 'unpriced-failure', status: 'failed', usage },
+      }));
+      const onAttempt = vi.fn();
+      await expect(
+        callWithCascade({
+          clients: [{ provider: 'perplexity', model: 'low', apiKey: 'fake' }],
+          prompt: 'p',
+          action: 'refine',
+          timeoutMs: 1000,
+          json: true,
+          onAttempt,
+        }),
+      ).rejects.toThrow('not completed');
+      const attempt = onAttempt.mock.calls[0]?.[0];
+      expect(attempt.status).toBe('error');
+      expect(attempt.usage?.costUsd).toBeUndefined();
+      if (usage) expect(attempt.usage?.inputTokens).toBe(10);
+      else expect(attempt.usage).toBeUndefined();
+    },
+  );
+
+  it('retains failure usage and sanitized diagnostics before cascading', async () => {
+    const key = 'sentinel-perplexity-credential';
+    const getCalls = stubFetch((url) => ({
+      status: 200,
+      body: url.includes('perplexity.ai')
+        ? {
+            id: 'redacted-failure',
+            status: 'failed',
+            error: { message: `credential ${key} rejected` },
+            usage: { cost: { total_cost: 0.02 }, secret: key },
+          }
+        : { choices: [{ message: { content: 'fallback answer' } }] },
+    }));
+    const onAttempt = vi.fn();
+    const onWarning = vi.fn();
+    const result = await callWithCascade({
+      clients: [
+        { provider: 'perplexity', model: 'low', apiKey: key },
+        clients[0] as LlmClient,
+      ],
+      prompt: 'p',
+      action: 'synthesis',
+      timeoutMs: 1000,
+      json: false,
+      beforeAttempt: (_client, index) => {
+        if (index === 1) {
+          expect(onAttempt).toHaveBeenCalledExactlyOnceWith(
+            expect.objectContaining({
+              status: 'error',
+              error: 'Perplexity Agent request failed.',
+              usage: expect.objectContaining({ costUsd: 0.02 }),
+            }),
+          );
+        }
+      },
+      onAttempt,
+      onWarning,
+    });
+    expect(result.result).toBe('fallback answer');
+    expect(getCalls()).toHaveLength(2);
+    expect(onWarning).toHaveBeenCalledExactlyOnceWith(
+      'Perplexity Agent request failed.; trying openai',
+    );
+    const failure = onAttempt.mock.calls[0]?.[0];
+    expect(
+      JSON.stringify({ error: failure.error, usage: failure.usage }),
+    ).not.toContain(key);
+  });
+
   it.each([
     ['fast', 'fast'],
     ['fast-search', 'fast'],
