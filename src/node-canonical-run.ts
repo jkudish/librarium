@@ -602,9 +602,9 @@ function parseManifest(path: string): CanonicalRunManifestV3 {
     return CanonicalRunManifestV3Schema.parse(
       JSON.parse(readFileSync(path, 'utf8')),
     );
-  } catch (error) {
+  } catch {
     throw new CanonicalRunManifestError(
-      `Canonical run manifest is invalid (${error instanceof Error ? error.message : String(error)})`,
+      'Canonical run manifest is invalid',
       path,
     );
   }
@@ -625,7 +625,12 @@ export function readRunJsonSchemaVersion(
       path,
     );
   }
-  const value = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new CanonicalRunManifestError('Run manifest is not valid JSON', path);
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new CanonicalRunManifestError('Run manifest is not an object', path);
   }
@@ -1162,7 +1167,10 @@ function paidResearchCompletion(
     ...(providerResult?.usage && { usage: providerResult.usage }),
     ...(output !== undefined && {
       output_fingerprint: fingerprint(output),
-      output_ref: `run.json#/provider_outputs_by_attempt/${launch.attempt_id}`,
+      ...(result.kind === 'finished' &&
+        result.finished.outcome === 'succeeded' && {
+          output_ref: `run.json#/provider_outputs_by_attempt/${launch.attempt_id}`,
+        }),
     }),
   };
 }

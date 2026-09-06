@@ -8,13 +8,16 @@ import type { CredentialContext } from '../core/credentials.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type { Config } from '../types.js';
 import { checkAsyncTasks } from './async.js';
-import { discoverProviders } from './provider-discovery.js';
+import {
+  discoverProviders,
+  ProviderDiscoveryError,
+} from './provider-discovery.js';
 import {
   ResearchInputError,
   runResearchSilent,
   type SilentRunDeps,
 } from './research.js';
-import { ResultPageOptionsSchema } from './result-pages.js';
+import { ResultPageError, ResultPageOptionsSchema } from './result-pages.js';
 import {
   type McpArtifactRepository,
   readRunIndex,
@@ -78,7 +81,9 @@ function errorResult(message: string): CallToolResult {
 }
 
 function describeError(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  return e instanceof ResultPageError || e instanceof ProviderDiscoveryError
+    ? e.message
+    : 'Operation failed. Inspect local configuration and saved artifacts.';
 }
 
 export function createMcpServer(deps: McpServerDeps = {}): McpServer {

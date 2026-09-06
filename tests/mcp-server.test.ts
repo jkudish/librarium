@@ -475,7 +475,7 @@ describe('research tool', () => {
     await server.close();
   });
 
-  it('surfaces a provider/run failure as a detailed tool error', async () => {
+  it('replaces an arbitrary provider/run failure with a safe tool error', async () => {
     const runResearch = vi.fn().mockRejectedValue(new Error('HTTP 500 boom'));
     const { client, server } = await connect({ runResearch });
     const res = await client.callTool({
@@ -483,8 +483,9 @@ describe('research tool', () => {
       arguments: { query: 'x' },
     });
     expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).not.toContain('HTTP 500 boom');
     expect((res.content as { text: string }[])[0].text).toContain(
-      'HTTP 500 boom',
+      'research failed: Operation failed.',
     );
     await server.close();
   });
@@ -684,7 +685,9 @@ describe('review fixes: path containment', () => {
     });
     writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
     const result = readRunResults(dir);
-    expect(result.results[0].error).toMatch(/outside the run directory/);
+    expect(result.results[0].error).toBe(
+      'Saved provider diagnostic omitted. Inspect the run locally.',
+    );
     expect(result.results[0].content).toBe('');
   });
 
