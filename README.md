@@ -590,6 +590,8 @@ bounded error rather than an oversized response.
 
 Completed, saved results can be read while other providers in the same run are
 still pending; readers do not have to wait for a terminal run-wide response.
+For v3 runs, committed canonical output is authoritative: editing or replacing
+derived provider Markdown does not change the evidence returned by MCP.
 `get_results` exposes safe diagnostics, never historical raw provider error
 strings. Malformed configuration and run JSON diagnostics do not echo source
 fragments that could contain credentials. These diagnostic protections do not
