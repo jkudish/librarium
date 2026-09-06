@@ -1507,34 +1507,13 @@ function preparedFromManifest(
   };
 }
 
-/** Resume an existing v3 run using only persisted state and exact bindings. */
-export async function resumeCanonicalPreparedExecution(
-  dependencies: ResumeCanonicalPreparedExecutionDependencies,
-): Promise<CanonicalPreparedExecutionResult> {
-  const store = new RunJsonCoordinationStateStore({
-    runs_root: dependencies.runs_root,
-    run_directory: dependencies.run_directory,
-  });
-  const manifest = store.readManifest();
-  const hasRemoteCustody = manifest.coordination_state.attempts.some(
-    (attempt) =>
-      attempt.durable_handle &&
-      !['failed', 'cancelled', 'succeeded'].includes(
-        attempt.durable_handle.status,
-      ),
-  );
-  if (manifest.terminal_response && !hasRemoteCustody) {
-    return {
-      runtime: {
-        state: structuredClone(manifest.coordination_state) as CoordinatorState,
-        outputs_by_attempt: Object.freeze({}),
-      },
-      manifest,
-      response: manifest.terminal_response,
-    };
-  }
-  const custodyMode =
-    manifest.coordination_state.status !== 'running' && hasRemoteCustody;
+function restoreCanonicalPaidWallet(
+  manifest: CanonicalRunManifestV3,
+  dependencies: Pick<
+    RunCanonicalPreparedExecutionDependencies,
+    'runs_root' | 'run_directory' | 'coordinator' | 'paid_wallet'
+  >,
+): RunPaidWallet | undefined {
   const prepared = preparedFromManifest(manifest);
   const persistedLedger = readPaidRunLedger(
     dependencies.runs_root,
@@ -1555,7 +1534,7 @@ export async function resumeCanonicalPreparedExecution(
       'The paid-attempt ledger does not match the canonical run.',
     );
   }
-  const wallet =
+  return (
     dependencies.paid_wallet ??
     (persistedLedger
       ? new RunPaidWallet({
@@ -1586,7 +1565,40 @@ export async function resumeCanonicalPreparedExecution(
               ledger,
             ),
         })
-      : undefined);
+      : undefined)
+  );
+}
+
+/** Resume an existing v3 run using only persisted state and exact bindings. */
+export async function resumeCanonicalPreparedExecution(
+  dependencies: ResumeCanonicalPreparedExecutionDependencies,
+): Promise<CanonicalPreparedExecutionResult> {
+  const store = new RunJsonCoordinationStateStore({
+    runs_root: dependencies.runs_root,
+    run_directory: dependencies.run_directory,
+  });
+  const manifest = store.readManifest();
+  const hasRemoteCustody = manifest.coordination_state.attempts.some(
+    (attempt) =>
+      attempt.durable_handle &&
+      !['failed', 'cancelled', 'succeeded'].includes(
+        attempt.durable_handle.status,
+      ),
+  );
+  if (manifest.terminal_response && !hasRemoteCustody) {
+    return {
+      runtime: {
+        state: structuredClone(manifest.coordination_state) as CoordinatorState,
+        outputs_by_attempt: Object.freeze({}),
+      },
+      manifest,
+      response: manifest.terminal_response,
+    };
+  }
+  const custodyMode =
+    manifest.coordination_state.status !== 'running' && hasRemoteCustody;
+  const prepared = preparedFromManifest(manifest);
+  const wallet = restoreCanonicalPaidWallet(manifest, dependencies);
   // Terminal custody reconciliation is a bounded GET-only safety observation,
   // not a new paid launch, so it retains its historical post-deadline window.
   const bridge = bridgeWithPaidWalletSignal(
