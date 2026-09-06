@@ -1194,19 +1194,36 @@ export function recordAttemptFinished(
   input: unknown,
   dependencies: CoordinatorDependencies,
 ): CoordinatorState {
+  const finished = AttemptFinishedInputSchema.parse(input);
   const deadlineState = advanceDeadlines(state, dependencies);
-  if (deadlineState.status !== 'running') return deadlineState;
   const attempt = attemptFor(deadlineState, attemptId);
+  if (attempt.status === 'acceptance_unknown') return deadlineState;
   if (
-    TERMINAL_ATTEMPT_STATUSES.has(attempt.status) ||
-    attempt.status === 'acceptance_unknown'
+    deadlineState.status !== 'running' ||
+    TERMINAL_ATTEMPT_STATUSES.has(attempt.status)
   ) {
-    return deadlineState;
+    // A deadline/cancellation wins the outcome, not the bill. Fill unknown
+    // accounting only: repeated or stale deliveries cannot double-charge or
+    // replace an already-recorded actual, nor change terminal custody.
+    if (
+      finished.actual_cost_microusd === undefined ||
+      attempt.actual_cost_microusd !== undefined
+    ) {
+      return deadlineState;
+    }
+    const next = cloneState(deadlineState);
+    attemptFor(next, attemptId).actual_cost_microusd =
+      finished.actual_cost_microusd;
+    next.budget.actual_cost_microusd = exactAdd(
+      next.budget.actual_cost_microusd,
+      finished.actual_cost_microusd,
+    );
+    return next;
   }
   return finishAttemptUnchecked(
     deadlineState,
     attemptId,
-    AttemptFinishedInputSchema.parse(input),
+    finished,
     dependencies,
   );
 }

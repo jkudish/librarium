@@ -352,18 +352,28 @@ function taskFailureOutcome(
       durable_handle: observedHandle(handle, outcome, now),
       ...reportedCost(task.usage),
     },
-    ...(task.usage && {
-      output: {
-        provider: provider.id,
-        tier: provider.tier,
-        content: '',
-        citations: [],
-        durationMs: 0,
-        error: error.message,
-        usage: task.usage,
-      } satisfies ProviderResult,
-    }),
+    ...failureOutput(provider, task.usage, error),
   };
+}
+
+function failureOutput(
+  provider: BackgroundProvider,
+  usage: ProviderUsage | undefined,
+  error: StructuredError,
+): { readonly output?: ProviderResult } {
+  return usage
+    ? {
+        output: {
+          provider: provider.id,
+          tier: provider.tier,
+          content: '',
+          citations: [],
+          durationMs: 0,
+          error: error.message,
+          usage,
+        },
+      }
+    : {};
 }
 
 function durableHandle(
@@ -406,6 +416,7 @@ async function retrieveCompletedTask(
   handle: DurableHandle,
   now: () => number,
   runSignal?: AbortSignal,
+  completedUsage: ProviderUsage | undefined = task.usage,
 ): Promise<AttemptExecutionResult> {
   const completedHandle = observedHandle(handle, 'succeeded', now);
   const retrieved = await beforeDeadline(
@@ -414,37 +425,52 @@ async function retrieveCompletedTask(
     now,
     runSignal,
   );
-  if (retrieved.kind === 'deadline') {
+  if (retrieved.kind !== 'value') {
+    const error =
+      retrieved.kind === 'deadline'
+        ? providerFailure(
+            'attempt_deadline_exceeded',
+            'The provider result retrieval exceeded the attempt deadline.',
+            false,
+            true,
+            'timeout',
+          )
+        : providerFailure(
+            'adapter_retrieve_failed',
+            'The provider result retrieval failed.',
+            true,
+          );
     return {
       kind: 'finished',
       finished: {
-        outcome: 'timed_out',
-        error: providerFailure(
-          'attempt_deadline_exceeded',
-          'The provider result retrieval exceeded the attempt deadline.',
-          false,
-          true,
-          'timeout',
-        ),
+        outcome: retrieved.kind === 'deadline' ? 'timed_out' : 'failed',
+        error,
         durable_handle: completedHandle,
+        ...reportedCost(completedUsage),
       },
+      ...failureOutput(provider, completedUsage, error),
     };
   }
-  if (retrieved.kind === 'error') {
-    return {
-      kind: 'finished',
-      finished: {
-        outcome: 'failed',
-        error: providerFailure(
-          'adapter_retrieve_failed',
-          'The provider result retrieval failed.',
-          true,
-        ),
-        durable_handle: completedHandle,
-      },
-    };
-  }
-  return resultOutcome(launch, retrieved.value, completedHandle);
+  const result = retrieved.value;
+  return resultOutcome(
+    launch,
+    {
+      ...result,
+      ...(completedUsage && {
+        usage: {
+          ...completedUsage,
+          ...result.usage,
+          // A terminal observation remains a known bill until retrieval reports
+          // a replacement cost; missing usage (or token-only usage) is not zero.
+          ...(result.usage?.costUsd === undefined &&
+            completedUsage.costUsd !== undefined && {
+              costUsd: completedUsage.costUsd,
+            }),
+        },
+      }),
+    },
+    completedHandle,
+  );
 }
 
 function taskFromDurableHandle(
@@ -607,6 +633,7 @@ export function createProviderAttemptBridge(
             latestHandle,
             now,
             dependencies.signal,
+            poll.usage,
           );
         }
         if (poll.status === 'failed' || poll.status === 'cancelled') {
@@ -857,6 +884,7 @@ export function createProviderAttemptBridge(
             latestHandle,
             now,
             dependencies.signal,
+            poll.usage,
           );
         }
         if (poll.status === 'failed' || poll.status === 'cancelled') {

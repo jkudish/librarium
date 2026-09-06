@@ -8,6 +8,7 @@ import { LifecycleTraceSchema } from '../src/contracts/interchange/lifecycle.js'
 import {
   acceptedDurableHandles,
   advanceCoordination,
+  advanceDeadlines,
   type CoordinatorState,
   cancelCoordination,
   claimFallbackRound,
@@ -640,6 +641,121 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     );
     expect(durable.attempts[0]?.status).toBe('acceptance_unknown');
     expect(durable.attempts[0]?.durable_handle).toBeUndefined();
+  });
+
+  it.each(['attempt deadline', 'request deadline', 'cancellation'])(
+    'reconciles only unknown cost after %s, idempotently through concurrent CAS delivery',
+    async (boundary) => {
+      const start = Date.parse('2026-08-08T12:00:00Z');
+      const deps = dependencies(start);
+      const profile = durableProfile('durable');
+      let state = startAll(
+        preparedExecution({
+          primaries: [profile],
+          backgroundAttemptDeadlineMs: 10_000,
+        }),
+        deps,
+      );
+      const attemptId = state.attempts[0]!.attempt_id;
+      state = recordSubmissionAccepted(
+        state,
+        attemptId,
+        handle(profile, 'pending'),
+        deps,
+      );
+      deps.setNow(
+        boundary === 'request deadline'
+          ? Date.parse(state.request_deadline_at)
+          : start + 10_000,
+      );
+      state =
+        boundary === 'cancellation'
+          ? cancelCoordination(state, deps)
+          : advanceDeadlines(state, deps);
+      const snapshot = structuredClone(state);
+      const receipt = {
+        outcome: 'succeeded',
+        result_id: 'late-result',
+        durable_handle: handle(profile, 'succeeded'),
+        actual_cost_microusd: '20000',
+      };
+      const store = new InMemoryCoordinationStateStore();
+      await store.create(state);
+      let deliveries = 0;
+      const update = () =>
+        updateCoordinationState(store, state.request_id, (current) => {
+          deliveries++;
+          return recordAttemptFinished(current, attemptId, receipt, deps);
+        });
+      await Promise.all([update(), update()]);
+      const reconciled = (await store.load(state.request_id))!.state;
+      expect(deliveries).toBe(3);
+      expect(reconciled).toEqual({
+        ...snapshot,
+        attempts: snapshot.attempts.map((attempt) => ({
+          ...attempt,
+          actual_cost_microusd: '20000',
+        })),
+        budget: { ...snapshot.budget, actual_cost_microusd: '20000' },
+      });
+      expect(state).toEqual(snapshot);
+      // Stale/absent bills never erase the recorded charge or resurrect output.
+      for (const cost of ['0', undefined])
+        expect(
+          recordAttemptFinished(
+            reconciled,
+            attemptId,
+            { ...receipt, actual_cost_microusd: cost },
+            deps,
+          ),
+        ).toEqual(reconciled);
+    },
+  );
+
+  it('validates late receipts and treats a recorded zero as known, not missing', () => {
+    const deps = dependencies();
+    const state = cancelCoordination(
+      startAll(
+        preparedExecution({ primaries: [inlineProfile('inline')] }),
+        deps,
+      ),
+      deps,
+    );
+    const attemptId = state.attempts[0]!.attempt_id;
+    const receipt = { outcome: 'failed', error: providerFailure(true) };
+    for (const cost of ['-1', '01', '1.5', '9'.repeat(65), 20000, null])
+      expect(() =>
+        recordAttemptFinished(
+          state,
+          attemptId,
+          { ...receipt, actual_cost_microusd: cost },
+          deps,
+        ),
+      ).toThrow();
+    expect(() =>
+      recordAttemptFinished(
+        state,
+        attemptId,
+        { ...receipt, secret: 'extra' },
+        deps,
+      ),
+    ).toThrow();
+    const free = recordAttemptFinished(
+      state,
+      attemptId,
+      { ...receipt, actual_cost_microusd: '0' },
+      deps,
+    );
+    expect(free.attempts[0]?.actual_cost_microusd).toBe('0');
+    expect(free.budget.actual_cost_microusd).toBe('0');
+    expect(
+      recordAttemptFinished(
+        free,
+        attemptId,
+        { ...receipt, actual_cost_microusd: '20000' },
+        deps,
+      ),
+    ).toEqual(free);
   });
 
   it('retains a timely target callback while advancing an overdue sibling', () => {
