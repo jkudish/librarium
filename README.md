@@ -80,7 +80,7 @@ defaults; saved configuration preferences are also honored.
 
 ## V2 catalog
 
-The v2 catalog has **33 built-in providers** and **39 implemented public
+The v2 catalog has **34 built-in providers** and **41 implemented public
 profiles**. A profile is the unit of selection and provenance:
 `provider_id/profile_id`. A provider can expose more than one profile, such as
 `exa/search` and the durable `exa/research` profile. Adapter IDs are a Node
@@ -126,6 +126,7 @@ process state remains available. All other profiles are `inline/none`.
 | Perplexity | `perplexity-search/search` (raw Search, unchanged), `perplexity-sonar-pro/grounded` (Agent low, inline), `perplexity-deep-research/research` (Agent medium, background/durable), `perplexity-sonar-deep/research` (Agent high, background/durable) |
 | SearchAPI | `searchapi/search`, `searchapi-chatgpt/surface`, `searchapi-gemini/surface`, `searchapi-perplexity/surface`, `searchapi-google-ai-mode/surface`, `searchapi-bing-copilot/surface`, `searchapi-google-ai-overview/surface` |
 | SerpAPI | `serpapi/search` |
+| SerpBase | `serpbase/search`, `serpbase/news` |
 | Tavily | `tavily/search` |
 | Valyu | `valyu/search`, `valyu/research` (background/durable; exact-profile remote cancellation is advertised) |
 | You.com | `you-research/grounded`, `you-research/research` (background/durable), `you-answer/grounded` |
@@ -133,6 +134,21 @@ process state remains available. All other profiles are `inline/none`.
 `grok-x-only/x` is the X-only profile. `grok-combined/combined` is a separate
 combined-search profile; it is not an alias for `grok/web` and must retain its
 own identity in configuration, artifacts, and reports.
+
+SerpBase is opt-in and is not part of the default `quick` workflow. Configure
+the Node adapters as `serpbase-search` or `serpbase-news` with
+`SERPBASE_API_KEY`. Both accept `hl`, `gl`, and a 1-based `page`; Search alone
+accepts `device` (`default`, `pc`, or `mobile`). Search’s `includeRichResults`
+defaults to `false`. When enabled, documented organic and PAA sources are
+extracted, related searches remain non-evidence suggestions, and rich modules
+whose nested schemas are not public are shown as bounded literal data without
+citations. Search, News, and related-search rendering passed live smoke checks;
+PAA and the opaque rich modules were not returned in those checks and remain
+live-unverified.
+
+SerpBase responses are limited to 100 primary results per page; retained text
+fields are capped at 2,000 UTF-8 bytes. Credential-bearing URLs are rejected,
+and provider errors omit upstream response bodies.
 
 ### What evidence means
 
@@ -430,7 +446,10 @@ Every provider call can send a query and selected options to that provider.
 Retention, billing, and account-specific behavior belong to the upstream
 provider. SearchAPI `zeroRetention` is an account capability: Librarium sends
 it only when explicitly configured and fails closed if the account rejects it.
-It does not make a broader compliance, retention, or privacy promise.
+SerpBase states that it may log search queries for billing, debugging, abuse
+prevention, and account logs; it does not publish a zero-retention option or a
+fixed public retention period. Librarium makes no broader compliance,
+retention, or privacy promise for either provider.
 
 The normal test suite and this repository’s demo do not make provider, paid,
 or network calls. The separate live-validation approval protocol is the only

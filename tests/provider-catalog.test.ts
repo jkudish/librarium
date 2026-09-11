@@ -123,6 +123,8 @@ const IMPLEMENTED_MATRIX = [
   ['firecrawl-search', 'search'],
   ['searchapi', 'search'],
   ['serpapi', 'search'],
+  ['serpbase', 'search'],
+  ['serpbase', 'news'],
   ['tavily', 'search'],
   ['parallel', 'turbo'],
   ['parallel', 'search'],
@@ -1195,6 +1197,7 @@ describe('provider catalog -- target selection', () => {
       ['tavily', 'search'],
       ['searchapi', 'search'],
       ['serpapi', 'search'],
+      ['serpbase', 'search'],
       ['parallel', 'search'],
       ['valyu', 'search'],
     ] as const) {
@@ -1278,9 +1281,49 @@ describe('provider catalog -- network-free estimates', () => {
   it('does not establish hard budgets from stale or account-dependent prices', () => {
     expect(built.get('you-answer', 'grounded')?.estimate).toBeUndefined();
     expect(built.get('tavily', 'search')?.estimate).toBeUndefined();
+    expect(built.get('serpbase', 'search')?.estimate).toBeUndefined();
+    expect(built.get('serpbase', 'news')?.estimate).toBeUndefined();
     expect(
       built.get('searchapi-google-ai-overview', 'surface')?.estimate,
     ).toBeUndefined();
+  });
+
+  it('quotes SerpBase only from explicit account-configured credit pricing', () => {
+    const configured = catalog({
+      configuredPricing: (['search', 'news'] as const).map((profileId) => ({
+        id: `serpbase.${profileId}.account`,
+        provider_id: 'serpbase',
+        profile_id: profileId,
+        currency: 'USD' as const,
+        completeness: 'complete' as const,
+        confidence: 'confirmed' as const,
+        expected_units: ['credits' as const],
+        fixed_quantities: { credits: '1' },
+        missing_units: [],
+        rates: [
+          {
+            unit: 'credits' as const,
+            amount_decimal: '0.003',
+            per_decimal: '1',
+          },
+        ],
+        provenance: {
+          source_class: 'configured_account_rate' as const,
+          source_reference: 'configured:serpbase/account-rate',
+          effective_at: '2026-09-11T00:00:00.000Z',
+          retrieved_at: '2026-09-11T00:00:00.000Z',
+        },
+      })),
+    });
+
+    expect(configured.get('serpbase', 'search')?.estimate).toEqual({
+      estimated_cost_microusd: '3000',
+      billable_units: [{ unit: 'credits', quantity: '1' }],
+    });
+    expect(configured.get('serpbase', 'news')?.estimate).toEqual({
+      estimated_cost_microusd: '3000',
+      billable_units: [{ unit: 'credits', quantity: '1' }],
+    });
   });
 
   it('uses a reviewed fallback only under its explicit account conditions', () => {
@@ -1491,6 +1534,7 @@ describe('provider catalog -- explicit and capability selection', () => {
       'firecrawl-search/search',
       'searchapi/search',
       'serpapi/search',
+      'serpbase/search',
       'tavily/search',
       'parallel/turbo',
       'parallel/search',
@@ -1514,7 +1558,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     );
     expect(selected).not.toContain('serpapi/search');
     expect(selected).not.toContain('tavily/search');
-    expect(selected).toHaveLength(9);
+    expect(selected).toHaveLength(10);
   });
 
   it('never selects an unauthenticated profile by capability', () => {

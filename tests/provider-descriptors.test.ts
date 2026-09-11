@@ -25,7 +25,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(37);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(39);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -93,6 +93,8 @@ describe('built-in provider descriptors', () => {
       'firecrawl-search',
       'searchapi',
       'serpapi',
+      'serpbase-search',
+      'serpbase-news',
       'tavily',
       'claude',
       'openai-chat',

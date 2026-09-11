@@ -46,13 +46,13 @@ const mcpTools = [
 
 describe('public v2 documentation drift', () => {
   it('keeps the generated catalog facts in README aligned with source', () => {
-    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(33);
-    expect(profileKeys).toHaveLength(39);
+    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(34);
+    expect(profileKeys).toHaveLength(41);
     expect(README).toMatch(
-      /\*\*33 built-in providers\*\* and \*\*39 implemented public\s+profiles\*\*/,
+      /\*\*34 built-in providers\*\* and \*\*41 implemented public\s+profiles\*\*/,
     );
     expect(SKILL).toContain(
-      '33 built-in providers and 39 implemented profiles',
+      '34 built-in providers and 41 implemented profiles',
     );
 
     for (const provider of BUILTIN_PROVIDER_CATALOG) {

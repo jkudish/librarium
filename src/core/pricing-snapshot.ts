@@ -372,6 +372,18 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     { requests: '1' },
   ),
 
+  // SerpBase: credits are account-priced and are not USD.
+  ...(['search', 'news'] as const).map((profileId) =>
+    unavailable(
+      'serpbase',
+      profileId,
+      ['credits'],
+      accountReason,
+      'official:serpbase.dev/docs',
+      { credits: '1' },
+    ),
+  ),
+
   // Tavily
   definition('tavily', 'search', {
     conditions: { account_plan: 'payg' },
@@ -432,6 +444,6 @@ export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:87f793e4b1f2fdccb17f36c8fb1fb523ea82949ccae2030cab05f0e244ef986d',
+      'sha256:81799cecd440f70b2e891b56cb8fa4e0f1014daeb87a750cda6746512df7e5fe',
     definitions: DEFINITIONS,
   });

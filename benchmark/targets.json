@@ -234,6 +234,20 @@
       "pricingVersion": "2026-08"
     },
     {
+      "id": "serpbase-search",
+      "tier": "raw-search",
+      "envVar": "SERPBASE_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "serpbase-news",
+      "tier": "raw-search",
+      "envVar": "SERPBASE_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
       "id": "tavily",
       "tier": "raw-search",
       "envVar": "TAVILY_API_KEY",
@@ -302,6 +316,8 @@
       "firecrawl-search",
       "searchapi",
       "serpapi",
+      "serpbase-search",
+      "serpbase-news",
       "tavily",
       "valyu-search"
     ],
@@ -380,6 +396,8 @@
       "brave-search",
       "searchapi",
       "serpapi",
+      "serpbase-search",
+      "serpbase-news",
       "tavily",
       "valyu-search",
       "searchapi-chatgpt",

@@ -70,6 +70,11 @@ import { SearchApiGoogleAiModeProvider } from './searchapi-google-ai-mode.js';
 import { SearchApiGoogleAiOverviewProvider } from './searchapi-google-ai-overview.js';
 import { SearchApiPerplexityProvider } from './searchapi-perplexity.js';
 import { SerpApiProvider } from './serpapi.js';
+import { SerpBaseProvider } from './serpbase.js';
+import {
+  SerpBaseNewsOptionsSchema,
+  SerpBaseSearchOptionsSchema,
+} from './serpbase-options.js';
 import { TavilyProvider } from './tavily.js';
 import { TavilyResearchProvider } from './tavily-research.js';
 import type {
@@ -386,6 +391,14 @@ const factories: Record<string, ProviderFactory> = {
       }),
   ),
   serpapi: () => new SerpApiProvider(),
+  'serpbase-search': typedFactory(
+    SerpBaseSearchOptionsSchema,
+    (context) => new SerpBaseProvider('search', context.options),
+  ),
+  'serpbase-news': typedFactory(
+    SerpBaseNewsOptionsSchema,
+    (context) => new SerpBaseProvider('news', context.options),
+  ),
   tavily: () => new TavilyProvider(),
   'tavily-research': typedFactory(
     tavilyResearchOptions,
