@@ -145,6 +145,10 @@ whose nested schemas are not public are shown as bounded literal data without
 citations. Live validation of those opaque rich-module schemas remains pending
 account access.
 
+SerpBase responses are limited to 100 primary results per page; retained text
+fields are capped at 2,000 UTF-8 bytes. Credential-bearing URLs are rejected,
+and provider errors omit upstream response bodies.
+
 ### What evidence means
 
 - A direct API response is `api_output`. It reports the response returned by

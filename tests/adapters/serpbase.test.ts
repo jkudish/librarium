@@ -5,6 +5,7 @@ import {
   HttpRequestAbortedError,
   HttpRequestTimeoutError,
   type HttpResponse,
+  httpRequest,
 } from '../../src/core/http-client.js';
 import {
   buildProviderMetering,
@@ -81,8 +82,112 @@ describe('SerpBase provider', () => {
         timeout: 7_000,
         signal,
         retry: { mode: 'never' },
+        redirect: 'manual',
       },
     );
+  });
+
+  it('refuses redirects through the production transport without exposing error bodies', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Bearer unrelated-secret' }), {
+        status: 302,
+        headers: { location: 'https://other-origin.test' },
+      }),
+    );
+    try {
+      const result = await provider('search', {
+        httpClient: httpRequest,
+      }).execute('query', { timeout: 2 });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe('manual');
+      expect(result.error).toBe('SerpBase rejected the request (HTTP 302).');
+      expect(JSON.stringify(result)).not.toContain('unrelated-secret');
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it('rejects signed evidence URLs and omits sensitive opaque fields', async () => {
+    const urls = [
+      'https://safe.test/?sig=private',
+      'https://safe.test/#session_id=private',
+      'https://safe.test/?next=%252F%253Ftoken%253Dprivate',
+    ];
+    for (const link of urls) {
+      const result = await provider('search', {
+        httpClient: transport(
+          success('search', [{ rank: 1, title: 'Result', link }]),
+        ),
+      }).execute('query', { timeout: 2 });
+      expect(result.error).toContain('safe HTTP(S) URL');
+      expect(result.citations).toEqual([]);
+    }
+    const result = await provider('search', {
+      includeRichResults: true,
+      httpClient: transport({
+        ...success('search'),
+        featured_snippet: {
+          auth: 'private-auth',
+          bearer: 'private-bearer',
+          session_id: 'private-session',
+          'X-Goog-Signature': 'private-signature',
+          safe: 'kept',
+          link: urls[0],
+        },
+      }),
+    }).execute('query', { timeout: 2 });
+    expect(result.content).toContain('kept');
+    expect(result.content).not.toContain('private');
+    expect(result.content).toContain('[omitted unsafe URL]');
+  });
+
+  it('bounds retained primary text without rejecting ordinary authentication documentation URLs', async () => {
+    const item = {
+      rank: 1,
+      title: 'é'.repeat(1500),
+      snippet: 'z'.repeat(3000),
+      link: 'https://docs.test/authentication?q=token',
+    };
+    const result = await provider('search', {
+      httpClient: transport(success('search', [item])),
+    }).execute('query', { timeout: 2 });
+    expect(result.error).toBeUndefined();
+    expect(new TextEncoder().encode(result.citations[0].title).length).toBe(
+      2000,
+    );
+    expect(result.citations[0].snippet?.length).toBe(2000);
+    const oversized = await provider('search', {
+      httpClient: transport(
+        success(
+          'search',
+          Array.from({ length: 101 }, () => item),
+        ),
+      ),
+    }).execute('query', { timeout: 2 });
+    expect(oversized.error).toContain('exceeds 100');
+    expect(oversized.usage?.billableUnits).toBe(1);
+  });
+
+  it('requires bounded envelope metadata and classifies HTTP timeouts', async () => {
+    for (const patch of [
+      { request_id: undefined },
+      { request_id: 'x'.repeat(256) },
+      { elapsed_ms: undefined },
+      { elapsed_ms: Infinity },
+    ]) {
+      const result = await provider('search', {
+        httpClient: transport({ ...success('search'), ...patch }),
+      }).execute('query', { timeout: 2 });
+      expect(result.error).toContain('Malformed SerpBase');
+      expect(result.usage?.billableUnits).toBe(1);
+    }
+    for (const status of [408, 504]) {
+      const result = await provider('search', {
+        httpClient: transport({ error: 'private response' }, status),
+      }).execute('query', { timeout: 2 });
+      expect(result.failureDiagnostic?.kind).toBe('timeout');
+      expect(result.error).not.toContain('private response');
+    }
   });
 
   it('uses endpoint defaults by omission and rejects endpoint-inappropriate options', async () => {
@@ -387,7 +492,7 @@ describe('SerpBase provider', () => {
         timeout: 2,
       });
 
-      expect(result.error).toBe(`SerpBase error ${status}: failure ${status}`);
+      expect(result.error).toBe(`SerpBase reported business status ${status}.`);
       expect(result.failureDiagnostic).toEqual({ kind });
       expect(result.usage).toEqual({ billableUnits: 0.5, unit: 'credit' });
       expect(result.content).toBe('');

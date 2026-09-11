@@ -59,7 +59,7 @@ const MAX_RICH_ENTRIES = 20;
 const MAX_RICH_TEXT_BYTES = 2_000;
 const MAX_RICH_RENDER_BYTES = 8_000;
 const SENSITIVE_RICH_KEY =
-  /(?:secret|key|token|credential|password|request[-_]?id|authorization|cookie|image|thumbnail|icon|photo)/i;
+  /(?:secret|key|token|credential|password|passwd|request[-_]?id|auth|bearer|session|signature|cookie|image|thumbnail|icon|photo|(?:^|[-_])sig(?:$|[-_]))/i;
 const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
@@ -120,6 +120,7 @@ export class SerpBaseProvider extends BaseProvider {
         // SerpBase documents no idempotency guarantee. A retry could charge
         // another credit after an ambiguous response, so every run is one try.
         retry: { mode: 'never' },
+        redirect: 'manual',
       });
       const durationMs = Math.round(performance.now() - start);
 
@@ -137,7 +138,7 @@ export class SerpBaseProvider extends BaseProvider {
       if (response.status !== 200) {
         return this.failure(
           durationMs,
-          this.formatError(response.status, response.data),
+          `SerpBase rejected the request (HTTP ${response.status}).`,
           diagnosticFromHttpStatus(response.status),
           usageFromPayload(response.data),
         );
@@ -155,10 +156,9 @@ export class SerpBaseProvider extends BaseProvider {
             usageFromPayload(data),
           );
         }
-        const message = text(data.error) ?? `business status ${data.status}`;
         return this.failure(
           durationMs,
-          `SerpBase error ${data.status}: ${this.redactErrorText(message).slice(0, 200)}`,
+          `SerpBase reported business status ${data.status}.`,
           diagnosticFromBusinessStatus(data.status),
           usageFromPayload(data),
         );
@@ -199,7 +199,11 @@ export class SerpBaseProvider extends BaseProvider {
             : ({ kind: 'network' } as const);
       return this.failure(
         Math.round(performance.now() - start),
-        this.formatCatchError(error),
+        isMissingCredentialError(error) ||
+          error instanceof HttpRequestTimeoutError ||
+          error instanceof HttpRequestAbortedError
+          ? this.formatCatchError(error)
+          : 'SerpBase could not complete the request.',
         diagnostic,
       );
     }
@@ -239,6 +243,21 @@ export class SerpBaseProvider extends BaseProvider {
 
   private parseSuccess(data: Record<string, unknown>): ParsedSuccess | Error {
     if (
+      typeof data.request_id !== 'string' ||
+      !data.request_id.trim() ||
+      utf8Length(data.request_id) > 255 ||
+      sanitizeControlCharacters(data.request_id) !== data.request_id
+    ) {
+      return new Error('request_id must be a bounded non-empty string');
+    }
+    if (
+      typeof data.elapsed_ms !== 'number' ||
+      !Number.isFinite(data.elapsed_ms) ||
+      data.elapsed_ms < 0
+    ) {
+      return new Error('elapsed_ms must be a finite non-negative number');
+    }
+    if (
       typeof data.credits_charged !== 'number' ||
       !Number.isFinite(data.credits_charged) ||
       data.credits_charged < 0
@@ -259,6 +278,9 @@ export class SerpBaseProvider extends BaseProvider {
     const rawResults = data[resultKey];
     if (rawResults !== undefined && !Array.isArray(rawResults)) {
       return new Error(`${resultKey} must be an array when present`);
+    }
+    if (rawResults && rawResults.length > 100) {
+      return new Error(`${resultKey} exceeds 100 results per page`);
     }
     const results: NormalizedResult[] = [];
     for (const [index, value] of (rawResults ?? []).entries()) {
@@ -581,27 +603,38 @@ function diagnosticFromBusinessStatus(
 function diagnosticFromHttpStatus(status: number): ProviderFailureDiagnostic {
   const httpStatus = status >= 100 && status <= 599 ? status : undefined;
   const kind =
-    status === 401 || status === 403
-      ? 'authentication'
-      : status === 402
-        ? 'billing'
-        : status === 429
-          ? 'rate_limit'
-          : status >= 400 && status < 500
-            ? 'invalid_request'
-            : 'provider';
+    status === 408 || status === 504
+      ? 'timeout'
+      : status === 401 || status === 403
+        ? 'authentication'
+        : status === 402
+          ? 'billing'
+          : status === 429
+            ? 'rate_limit'
+            : status >= 400 && status < 500
+              ? 'invalid_request'
+              : 'provider';
   return { kind, ...(httpStatus !== undefined && { httpStatus }) };
 }
 
 function safeHttpUrl(value: unknown): string | undefined {
-  const candidate = text(value);
-  if (!candidate || candidate.trim() !== candidate) return undefined;
+  const candidate = typeof value === 'string' ? value : undefined;
+  if (
+    !candidate ||
+    candidate.trim() !== candidate ||
+    utf8Length(candidate) > 8192 ||
+    sanitizeControlCharacters(candidate) !== candidate
+  )
+    return undefined;
   try {
     const url = new URL(candidate);
     if (
       !['http:', 'https:'].includes(url.protocol) ||
       url.username ||
-      url.password
+      url.password ||
+      hasCredentialParameters(url.pathname, false) ||
+      hasCredentialParameters(url.search, true) ||
+      hasCredentialParameters(url.hash, true)
     ) {
       return undefined;
     }
@@ -629,16 +662,43 @@ function timestamp(value: string | undefined): string | undefined {
 /** Detect URL-shaped strings without interpreting ordinary prose as a URL. */
 function safeRichUrl(value: string): boolean | undefined {
   if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return undefined;
-  try {
-    const url = new URL(value);
-    return (
-      ['http:', 'https:'].includes(url.protocol) &&
-      !url.username &&
-      !url.password
-    );
-  } catch {
-    return false;
+  return safeHttpUrl(value) !== undefined;
+}
+
+function hasCredentialParameters(
+  component: string,
+  allowBareKey: boolean,
+): boolean {
+  let decoded = component;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const next = decodeURIComponent(decoded.replaceAll('+', ' '));
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      return true;
+    }
   }
+  if (/%[0-9a-f]{2}/i.test(decoded)) return true;
+  const keys = [...decoded.matchAll(/(?:^|[?&#;/=])([^?&#;/=]+)(?==)/g)].map(
+    (match) => match[1],
+  );
+  if (allowBareKey) {
+    keys.push(
+      ...decoded
+        .replace(/^[?#]/, '')
+        .split(/[&;]/)
+        .map((parameter) => parameter.split('=')[0]),
+    );
+  }
+  return keys.some((part) => {
+    const segments = part.split(/[^a-z0-9]+/i);
+    return [...segments, segments.join('')].some((key) =>
+      /^(?:key|sig|bearer|cookie)$|(?:signature|credential|token|secret|password|passwd|authorization|authentication|auth|session(?:id)?|api(?:access)?key|accesskeyid)$/i.test(
+        key,
+      ),
+    );
+  });
 }
 
 function optionalText(
@@ -649,7 +709,9 @@ function optionalText(
 }
 
 function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
+  return typeof value === 'string' && value.trim().length > 0
+    ? truncateUtf8(sanitizeControlCharacters(value), MAX_RICH_TEXT_BYTES)
+    : undefined;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

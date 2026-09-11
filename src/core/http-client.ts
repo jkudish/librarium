@@ -43,6 +43,8 @@ export interface HttpRequestOptions {
   /** Per-attempt timeout in milliseconds; retry delays are excluded. */
   timeout?: number;
   signal?: AbortSignal;
+  /** Refuse automatic redirects for requests carrying custom credentials. */
+  redirect?: 'manual';
   /**
    * GET requests retry transient failures by default. Mutating requests do not
    * retry unless their idempotency is declared explicitly.
@@ -64,7 +66,10 @@ export type HttpClient = <T = unknown>(
   options?: HttpRequestOptions,
 ) => Promise<HttpResponse<T>>;
 
-export type HttpStreamRequestOptions = Omit<HttpRequestOptions, 'retry'> & {
+export type HttpStreamRequestOptions = Omit<
+  HttpRequestOptions,
+  'retry' | 'redirect'
+> & {
   /** Streaming submissions are intentionally one-attempt only. */
   retry?: { mode: 'never' };
 };
@@ -177,6 +182,7 @@ export async function httpRequest<T = unknown>(
         method,
         headers: requestHeaders,
         signal: controller.signal,
+        ...(options.redirect && { redirect: options.redirect }),
       };
 
       if (body !== undefined) {
