@@ -142,8 +142,9 @@ accepts `device` (`default`, `pc`, or `mobile`). Search’s `includeRichResults`
 defaults to `false`. When enabled, documented organic and PAA sources are
 extracted, related searches remain non-evidence suggestions, and rich modules
 whose nested schemas are not public are shown as bounded literal data without
-citations. Live validation of those opaque rich-module schemas remains pending
-account access.
+citations. Search, News, and related-search rendering passed live smoke checks;
+PAA and the opaque rich modules were not returned in those checks and remain
+live-unverified.
 
 SerpBase responses are limited to 100 primary results per page; retained text
 fields are capped at 2,000 UTF-8 bytes. Credential-bearing URLs are rejected,
