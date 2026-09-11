@@ -513,6 +513,16 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
   },
   { provider_id: 'searchapi', profile_id: 'search', adapter_id: 'searchapi' },
   { provider_id: 'serpapi', profile_id: 'search', adapter_id: 'serpapi' },
+  {
+    provider_id: 'serpbase',
+    profile_id: 'search',
+    adapter_id: 'serpbase-search',
+  },
+  {
+    provider_id: 'serpbase',
+    profile_id: 'news',
+    adapter_id: 'serpbase-news',
+  },
   { provider_id: 'tavily', profile_id: 'search', adapter_id: 'tavily' },
   {
     provider_id: 'valyu',

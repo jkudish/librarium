@@ -133,6 +133,14 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     evidence: ['tests/provider-descriptors.test.ts'],
     lanes: base,
   },
+  'serpbase/search': {
+    evidence: ['tests/adapters/serpbase.test.ts'],
+    lanes: [...base, 'options'],
+  },
+  'serpbase/news': {
+    evidence: ['tests/adapters/serpbase.test.ts'],
+    lanes: [...base, 'options'],
+  },
   'tavily/search': {
     evidence: ['tests/adapters/grounded-providers.test.ts'],
     lanes: base,

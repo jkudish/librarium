@@ -11,6 +11,10 @@ import {
 } from '../adapters/parallel-options.js';
 import { PerplexitySearchOptionsSchema } from '../adapters/perplexity-search-options.js';
 import {
+  SerpBaseNewsOptionsSchema,
+  SerpBaseSearchOptionsSchema,
+} from '../adapters/serpbase-options.js';
+import {
   ValyuResearchOptionsSchema,
   ValyuSearchOptionsSchema,
 } from '../adapters/valyu-options.js';
@@ -951,6 +955,50 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       defaultPerRequestUsd: 0.015,
       defaultUnitsPerRequest: 1,
       unit: 'request',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'serpbase-search',
+    registrationOrder: 19.1,
+    tier: 'raw-search',
+    envVar: 'SERPBASE_API_KEY',
+    autoEnable: false,
+    optionsSchema: SerpBaseSearchOptionsSchema,
+    display: {
+      family: 'SerpBase',
+      name: 'SerpBase Search',
+      description: 'Google organic search with opt-in rich SERP projection.',
+      bestFor: 'Ranked Google web results and optional SERP context.',
+      setupUrl: 'https://serpbase.dev/docs',
+      order: 211,
+    },
+    metering: {
+      kind: 'credit_priced',
+      defaultUnitsPerRequest: 1,
+      unit: 'credit',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'serpbase-news',
+    registrationOrder: 19.2,
+    tier: 'raw-search',
+    envVar: 'SERPBASE_API_KEY',
+    autoEnable: false,
+    optionsSchema: SerpBaseNewsOptionsSchema,
+    display: {
+      family: 'SerpBase',
+      name: 'SerpBase News',
+      description: 'Ranked Google News results with publisher metadata.',
+      bestFor: 'Recent news discovery through a dedicated search endpoint.',
+      setupUrl: 'https://serpbase.dev/docs',
+      order: 212,
+    },
+    metering: {
+      kind: 'credit_priced',
+      defaultUnitsPerRequest: 1,
+      unit: 'credit',
     },
     capabilities: inline('always'),
   }),

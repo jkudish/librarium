@@ -17,6 +17,7 @@ export const secretEnvironmentVariables = [
   'PERPLEXITY_API_KEY',
   'SEARCHAPI_API_KEY',
   'SERPAPI_API_KEY',
+  'SERPBASE_API_KEY',
   'TAVILY_API_KEY',
   'VALYU_API_KEY',
   'XAI_API_KEY',
