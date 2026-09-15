@@ -376,6 +376,120 @@ describe('custom providers', () => {
     expect(health.ok).toBe(true);
   });
 
+  it('reports script command spawn failures during initialization', async () => {
+    const providerId = 'script-spawn-failure';
+    const command = join(tmpDir, 'missing-script-provider-command');
+
+    const initialized = await initializeProviders({
+      providers: { [providerId]: { enabled: true } },
+      customProviders: {
+        [providerId]: { type: 'script', command },
+      },
+      trustedProviderIds: [providerId],
+    });
+
+    expect(initialized.warnings).toHaveLength(1);
+    expect(initialized.warnings[0]).toContain(
+      `Failed to load custom provider "${providerId}": Failed to start script provider command "${command}"`,
+    );
+    expect(getProvider(providerId)).toBeUndefined();
+  });
+
+  it('keeps script process, protocol, provider, and success outcomes distinct', async () => {
+    const cases = [
+      {
+        behavior: 'nonzero-exit',
+        error: 'returned no JSON response for operation "execute" (exit code 7',
+      },
+      {
+        behavior: 'no-json',
+        error: 'returned no JSON response for operation "execute" (exit code 0',
+      },
+      {
+        behavior: 'malformed-json',
+        error: 'returned invalid JSON for operation "execute"',
+      },
+      {
+        behavior: 'provider-failure',
+        error: 'operation "execute" failed: controlled provider failure',
+      },
+      {
+        behavior: 'null-model',
+        error:
+          'returned invalid "execute" payload: Invalid input: expected string, received null',
+      },
+      { behavior: 'success', error: null },
+    ] as const;
+
+    for (const testCase of cases) {
+      const providerId = `script-${testCase.behavior}`;
+      const cwd = join(tmpDir, `${providerId}-cwd`);
+      mkdirSync(cwd);
+      const scriptPath = join(tmpDir, `${providerId}.mjs`);
+      writeFileSync(
+        scriptPath,
+        [
+          "import { readFileSync } from 'node:fs';",
+          'const input = JSON.parse(readFileSync(0, "utf8"));',
+          'if (input.operation === "describe") {',
+          '  process.stdout.write(JSON.stringify({ ok: true, data: {',
+          `    displayName: ${JSON.stringify(providerId)}, tier: 'ai-grounded', execution: 'inline',`,
+          "    envVar: 'CONTROLLED_SCRIPT_KEY', requiresApiKey: true, capabilities: { execute: true }",
+          '  }}));',
+          '} else {',
+          `  const behavior = ${JSON.stringify(testCase.behavior)};`,
+          "  if (behavior === 'nonzero-exit') process.exit(7);",
+          "  if (behavior === 'no-json') process.exit(0);",
+          "  if (behavior === 'malformed-json') process.stdout.write('{not-json');",
+          "  if (behavior === 'provider-failure') process.stdout.write(JSON.stringify({ ok: false, error: 'controlled provider failure' }));",
+          "  if (behavior === 'null-model') process.stdout.write(JSON.stringify({ ok: true, data: { provider: input.providerId, tier: 'ai-grounded', content: 'answer', citations: [], durationMs: 1, model: null } }));",
+          "  if (behavior === 'success') process.stdout.write(JSON.stringify({ ok: true, data: { provider: input.providerId, tier: 'ai-grounded', content: JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2), env: process.env.CONTROLLED_SCRIPT_MARKER, protocolVersion: input.protocolVersion, operation: input.operation, query: input.query, timeout: input.options.timeout, sourceMarker: input.sourceOptions.marker }), citations: [], durationMs: 1 } }));",
+          '}',
+        ].join('\n'),
+      );
+
+      const initialized = await initializeProviders({
+        providers: {
+          [providerId]: {
+            enabled: true,
+            apiKey: '$CONTROLLED_SCRIPT_KEY',
+          },
+        },
+        customProviders: {
+          [providerId]: {
+            type: 'script',
+            command: 'node',
+            args: [scriptPath, 'fixed-argument'],
+            cwd,
+            env: { CONTROLLED_SCRIPT_MARKER: 'allowlisted-marker' },
+            options: { marker: 'source-option' },
+          },
+        },
+        trustedProviderIds: [providerId],
+      });
+      expect(initialized.warnings).toEqual([]);
+      const provider = getProvider(providerId);
+      expect(provider).toBeDefined();
+
+      const execution = provider!.execute('controlled query', { timeout: 9 });
+      if (testCase.error) {
+        await expect(execution).rejects.toThrow(testCase.error);
+      } else {
+        const result = await execution;
+        expect(JSON.parse(result.content)).toEqual({
+          cwd,
+          argv: ['fixed-argument'],
+          env: 'allowlisted-marker',
+          protocolVersion: 1,
+          operation: 'execute',
+          query: 'controlled query',
+          timeout: 9,
+          sourceMarker: 'source-option',
+        });
+      }
+    }
+  });
+
   it('aborts and kills a hanging script provider operation', async () => {
     const scriptPath = join(tmpDir, 'abortable-script-provider.mjs');
     const pidPath = join(tmpDir, 'abortable-script-provider.pid');
