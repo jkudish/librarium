@@ -1,11 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -382,12 +376,27 @@ describe('custom providers', () => {
     expect(health.ok).toBe(true);
   });
 
-  it('keeps script spawn, process, protocol, provider, and success outcomes distinct', async () => {
-    const cases = [
-      {
-        behavior: 'spawn-failure',
-        error: 'Failed to start script provider command',
+  it('reports script command spawn failures during initialization', async () => {
+    const providerId = 'script-spawn-failure';
+    const command = join(tmpDir, 'missing-script-provider-command');
+
+    const initialized = await initializeProviders({
+      providers: { [providerId]: { enabled: true } },
+      customProviders: {
+        [providerId]: { type: 'script', command },
       },
+      trustedProviderIds: [providerId],
+    });
+
+    expect(initialized.warnings).toHaveLength(1);
+    expect(initialized.warnings[0]).toContain(
+      `Failed to load custom provider "${providerId}": Failed to start script provider command "${command}"`,
+    );
+    expect(getProvider(providerId)).toBeUndefined();
+  });
+
+  it('keeps script process, protocol, provider, and success outcomes distinct', async () => {
+    const cases = [
       {
         behavior: 'nonzero-exit',
         error: 'returned no JSON response for operation "execute" (exit code 7',
@@ -420,16 +429,13 @@ describe('custom providers', () => {
       writeFileSync(
         scriptPath,
         [
-          '#!/usr/bin/env node',
-          "import { readFileSync, rmSync } from 'node:fs';",
-          "import { fileURLToPath } from 'node:url';",
+          "import { readFileSync } from 'node:fs';",
           'const input = JSON.parse(readFileSync(0, "utf8"));',
           'if (input.operation === "describe") {',
           '  process.stdout.write(JSON.stringify({ ok: true, data: {',
           `    displayName: ${JSON.stringify(providerId)}, tier: 'ai-grounded', execution: 'inline',`,
           "    envVar: 'CONTROLLED_SCRIPT_KEY', requiresApiKey: true, capabilities: { execute: true }",
           '  }}));',
-          `  if (${JSON.stringify(testCase.behavior)} === 'spawn-failure') rmSync(fileURLToPath(import.meta.url));`,
           '} else {',
           `  const behavior = ${JSON.stringify(testCase.behavior)};`,
           "  if (behavior === 'nonzero-exit') process.exit(7);",
@@ -441,7 +447,6 @@ describe('custom providers', () => {
           '}',
         ].join('\n'),
       );
-      chmodSync(scriptPath, 0o755);
 
       const initialized = await initializeProviders({
         providers: {
@@ -453,12 +458,8 @@ describe('custom providers', () => {
         customProviders: {
           [providerId]: {
             type: 'script',
-            command:
-              testCase.behavior === 'spawn-failure' ? scriptPath : 'node',
-            args:
-              testCase.behavior === 'spawn-failure'
-                ? ['fixed-argument']
-                : [scriptPath, 'fixed-argument'],
+            command: 'node',
+            args: [scriptPath, 'fixed-argument'],
             cwd,
             env: { CONTROLLED_SCRIPT_MARKER: 'allowlisted-marker' },
             options: { marker: 'source-option' },
