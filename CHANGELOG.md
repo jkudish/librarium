@@ -90,7 +90,7 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
 
 ### Added
 
-- A typed public catalog with 33 built-in providers and 39 retained public
+- A typed public catalog with 34 built-in providers and 41 retained public
   profiles. Descriptors are the source of truth for profile identity,
   selection, credentials, models, options, metering, execution capabilities,
   and provenance.
