@@ -114,11 +114,8 @@ export function readRunManifest(outputDir: string): RunManifest {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
-  } catch (error) {
-    throw new RunManifestError(
-      `Run manifest is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
-      path,
-    );
+  } catch {
+    throw new RunManifestError('Run manifest is not valid JSON', path);
   }
   if (!isRunManifest(parsed)) {
     throw new RunManifestError(

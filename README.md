@@ -53,8 +53,27 @@ Standalone and Homebrew binaries include their own runtime.
 
 ## Quick start
 
+These instructions require v2. The committed `2.0.0` package version is not
+evidence that any package channel contains v2. Check npm metadata before using
+the registry installation path:
+
 ```bash
-npm install -g librarium
+npm view librarium@2 version
+
+# Run this only when npm lists a matching v2 release above.
+npm install -g librarium@^2
+librarium --version # Must report major version 2.
+```
+
+If npm has no matching v2 release, build a reviewed v2 checkout with Node.js
+22.12 or newer instead:
+
+```bash
+# From the root of a reviewed v2 checkout.
+npm ci
+npm run build
+npm install -g .
+librarium --version # Must report major version 2.
 
 # Configure credentials and select providers interactively.
 librarium init
@@ -77,6 +96,11 @@ charges. `librarium run --json` sends only JSON to standard output; progress and
 diagnostics go to standard error. New requests default to the `quick` workflow
 in `sync` mode. Pass `--group`, `--providers`, or `--mode` to override those
 defaults; saved configuration preferences are also honored.
+
+`quick` is not an AI-grounded-only group: it includes raw search from
+`exa/search`. Explicit provider selection takes precedence over `--group`
+with a notice. Saved mode and limit settings override factory defaults; there
+is no saved default workflow setting that replaces implicit `quick` selection.
 
 ## V2 catalog
 
@@ -185,7 +209,7 @@ librarium run <query> [options]
 | `--parallel <n>` / `--timeout <n>` | Concurrency and per-provider timeout limits |
 | `--max-cost <usd>` | Require bounded network-free primary/reserve estimates at admission, then stop new launches when provider-reported spend reaches the bound |
 | `--max-estimated-cost <usd>` | Require bounded network-free primary/reserve estimates and admit only when the complete primary plan fits |
-| `--yes` / `--no-fallback` | Skip the deep preflight confirmation / require the exact primary matrix |
+| `--yes` / `--no-fallback` | Skip the deep preflight confirmation / disable configured provider and helper fallbacks for the exact primary matrix |
 | `--json` / `--refine` / `--html` / `--jsonl` / `--open` | Machine output, optional query refinement, and presentation artifacts |
 
 `answer` accepts the same run options and adds `--verify`. Verification is
@@ -193,6 +217,12 @@ bounded and opt-in. It may use successful evidence from the run and limited
 follow-up searches, but it does not make a result verified merely because a
 model produced it. It leaves the original answer intact when verification is
 incomplete, budget-limited, or fails.
+
+`--timeout` is in seconds and controls the inline per-attempt limit; it does
+not replace the background timeout or a configured whole-request deadline.
+`async` admits only durable background profiles. It is not a way to detach
+inline or process-local work; legacy `mixed` also follows this restriction
+after migration to `async`.
 
 ### `plan`
 
@@ -238,6 +268,22 @@ Other public commands are `live-validation`, `status`, `usage`, `browse`,
 `html`, `jsonl`, `refine`, `completions`, `ls`, `groups`, `init`, `doctor`,
 `config`, `cleanup`, `clear`, `upgrade`, `install-skill`, and `mcp`.
 
+### `doctor`
+
+`librarium doctor --json` emits provider rows with separate `credentialStatus`
+and `connectivity` fields. Offline `unchecked` means no connectivity test was
+made, not a successful authentication. Custom declarations without credential
+metadata can report `unknown`; disabled or untrusted providers are skipped.
+Exit status is 1 when any row has `connectivity: "fail"` (including an enabled
+provider with a missing key), or configuration/initialization fails, in both
+text and JSON modes. Exit 0 does not mean every provider is usable: inspect
+skipped, unknown, and unchecked rows. A configuration/initialization error may
+be diagnostic text on stderr rather than a JSON row array.
+
+Only `--live` invokes available provider tests and loads trusted custom code.
+It may make paid requests. Providers without a test report `no-test`, not a
+successful connection.
+
 ### Command option ledger
 
 This ledger is intentionally compact. It covers the registered command options
@@ -263,7 +309,7 @@ that are not in the `run` table above.
 | `config migrate` | `--from`, `--project`, `--output`, `--force` |
 | `cleanup` | `--days`, `--all`, `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
 | `clear` | `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
-| `upgrade` | `--check`, `--dry-run`, `--force` |
+| `upgrade` | `--check`, `--dry-run`, `--force`, `--target` (exact local/fixture version; requires `--dry-run`) |
 | `install-skill` | `--force`, `--dry-run` |
 | `mcp` | no explicit option |
 
@@ -275,12 +321,32 @@ only for `background/durable` profiles. A poll observes state; a retrieve
 turns an observed successful durable handle into a terminal result. A
 `background/process-local` profile must not be represented as durable work.
 
+New CLI and MCP runs write canonical **schema version 3** `run.json` artifacts.
+Historical **schema version 2** artifacts remain readable and their durable
+tasks can be reconciled; they are not rewritten into v3 or replayed as new
+research. `status` performs a canonical resume pass, including retrieval of an
+observed successful handle; `--wait` repeats passes. For historical v2 work,
+`--retrieve` fetches completed results and `--wait` also auto-retrieves.
+Unlike reading saved results, status/resume can contact providers and write
+artifacts. Preserve the entire run directory for recovery.
+
+Progress events are bounded observations, not an append-only audit log. Canonical
+snapshots retain the latest progress per attempt and may renumber their internal
+lifecycle sequence when compacting older progress. Semantic start, submission,
+finish, and request-terminal events are retained.
+
 Do not promise remote cancellation for every background provider. The canonical
 validation protocol explicitly marks a target as either
-`supported_exact_profile` cancellation or `reconcile_only`. The published
+`supported_exact_profile` cancellation or `reconcile_only`. The source
 catalog currently advertises remote cancellation only for `valyu/research`.
-All other cancellation behaviour requires reconciliation, not an invented
-provider-side cancel call.
+Other profiles use reconciliation. New runs freeze this policy into each exact
+profile plan; historical runs without it fail closed to reconciliation.
+
+Ctrl-C requests local cancellation and stops new paid launches. Accepted remote
+jobs may still run and incur charges, even if a local run is cancelled or its
+deadline expires. Best-effort remote cancellation requires the exact profile's
+supported cancel operation; a failed or unsupported cancel preserves the handle
+for reconciliation. There is no general CLI cancel command or MCP cancel tool.
 
 ### Offline canonical validation
 
@@ -324,7 +390,10 @@ only the documented optional fields.
 ```
 
 `request_deadline_ms` is optional. When set, it bounds the entire canonical
-run across primary and fallback attempts; it is not a per-provider timeout.
+run from the original request time, including refinement, research, fallbacks,
+synthesis, and verification; it is not a per-provider timeout. Without it,
+preflight derives the request window from the selected work and configured
+timeouts. `plan --json` reports the effective limit and its source.
 
 `migrateConfig()` accepts v1 or v2 data and returns either an immutable v2
 configuration plus notices or structured issues. It does not rewrite source
@@ -332,9 +401,29 @@ files. `loadConfigV2()` also never rewrites; it requires explicit paths. Only
 `saveConfigV2()` persists a validated v2 config, atomically and owner-only. It
 fails closed when it cannot verify equivalent owner-only protection on Windows.
 
+There are two distinct project-loading contracts:
+
+- The Node library's explicit `loadConfigV2({ global_path, project_path })`
+  migrates and merges v1 or native v2 layers into one full v2 config. Project
+  fields override global fields; replacing custom code under an existing ID
+  removes inherited trust and requires project-layer trust. `saveConfigV2()`
+  saves a full validated config, not a project override document.
+- Normal CLI commands load the conventional global config and the current
+  directory's `.librarium.json`, then apply CLI flags. They accept a native v2
+  **global** file, but the project file still uses the camelCase compatibility
+  contract (`defaults`, `providers`, `customProviders`, `trustedProviderIds`,
+  `groups`, `refine`, `answer`). Do not install a native snake_case v2 project
+  document there expecting the normal CLI path to apply it.
+
+`config --json` shows the merged camelCase compatibility projection, not the
+native file or a save-ready v2 document. `config --global --json` excludes the
+project layer. Treat this output as sensitive: it may contain literal
+credentials. The interactive config menu edits global settings only, and its
+legacy writer and onboarding refuse to overwrite an active native v2 file.
+
 ### Migrate a v1 config from the CLI
 
-Prerequisites: install Librarium 2.x, locate the global v1 config, and make a
+Prerequisites: build the v2 CLI as above, locate the global v1 config, and make a
 backup. The conventional global path is `~/.config/librarium/config.json`; a
 project config, when used, is normally `.librarium.json`. Keep the v1 files in
 place: `config migrate` refuses to use either source path as its output.
@@ -365,7 +454,8 @@ librarium config migrate \
 ```
 
 Writing validates again through `saveConfigV2()` and uses its atomic owner-only
-save boundary. An existing destination is refused. `--force` explicitly
+save boundary. Successful writes print a non-secret JSON receipt, not the saved
+configuration; only preview prints the configuration document. An existing destination is refused. `--force` explicitly
 replaces an existing destination, but it still cannot replace either source,
 including through a symlink or Windows case alias.
 Do not create the candidate with shell redirection: that bypasses the
@@ -435,12 +525,48 @@ calculation against an empty paid-attempt ledger and reports reservation-driven
 first-attempt blocks. Admission for later stages remains conditional on the
 estimates and provider-reported costs accumulated by earlier attempts.
 
+The actual-cost admission calculation uses reported cost when known and retains
+the committed estimate while reported cost is unknown. Known provider-reported
+failure costs count against the actual budget too: a failed helper, submission,
+or polled job is not automatically free. Known terminal charges also survive
+failed or timed-out retrieval and cancellation. Late coordinator receipts can
+fill unknown accounting without reopening the attempt; repeated receipts do not
+add an already-recorded charge again. A known first synthesis attempt is
+reserved before research or refinement can spend that capacity; this is not a
+reservation for every possible retry or verification call.
+
 Estimated cost, provider-reported actual cost, and unknown cost are separate
 facts. An estimate is not a quote, and neither budget flag guarantees the final
 bill. Refinement, synthesis, and verification share the run-wide paid wallet,
 but their spending is not inherently fixed: a helper with no bounded estimate
 is skipped or blocked under a hard budget, while provider-reported cost may
 arrive only after an admitted attempt finishes.
+
+CLI `run`/`answer` and MCP research persist `paid-attempt-ledger.json` alongside
+`run.json`, recording refinement, research, synthesis, and verification attempts
+when requested. It separates known/unknown estimates from reported costs and
+records attempt identity, status, fingerprints, limits, and the absolute
+deadline. `paid-attempt-ledger.required` marks runs that require this sidecar.
+Do not delete it to reset a budget: recovery fails closed if required ledger
+state is missing or invalid. Historical runs without a ledger remain readable;
+Librarium does not invent their helper-stage spending history.
+
+Refined CLI and MCP runs persist canonical `run.json` before the first paid
+refinement call. Its optional refinement state moves from `not_started` to
+`in_progress`, then atomically to either `completed` with the saved per-slot
+queries or `failed_or_interrupted`. Status/resume never starts research while
+refinement is incomplete and never replays an ambiguous paid refinement. A
+crash can therefore leave an honest, discoverable `in_progress` run until its
+original deadline; cancellation or deadline expiry preserves uncertainty rather
+than claiming the remote call stopped, because it may still finish and charge.
+
+Canonical resume restores prior spend, reservations, and the original deadline
+before admitting any new fallback. It does not grant a fresh budget or time
+window, or automatically replay answer/refinement/verification stages. Bounded
+GET-only provider reconciliation of retained remote handles can still observe
+custody after a terminal deadline/cancellation and persist that observation
+locally; that is not permission to launch more paid work or replace the saved
+terminal outcome.
 
 Every provider call can send a query and selected options to that provider.
 Retention, billing, and account-specific behavior belong to the upstream
@@ -457,8 +583,10 @@ path that may construct its frozen paid target.
 
 ## For agents
 
-Run `librarium install-skill` to install the shipped skill for Claude Code, or
-use the MCP stdio server:
+Run `librarium install-skill` to install the shipped skill for Claude Code.
+Both npm and standalone builds embed the root `SKILL.md` at build time, so
+installation works offline without a release tag and uses version-matched
+instructions. This does not upgrade the CLI. Alternatively, use the MCP stdio server:
 
 ```bash
 claude mcp add librarium -- librarium mcp
@@ -489,6 +617,15 @@ reading every result through unfiltered pages. `available: false` distinguishes
 missing evidence from a saved empty result. Oversized metadata returns a
 bounded error rather than an oversized response.
 
+Completed, saved results can be read while other providers in the same run are
+still pending; readers do not have to wait for a terminal run-wide response.
+For v3 runs, committed canonical output is authoritative: editing or replacing
+derived provider Markdown does not change the evidence returned by MCP.
+`get_results` exposes safe diagnostics, never historical raw provider error
+strings. Malformed configuration and run JSON diagnostics do not echo source
+fragments that could contain credentials. These diagnostic protections do not
+make provider evidence trusted or safe to execute.
+
 Reads make no provider calls, polls, or artifact writes. Changed evidence
 invalidates existing cursors: restart without a cursor. Missing or unsafe
 artifacts are not fetched remotely. Historical schema version 2 runs and
@@ -507,14 +644,33 @@ inline canonical `response`, async `tasks`, source lists, or a single capped
 `runDir`/`provider` inputs remain supported; saved artifacts and public
 Node/PHP interchange contracts are unchanged.
 
+### Discover profiles without executing custom code
+
+Call `list_providers` with `{"detail":"profiles"}`; optionally add
+`"provider":"exa"` to filter by canonical provider or configured adapter ID.
+The versioned response includes exact selectors, configured targets,
+capabilities, invocation/resumability, workflows, provenance, availability
+reasons, credential status, and a catalog revision. Without `detail`, it
+returns compact provider summaries. An unknown provider filter is an error.
+
+Discovery reads static configuration and declarations, not adapter output. It
+does not import custom modules, spawn scripts, contact providers, or resolve OS
+keychain credentials. Keychain presence stays `unknown`, and authentication is
+always `not-checked`. Declared disabled custom profiles remain visible as
+unavailable; undeclared custom providers are reported as unplannable, not given
+invented capabilities. Local presence and static selectability are not proof
+of live account access. Use `plan` to inspect admission for a specific request.
+
 ### Amp orbs
 
 Amp needs only the Librarium User Skill and the v2 CLI; no Amp plugin is
 required. A global User Skill is synced into every orb automatically. The
 Librarium repository's `.agents/setup` builds the checked-out source and runs
 `npm install -g .`, then verifies that `librarium --version` reports major
-version 2. Other orb projects can install `librarium@^2` after v2 is published.
-They must not silently use npm's v1 `latest` tag for a v2 workflow.
+version 2. Other orb projects may install `librarium@^2` only when read-only
+`npm view librarium@2 version` metadata lists a matching release; otherwise,
+install a reviewed v2 checkout. Always verify major version 2 rather than
+silently using an incompatible package channel for a v2 workflow.
 
 ## Shared TypeScript/PHP boundary
 

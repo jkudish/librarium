@@ -144,21 +144,82 @@ describe('OpenAIResearchProvider', () => {
         timeout: 1800,
         signal: controller.signal,
       }),
-    ).rejects.toThrow('Request aborted');
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'timeout' },
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not retry a failed billable submission', async () => {
-    const fetchMock = vi
+  it.each([
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'keeps HTTP %s submission diagnostics bounded without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'raw-provider-secret';
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse(status, {
+          error: { message: `Bearer ${secret}`, api_key: secret },
+        }),
+      );
+      globalThis.fetch = fetchMock;
+
+      const submission = provider().submit('What changed?', { timeout: 1800 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message: 'OpenAI submission failed before a valid handle was returned.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('keeps network and malformed accepted submissions ambiguous', async () => {
+    const network = vi
       .fn()
-      .mockResolvedValue(jsonResponse(500, { error: { message: 'down' } }));
-    globalThis.fetch = fetchMock;
+      .mockRejectedValueOnce(
+        new TypeError('fetch failed with Bearer raw-provider-secret'),
+      );
+    globalThis.fetch = network;
+    await expect(
+      provider().submit('What changed?', { timeout: 1800 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(network).toHaveBeenCalledOnce();
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        error: { message: 'accepted without an id' },
+      }),
+    );
+    const malformed = provider().submit('What changed?', { timeout: 1800 });
+    await expect(malformed).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(malformed).rejects.not.toHaveProperty(
+      'failureDiagnostic.httpStatus',
+    );
+  });
+
+  it('preserves a valid id from a malformed accepted response', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { id: 'resp_123' }));
 
     await expect(
       provider().submit('What changed?', { timeout: 1800 }),
-    ).rejects.toMatchObject({ name: 'UnsafeToRetrySubmissionError' });
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    ).resolves.toMatchObject({
+      taskId: 'resp_123',
+      status: 'pending',
+      providerStatus: 'invalid_response',
+    });
   });
 
   it('keeps unknown provider statuses retryable and visible', async () => {
@@ -171,6 +232,46 @@ describe('OpenAIResearchProvider', () => {
       status: 'running',
       rawStatus: 'migrating',
       message: 'Unknown OpenAI response status: migrating',
+    });
+  });
+
+  it.each([401, 403, 404])(
+    'keeps accepted custody after HTTP %s and observes eventual completion',
+    async (status) => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(status, { error: 'unavailable' }))
+        .mockResolvedValueOnce(
+          jsonResponse(200, { id: 'resp_123', status: 'completed' }),
+        );
+      const subject = provider();
+      const task = handle('running');
+
+      await expect(subject.poll(task)).rejects.toThrow(
+        `Poll returned HTTP ${status}`,
+      );
+      await expect(subject.poll(task)).resolves.toMatchObject({
+        status: 'completed',
+        rawStatus: 'completed',
+      });
+    },
+  );
+
+  it('rejects malformed status observations without fabricating task failure', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { id: 'resp_123' }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'resp_123', status: 'completed' }),
+      );
+    const subject = provider();
+    const task = handle('running');
+
+    await expect(subject.poll(task)).rejects.toThrow(
+      'OpenAI returned a malformed status response',
+    );
+    await expect(subject.poll(task)).resolves.toMatchObject({
+      status: 'completed',
     });
   });
 

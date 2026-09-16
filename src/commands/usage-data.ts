@@ -1,9 +1,11 @@
 import { RunArtifactRepository } from '../node-run-artifacts.js';
+import { discoverRuns } from './browse-data.js';
 
 /**
- * Pure aggregation for `librarium usage`: walk the run.json manifests under the
- * output base dir and total up API-reported cost and tokens per provider. No
- * interactive or rendering code here so it stays unit-testable.
+ * Pure aggregation for `librarium usage`: discover authoritative v2 and v3
+ * run.json manifests under the output base dir and total up API-reported cost
+ * and tokens per provider. No interactive or rendering code here so it stays
+ * unit-testable.
  *
  * Honest data only: cost figures come straight from each manifest's reported
  * usage. Manifests with no reported usage are counted but contribute 0.
@@ -71,10 +73,22 @@ export function aggregateUsage(
   let fromSeconds = Number.POSITIVE_INFINITY;
   let toSeconds = Number.NEGATIVE_INFINITY;
 
-  for (const { manifest } of repository.discoverRuns(
+  const runsByDirectory = new Map<
+    string,
+    ReturnType<typeof discoverRuns>[number]
+  >();
+  for (const run of discoverRuns(
     baseDir,
     Number.MAX_SAFE_INTEGER,
+    repository,
   )) {
+    const existing = runsByDirectory.get(run.dir);
+    if (!existing || run.schemaVersion === 3) {
+      runsByDirectory.set(run.dir, run);
+    }
+  }
+
+  for (const { manifest } of runsByDirectory.values()) {
     if (cutoffSeconds !== undefined && manifest.timestamp < cutoffSeconds) {
       continue;
     }

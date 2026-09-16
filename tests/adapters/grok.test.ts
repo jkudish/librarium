@@ -10,6 +10,9 @@ import {
   DEFAULT_GROK_MODEL,
   validateGrokOptions,
 } from '../../src/adapters/grok-responses.js';
+import type { ExecutionProfile } from '../../src/contracts/domain/index.js';
+import type { AttemptLaunch } from '../../src/core/coordinator.js';
+import { normalizeProviderAttemptOutput } from '../../src/core/research-response-projector.js';
 
 vi.mock('../../src/constants.js', async (importOriginal) => {
   const original =
@@ -37,6 +40,42 @@ function outputResponse(text = 'Grounded answer.'): Record<string, unknown> {
   return {
     model: 'grok-4.6',
     output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
+  };
+}
+
+function grokLaunch(): AttemptLaunch {
+  const profile: ExecutionProfile = {
+    identity: {
+      provider_id: 'grok',
+      profile_id: 'web',
+      target: {
+        primary: {
+          model_selection: 'configurable',
+          kind: 'model',
+          target_id: 'grok-4.6',
+        },
+      },
+    },
+    result_kind: 'grounded_answer',
+    grounding_policy: 'required',
+    observation_mode: 'api_output',
+    corpora: ['web'],
+    retrieval_method: 'model_search_tool',
+    access_mode: 'direct',
+    operator_id: 'xai',
+    invocation: 'inline',
+    resumability: 'none',
+  };
+  return {
+    attempt_id: 'attempt-grok',
+    slot_id: 'slot-grok',
+    profile,
+    binding: { adapter_id: 'grok', binding_id: 'binding-grok' },
+    catalog_digest: 'catalog-digest',
+    query: 'ground this',
+    deadline_at: '2026-09-08T12:01:00.000Z',
+    delivery_lease_id: 'lease-grok',
+    idempotency_key: 'idempotency-grok',
   };
 }
 
@@ -180,12 +219,27 @@ describe('GrokProvider', () => {
     expect(result.usage?.inputTokens).toBe(120);
     expect(result.usage?.outputTokens).toBe(45);
     expect(result.usage?.totalTokens).toBe(165);
+    expect(result.usage?.cacheReadInputTokens).toBe(10);
+    expect(result.usage?.reasoningTokens).toBe(20);
     expect(result.usage?.raw).toMatchObject({
       strategy: 'web',
       usage,
       server_side_tool_usage: serverSideToolUsage,
     });
     expect(result.usage?.costUsd).toBeUndefined();
+
+    const terminalOutput = normalizeProviderAttemptOutput(
+      grokLaunch(),
+      'result-grok',
+      result,
+      '2026-09-08T12:00:01.000Z',
+    );
+    expect(terminalOutput.usage).toEqual({
+      prompt_tokens: 120,
+      completion_tokens: 45,
+      cache_read_input_tokens: 10,
+      reasoning_tokens: 20,
+    });
   });
 
   it('converts reported cost_in_usd_ticks into a reported costUsd', async () => {

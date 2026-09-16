@@ -9,6 +9,7 @@ import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import { generateSlug } from '../core/prompt-builder.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
+  type CanonicalRunRefinement,
   canonicalRunsRoot,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
@@ -265,6 +266,7 @@ async function reconcileCanonicalRuns(
   readonly runs: readonly {
     readonly runDir: string;
     readonly state: 'pending' | 'terminal' | 'error';
+    readonly refinementStatus?: CanonicalRunRefinement['status'];
     readonly response?: unknown;
     readonly error?: typeof RECONCILIATION_FAILED;
   }[];
@@ -274,6 +276,7 @@ async function reconcileCanonicalRuns(
   const runs: Array<{
     runDir: string;
     state: 'pending' | 'terminal' | 'error';
+    refinementStatus?: CanonicalRunRefinement['status'];
     response?: unknown;
     error?: typeof RECONCILIATION_FAILED;
   }> = [];
@@ -324,6 +327,9 @@ async function reconcileCanonicalRuns(
           canonical.manifest.coordination_state.status === 'running'
             ? ('pending' as const)
             : ('terminal' as const),
+        ...(canonical.manifest.refinement && {
+          refinementStatus: canonical.manifest.refinement.status,
+        }),
         ...(canonical.response && { response: canonical.response }),
       });
     } catch {
@@ -353,7 +359,18 @@ function printCanonicalRuns(
       | { readonly status?: string; readonly request_id?: string }
       | undefined;
     const detail = run.error ?? response?.status ?? run.state;
-    print(`  ${run.runDir} | Status: ${detail}`);
+    const pendingRefinement =
+      run.state === 'pending' &&
+      (run.refinementStatus === 'not_started' ||
+        run.refinementStatus === 'in_progress');
+    const refinement = run.refinementStatus
+      ? ` | Refinement: ${run.refinementStatus}${
+          pendingRefinement
+            ? ' (run may still be active or may have been interrupted; no automatic replay)'
+            : ''
+        }`
+      : '';
+    print(`  ${run.runDir} | Status: ${detail}${refinement}`);
   }
 }
 

@@ -222,6 +222,8 @@ export interface AsyncTaskHandle {
   lastPollError?: string;
   /** Safe, allowlisted facts for an immediately failed accepted task. */
   failureDiagnostic?: ProviderFailureDiagnostic;
+  /** Provider-reported usage, including charges on a terminal submission. */
+  usage?: ProviderUsage;
   outputDir?: string;
 }
 
@@ -234,6 +236,8 @@ export interface AsyncPollResult {
   rawStatus?: string;
   /** Safe, allowlisted facts when the observed task state is failed. */
   failureDiagnostic?: ProviderFailureDiagnostic;
+  /** Provider-reported usage; failed or cancelled work is not necessarily free. */
+  usage?: ProviderUsage;
 }
 
 // Fields shared by every provider implementation.

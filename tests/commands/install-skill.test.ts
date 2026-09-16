@@ -14,23 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerInstallSkillCommand } from '../../src/commands/install-skill.js';
 import { safeWriteFile } from '../../src/core/fs-utils.js';
 
-const VALID_SKILL = `---
-description: Run multi-provider research with librarium
----
-
-# Librarium Research Skill
-
-Use the immutable packaged instructions below when conducting research.
-
-## Workflow
-
-Run \`librarium run "the research question" --group quick\`, inspect every
-generated source, preserve provenance, and report disagreements explicitly.
-`;
-
-function response(body: string, status = 200): Response {
-  return new Response(body, { status });
-}
+const VALID_SKILL = readFileSync(
+  new URL('../../SKILL.md', import.meta.url),
+  'utf8',
+);
 
 describe('install-skill command', () => {
   let root: string;
@@ -53,7 +40,7 @@ describe('install-skill command', () => {
   });
 
   function command(
-    fetchSkill: typeof fetch,
+    content = VALID_SKILL,
     writeAtomically: (path: string, content: string) => void = safeWriteFile,
   ): Command {
     const program = new Command();
@@ -61,9 +48,7 @@ describe('install-skill command', () => {
     registerInstallSkillCommand(program, {
       skill_dir: skillDir,
       skill_file: skillFile,
-      skill_url:
-        'https://raw.githubusercontent.com/jkudish/librarium/v2.0.0/SKILL.md',
-      fetch_skill: fetchSkill,
+      skill_content: content,
       write_atomically: writeAtomically,
     });
     return program;
@@ -95,40 +80,24 @@ describe('install-skill command', () => {
     expect(dryRunOption).toBeDefined();
   });
 
-  it('fails closed when the immutable version tag is missing', async () => {
-    const fetchSkill = vi.fn(async () => response('not found', 404));
-
-    await command(fetchSkill).parseAsync(['node', 'test', 'install-skill']);
-
-    expect(fetchSkill).toHaveBeenCalledTimes(1);
-    expect(fetchSkill.mock.calls[0]?.[0]).toContain('/v2.0.0/SKILL.md');
-    expect(existsSync(skillFile)).toBe(false);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.stringContaining('skill tag for version'),
-    );
-    expect(process.exitCode).toBe(1);
-  });
-
-  it('leaves no partial install when the download fails', async () => {
-    const fetchSkill = vi.fn(async () => {
-      throw new Error('request included a secret');
+  it('installs the exact skill without any download', async () => {
+    const fetchSkill = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      throw new Error('network denied');
     });
 
-    await command(fetchSkill).parseAsync(['node', 'test', 'install-skill']);
+    await command().parseAsync(['node', 'test', 'install-skill']);
 
-    expect(existsSync(skillDir)).toBe(false);
-    expect(console.error).toHaveBeenCalledWith(
-      expect.not.stringContaining('secret'),
-    );
-    expect(process.exitCode).toBe(1);
+    expect(fetchSkill).not.toHaveBeenCalled();
+    expect(readFileSync(skillFile, 'utf8')).toBe(VALID_SKILL);
+    expect(process.exitCode).toBeUndefined();
   });
 
-  it('validates the complete skill before creating the destination', async () => {
-    const fetchSkill = vi.fn(async () =>
-      response('---\ndescription: plausible but incomplete\n---\n'),
-    );
-
-    await command(fetchSkill).parseAsync(['node', 'test', 'install-skill']);
+  it.each([
+    '',
+    '---\ndescription: plausible but incomplete\n---\n',
+    VALID_SKILL.replace('name: librarium', 'name: renamed-skill'),
+  ])('rejects a missing or invalid bundle before writing', async (content) => {
+    await command(content).parseAsync(['node', 'test', 'install-skill']);
 
     expect(existsSync(skillDir)).toBe(false);
     expect(console.error).toHaveBeenCalledWith(
@@ -137,17 +106,31 @@ describe('install-skill command', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('dry-run describes the bundled install without creating files', async () => {
+    await command().parseAsync(['node', 'test', 'install-skill', '--dry-run']);
+
+    expect(existsSync(skillDir)).toBe(false);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining('Would install the bundled skill'),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('preserves an existing installation without --force', async () => {
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(skillFile, 'old install');
+
+    await command().parseAsync(['node', 'test', 'install-skill']);
+
+    expect(readFileSync(skillFile, 'utf8')).toBe('old install');
+    expect(process.exitCode).toBeUndefined();
+  });
+
   it('atomically replaces an existing install with --force', async () => {
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(skillFile, 'old install', { encoding: 'utf8', flag: 'wx' });
-    const fetchSkill = vi.fn(async () => response(VALID_SKILL));
 
-    await command(fetchSkill).parseAsync([
-      'node',
-      'test',
-      'install-skill',
-      '--force',
-    ]);
+    await command().parseAsync(['node', 'test', 'install-skill', '--force']);
 
     expect(readFileSync(skillFile, 'utf8')).toBe(VALID_SKILL);
     expect(readdirSync(skillDir)).toEqual(['SKILL.md']);
@@ -164,10 +147,12 @@ describe('install-skill command', () => {
       throw new Error('injected replacement failure');
     });
 
-    await command(
-      vi.fn(async () => response(VALID_SKILL)),
-      writeAtomically,
-    ).parseAsync(['node', 'test', 'install-skill', '--force']);
+    await command(VALID_SKILL, writeAtomically).parseAsync([
+      'node',
+      'test',
+      'install-skill',
+      '--force',
+    ]);
 
     expect(writeAtomically).toHaveBeenCalledWith(skillFile, VALID_SKILL);
     expect(readFileSync(skillFile, 'utf8')).toBe('old install');

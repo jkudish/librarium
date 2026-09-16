@@ -82,7 +82,7 @@ function makeConfig(overrides: Partial<Config['defaults']> = {}): Config {
     },
     customProviders: {},
     trustedProviderIds: [],
-    groups: { quick: ['exa'], deep: ['openai-research'] },
+    groups: { 'custom:team': ['exa/search'] },
   };
 }
 
@@ -186,22 +186,30 @@ describe('mcp tool surface', () => {
     expect(researchSchema.properties?.group?.description).toContain(
       'Defaults to quick',
     );
+    expect(researchSchema.properties?.group?.description).toContain(
+      'visibility',
+    );
+    expect(researchSchema.properties?.group?.description).not.toContain('raw');
     expect(researchSchema.properties?.mode?.description).toContain(
       'sync (default)',
     );
     await server.close();
   });
 
-  it('list_groups returns configured groups', async () => {
+  it('list_groups returns canonical built-ins and custom groups', async () => {
     const { client, server } = await connect({
       loadMergedConfig: () => makeConfig(),
     });
     const res = await client.callTool({ name: 'list_groups', arguments: {} });
     const payload = JSON.parse((res.content as { text: string }[])[0].text);
-    expect(payload.groups).toEqual([
-      { name: 'quick', members: ['exa'] },
-      { name: 'deep', members: ['openai-research'] },
-    ]);
+    expect(payload.groups.map((group: { name: string }) => group.name)).toEqual(
+      ['quick', 'deep', 'visibility', 'all', 'custom:team'],
+    );
+    expect(
+      payload.groups.find(
+        (group: { name: string }) => group.name === 'custom:team',
+      ),
+    ).toEqual({ name: 'custom:team', members: ['exa/search'] });
     await server.close();
   });
 
@@ -475,7 +483,7 @@ describe('research tool', () => {
     await server.close();
   });
 
-  it('surfaces a provider/run failure as a detailed tool error', async () => {
+  it('replaces an arbitrary provider/run failure with a safe tool error', async () => {
     const runResearch = vi.fn().mockRejectedValue(new Error('HTTP 500 boom'));
     const { client, server } = await connect({ runResearch });
     const res = await client.callTool({
@@ -483,8 +491,9 @@ describe('research tool', () => {
       arguments: { query: 'x' },
     });
     expect(res.isError).toBe(true);
+    expect(JSON.stringify(res)).not.toContain('HTTP 500 boom');
     expect((res.content as { text: string }[])[0].text).toContain(
-      'HTTP 500 boom',
+      'research failed: Operation failed.',
     );
     await server.close();
   });
@@ -684,7 +693,9 @@ describe('review fixes: path containment', () => {
     });
     writeFileSync(join(dir, 'run.json'), JSON.stringify(manifest));
     const result = readRunResults(dir);
-    expect(result.results[0].error).toMatch(/outside the run directory/);
+    expect(result.results[0].error).toBe(
+      'Saved provider diagnostic omitted. Inspect the run locally.',
+    );
     expect(result.results[0].content).toBe('');
   });
 

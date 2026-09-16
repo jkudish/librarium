@@ -435,6 +435,8 @@ export class GrokResponsesProvider extends BaseProvider {
       inputTokens: usage?.input_tokens,
       outputTokens: usage?.output_tokens,
       totalTokens: usage?.total_tokens,
+      cacheReadInputTokens: this.validTokenCount(usage?.cached_tokens),
+      reasoningTokens: this.validTokenCount(usage?.reasoning_tokens),
       raw,
     };
     if (
@@ -445,6 +447,14 @@ export class GrokResponsesProvider extends BaseProvider {
       result.costUsd = usage.cost_in_usd_ticks * USD_PER_COST_TICK;
     }
     return result;
+  }
+
+  private validTokenCount(value: unknown): number | undefined {
+    return typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0
+      ? value
+      : undefined;
   }
 
   private configuredMediaMeta(): Record<string, unknown> {

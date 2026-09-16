@@ -17,6 +17,7 @@ import { SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION } from '../src/node-entry.js';
 const read = (path: string) =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const README = read('README.md');
+const CHANGELOG = read('CHANGELOG.md');
 const SKILL = read('SKILL.md');
 const PROVIDER_GUIDE = read('docs/provider-development.md');
 const CONTRACTS_GUIDE = read('contracts/README.md');
@@ -144,7 +145,7 @@ describe('public v2 documentation drift', () => {
       expect(README).toContain(`\`${command.name()}\``);
       for (const option of command.options) {
         if (option.long && option.long !== '--help') {
-          expect(README).toContain(option.long);
+          expect(README).toMatch(new RegExp(`${option.long}(?![A-Za-z0-9_-])`));
         }
       }
     }
@@ -158,8 +159,19 @@ describe('public v2 documentation drift', () => {
     expect(migrate).toBeDefined();
     expect(README).toContain('`config migrate`');
     for (const option of migrate?.options ?? []) {
-      if (option.long) expect(README).toContain(option.long);
+      if (option.long) {
+        expect(README).toMatch(new RegExp(`${option.long}(?![A-Za-z0-9_-])`));
+      }
     }
+  });
+
+  it('keeps the pending v2 changelog truthful', () => {
+    expect(CHANGELOG).toContain('## [2.0.0] - Unreleased');
+    expect(CHANGELOG).not.toMatch(/## \[2\.0\.0\] - \d{4}-\d{2}-\d{2}/);
+    expect(CHANGELOG).toContain(
+      'A typed public catalog with 33 built-in providers and 39 retained public',
+    );
+    expect(CHANGELOG).not.toContain('40 retained public');
   });
 
   it('documents the source-derived MCP tool roster', () => {

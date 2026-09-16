@@ -1,6 +1,8 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { GeminiGroundedProvider } from '../../src/adapters/gemini-grounded.js';
+import { KagiFastGPTProvider } from '../../src/adapters/kagi-fastgpt.js';
 import { OpenRouterOnlineProvider } from '../../src/adapters/openrouter-online.js';
+import { YouResearchProvider } from '../../src/adapters/you-research.js';
 
 function jsonResponse(status: number, data: unknown): Response {
   return {
@@ -117,6 +119,118 @@ describe('grounded providers', () => {
     expect(result.error).toContain('key=[REDACTED]&request=9');
     expect(result.error).not.toContain(sentinel);
     expect(result.error).not.toContain('other-secret');
+  });
+
+  it.each([
+    ['missing candidates', {}],
+    ['missing candidate content', { candidates: [{}] }],
+    [
+      'blank candidate text',
+      { candidates: [{ content: { parts: [{ text: ' \n ' }] } }] },
+    ],
+  ])('fails Gemini grounded responses with %s', async (_label, payload) => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, payload));
+    const provider = new GeminiGroundedProvider({
+      credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+    });
+
+    const result = await provider.execute('ground this', { timeout: 10 });
+
+    expect(result).toMatchObject({
+      content: '',
+      citations: [],
+      error: 'Gemini response did not include a non-empty answer',
+    });
+    expect(result.preventFallback).toBeUndefined();
+  });
+
+  it.each([
+    ['missing output', { data: {} }],
+    ['blank output', { data: { output: ' \n ' } }],
+    [
+      'references without output',
+      {
+        data: {
+          references: [
+            { url: 'https://example.com/reference', title: 'Reference' },
+          ],
+        },
+      },
+    ],
+  ])('fails Kagi grounded responses with %s', async (_label, payload) => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, payload));
+    const provider = new KagiFastGPTProvider({
+      credentials: { env: { KAGI_API_KEY: 'kagi-key' } },
+    });
+
+    const result = await provider.execute('ground this', { timeout: 10 });
+
+    expect(result).toMatchObject({
+      content: '',
+      citations: [],
+      error: 'Kagi response did not include a non-empty answer',
+    });
+    expect(result.preventFallback).toBeUndefined();
+  });
+
+  it('accepts a citation-free non-empty Kagi answer', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: { output: 'Grounded answer.', references: [] },
+      }),
+    );
+    const provider = new KagiFastGPTProvider({
+      credentials: { env: { KAGI_API_KEY: 'kagi-key' } },
+    });
+
+    const result = await provider.execute('ground this', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toContain('Grounded answer.');
+    expect(result.citations).toEqual([]);
+  });
+
+  it.each([
+    ['missing output', {}],
+    ['missing content', { output: {} }],
+    ['blank content', { output: { content: ' \n ' } }],
+  ])('fails You.com grounded responses with %s', async (_label, payload) => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, payload));
+    const provider = new YouResearchProvider({
+      credentials: { env: { YOU_COM_API_KEY: 'you-key' } },
+    });
+
+    const result = await provider.execute('ground this', { timeout: 10 });
+
+    expect(result).toMatchObject({
+      content: '',
+      citations: [],
+      error: 'You.com response did not include a non-empty answer',
+    });
+    expect(result.preventFallback).toBeUndefined();
+  });
+
+  it('accepts a citation-free non-empty You.com answer', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        output: { content: 'Grounded answer.', sources: [] },
+      }),
+    );
+    const provider = new YouResearchProvider({
+      credentials: { env: { YOU_COM_API_KEY: 'you-key' } },
+    });
+
+    const result = await provider.execute('ground this', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Grounded answer.');
+    expect(result.citations).toEqual([]);
   });
 
   it('calls OpenRouter online search and extracts URL annotations', async () => {

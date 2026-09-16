@@ -238,6 +238,16 @@ const TERMINAL_SLOT_STATUSES = new Set<CoordinatorSlotStatus>([
   'cancelled',
 ]);
 
+const MAX_LIFECYCLE_EVENTS = 10_000;
+const MAX_COORDINATOR_ATTEMPTS = 256;
+const MAX_FALLBACK_SELECTIONS = 64;
+// Retain enough room for every allowed attempt to start, record durable
+// acceptance, and finish, plus every fallback selection and request boundary.
+// Progress is observational and may be coalesced; these semantic events may not.
+const MAX_RETAINED_PROGRESS_EVENTS =
+  MAX_LIFECYCLE_EVENTS -
+  (MAX_COORDINATOR_ATTEMPTS * 3 + MAX_FALLBACK_SELECTIONS + 2);
+
 function cloneState(state: CoordinatorState): CoordinatorState {
   return structuredClone(state);
 }
@@ -254,8 +264,59 @@ function exactGreaterThan(left: string, right: string): boolean {
   return BigInt(left) > BigInt(right);
 }
 
+function compactProgressLifecycle(
+  state: CoordinatorState,
+  supersededAttemptId?: string,
+): void {
+  const latestProgressByAttempt = new Set<string>();
+  const retainedProgress = new Set<number>();
+  for (let index = state.lifecycle.length - 1; index >= 0; index -= 1) {
+    const event = state.lifecycle[index];
+    if (event?.event_kind !== 'attempt_progress') continue;
+    const attemptId = event.attempt_id;
+    if (attemptId === supersededAttemptId) continue;
+    if (latestProgressByAttempt.has(attemptId)) continue;
+    latestProgressByAttempt.add(attemptId);
+    retainedProgress.add(index);
+  }
+
+  let progressToDrop = Math.max(
+    0,
+    retainedProgress.size - MAX_RETAINED_PROGRESS_EVENTS,
+  );
+  state.lifecycle = state.lifecycle
+    .filter((event, index) => {
+      if (event.event_kind !== 'attempt_progress') return true;
+      if (!retainedProgress.has(index)) return false;
+      if (progressToDrop > 0) {
+        progressToDrop -= 1;
+        return false;
+      }
+      return true;
+    })
+    .map((event, sequence) =>
+      event.sequence === sequence ? event : { ...event, sequence },
+    ) as LifecycleEvent[];
+  state.lifecycle_sequence = state.lifecycle.length;
+}
+
 function appendLifecycle(state: CoordinatorState, event: LifecycleEvent): void {
-  state.lifecycle.push(event);
+  if (
+    event.event_kind === 'attempt_progress' ||
+    state.lifecycle.length >= MAX_LIFECYCLE_EVENTS
+  ) {
+    compactProgressLifecycle(
+      state,
+      event.event_kind === 'attempt_progress' ? event.attempt_id : undefined,
+    );
+  }
+  if (state.lifecycle.length >= MAX_LIFECYCLE_EVENTS) {
+    throw new Error('Lifecycle trace exhausted its semantic event capacity.');
+  }
+  state.lifecycle.push({
+    ...event,
+    sequence: state.lifecycle_sequence,
+  } as LifecycleEvent);
   state.lifecycle_sequence += 1;
 }
 
@@ -557,11 +618,14 @@ export function createCoordinatorState(
   prepared: PreparedResearchExecution,
   dependencies: CoordinatorDependencies,
 ): CoordinatorState {
-  const createdAtMs = dependencies.clock.now();
+  const requestedAtMs = Date.parse(prepared.request.requested_at);
+  const requestDeadlineAtMs =
+    requestedAtMs + prepared.policy.limits.request_deadline_ms;
+  // The coordinator chronology begins at request ingress. Preparation may be
+  // delayed, but it cannot extend or move the persisted request window.
+  const createdAtMs = requestedAtMs;
   const createdAt = iso(createdAtMs);
-  const requestDeadlineAt = iso(
-    createdAtMs + prepared.policy.limits.request_deadline_ms,
-  );
+  const requestDeadlineAt = iso(requestDeadlineAtMs);
   const state: CoordinatorState = {
     request_id: prepared.request.request_id,
     mode: prepared.request.mode,
@@ -1194,19 +1258,36 @@ export function recordAttemptFinished(
   input: unknown,
   dependencies: CoordinatorDependencies,
 ): CoordinatorState {
+  const finished = AttemptFinishedInputSchema.parse(input);
   const deadlineState = advanceDeadlines(state, dependencies);
-  if (deadlineState.status !== 'running') return deadlineState;
   const attempt = attemptFor(deadlineState, attemptId);
+  if (attempt.status === 'acceptance_unknown') return deadlineState;
   if (
-    TERMINAL_ATTEMPT_STATUSES.has(attempt.status) ||
-    attempt.status === 'acceptance_unknown'
+    deadlineState.status !== 'running' ||
+    TERMINAL_ATTEMPT_STATUSES.has(attempt.status)
   ) {
-    return deadlineState;
+    // A deadline/cancellation wins the outcome, not the bill. Fill unknown
+    // accounting only: repeated or stale deliveries cannot double-charge or
+    // replace an already-recorded actual, nor change terminal custody.
+    if (
+      finished.actual_cost_microusd === undefined ||
+      attempt.actual_cost_microusd !== undefined
+    ) {
+      return deadlineState;
+    }
+    const next = cloneState(deadlineState);
+    attemptFor(next, attemptId).actual_cost_microusd =
+      finished.actual_cost_microusd;
+    next.budget.actual_cost_microusd = exactAdd(
+      next.budget.actual_cost_microusd,
+      finished.actual_cost_microusd,
+    );
+    return next;
   }
   return finishAttemptUnchecked(
     deadlineState,
     attemptId,
-    AttemptFinishedInputSchema.parse(input),
+    finished,
     dependencies,
   );
 }
