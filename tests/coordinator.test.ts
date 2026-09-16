@@ -767,7 +767,7 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     );
     const attemptId = state.attempts[0]!.attempt_id;
     const receipt = { outcome: 'failed', error: providerFailure(true) };
-    for (const cost of ['-1', '01', '1.5', '9'.repeat(65), 20000, null])
+    for (const cost of ['-1', '01', '1.5', '9'.repeat(316), 20000, null])
       expect(() =>
         recordAttemptFinished(
           state,
@@ -1425,7 +1425,7 @@ describe('durable handles and terminal mapping', () => {
         {
           outcome: 'failed',
           error: providerFailure(true),
-          actual_cost_microusd: '9'.repeat(65),
+          actual_cost_microusd: '9'.repeat(316),
         },
         deps,
       ),

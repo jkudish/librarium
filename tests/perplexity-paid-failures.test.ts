@@ -31,6 +31,101 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true });
 });
 
+it.each([
+  {
+    label: 'largest persisted 64-digit receipt',
+    costUsd: 1e57,
+    expectedMicrousd: `1${'0'.repeat(63)}`,
+    expectedUsd: `1${'0'.repeat(57)}`,
+  },
+  {
+    label: 'largest finite provider-reported number',
+    costUsd: Number.MAX_VALUE,
+    expectedMicrousd: `17976931348623157${'0'.repeat(298)}`,
+    expectedUsd: `17976931348623157${'0'.repeat(292)}`,
+  },
+])(
+  'preserves successful evidence and exact wallet billing at the $label boundary',
+  async ({ costUsd, expectedMicrousd, expectedUsd }) => {
+    const profile = canonicalFixtureProfile('reported-cost-boundary');
+    const plan = canonicalFixturePrepared([profile], {
+      requestedAtMs: Date.now(),
+    });
+    const profileKey = profileIdentityKey(profile.identity);
+    const providerId = 'adapter-reported-cost-boundary';
+    const provider: Provider = {
+      id: providerId,
+      displayName: 'Reported cost boundary',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: vi.fn(async () => ({
+        ...canonicalFixtureResult(providerId),
+        usage: { costUsd },
+      })),
+    };
+    const root = mkdtempSync(join(tmpdir(), 'librarium-cost-boundary-'));
+    roots.push(root);
+    const runDirectory = join(root, 'run');
+    mkdirSync(runDirectory);
+    const wallet = new RunPaidWallet({
+      request_id: plan.request.request_id,
+      request_fingerprint: fingerprint(plan.request),
+      config_fingerprint: fingerprint('config'),
+      created_at: plan.request.requested_at,
+      deadline_at: new Date(
+        Date.parse(plan.request.requested_at) + 60_000,
+      ).toISOString(),
+      stages: (
+        ['refinement', 'research', 'synthesis', 'verification'] as const
+      ).map((stage) => ({
+        stage,
+        requested: stage === 'research',
+        fallback_authorized: false,
+        prompt_version: 'v1',
+        providers:
+          stage === 'research'
+            ? [{ provider: providerId, profile: profileKey }]
+            : [],
+      })),
+      on_change: (ledger) => writePaidRunLedger(root, runDirectory, ledger),
+      load_latest: () => readPaidRunLedger(root, runDirectory),
+      with_mutation_lock: (action) =>
+        withPaidRunLedgerLock(root, runDirectory, action),
+    });
+
+    const result = await runCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: createNodeCoordinatorDependencies(),
+      attempt_bridge: createRegisteredProviderAttemptBridge(
+        plan,
+        () => provider,
+      ),
+      paid_wallet: wallet,
+    });
+
+    expect(result.response).toMatchObject({
+      status: 'succeeded',
+      usage: { actual_cost: expectedUsd, currency: 'USD' },
+      results: [
+        expect.objectContaining({
+          content: expect.stringContaining('Evidence.'),
+          usage: { actual_cost: expectedUsd, currency: 'USD' },
+        }),
+      ],
+    });
+    expect(result.manifest.coordination_state.attempts[0]).toMatchObject({
+      status: 'succeeded',
+      actual_cost_microusd: expectedMicrousd,
+    });
+    expect(readPaidRunLedger(root, runDirectory)?.attempts[0]).toMatchObject({
+      status: 'succeeded',
+      reported: { state: 'known', cost_microusd: expectedMicrousd },
+    });
+  },
+);
+
 describe.each([true, false])(
   'Perplexity terminal billing with wallet=%s',
   (withWallet) => {

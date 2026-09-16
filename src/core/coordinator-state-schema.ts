@@ -7,12 +7,26 @@ import {
   StructuredErrorSchema,
 } from '../contracts/domain/index.js';
 import { LifecycleTraceSchema } from '../contracts/interchange/lifecycle.js';
+import {
+  MAX_AGGREGATE_COST_MICROUSD_DIGITS,
+  MAX_REPORTED_COST_MICROUSD_DIGITS,
+} from './budget.js';
 import type { CoordinatorState } from './coordinator.js';
 import { profileIdentityKey } from './execution-plan.js';
 
 const NonNegativeDecimalIntegerSchema = z
   .string()
   .max(128)
+  .regex(/^(?:0|[1-9]\d*)$/, 'Expected a non-negative decimal integer');
+
+const ReportedCostMicrousdSchema = z
+  .string()
+  .max(MAX_REPORTED_COST_MICROUSD_DIGITS)
+  .regex(/^(?:0|[1-9]\d*)$/, 'Expected a non-negative decimal integer');
+
+const AggregateCostMicrousdSchema = z
+  .string()
+  .max(MAX_AGGREGATE_COST_MICROUSD_DIGITS)
   .regex(/^(?:0|[1-9]\d*)$/, 'Expected a non-negative decimal integer');
 
 const AdapterBindingIdentitySchema = z.strictObject({
@@ -104,7 +118,7 @@ const CoordinatorAttemptStateSchema = z.strictObject({
   result_id: OpaqueIdSchema.optional(),
   error: StructuredErrorSchema.optional(),
   reserved_estimated_cost_microusd: NonNegativeDecimalIntegerSchema,
-  actual_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
+  actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
 });
 
 const CoordinatorReserveCandidateSchema = z.strictObject({
@@ -180,7 +194,7 @@ export const CoordinatorStateSchema = z
       max_estimated_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
       max_actual_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
       reserved_estimated_cost_microusd: NonNegativeDecimalIntegerSchema,
-      actual_cost_microusd: NonNegativeDecimalIntegerSchema,
+      actual_cost_microusd: AggregateCostMicrousdSchema,
     }),
     cancellation: z
       .strictObject({

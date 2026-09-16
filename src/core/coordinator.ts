@@ -9,6 +9,7 @@ import {
 } from '../contracts/domain/index.js';
 import type { LifecycleEvent } from '../contracts/interchange/internal.js';
 import { INTERCHANGE_VERSION } from '../contracts/interchange/internal.js';
+import { MAX_REPORTED_COST_MICROUSD_DIGITS } from './budget.js';
 import {
   assertCompareAndSwapAttemptBudget,
   type CoordinationStateStore,
@@ -19,10 +20,7 @@ import {
   type PreparedResearchExecution,
   profileIdentityKey,
 } from './execution-plan.js';
-import {
-  ExactMicrousdSchema,
-  RESEARCH_REQUEST_LIMITS,
-} from './research-request.js';
+import { RESEARCH_REQUEST_LIMITS } from './research-request.js';
 
 export type CoordinatorTerminalOutcome =
   | 'succeeded'
@@ -194,24 +192,29 @@ export interface CoordinatorAdvanceResult {
   readonly launches: readonly AttemptLaunch[];
 }
 
+const ReportedCostMicrousdSchema = z
+  .string()
+  .max(MAX_REPORTED_COST_MICROUSD_DIGITS)
+  .regex(/^(?:0|[1-9]\d*)$/, 'Expected an exact non-negative integer string');
+
 const AttemptFinishedInputSchema = z.discriminatedUnion('outcome', [
   z.strictObject({
     outcome: z.literal('succeeded'),
     result_id: OpaqueIdSchema,
     durable_handle: DurableHandleSchema.optional(),
-    actual_cost_microusd: ExactMicrousdSchema.optional(),
+    actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
   }),
   z.strictObject({
     outcome: z.enum(['failed', 'timed_out']),
     error: StructuredErrorSchema,
     durable_handle: DurableHandleSchema.optional(),
-    actual_cost_microusd: ExactMicrousdSchema.optional(),
+    actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
   }),
   z.strictObject({
     outcome: z.literal('cancelled'),
     error: StructuredErrorSchema.optional(),
     durable_handle: DurableHandleSchema.optional(),
-    actual_cost_microusd: ExactMicrousdSchema.optional(),
+    actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
   }),
 ]);
 

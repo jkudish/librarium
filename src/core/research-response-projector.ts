@@ -18,6 +18,7 @@ import {
   ResearchResultSchema,
   UsageSchema,
 } from '../contracts/interchange/research-result.js';
+import { decimalUsdFromNumber } from './budget.js';
 import type {
   AttemptLaunch,
   CoordinatorAttemptState,
@@ -207,18 +208,6 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function decimalFromNumber(value: number): string {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error('Usage costs must be finite non-negative numbers.');
-  }
-  if (Number.isInteger(value)) return String(value);
-  const fixed = value.toFixed(18).replace(/0+$/, '').replace(/\.$/, '');
-  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(fixed)) {
-    throw new Error('Usage cost cannot be represented as an exact decimal.');
-  }
-  return fixed;
-}
-
 function legacyUsage(
   result: z.infer<typeof LegacyProviderResultSchema>,
 ): CanonicalProviderOutput['usage'] {
@@ -242,10 +231,10 @@ function legacyUsage(
       reasoning_tokens: result.usage.reasoningTokens,
     }),
     ...(actualCost !== undefined && {
-      actual_cost: decimalFromNumber(actualCost),
+      actual_cost: decimalUsdFromNumber(actualCost),
     }),
     ...(estimatedCost !== undefined && {
-      estimated_cost: decimalFromNumber(estimatedCost),
+      estimated_cost: decimalUsdFromNumber(estimatedCost),
     }),
     ...((actualCost !== undefined || estimatedCost !== undefined) && {
       currency: 'USD',
