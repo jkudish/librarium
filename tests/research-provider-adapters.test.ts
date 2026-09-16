@@ -261,20 +261,27 @@ describe('durable research provider adapters', () => {
   });
 
   it('preserves a valid Exa remote id from a malformed create response', async () => {
-    const provider = new ExaResearchProvider({
-      credentials: { env: { EXA_API_KEY: 'test-key' } },
-      httpClient: async () =>
+    const httpClient = vi
+      .fn()
+      .mockResolvedValueOnce(
         response({
           id: 'agent_run_preserved',
           status: 'mystery',
-        }) as never,
+        }),
+      )
+      .mockResolvedValueOnce(response(exaRun({ status: 'completed' })));
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: httpClient as HttpClient,
     });
-    await expect(
-      provider.submit('query', { timeout: 10 }),
-    ).resolves.toMatchObject({
+    const handle = await provider.submit('query', { timeout: 10 });
+    expect(handle).toMatchObject({
       taskId: 'agent_run_preserved',
-      status: 'failed',
+      status: 'pending',
       providerStatus: 'invalid_response',
+    });
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
     });
   });
 
@@ -282,6 +289,7 @@ describe('durable research provider adapters', () => {
     ['authentication', 401, 'authentication'],
     ['forbidden', 403, 'authentication'],
     ['invalid request', 422, 'invalid_request'],
+    ['request timeout', 408, 'timeout'],
     ['rate limit', 429, 'rate_limit'],
     ['server error', 503, 'provider'],
   ] as const)(
@@ -333,6 +341,76 @@ describe('durable research provider adapters', () => {
     ).rejects.toMatchObject({
       name: 'UnsafeToRetrySubmissionError',
       failureDiagnostic: { kind: 'timeout' },
+    });
+  });
+
+  it('classifies an Exa create network failure as maybe-accepted without retrying', async () => {
+    const httpClient = vi.fn(async () => {
+      throw new TypeError('fetch failed with Bearer raw-provider-secret');
+    });
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: httpClient as HttpClient,
+    });
+    const submission = provider.submit('query', { timeout: 10 });
+    await expect(submission).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    await expect(submission).rejects.not.toThrow(/secret|token|Bearer/i);
+    expect(httpClient).toHaveBeenCalledOnce();
+  });
+
+  it.each([401, 403, 404])(
+    'keeps accepted Exa custody after HTTP %s and observes eventual completion',
+    async (status) => {
+      const httpClient = vi
+        .fn()
+        .mockResolvedValueOnce(response({ error: 'unavailable' }, status))
+        .mockResolvedValueOnce(response(exaRun({ status: 'completed' })));
+      const provider = new ExaResearchProvider({
+        credentials: { env: { EXA_API_KEY: 'test-key' } },
+        httpClient: httpClient as HttpClient,
+      });
+      const handle = {
+        provider: provider.id,
+        taskId: 'agent_run_accepted',
+        query: 'q',
+        submittedAt: 0,
+        status: 'running' as const,
+      };
+
+      await expect(provider.poll(handle)).rejects.toThrow(
+        `Poll returned HTTP ${status}`,
+      );
+      await expect(provider.poll(handle)).resolves.toMatchObject({
+        status: 'completed',
+      });
+    },
+  );
+
+  it('keeps accepted Exa custody after malformed status evidence', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValueOnce(response({ id: 'agent_run_accepted' }))
+      .mockResolvedValueOnce(response(exaRun({ status: 'completed' })));
+    const provider = new ExaResearchProvider({
+      credentials: { env: { EXA_API_KEY: 'test-key' } },
+      httpClient: httpClient as HttpClient,
+    });
+    const handle = {
+      provider: provider.id,
+      taskId: 'agent_run_accepted',
+      query: 'q',
+      submittedAt: 0,
+      status: 'running' as const,
+    };
+
+    await expect(provider.poll(handle)).rejects.toThrow(
+      'Exa Agent returned a malformed status response',
+    );
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
     });
   });
 
@@ -417,17 +495,142 @@ describe('durable research provider adapters', () => {
   });
 
   it('preserves a valid You.com remote id from a malformed create response', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({ task_id: YOU_ID, status: 'mystery' }, 202),
+      )
+      .mockResolvedValueOnce(response(youTask({ status: 'completed' })));
     const provider = new YouResearchBackgroundProvider({
       credentials: { env: { YOU_COM_API_KEY: 'test-key' } },
-      httpClient: async () =>
-        response({ task_id: YOU_ID, status: 'mystery' }, 202) as never,
+      httpClient: httpClient as HttpClient,
+    });
+    const handle = await provider.submit('query', { timeout: 10 });
+    expect(handle).toMatchObject({
+      taskId: YOU_ID,
+      status: 'pending',
+      providerStatus: 'invalid_response',
+    });
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
+    });
+  });
+
+  it.each([
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'keeps You.com HTTP %s submission diagnostics bounded without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'raw-provider-secret';
+      const httpClient = vi.fn(async () =>
+        response(
+          { error: { message: `Bearer ${secret}`, api_key: secret } },
+          status,
+        ),
+      );
+      const provider = new YouResearchBackgroundProvider({
+        credentials: { env: { YOU_COM_API_KEY: 'test-key' } },
+        httpClient: httpClient as HttpClient,
+      });
+
+      const submission = provider.submit('query', { timeout: 10 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'You.com submission failed before a valid research handle was returned.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(httpClient).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps You.com network and malformed accepted submissions ambiguous', async () => {
+    const networkClient = vi.fn(async () => {
+      throw new TypeError('fetch failed with Bearer raw-provider-secret');
+    });
+    const provider = new YouResearchBackgroundProvider({
+      credentials: { env: { YOU_COM_API_KEY: 'test-key' } },
+      httpClient: networkClient as HttpClient,
     });
     await expect(
       provider.submit('query', { timeout: 10 }),
-    ).resolves.toMatchObject({
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(networkClient).toHaveBeenCalledOnce();
+
+    const malformedClient = vi.fn(async () =>
+      response({ status: 'queued' }, 202),
+    );
+    provider.configure({
+      credentials: { env: { YOU_COM_API_KEY: 'test-key' } },
+      httpClient: malformedClient as HttpClient,
+    });
+    const malformed = provider.submit('query', { timeout: 10 });
+    await expect(malformed).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(malformed).rejects.not.toHaveProperty(
+      'failureDiagnostic.httpStatus',
+    );
+  });
+
+  it.each([401, 403, 404])(
+    'keeps accepted You.com custody after HTTP %s and observes eventual completion',
+    async (status) => {
+      const httpClient = vi
+        .fn()
+        .mockResolvedValueOnce(response({ error: 'unavailable' }, status))
+        .mockResolvedValueOnce(response(youTask({ status: 'completed' })));
+      const provider = new YouResearchBackgroundProvider({
+        credentials: { env: { YOU_COM_API_KEY: 'test-key' } },
+        httpClient: httpClient as HttpClient,
+      });
+      const handle = {
+        provider: provider.id,
+        taskId: YOU_ID,
+        query: 'q',
+        submittedAt: 0,
+        status: 'running' as const,
+      };
+
+      await expect(provider.poll(handle)).rejects.toThrow(
+        `Poll returned HTTP ${status}`,
+      );
+      await expect(provider.poll(handle)).resolves.toMatchObject({
+        status: 'completed',
+      });
+    },
+  );
+
+  it('keeps accepted You.com custody after malformed status evidence', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValueOnce(response({ id: YOU_ID }))
+      .mockResolvedValueOnce(response(youTask({ status: 'completed' })));
+    const provider = new YouResearchBackgroundProvider({
+      credentials: { env: { YOU_COM_API_KEY: 'test-key' } },
+      httpClient: httpClient as HttpClient,
+    });
+    const handle = {
+      provider: provider.id,
       taskId: YOU_ID,
-      status: 'failed',
-      providerStatus: 'invalid_response',
+      query: 'q',
+      submittedAt: 0,
+      status: 'running' as const,
+    };
+
+    await expect(provider.poll(handle)).rejects.toThrow(
+      'You.com returned a malformed status response',
+    );
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
     });
   });
 

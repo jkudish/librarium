@@ -1,4 +1,9 @@
-import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import { OpaqueIdSchema } from '../contracts/common.js';
+import {
+  diagnosticForSubmissionError,
+  diagnosticForSubmissionHttpStatus,
+  UnsafeToRetrySubmissionError,
+} from '../core/errors.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -69,6 +74,8 @@ interface ValyuCancelResponse {
 }
 
 const TASKS_URL = 'https://api.valyu.ai/v1/deepresearch/tasks';
+const SUBMISSION_FAILED =
+  'Valyu submission failed before a valid research task handle was returned.';
 const STATUS_MAP: Record<string, AsyncTaskHandle['status']> = {
   queued: 'pending',
   running: 'running',
@@ -199,6 +206,7 @@ export class ValyuResearchProvider extends BackgroundBaseProvider {
     if (query.length > 25_000) {
       throw new UnsafeToRetrySubmissionError(
         'Valyu research queries cannot exceed 25000 characters.',
+        { kind: 'invalid_request' },
       );
     }
     let response;
@@ -212,44 +220,70 @@ export class ValyuResearchProvider extends BackgroundBaseProvider {
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
       );
     }
     if (response.status !== 202) {
       throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     }
-    const data = response.data;
-    if (!data.deepresearch_id || !data.status) {
+    const data = response.data as {
+      created_at?: unknown;
+      deepresearch_id?: unknown;
+      message?: unknown;
+      status?: unknown;
+    } | null;
+    const id = OpaqueIdSchema.safeParse(data?.deepresearch_id);
+    if (!id.success) {
       throw new UnsafeToRetrySubmissionError(
-        'Valyu returned an invalid research task handle.',
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     }
-    const heldBackHitl = HELD_BACK_HITL_STATUSES.has(data.status);
-    const status = heldBackHitl ? 'failed' : STATUS_MAP[data.status];
-    if (!status) {
-      throw new UnsafeToRetrySubmissionError(
-        'Valyu returned an invalid research task handle.',
-      );
+    const rawStatus =
+      typeof data?.status === 'string' && data.status.trim()
+        ? data.status
+        : undefined;
+    if (
+      !rawStatus ||
+      (!STATUS_MAP[rawStatus] && !HELD_BACK_HITL_STATUSES.has(rawStatus))
+    ) {
+      return {
+        provider: this.id,
+        taskId: id.data,
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+        providerStatus: 'invalid_response',
+        lastPollError: 'Valyu returned a malformed research task response.',
+      };
     }
-    const submittedAt = data.created_at
-      ? Date.parse(data.created_at)
-      : Number.NaN;
+    const heldBackHitl = HELD_BACK_HITL_STATUSES.has(rawStatus);
+    const status = heldBackHitl ? 'failed' : STATUS_MAP[rawStatus];
+    const createdAt =
+      typeof data?.created_at === 'string' ? data.created_at : undefined;
+    const submittedAt = createdAt ? Date.parse(createdAt) : Number.NaN;
+    const message =
+      typeof data?.message === 'string' && data.message.trim()
+        ? data.message
+        : undefined;
     return {
       provider: this.id,
-      taskId: data.deepresearch_id,
+      taskId: id.data,
       query,
       submittedAt: Number.isFinite(submittedAt) ? submittedAt : Date.now(),
       status,
-      providerStatus: data.status,
+      providerStatus: rawStatus,
       ...(heldBackHitl
         ? {
             lastPollError:
               'Valyu requested unsupported human-in-the-loop interaction.',
           }
-        : data.message
-          ? { lastPollError: data.message }
+        : message
+          ? { lastPollError: message }
           : {}),
     };
   }

@@ -11,7 +11,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { registerConfigCommand } from '../src/commands/config.js';
+import {
+  configCommandInternals,
+  registerConfigCommand,
+} from '../src/commands/config.js';
 
 function v1(overrides: Record<string, unknown> = {}) {
   return {
@@ -121,6 +124,43 @@ describe('config migrate command', () => {
     });
     expect(readFileSync(globalPath, 'utf8')).toBe(global);
     expect(readFileSync(projectPath, 'utf8')).toBe(project);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('prints a sanitized receipt instead of secret-bearing config after writing', async () => {
+    const secret = 'literal-secret-that-must-not-be-echoed';
+    const globalPath = join(directory, 'secret-v1.json');
+    const outputPath = join(directory, 'secret-v2.json');
+    writeFileSync(
+      globalPath,
+      JSON.stringify(
+        v1({
+          providers: {
+            exa: { enabled: true, apiKey: secret },
+          },
+        }),
+      ),
+    );
+
+    await program().parseAsync([
+      'node',
+      'librarium',
+      'config',
+      'migrate',
+      '--from',
+      globalPath,
+      '--output',
+      outputPath,
+    ]);
+
+    expect(JSON.parse(stdout)).toEqual({
+      written: true,
+      outputPath,
+      version: 2,
+    });
+    expect(stdout).not.toContain(secret);
+    expect(stdout).not.toContain('providers');
+    expect(readFileSync(outputPath, 'utf8')).toContain(secret);
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -376,5 +416,49 @@ describe('config migrate command', () => {
     expect(existsSync(outputPath)).toBe(false);
     expect(existsSync(dirname(outputPath))).toBe(false);
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe('config menu limit validation', () => {
+  const { limitBounds, validateBoundedIntegerInput } = configCommandInternals;
+
+  it('uses canonical field-specific maxima', () => {
+    expect(limitBounds).toEqual({
+      maxParallel: { min: 1, max: 64 },
+      timeout: { min: 1, max: 604_800 },
+      asyncTimeout: { min: 1, max: 604_800 },
+      asyncPollInterval: { min: 1, max: 300 },
+    });
+  });
+
+  it.each(Object.entries(limitBounds))(
+    'rejects out-of-bounds %s menu values',
+    (_field, bounds) => {
+      expect(
+        validateBoundedIntegerInput(String(bounds.min), bounds.min, bounds),
+      ).toBeUndefined();
+      expect(
+        validateBoundedIntegerInput(String(bounds.max), bounds.min, bounds),
+      ).toBeUndefined();
+      expect(
+        validateBoundedIntegerInput(String(bounds.min - 1), bounds.min, bounds),
+      ).toContain(`${bounds.min}`);
+      expect(
+        validateBoundedIntegerInput(String(bounds.max + 1), bounds.min, bounds),
+      ).toContain(`${bounds.max}`);
+      expect(validateBoundedIntegerInput('1.5', bounds.min, bounds)).toContain(
+        `${bounds.max}`,
+      );
+    },
+  );
+
+  it('does not accept a blank prompt when the existing value is invalid', () => {
+    expect(
+      validateBoundedIntegerInput(
+        '',
+        limitBounds.maxParallel.max + 1,
+        limitBounds.maxParallel,
+      ),
+    ).toContain('64');
   });
 });

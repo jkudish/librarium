@@ -82,6 +82,8 @@ import {
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
 import { loadRunTasks } from '../src/core/run-manifest.js';
 import {
+  beginCanonicalRefinement,
+  materializeCanonicalPreparedExecution,
   RunJsonCoordinationStateStore,
   readCanonicalRunManifest,
   runCanonicalPreparedExecution,
@@ -206,6 +208,24 @@ async function seedCanonicalRun(
   return { runDir, plan, now };
 }
 
+async function seedPendingCanonicalRefinement(run: string): Promise<string> {
+  const now = Date.now();
+  const runDir = join(state.outputDir, run);
+  mkdirSync(runDir, { recursive: true });
+  const plan = canonicalPlan('sync', run, now);
+  await materializeCanonicalPreparedExecution(plan, {
+    runs_root: state.outputDir,
+    run_directory: runDir,
+    coordinator: canonicalFixtureCoordinator(now),
+    refinement_requested: true,
+  });
+  beginCanonicalRefinement({
+    runs_root: state.outputDir,
+    run_directory: runDir,
+  });
+  return runDir;
+}
+
 describe('status command', () => {
   const dirs: string[] = [];
 
@@ -268,6 +288,40 @@ describe('status command', () => {
     expect(payload.tasks).toEqual([
       expect.objectContaining({ taskId: 'task-1', status: 'completed' }),
     ]);
+  });
+
+  it('explains an in-progress canonical refinement without replaying it', async () => {
+    const runDir = await seedPendingCanonicalRefinement('refining-v3');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    const payload = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect(payload.canonicalRuns).toEqual([
+      expect.objectContaining({
+        runDir: realpathSync(runDir),
+        state: 'pending',
+        refinementStatus: 'in_progress',
+      }),
+    ]);
+
+    await program().parseAsync(['node', 'test', 'status']);
+
+    const output = stdout.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('Status: pending | Refinement: in_progress');
+    expect(output).toContain(
+      'run may still be active or may have been interrupted; no automatic replay',
+    );
+    expect(
+      readCanonicalRunManifest(state.outputDir, runDir).coordination_state
+        .attempts,
+    ).toEqual([]);
+    expect(state.submit).not.toHaveBeenCalled();
+    expect(state.poll).not.toHaveBeenCalled();
+    expect(state.retrieve).not.toHaveBeenCalled();
   });
 
   it('--retrieve writes the result and removes the completed task', async () => {

@@ -1,4 +1,9 @@
-import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import { OpaqueIdSchema } from '../contracts/common.js';
+import {
+  diagnosticForSubmissionError,
+  diagnosticForSubmissionHttpStatus,
+  UnsafeToRetrySubmissionError,
+} from '../core/errors.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -66,6 +71,8 @@ interface GeminiDeepProviderOptions {
 
 const INTERACTIONS_URL =
   'https://generativelanguage.googleapis.com/v1beta/interactions';
+const SUBMISSION_FAILED =
+  'Gemini submission failed before a valid interaction handle was returned.';
 
 /**
  * API revision pin for the Interactions endpoint family. Sent on every request
@@ -203,7 +210,15 @@ export class GeminiDeepProvider extends BackgroundBaseProvider {
     query: string,
     options: ProviderOptions,
   ): Promise<AsyncTaskHandle> {
-    const apiKey = this.getApiKey();
+    let apiKey: string;
+    try {
+      apiKey = this.getApiKey();
+    } catch (error) {
+      throw new UnsafeToRetrySubmissionError(
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
+      );
+    }
 
     let response;
     try {
@@ -229,28 +244,55 @@ export class GeminiDeepProvider extends BackgroundBaseProvider {
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
       );
     }
 
     if (response.status !== 200 && response.status !== 201) {
       throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     }
 
-    const data = response.data;
+    const data = response.data as {
+      id?: unknown;
+      status?: unknown;
+    } | null;
+    const id = OpaqueIdSchema.safeParse(data?.id);
+    if (!id.success) {
+      throw new UnsafeToRetrySubmissionError(
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
+      );
+    }
+    const rawStatus =
+      typeof data?.status === 'string' && data.status.trim()
+        ? data.status
+        : undefined;
+    if (!rawStatus) {
+      return {
+        provider: this.id,
+        taskId: id.data,
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+        providerStatus: 'invalid_response',
+        lastPollError: 'Gemini returned a malformed interaction response',
+      };
+    }
     return {
       provider: this.id,
-      taskId: data.id,
+      taskId: id.data,
       query,
       submittedAt: Date.now(),
-      status: STATUS_MAP[data.status] ?? 'pending',
-      providerStatus: data.status,
-      ...(STATUS_MAP[data.status]
+      status: STATUS_MAP[rawStatus] ?? 'pending',
+      providerStatus: rawStatus,
+      ...(STATUS_MAP[rawStatus]
         ? {}
         : {
-            lastPollError: `Unknown Gemini interaction status: ${data.status}`,
+            lastPollError: `Unknown Gemini interaction status: ${rawStatus}`,
           }),
     };
   }
@@ -268,25 +310,19 @@ export class GeminiDeepProvider extends BackgroundBaseProvider {
     );
 
     if (response.status !== 200) {
-      // Retryable transport failures (timeouts, rate limits, 5xx, gateway
-      // blips): the interaction may still be running server-side. Throw so
-      // the caller retries on the next poll.
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      ) {
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      }
-      // Non-retryable client errors (400/401/403/404...): retrying forever
-      // cannot help; surface a terminal failure with the status.
-      return {
-        status: 'failed',
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
 
     const data = response.data;
+    if (
+      typeof data?.id !== 'string' ||
+      data.id !== handle.taskId ||
+      typeof data.status !== 'string'
+    ) {
+      throw new Error(
+        'Gemini returned a malformed interaction status response',
+      );
+    }
     const status = STATUS_MAP[data.status];
     if (!status) {
       return {
