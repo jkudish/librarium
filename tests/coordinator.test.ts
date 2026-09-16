@@ -802,6 +802,46 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     ).toEqual(free);
   });
 
+  it('admits a maximum receipt and persists the 256-receipt aggregate', () => {
+    const deps = dependencies();
+    const receipt = '9'.repeat(315);
+    const state = startAll(
+      preparedExecution({ primaries: [inlineProfile('inline')] }),
+      deps,
+    );
+    const attemptId = state.attempts[0]!.attempt_id;
+    const accepted = recordAttemptFinished(
+      state,
+      attemptId,
+      {
+        outcome: 'failed',
+        error: providerFailure(false),
+        actual_cost_microusd: receipt,
+      },
+      deps,
+    );
+    expect(accepted.attempts[0]?.actual_cost_microusd).toBe(receipt);
+
+    const aggregate = (BigInt(receipt) * 256n).toString();
+    expect(aggregate).toHaveLength(318);
+    const persisted = CoordinatorStateSchema.parse({
+      ...accepted,
+      slots: accepted.slots.map((slot) => ({
+        ...slot,
+        latest_attempt_id: 'attempt-boundary-255',
+      })),
+      attempts: Array.from({ length: 256 }, (_, index) => ({
+        ...accepted.attempts[0],
+        attempt_id: `attempt-boundary-${index}`,
+      })),
+      budget: {
+        ...accepted.budget,
+        actual_cost_microusd: aggregate,
+      },
+    });
+    expect(persisted.budget.actual_cost_microusd).toBe(aggregate);
+  });
+
   it('retains a timely target callback while advancing an overdue sibling', () => {
     const start = Date.parse('2026-08-08T12:00:00Z');
     const deps = dependencies(start);

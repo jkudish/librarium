@@ -3,7 +3,7 @@ import type { MeteringEstimate, ProviderUsage } from '../types.js';
 /** Every finite JavaScript number converted to microusd fits in this bound. */
 export const MAX_REPORTED_COST_MICROUSD_DIGITS = 315;
 /** A coordinator persists at most 256 reported attempt costs. */
-export const MAX_AGGREGATE_COST_MICROUSD_DIGITS = 317;
+export const MAX_AGGREGATE_COST_MICROUSD_DIGITS = 318;
 
 function expandedNonNegativeDecimal(value: number): string {
   const [coefficient, exponentText] = value.toString().toLowerCase().split('e');
