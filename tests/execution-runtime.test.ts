@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { OpenAIResearchProvider } from '../src/adapters/openai-research.js';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
 import {
   advanceCoordination,
@@ -19,6 +20,7 @@ import {
   type AttemptExecutionPort,
   runPreparedExecution,
 } from '../src/core/execution-runtime.js';
+import type { HttpClient } from '../src/core/http-client.js';
 import { createProviderAttemptBridge } from '../src/core/provider-attempt-bridge.js';
 import type { Provider, ProviderResult } from '../src/types.js';
 
@@ -507,6 +509,109 @@ describe('private prepared execution runtime', () => {
     expect(result.state.unresolved_acceptances).toEqual([]);
   });
 
+  it.each([
+    ['HTTP 401', 401, 'failed'],
+    ['HTTP 408', 408, 'acceptance_unknown'],
+    ['HTTP 503', 503, 'acceptance_unknown'],
+    ['network failure', undefined, 'acceptance_unknown'],
+    ['malformed HTTP 200 response', 200, 'acceptance_unknown'],
+    ['unlisted HTTP 418', 418, 'acceptance_unknown'],
+  ] as const)(
+    'classifies a real OpenAI %s submit through the canonical bridge without resubmission',
+    async (_label, responseStatus, expectedStatus) => {
+      const secret = 'raw-provider-secret';
+      const transport = vi.fn(async () => {
+        if (responseStatus === undefined) {
+          throw new TypeError(`fetch failed with Bearer ${secret}`);
+        }
+        return {
+          status: responseStatus,
+          statusText: 'Error',
+          headers: {},
+          durationMs: 1,
+          data: {
+            error: { message: `Bearer ${secret}`, api_key: secret },
+          },
+        };
+      });
+      const durable = new OpenAIResearchProvider({
+        apiKey: 'synthetic-openai-key',
+        httpClient: transport as HttpClient,
+      });
+      const durableProfile = profile('durable', 'background');
+      const execution = prepared([durableProfile], [profile('reserve')]);
+      const durableKey = profileIdentityKey(durableProfile.identity);
+      const durablePlan = execution.profile_plans_by_identity[durableKey];
+      if (!durablePlan) throw new Error('missing durable fixture plan');
+      const boundExecution: PreparedResearchExecution = {
+        ...execution,
+        profile_plans_by_identity: {
+          ...execution.profile_plans_by_identity,
+          [durableKey]: {
+            ...durablePlan,
+            binding: {
+              adapter_id: durable.id,
+              binding_id: 'binding-openai-research',
+            },
+          },
+        },
+      };
+      const fallbackExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const fallback: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: fallbackExecute,
+      };
+
+      const result = await runPreparedExecution(boundExecution, {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createProviderAttemptBridge({
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === durable.id
+              ? {
+                  binding: {
+                    adapter_id: durable.id,
+                    binding_id: 'binding-openai-research',
+                  },
+                  profile: durableProfile,
+                  catalog_digest: 'runtime-digest',
+                  provider: durable,
+                }
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', fallback)
+                : undefined,
+          now: () => start,
+        }),
+      });
+
+      expect(transport).toHaveBeenCalledOnce();
+      expect(fallbackExecute).not.toHaveBeenCalled();
+      expect(result.state.attempts).toHaveLength(1);
+      expect(result.state.attempts[0]?.status).toBe(expectedStatus);
+      expect(JSON.stringify(result.state)).not.toContain(secret);
+      if (responseStatus === 401) {
+        expect(result.state.attempts[0]?.error).toMatchObject({
+          code: 'provider_authentication_failed',
+          provider_code: 'http_401',
+          retryable: false,
+          fallback_allowed: false,
+        });
+        expect(result.state.unresolved_acceptances).toEqual([]);
+      } else {
+        expect(result.state.unresolved_acceptances).toHaveLength(1);
+        expect(result.state.unresolved_acceptances[0]).toMatchObject({
+          reason: 'submission_response_uncertain',
+        });
+      }
+    },
+  );
+
   it('rechecks concurrent orphan submissions after the request expires', async () => {
     const plan = prepared(
       [profile('durable-a', 'background'), profile('durable-b', 'background')],
@@ -906,6 +1011,79 @@ describe('private prepared execution runtime', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it.each([
+    ['HTTP 401', new Error('Poll returned HTTP 401')],
+    ['HTTP 403', new Error('Poll returned HTTP 403')],
+    ['HTTP 404', new Error('Poll returned HTTP 404')],
+    ['malformed schema', new Error('Malformed provider status response')],
+  ])(
+    'keeps accepted custody through a %s observation and eventually succeeds',
+    async (_label, observationError) => {
+      const poll = vi
+        .fn()
+        .mockRejectedValueOnce(observationError)
+        .mockResolvedValueOnce({ status: 'completed' as const });
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-durable',
+          taskId: 'eventual-success',
+          query: 'runtime query',
+          submittedAt: start,
+          status: 'pending' as const,
+        })),
+        poll,
+        retrieve: vi.fn(async () => successfulResult('adapter-durable')),
+      };
+      const fallbackExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const fallback: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: fallbackExecute,
+      };
+
+      const result = await runPreparedExecution(
+        prepared([profile('durable', 'background')], [profile('reserve')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: coordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-durable'
+                ? resolvedBinding('durable', durable)
+                : binding.adapter_id === 'adapter-reserve'
+                  ? resolvedBinding('reserve', fallback)
+                  : undefined,
+            now: () => start,
+            wait: async () => {},
+          }),
+        },
+      );
+
+      expect(poll).toHaveBeenCalledTimes(2);
+      expect(fallbackExecute).not.toHaveBeenCalled();
+      expect(result.state.status).toBe('succeeded');
+      expect(result.state.attempts).toHaveLength(1);
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'succeeded',
+        durable_handle: {
+          provider_task_id: 'eventual-success',
+          status: 'succeeded',
+        },
+      });
+    },
+  );
 
   it('returns an async accepted handle without polling or retrieving', async () => {
     const durable: Provider = {

@@ -19,6 +19,8 @@ import {
   recordAcceptanceRejected,
   recordAcceptanceUnknown,
   recordAttemptFinished,
+  recordAttemptProgress,
+  recordAttemptRunning,
   recordLaunchDispatched,
   recordSubmissionAccepted,
   recordTransientPollFailure,
@@ -26,6 +28,7 @@ import {
   setRefinedSlotQuery,
   startLaunchableAttempts,
 } from '../src/core/coordinator.js';
+import { CoordinatorStateSchema } from '../src/core/coordinator-state-schema.js';
 import {
   InMemoryCoordinationStateStore,
   updateCoordinationState,
@@ -551,6 +554,47 @@ describe('deterministic coordinator rounds', () => {
 });
 
 describe('acceptance, deadlines, cancellation, and budgets', () => {
+  it('keeps the request deadline anchored to ingress across delayed preparation', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const prepared = preparedExecution({
+      primaries: [inlineProfile('inline')],
+      requestDeadlineMs: 60_000,
+    });
+    const delayed = dependencies(start + 30_000);
+    const state = createCoordinatorState(prepared, delayed);
+
+    expect(state.created_at).toBe(new Date(start).toISOString());
+    expect(state.request_deadline_at).toBe(
+      new Date(start + 60_000).toISOString(),
+    );
+  });
+
+  it('terminalizes an already-expired request without dispatching work', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const prepared = preparedExecution({
+      primaries: [inlineProfile('inline')],
+      requestDeadlineMs: 60_000,
+    });
+    const delayed = dependencies(start + 90_000);
+    const created = createCoordinatorState(prepared, delayed);
+    const advanced = advanceCoordination(created, delayed);
+
+    expect(created.created_at).toBe(new Date(start).toISOString());
+    expect(created.request_deadline_at).toBe(
+      new Date(start + 60_000).toISOString(),
+    );
+    expect(advanced.launches).toEqual([]);
+    expect(advanced.state.attempts).toEqual([]);
+    expect(advanced.state.status).toBe('unsuccessful');
+    expect(advanced.state.lifecycle.map((event) => event.event_kind)).toEqual([
+      'request_started',
+      'request_completed',
+    ]);
+    expect(
+      LifecycleTraceSchema.safeParse(advanced.state.lifecycle).success,
+    ).toBe(true);
+  });
+
   it('assigns separate inline and background attempt deadlines', () => {
     const start = Date.parse('2026-08-08T12:00:00Z');
     const deps = dependencies(start);
@@ -980,6 +1024,74 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     });
     expect(state.lifecycle).toHaveLength(lifecycleLength);
     expect(state.status).toBe('running');
+  });
+
+  it('coalesces a saturated progress trace while retaining terminal events', () => {
+    const deps = dependencies();
+    const profile = durableProfile('durable');
+    let state = startAll(preparedExecution({ primaries: [profile] }), deps);
+    const attemptId = state.attempts[0]?.attempt_id ?? '';
+    state = recordSubmissionAccepted(
+      state,
+      attemptId,
+      handle(profile, 'pending'),
+      deps,
+    );
+    state = recordAttemptRunning(state, attemptId, deps);
+    state = recordAttemptProgress(state, attemptId, 1, 'first poll', deps);
+    const progress = state.lifecycle.at(-1);
+    if (progress?.event_kind !== 'attempt_progress') {
+      throw new Error('Expected a progress fixture event.');
+    }
+    while (state.lifecycle.length < 10_000) {
+      const sequence = state.lifecycle.length;
+      state.lifecycle.push({
+        ...progress,
+        event_id: `legacy-progress-${sequence}`,
+        sequence,
+        data: { progress_percent: sequence % 101 },
+      });
+    }
+    state.lifecycle_sequence = state.lifecycle.length;
+    expect(LifecycleTraceSchema.safeParse(state.lifecycle).success).toBe(true);
+    expect(CoordinatorStateSchema.safeParse(state).success).toBe(true);
+
+    state = recordAttemptProgress(state, attemptId, 75, 'latest poll', deps);
+    expect(state.lifecycle).toHaveLength(4);
+    expect(
+      state.lifecycle.filter(
+        (event) => event.event_kind === 'attempt_progress',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        data: { progress_percent: 75, message: 'latest poll' },
+      }),
+    ]);
+
+    state = recordAttemptFinished(
+      state,
+      attemptId,
+      {
+        outcome: 'failed',
+        error: providerFailure(false),
+        durable_handle: handle(profile, 'failed'),
+      },
+      deps,
+    );
+    state = finalizeCoordination(state, deps);
+    expect(state.lifecycle.map((event) => event.event_kind)).toEqual([
+      'request_started',
+      'attempt_started',
+      'durable_task_submitted',
+      'attempt_progress',
+      'attempt_finished',
+      'request_completed',
+    ]);
+    expect(state.lifecycle.map((event) => event.sequence)).toEqual([
+      0, 1, 2, 3, 4, 5,
+    ]);
+    expect(LifecycleTraceSchema.safeParse(state.lifecycle).success).toBe(true);
+    expect(CoordinatorStateSchema.safeParse(state).success).toBe(true);
   });
 
   it('uses a zero ceiling to suppress paid slots while permitting zero reservations', () => {

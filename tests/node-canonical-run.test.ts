@@ -28,9 +28,13 @@ import { readRunResults, resolveRunDir } from '../src/mcp/shaping.js';
 import { writeCanonicalPresentationArtifacts } from '../src/node-canonical-artifacts.js';
 import { projectCanonicalRunPresentation } from '../src/node-canonical-presentation.js';
 import {
+  beginCanonicalRefinement,
   CanonicalRunManifestV3Schema,
   cancelCanonicalRun,
+  completeCanonicalRefinement,
   createRegisteredProviderAttemptBridge,
+  failOrInterruptCanonicalRefinement,
+  materializeCanonicalPreparedExecution,
   RunJsonCoordinationStateStore,
   readCanonicalRunManifest,
   resumeCanonicalPreparedExecution,
@@ -226,6 +230,7 @@ function success(provider: string): ProviderResult {
 function exactBindings(
   profiles: readonly ExecutionProfile[],
   providers: Readonly<Record<string, Provider>>,
+  cancelPolicy?: 'supported_exact_profile' | 'reconcile_only',
 ) {
   return {
     resolveExactBinding(binding: { adapter_id: string; binding_id: string }) {
@@ -240,6 +245,7 @@ function exactBindings(
             profile: item,
             catalog_digest: 'catalog-digest',
             provider,
+            ...(cancelPolicy && { cancel_policy: cancelPolicy }),
           }
         : undefined;
     },
@@ -309,6 +315,222 @@ describe('canonical v3 run.json', () => {
     expect(results.filter((result) => !result.ok)).toHaveLength(1);
     expect(store.readManifest().revision).toBe(2);
     expect(readdirSync(runDirectory).sort()).toEqual(['run.json']);
+  });
+
+  it('gates concurrent resume until completed refinement queries are atomically saved', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('refined');
+    const plan = prepared([selected]);
+    const execute = vi.fn(async () => success('adapter-refined'));
+    const provider: Provider = {
+      id: 'adapter-refined',
+      displayName: 'Refined',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute,
+    };
+    const bridge = exactBindings([selected], { 'adapter-refined': provider });
+
+    const materialized = await materializeCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      refinement_requested: true,
+    });
+    expect(materialized.manifest.refinement).toEqual({
+      status: 'not_started',
+    });
+    expect(materialized.manifest.coordination_state.attempts).toEqual([]);
+
+    const inProgress = beginCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDirectory,
+    });
+    expect(inProgress.refinement).toEqual({ status: 'in_progress' });
+    const concurrentStatus = await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('status-'),
+      attempt_bridge: bridge,
+    });
+    expect(concurrentStatus.manifest.revision).toBe(inProgress.revision);
+    expect(concurrentStatus.manifest.coordination_state.status).toBe('running');
+    expect(concurrentStatus.manifest.coordination_state.attempts).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
+    expect(() =>
+      beginCanonicalRefinement({
+        runs_root: root,
+        run_directory: runDirectory,
+      }),
+    ).toThrow(/start only once/);
+
+    const completedRefinement = completeCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDirectory,
+      queries_by_slot: { 'slot-0': '  saved refined query  ' },
+    });
+    expect(completedRefinement).toMatchObject({
+      revision: inProgress.revision + 1,
+      refinement: {
+        status: 'completed',
+        queries_by_slot: { 'slot-0': 'saved refined query' },
+      },
+      coordination_state: {
+        slots: [{ refined_query: 'saved refined query' }],
+        attempts: [],
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+
+    const dispatched = await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('resume-'),
+      attempt_bridge: bridge,
+    });
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      'saved refined query',
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    expect(dispatched.response?.status).toBe('succeeded');
+  });
+
+  it('does not replay ambiguous refinement and expires the discoverable run without research', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('interrupted-refine');
+    const plan = prepared([selected]);
+    const execute = vi.fn(async () => success('adapter-interrupted-refine'));
+    const provider: Provider = {
+      id: 'adapter-interrupted-refine',
+      displayName: 'Interrupted refine',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute,
+    };
+    await materializeCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      refinement_requested: true,
+    });
+    beginCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDirectory,
+    });
+
+    const expired = await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: {
+        ...coordinator('expired-'),
+        clock: { now: () => START + 60_000 },
+      },
+      attempt_bridge: exactBindings([selected], {
+        'adapter-interrupted-refine': provider,
+      }),
+    });
+
+    expect(expired.manifest.refinement).toEqual({
+      status: 'failed_or_interrupted',
+    });
+    expect(expired.manifest.coordination_state.status).not.toBe('running');
+    expect(expired.manifest.coordination_state.attempts).toEqual([]);
+    expect(expired.response?.status).toBe('failed');
+    expect(execute).not.toHaveBeenCalled();
+    expect(readCanonicalRunManifest(root, runDirectory).refinement).toEqual({
+      status: 'failed_or_interrupted',
+    });
+  });
+
+  it('keeps research gated while cancelling an incomplete refinement', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('cancel-refine');
+    const plan = prepared([selected]);
+    const execute = vi.fn(async () => success('adapter-cancel-refine'));
+    await materializeCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      refinement_requested: true,
+    });
+    beginCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDirectory,
+    });
+
+    const cancellation = cancelCanonicalRun({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('cancel-refine-'),
+    });
+    await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('concurrent-status-'),
+      attempt_bridge: exactBindings([selected], {
+        'adapter-cancel-refine': {
+          id: 'adapter-cancel-refine',
+          displayName: 'Cancel refine',
+          tier: 'ai-grounded',
+          envVar: '',
+          execution: 'inline',
+          execute,
+        },
+      }),
+    });
+    const cancelled = await cancellation;
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(cancelled.refinement).toEqual({
+      status: 'failed_or_interrupted',
+    });
+    expect(cancelled.coordination_state.status).toBe('cancelled');
+    expect(cancelled.terminal_response?.status).toBe('failed');
+  });
+
+  it('dispatches the original query after a recorded refinement failure', async () => {
+    const { root, runDirectory } = directories();
+    const selected = profile('failed-refine');
+    const plan = prepared([selected]);
+    const execute = vi.fn(async () => success('adapter-failed-refine'));
+    const provider: Provider = {
+      id: 'adapter-failed-refine',
+      displayName: 'Failed refine',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute,
+    };
+    await materializeCanonicalPreparedExecution(plan, {
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator(),
+      refinement_requested: true,
+    });
+    beginCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDirectory,
+    });
+    failOrInterruptCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDirectory,
+    });
+
+    await resumeCanonicalPreparedExecution({
+      runs_root: root,
+      run_directory: runDirectory,
+      coordinator: coordinator('failed-refine-'),
+      attempt_bridge: exactBindings([selected], {
+        'adapter-failed-refine': provider,
+      }),
+    });
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      plan.request.query,
+      expect.objectContaining({ signal: expect.anything() }),
+    );
   });
 
   it('atomically stores a safe result and immutable terminal projection', async () => {
@@ -616,6 +838,21 @@ describe('canonical v3 run.json', () => {
       },
     ]);
     expect(presentation.sources[0]?.providers).toEqual(['adapter-fallback']);
+
+    const fallbackPending = structuredClone(result.manifest);
+    const failedPrimary = fallbackPending.coordination_state.attempts[0];
+    if (!failedPrimary) throw new Error('Expected failed primary attempt.');
+    fallbackPending.coordination_state.status = 'running';
+    fallbackPending.coordination_state.attempts = [failedPrimary];
+    fallbackPending.coordination_state.slots[0]!.status = 'fallback_pending';
+    fallbackPending.coordination_state.slots[0]!.latest_attempt_id =
+      failedPrimary.attempt_id;
+    delete fallbackPending.coordination_state.slots[0]!.result_id;
+    delete fallbackPending.terminal_response;
+    expect(
+      projectCanonicalRunPresentation(fallbackPending, runDirectory, 'fixture')
+        .reports,
+    ).toMatchObject([{ id: 'adapter-primary', status: 'async-pending' }]);
   });
 
   it('derives partial and failed terminal shapes from exact slot outcomes', async () => {
@@ -1327,17 +1564,21 @@ describe('canonical v3 run.json', () => {
       runs_root: root,
       run_directory: runDirectory,
       coordinator: coordinator(),
-      attempt_bridge: exactBindings([durableProfile], {
-        'adapter-durable': provider,
-      }),
+      attempt_bridge: exactBindings(
+        [durableProfile],
+        { 'adapter-durable': provider },
+        'supported_exact_profile',
+      ),
     });
     const cancelled = await cancelCanonicalRun({
       runs_root: root,
       run_directory: runDirectory,
       coordinator: coordinator('cancel-'),
-      attempt_bridge: exactBindings([durableProfile], {
-        'adapter-durable': provider,
-      }),
+      attempt_bridge: exactBindings(
+        [durableProfile],
+        { 'adapter-durable': provider },
+        'supported_exact_profile',
+      ),
     });
     expect(cancelled.coordination_state.status).toBe('cancelled');
     expect(cancelled.terminal_response?.status).toBe('failed');
@@ -1350,9 +1591,11 @@ describe('canonical v3 run.json', () => {
       runs_root: root,
       run_directory: runDirectory,
       coordinator: coordinator('repeat-'),
-      attempt_bridge: exactBindings([durableProfile], {
-        'adapter-durable': provider,
-      }),
+      attempt_bridge: exactBindings(
+        [durableProfile],
+        { 'adapter-durable': provider },
+        'supported_exact_profile',
+      ),
     });
     expect(repeated.coordination_state.status).toBe('cancelled');
     expect(cancel).toHaveBeenCalledOnce();
@@ -1417,7 +1660,11 @@ describe('canonical v3 run.json', () => {
       });
       const onCancellationUsage = vi.fn();
       const bindings = {
-        ...exactBindings([selected], { [provider.id]: provider }),
+        ...exactBindings(
+          [selected],
+          { [provider.id]: provider },
+          'supported_exact_profile',
+        ),
         onCancellationUsage,
       };
       await runCanonicalPreparedExecution(plan, {
@@ -1519,9 +1766,13 @@ describe('canonical v3 run.json', () => {
         retrieve: vi.fn(),
         ...(cancelHook && { cancel: cancelHook }),
       };
-      const bindings = exactBindings([durableProfile], {
-        'adapter-durable': provider,
-      });
+      const bindings = exactBindings(
+        [durableProfile],
+        {
+          'adapter-durable': provider,
+        },
+        'supported_exact_profile',
+      );
       await runCanonicalPreparedExecution(prepared([durableProfile], 'async'), {
         runs_root: root,
         run_directory: runDirectory,
@@ -1608,9 +1859,13 @@ describe('canonical v3 run.json', () => {
       retrieve: vi.fn(async () => success('adapter-durable')),
       cancel,
     };
-    const bindings = exactBindings([durableProfile], {
-      'adapter-durable': provider,
-    });
+    const bindings = exactBindings(
+      [durableProfile],
+      {
+        'adapter-durable': provider,
+      },
+      'supported_exact_profile',
+    );
     await runCanonicalPreparedExecution(prepared([durableProfile], 'async'), {
       runs_root: root,
       run_directory: runDirectory,
@@ -1843,6 +2098,10 @@ describe('canonical v3 run.json', () => {
     expect(resumed.runtime.state.attempts[0]?.status).toBe(
       'acceptance_unknown',
     );
+    expect(
+      projectCanonicalRunPresentation(resumed.manifest, runDirectory, 'fixture')
+        .reports,
+    ).toMatchObject([{ id: 'adapter-unknown', status: 'async-pending' }]);
   });
 
   it('rejects path escape and process-local profiles before creating run.json', async () => {

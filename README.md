@@ -53,9 +53,20 @@ Standalone and Homebrew binaries include their own runtime.
 
 ## Quick start
 
-These instructions describe the v2 source checkout, not the published v1 CLI.
-The committed `2.0.0` package version is not evidence of publication. Until a
-v2 release is published, build a reviewed v2 checkout with Node.js 22.12 or newer:
+These instructions require v2. The committed `2.0.0` package version is not
+evidence that any package channel contains v2. Check npm metadata before using
+the registry installation path:
+
+```bash
+npm view librarium@2 version
+
+# Run this only when npm lists a matching v2 release above.
+npm install -g librarium@^2
+librarium --version # Must report major version 2.
+```
+
+If npm has no matching v2 release, build a reviewed v2 checkout with Node.js
+22.12 or newer instead:
 
 ```bash
 # From the root of a reviewed v2 checkout.
@@ -282,7 +293,7 @@ that are not in the `run` table above.
 | `config migrate` | `--from`, `--project`, `--output`, `--force` |
 | `cleanup` | `--days`, `--all`, `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
 | `clear` | `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
-| `upgrade` | `--check`, `--dry-run`, `--force` |
+| `upgrade` | `--check`, `--dry-run`, `--force`, `--target` (exact local/fixture version; requires `--dry-run`) |
 | `install-skill` | `--force`, `--dry-run` |
 | `mcp` | no explicit option |
 
@@ -303,12 +314,17 @@ observed successful handle; `--wait` repeats passes. For historical v2 work,
 Unlike reading saved results, status/resume can contact providers and write
 artifacts. Preserve the entire run directory for recovery.
 
+Progress events are bounded observations, not an append-only audit log. Canonical
+snapshots retain the latest progress per attempt and may renumber their internal
+lifecycle sequence when compacting older progress. Semantic start, submission,
+finish, and request-terminal events are retained.
+
 Do not promise remote cancellation for every background provider. The canonical
 validation protocol explicitly marks a target as either
 `supported_exact_profile` cancellation or `reconcile_only`. The source
 catalog currently advertises remote cancellation only for `valyu/research`.
-All other cancellation behaviour requires reconciliation, not an invented
-provider-side cancel call.
+Other profiles use reconciliation. New runs freeze this policy into each exact
+profile plan; historical runs without it fail closed to reconciliation.
 
 Ctrl-C requests local cancellation and stops new paid launches. Accepted remote
 jobs may still run and incur charges, even if a local run is cancelled or its
@@ -422,7 +438,8 @@ librarium config migrate \
 ```
 
 Writing validates again through `saveConfigV2()` and uses its atomic owner-only
-save boundary. An existing destination is refused. `--force` explicitly
+save boundary. Successful writes print a non-secret JSON receipt, not the saved
+configuration; only preview prints the configuration document. An existing destination is refused. `--force` explicitly
 replaces an existing destination, but it still cannot replace either source,
 including through a symlink or Windows case alias.
 Do not create the candidate with shell redirection: that bypasses the
@@ -517,6 +534,15 @@ deadline. `paid-attempt-ledger.required` marks runs that require this sidecar.
 Do not delete it to reset a budget: recovery fails closed if required ledger
 state is missing or invalid. Historical runs without a ledger remain readable;
 Librarium does not invent their helper-stage spending history.
+
+Refined CLI and MCP runs persist canonical `run.json` before the first paid
+refinement call. Its optional refinement state moves from `not_started` to
+`in_progress`, then atomically to either `completed` with the saved per-slot
+queries or `failed_or_interrupted`. Status/resume never starts research while
+refinement is incomplete and never replays an ambiguous paid refinement. A
+crash can therefore leave an honest, discoverable `in_progress` run until its
+original deadline; cancellation or deadline expiry preserves uncertainty rather
+than claiming the remote call stopped, because it may still finish and charge.
 
 Canonical resume restores prior spend, reservations, and the original deadline
 before admitting any new fallback. It does not grant a fresh budget or time
@@ -622,8 +648,10 @@ Amp needs only the Librarium User Skill and the v2 CLI; no Amp plugin is
 required. A global User Skill is synced into every orb automatically. The
 Librarium repository's `.agents/setup` builds the checked-out source and runs
 `npm install -g .`, then verifies that `librarium --version` reports major
-version 2. Other orb projects can install `librarium@^2` after v2 is published.
-They must not silently use npm's v1 `latest` tag for a v2 workflow.
+version 2. Other orb projects may install `librarium@^2` only when read-only
+`npm view librarium@2 version` metadata lists a matching release; otherwise,
+install a reviewed v2 checkout. Always verify major version 2 rather than
+silently using an incompatible package channel for a v2 workflow.
 
 ## Shared TypeScript/PHP boundary
 

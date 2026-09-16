@@ -17,7 +17,10 @@ import type {
 } from '../types.js';
 import { costMicrousdFromUsd } from './budget.js';
 import type { AttemptLaunch } from './coordinator.js';
-import type { AdapterBindingIdentity } from './execution-plan.js';
+import type {
+  AdapterBindingIdentity,
+  ExactProfileRemoteCancellationPolicy,
+} from './execution-plan.js';
 import type {
   AttemptExecutionContext,
   AttemptExecutionPort,
@@ -42,6 +45,8 @@ export interface ProviderAttemptBridgeDependencies {
         readonly profile: ExecutionProfile;
         readonly catalog_digest: string;
         readonly provider: Provider;
+        /** Missing on historical records and therefore treated as reconcile-only. */
+        readonly cancel_policy?: ExactProfileRemoteCancellationPolicy;
       }
     | undefined;
   now?: () => number;
@@ -491,10 +496,15 @@ function taskFromDurableHandle(
   };
 }
 
-function resolveDurableProvider(
+function resolveDurableBinding(
   dependencies: ProviderAttemptBridgeDependencies,
   launch: AttemptLaunch,
-): BackgroundProvider | undefined {
+):
+  | {
+      readonly provider: BackgroundProvider;
+      readonly cancel_policy?: ExactProfileRemoteCancellationPolicy;
+    }
+  | undefined {
   const resolved = dependencies.resolveExactBinding(launch.binding);
   if (
     !resolved ||
@@ -509,7 +519,10 @@ function resolveDurableProvider(
   ) {
     return undefined;
   }
-  return resolved.provider;
+  return {
+    provider: resolved.provider,
+    ...(resolved.cancel_policy && { cancel_policy: resolved.cancel_policy }),
+  };
 }
 
 /**
@@ -527,8 +540,10 @@ export function createProviderAttemptBridge(
       launch: AttemptLaunch,
       handle: DurableHandle,
     ): Promise<DurableHandle | undefined> {
-      const provider = resolveDurableProvider(dependencies, launch);
+      const resolved = resolveDurableBinding(dependencies, launch);
+      const provider = resolved?.provider;
       if (
+        resolved?.cancel_policy !== 'supported_exact_profile' ||
         !provider?.cancel ||
         !['pending', 'running'].includes(handle.status) ||
         handle.provider.provider_id !== launch.profile.identity.provider_id ||
@@ -550,7 +565,7 @@ export function createProviderAttemptBridge(
       handle: DurableHandle,
       context: AttemptExecutionContext,
     ): Promise<AttemptExecutionResult> {
-      const provider = resolveDurableProvider(dependencies, launch);
+      const provider = resolveDurableBinding(dependencies, launch)?.provider;
       if (
         !provider ||
         handle.provider.provider_id !== launch.profile.identity.provider_id ||

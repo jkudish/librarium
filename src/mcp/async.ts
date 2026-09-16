@@ -6,6 +6,7 @@ import type { ResearchResponse } from '../contracts/interchange/research-respons
 import { generateSlug } from '../core/prompt-builder.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
+  type CanonicalRunRefinement,
   canonicalRunsRoot,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
@@ -49,6 +50,7 @@ export interface CheckAsyncResult {
   error?: 'artifact.reconciliation_failed';
   regenerationError?: 'artifact.regeneration_failed';
   state?: 'pending' | 'terminal';
+  refinementStatus?: CanonicalRunRefinement['status'];
   response?: ResearchResponse;
 }
 
@@ -172,6 +174,9 @@ export async function checkAsyncTasks(
           canonical.manifest.coordination_state.status === 'running'
             ? 'pending'
             : 'terminal',
+        ...(canonical.manifest.refinement && {
+          refinementStatus: canonical.manifest.refinement.status,
+        }),
         ...(canonical.response && { response: canonical.response }),
       };
     }

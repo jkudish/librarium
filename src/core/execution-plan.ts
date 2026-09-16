@@ -7,6 +7,7 @@ import {
 import {
   type ExecutionProfile,
   ExecutionProfileSchema,
+  executionProfilesEqual,
   type ProviderIdentity,
   providerIdentityKey,
 } from '../contracts/domain/index.js';
@@ -75,6 +76,18 @@ export interface FrozenPlanningCatalog<
   readonly revision: string;
   readonly digest: string;
   readonly profiles: readonly TProfile[];
+  /** Optional exact declaration lookup; omission fails closed to reconciliation. */
+  get?(
+    providerId: string,
+    profileId: string,
+  ):
+    | {
+        readonly profile: ExecutionProfile;
+        readonly declaration: {
+          readonly features?: { readonly remote_cancellation?: true };
+        };
+      }
+    | undefined;
   resolveGroup(groupId: string): readonly ProviderIdentity[] | undefined;
   resolveDefault(): readonly ProviderIdentity[];
   resolveConfiguredReserve(
@@ -95,10 +108,16 @@ export interface PreparationDependencies {
   readonly ids: PreparationIdGenerator;
 }
 
+export type ExactProfileRemoteCancellationPolicy =
+  | 'supported_exact_profile'
+  | 'reconcile_only';
+
 export interface PreparedProfilePlan {
   readonly profile_key: string;
   readonly identity: ProviderIdentity;
   readonly binding: AdapterBindingIdentity;
+  /** Missing on historical records and therefore treated as reconcile-only. */
+  readonly cancel_policy?: ExactProfileRemoteCancellationPolicy;
   readonly estimate?: NetworkFreeEstimate;
 }
 
@@ -141,6 +160,7 @@ export interface AdmittedSelectedProfile {
   readonly entry: PlanningProfile;
   readonly path: string;
   readonly requirements?: EvidenceRequirements;
+  readonly cancel_policy: ExactProfileRemoteCancellationPolicy;
 }
 
 const RESEARCH_ADMISSION_BRAND: unique symbol = Symbol(
@@ -384,6 +404,22 @@ function findCatalogEntry(
   return byKey.get(profileIdentityKey(identity));
 }
 
+function cancellationPolicyForCatalogProfile(
+  catalog: FrozenPlanningCatalog,
+  entry: PlanningProfile,
+): ExactProfileRemoteCancellationPolicy {
+  const resolved = catalog.get?.(
+    entry.profile.identity.provider_id,
+    entry.profile.identity.profile_id,
+  );
+  const parsedResolved = ExecutionProfileSchema.safeParse(resolved?.profile);
+  return parsedResolved.success &&
+    executionProfilesEqual(entry.profile, parsedResolved.data) &&
+    resolved?.declaration.features?.remote_cancellation === true
+    ? 'supported_exact_profile'
+    : 'reconcile_only';
+}
+
 function resolveTargets(
   targets: readonly ProfileTarget[],
   catalog: FrozenPlanningCatalog,
@@ -420,7 +456,13 @@ function resolveTargets(
       });
       continue;
     }
-    selected.push(...matches.map((entry) => ({ entry, path })));
+    selected.push(
+      ...matches.map((entry) => ({
+        entry,
+        path,
+        cancel_policy: cancellationPolicyForCatalogProfile(catalog, entry),
+      })),
+    );
   }
   return selected;
 }
@@ -428,6 +470,7 @@ function resolveTargets(
 function resolveIdentities(
   identities: readonly ProviderIdentity[],
   byKey: ReadonlyMap<string, PlanningProfile>,
+  catalog: FrozenPlanningCatalog,
   path: string,
   issues: PreparationIssue[],
 ): AdmittedSelectedProfile[] {
@@ -444,7 +487,11 @@ function resolveIdentities(
       });
       continue;
     }
-    selected.push({ entry, path });
+    selected.push({
+      entry,
+      path,
+      cancel_policy: cancellationPolicyForCatalogProfile(catalog, entry),
+    });
   }
   return selected;
 }
@@ -547,7 +594,13 @@ function selectPrimaries(
         });
         return [];
       }
-      selected = resolveIdentities(identities, byKey, '/selector', issues);
+      selected = resolveIdentities(
+        identities,
+        byKey,
+        catalog,
+        '/selector',
+        issues,
+      );
       break;
     }
     case 'capabilities': {
@@ -560,6 +613,7 @@ function selectPrimaries(
           entry,
           path: '/selector/requirements',
           requirements: selector.requirements,
+          cancel_policy: cancellationPolicyForCatalogProfile(catalog, entry),
         }));
       if (
         selector.result_count !== undefined &&
@@ -580,6 +634,7 @@ function selectPrimaries(
       selected = resolveIdentities(
         catalog.resolveDefault(),
         byKey,
+        catalog,
         '/selector',
         issues,
       );
@@ -818,6 +873,7 @@ function resolveReserve(
             primaries.map(({ entry }) => entry.profile.identity),
           ),
           byKey,
+          catalog,
           '/fallback',
           issues,
         );
@@ -905,7 +961,8 @@ function resolveReserve(
   return retained;
 }
 
-function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
+function profilePlan(selection: AdmittedSelectedProfile): PreparedProfilePlan {
+  const { entry } = selection;
   return {
     profile_key: profileIdentityKey(entry.profile.identity),
     identity: { ...entry.profile.identity },
@@ -913,6 +970,7 @@ function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
       adapter_id: entry.binding.adapter_id,
       binding_id: entry.binding.binding_id,
     },
+    cancel_policy: selection.cancel_policy,
     estimate: entry.estimate
       ? {
           estimated_cost_microusd: entry.estimate.estimated_cost_microusd,
@@ -1246,8 +1304,8 @@ export function materializeResearchExecution(
   }
 
   const profilePlans = Object.fromEntries(
-    [...primaries, ...reserve].map(({ entry }) => {
-      const plan = profilePlan(entry);
+    [...primaries, ...reserve].map((selection) => {
+      const plan = profilePlan(selection);
       return [plan.profile_key, plan];
     }),
   );

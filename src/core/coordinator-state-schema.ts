@@ -36,6 +36,10 @@ const PreparedProfilePlanSchema = z.strictObject({
   profile_key: z.string().min(1),
   identity: ProviderIdentitySchema,
   binding: AdapterBindingIdentitySchema,
+  // Historical records omit this field and fail closed at the effect boundary.
+  cancel_policy: z
+    .enum(['supported_exact_profile', 'reconcile_only'])
+    .optional(),
   estimate: NetworkFreeEstimateSchema.optional(),
 });
 

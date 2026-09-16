@@ -15,9 +15,14 @@ import { generateSlug } from '../core/prompt-builder.js';
 import { retiredProviderSelectionIssues } from '../core/provider-selection.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
+  beginCanonicalRefinement,
   cancelCanonicalRun,
+  completeCanonicalRefinement,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
+  failOrInterruptCanonicalRefinement,
+  materializeCanonicalPreparedExecution,
+  resumeCanonicalPreparedExecution,
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
 import {
@@ -292,7 +297,9 @@ export async function executeRun(
     const createdAt = preflight.prepared.request.requested_at;
     const wallet = new RunPaidWallet({
       request_id: preflight.prepared.request.request_id,
-      request_fingerprint: fingerprint(preflight.prepared.request),
+      request_fingerprint: fingerprint(
+        JSON.parse(JSON.stringify(preflight.prepared.request)),
+      ),
       config_fingerprint: fingerprint({
         defaults: config.defaults,
         refine: config.refine,
@@ -340,45 +347,98 @@ export async function executeRun(
     };
     process.once('SIGINT', onInterrupt);
     let refined: RefinedQueries | null = null;
+    let refinedQueriesBySlot: Record<string, string> = {};
     if (opts.refine) {
-      spinner.start('Refining query...');
-      try {
-        refined = await refineQuery(
-          query,
-          config,
-          process.env,
-          (message) =>
+      await materializeCanonicalPreparedExecution(preflight.prepared, {
+        runs_root: baseDir,
+        run_directory: outputDir,
+        coordinator,
+        paid_wallet: wallet,
+        refinement_requested: true,
+      });
+      stateCreated = true;
+      if (interrupted) scheduleCancellation();
+      if (!interrupted && wallet.remainingMs() > 0) {
+        beginCanonicalRefinement({
+          runs_root: baseDir,
+          run_directory: outputDir,
+        });
+        spinner.start('Refining query...');
+        try {
+          refined = await refineQuery(
+            query,
+            config,
+            process.env,
+            (message) =>
+              process.stderr.write(
+                `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
+              ),
+            preflight.credentials,
+            wallet,
+          );
+        } catch (error) {
+          if (!interrupted) {
+            failOrInterruptCanonicalRefinement({
+              runs_root: baseDir,
+              run_directory: outputDir,
+            });
+          }
+          if (!interrupted && wallet.remainingMs() > 0) {
             process.stderr.write(
-              `${dimText(`[librarium] refine: ${message}`, isColorEnabled(process.stderr))}\n`,
-            ),
-          preflight.credentials,
-          wallet,
+              `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
+            );
+          }
+        }
+        refinedQueriesBySlot = Object.fromEntries(
+          preflight.prepared.request.slots.flatMap((slot) => {
+            const plan =
+              preflight.prepared.profile_plans_by_identity[
+                providerIdentityKey(slot.primary.identity)
+              ];
+            const tier = plan
+              ? resolveExactProvider(plan.binding.adapter_id)?.tier
+              : undefined;
+            const variant = tier ? refined?.tierQueries[tier] : undefined;
+            return variant ? [[slot.slot_id, variant]] : [];
+          }),
         );
-      } catch (error) {
-        process.stderr.write(
-          `[librarium] warning: refine failed (${error instanceof Error ? error.message : String(error)}); dispatching the original query\n`,
-        );
+        if (refined && !interrupted && wallet.remainingMs() > 0) {
+          completeCanonicalRefinement({
+            runs_root: baseDir,
+            run_directory: outputDir,
+            queries_by_slot: refinedQueriesBySlot,
+          });
+        } else if (!interrupted) {
+          failOrInterruptCanonicalRefinement({
+            runs_root: baseDir,
+            run_directory: outputDir,
+          });
+        }
+      } else if (!interrupted) {
+        failOrInterruptCanonicalRefinement({
+          runs_root: baseDir,
+          run_directory: outputDir,
+        });
       }
     }
     if (interrupted || wallet.remainingMs() === 0) {
+      if (interrupted) {
+        scheduleCancellation();
+        await cancellation;
+      } else if (stateCreated) {
+        await resumeCanonicalPreparedExecution({
+          runs_root: baseDir,
+          run_directory: outputDir,
+          coordinator,
+          attempt_bridge: cancellationBridge,
+          paid_wallet: wallet,
+        });
+      }
       process.off('SIGINT', onInterrupt);
       spinner.stop();
       process.exitCode = interrupted ? 130 : 2;
       return { exitCode: process.exitCode, outputDir };
     }
-    const refinedQueriesBySlot = Object.fromEntries(
-      preflight.prepared.request.slots.flatMap((slot) => {
-        const plan =
-          preflight.prepared.profile_plans_by_identity[
-            providerIdentityKey(slot.primary.identity)
-          ];
-        const tier = plan
-          ? resolveExactProvider(plan.binding.adapter_id)?.tier
-          : undefined;
-        const variant = tier ? refined?.tierQueries[tier] : undefined;
-        return variant ? [[slot.slot_id, variant]] : [];
-      }),
-    );
     spinner.stop();
     printLine('');
     printLine(`  fanning out to ${providerIds.length} providers`);
@@ -390,25 +450,33 @@ export async function executeRun(
     const runCanonical = deps.runCanonical ?? runCanonicalPreparedExecution;
     let canonical;
     try {
-      canonical = await runCanonical(preflight.prepared, {
-        runs_root: baseDir,
-        run_directory: outputDir,
-        coordinator,
-        attempt_bridge: {
-          ...createRegisteredProviderAttemptBridge(
-            preflight.prepared,
-            resolveExactProvider,
-          ),
-          signal: wallet.signal,
-        },
-        paid_wallet: wallet,
-        refined_queries_by_slot: refinedQueriesBySlot,
-        is_cancelled: () => interrupted,
-        on_state_created: () => {
-          stateCreated = true;
-          if (interrupted) scheduleCancellation();
-        },
-      });
+      const attemptBridge = {
+        ...createRegisteredProviderAttemptBridge(
+          preflight.prepared,
+          resolveExactProvider,
+        ),
+        signal: wallet.signal,
+      };
+      canonical = opts.refine
+        ? await resumeCanonicalPreparedExecution({
+            runs_root: baseDir,
+            run_directory: outputDir,
+            coordinator,
+            attempt_bridge: attemptBridge,
+            paid_wallet: wallet,
+          })
+        : await runCanonical(preflight.prepared, {
+            runs_root: baseDir,
+            run_directory: outputDir,
+            coordinator,
+            attempt_bridge: attemptBridge,
+            paid_wallet: wallet,
+            is_cancelled: () => interrupted,
+            on_state_created: () => {
+              stateCreated = true;
+              if (interrupted) scheduleCancellation();
+            },
+          });
     } catch (error) {
       if (!interrupted) throw error;
       await cancellation;

@@ -111,10 +111,20 @@ export class GeminiGroundedProvider extends BaseProvider {
       const candidate = data.candidates?.[0];
       const content =
         candidate?.content?.parts
-          ?.map((part) => part.text ?? '')
+          ?.map((part) => (typeof part.text === 'string' ? part.text : ''))
           .filter(Boolean)
           .join('\n')
           .trim() ?? '';
+      if (!content) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: 'Gemini response did not include a non-empty answer',
+        };
+      }
       const citations = this.extractCitations(candidate);
 
       return {

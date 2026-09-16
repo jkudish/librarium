@@ -528,7 +528,12 @@ export class RunPaidWallet {
     const reported = costMicrousdFromUsd(completion.usage?.costUsd);
     this.#attempts[index] = {
       ...prior,
-      status: this.#cancellationRequestedAt ? 'cancelled' : completion.status,
+      status:
+        completion.status === 'acceptance_unknown'
+          ? 'acceptance_unknown'
+          : this.#cancellationRequestedAt
+            ? 'cancelled'
+            : completion.status,
       finished_at: new Date(this.#now()).toISOString(),
       reported:
         reported === undefined

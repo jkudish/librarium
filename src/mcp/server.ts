@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { canonicalProviderGroups } from '../commands/groups.js';
 import { VERSION } from '../constants.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
@@ -112,7 +113,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
           .string()
           .optional()
           .describe(
-            'A configured provider group (e.g. deep, quick, raw, all). Defaults to quick when neither group nor providers is given. Ignored when providers is given.',
+            'A canonical provider workflow (quick, deep, visibility, or all) or configured custom:<name> group. Defaults to quick when neither group nor providers is given. Ignored when providers is given.',
           ),
         providers: z
           .array(z.string())
@@ -319,17 +320,14 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'List provider groups',
       description:
-        'Return the configured provider groups and their member provider ids.',
+        'Return the four canonical built-in workflows and configured custom:<name> groups with exact provider/profile members.',
       inputSchema: {},
     },
     async (): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
         return jsonResult({
-          groups: Object.entries(config.groups).map(([name, members]) => ({
-            name,
-            members,
-          })),
+          groups: canonicalProviderGroups(config),
         });
       } catch (e) {
         return errorResult(`list_groups failed: ${describeError(e)}`);

@@ -243,7 +243,7 @@ it.each([
   { status: 'cancelled', reported: false },
   { status: 'completed', reported: false },
 ])(
-  'reports cancellation billing without changing custody: %j',
+  'reports cancellation billing for an explicitly supported exact profile without changing custody: %j',
   async ({ status, reported }) => {
     const httpClient = vi.fn<HttpClient>(async () => ({
       status: 200,
@@ -276,6 +276,7 @@ it.each([
         profile,
         provider,
         catalog_digest: 'cancel-digest',
+        cancel_policy: 'supported_exact_profile',
       }),
       onCancellationUsage,
     });

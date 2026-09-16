@@ -32,6 +32,7 @@ import type {
 import { updateCoordinationState } from './core/coordinator-store.js';
 import type {
   AdapterBindingIdentity,
+  ExactProfileRemoteCancellationPolicy,
   PreparedResearchExecution,
 } from './core/execution-plan.js';
 import type {
@@ -74,6 +75,20 @@ import type { Provider, ProviderResult } from './types.js';
 
 const CANONICAL_RUN_KIND = 'canonical-research-run' as const;
 const CANONICAL_RUN_FORMAT = 'librarium.run-json.v3' as const;
+
+const CanonicalRunRefinementSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('not_started') }),
+  z.strictObject({ status: z.literal('in_progress') }),
+  z.strictObject({
+    status: z.literal('completed'),
+    queries_by_slot: z.record(OpaqueIdSchema, z.string().min(1)),
+  }),
+  z.strictObject({ status: z.literal('failed_or_interrupted') }),
+]);
+
+export type CanonicalRunRefinement = z.infer<
+  typeof CanonicalRunRefinementSchema
+>;
 
 function inspectPrivateExtensions(
   value: unknown,
@@ -142,6 +157,8 @@ export const CanonicalRunManifestV3Schema = z
     revision: z.number().int().safe().positive(),
     request: InterchangeRequestSchema,
     coordination_state: CoordinatorStateSchema,
+    /** Absent on non-refined and historical v3 runs. */
+    refinement: CanonicalRunRefinementSchema.optional(),
     provider_outputs_by_attempt: z.record(
       OpaqueIdSchema,
       CanonicalProviderOutputSchema,
@@ -152,6 +169,35 @@ export const CanonicalRunManifestV3Schema = z
     const state = manifest.coordination_state;
     inspectPrivateExtensions(manifest.request, ['request'], ctx);
     inspectPrivateExtensions(state, ['coordination_state'], ctx);
+    if (manifest.refinement?.status === 'completed') {
+      const persistedQueries = Object.fromEntries(
+        state.slots.flatMap((slot) =>
+          slot.refined_query === undefined
+            ? []
+            : [[slot.slot_id, slot.refined_query]],
+        ),
+      );
+      if (
+        canonicalJson(persistedQueries) !==
+        canonicalJson(manifest.refinement.queries_by_slot)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Completed refinement queries must match the coordinator slots',
+          path: ['refinement', 'queries_by_slot'],
+        });
+      }
+    } else if (
+      manifest.refinement &&
+      state.slots.some((slot) => slot.refined_query !== undefined)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Incomplete refinement cannot persist refined slot queries',
+        path: ['refinement'],
+      });
+    }
     if (
       manifest.request.request_id !== state.request_id ||
       manifest.request.mode !== state.mode ||
@@ -547,6 +593,8 @@ export interface RunJsonCoordinationStateStoreOptions {
   readonly run_directory: string;
   /** Required only when create() will initialize a new run. */
   readonly request?: InterchangeRequest;
+  /** Initial write-ahead state for a requested one-shot refinement. */
+  readonly initial_refinement?: CanonicalRunRefinement;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -646,6 +694,45 @@ export function readCanonicalRunManifest(
     runs_root: runsRoot,
     run_directory: runDirectory,
   }).readManifest();
+}
+
+export interface CanonicalRefinementMutationDependencies {
+  readonly runs_root: string;
+  readonly run_directory: string;
+}
+
+function refinementStore(
+  dependencies: CanonicalRefinementMutationDependencies,
+): RunJsonCoordinationStateStore {
+  return new RunJsonCoordinationStateStore({
+    runs_root: dependencies.runs_root,
+    run_directory: dependencies.run_directory,
+  });
+}
+
+/** Mark the write-ahead canonical run immediately before paid refinement. */
+export function beginCanonicalRefinement(
+  dependencies: CanonicalRefinementMutationDependencies,
+): CanonicalRunManifestV3 {
+  return refinementStore(dependencies).beginRefinement();
+}
+
+/** Atomically save completed queries into the lifecycle and dispatch slots. */
+export function completeCanonicalRefinement(
+  dependencies: CanonicalRefinementMutationDependencies & {
+    readonly queries_by_slot: Readonly<Record<string, string>>;
+  },
+): CanonicalRunManifestV3 {
+  return refinementStore(dependencies).completeRefinement(
+    dependencies.queries_by_slot,
+  );
+}
+
+/** Preserve failure/interruption uncertainty without replaying refinement. */
+export function failOrInterruptCanonicalRefinement(
+  dependencies: CanonicalRefinementMutationDependencies,
+): CanonicalRunManifestV3 {
+  return refinementStore(dependencies).failOrInterruptRefinement();
 }
 
 export function discoverCanonicalRunDirectories(
@@ -789,6 +876,9 @@ export async function cancelCanonicalRun(
     },
     dependencies.max_compare_and_swap_attempts,
   );
+  // Keep incomplete refinement gated until cancellation has committed. Otherwise
+  // a concurrent status call could dispatch research between these two writes.
+  store.failOrInterruptRefinement();
   store.persistTerminalResponse({
     generator: current.producer.id,
     generator_version: current.producer.version,
@@ -828,6 +918,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
   readonly #runsRoot: string;
   readonly #runDirectory: string;
   readonly #request?: InterchangeRequest;
+  readonly #initialRefinement?: CanonicalRunRefinement;
 
   constructor(options: RunJsonCoordinationStateStoreOptions) {
     const runDirectory = containedRunDirectory(
@@ -838,6 +929,11 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
     this.#runDirectory = runDirectory;
     this.#request = options.request
       ? InterchangeRequestSchema.parse(structuredClone(options.request))
+      : undefined;
+    this.#initialRefinement = options.initial_refinement
+      ? CanonicalRunRefinementSchema.parse(
+          structuredClone(options.initial_refinement),
+        )
       : undefined;
   }
 
@@ -891,10 +987,94 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
         revision: 1,
         request: structuredClone(request),
         coordination_state: persistedState(state),
+        ...(this.#initialRefinement && {
+          refinement: structuredClone(this.#initialRefinement),
+        }),
         provider_outputs_by_attempt: {},
       });
     });
     return versioned(created);
+  }
+
+  beginRefinement(): CanonicalRunManifestV3 {
+    const manifestPath = this.manifest_path;
+    return withRunJsonLock(manifestPath, () => {
+      const current = parseManifest(manifestPath);
+      if (
+        current.coordination_state.status !== 'running' ||
+        current.refinement?.status !== 'not_started'
+      ) {
+        throw new CanonicalRunManifestError(
+          'Refinement can start only once on a running not-started run',
+          manifestPath,
+        );
+      }
+      return writeManifest(manifestPath, {
+        ...current,
+        revision: current.revision + 1,
+        refinement: { status: 'in_progress' },
+      });
+    });
+  }
+
+  completeRefinement(
+    queriesBySlot: Readonly<Record<string, string>>,
+  ): CanonicalRunManifestV3 {
+    const manifestPath = this.manifest_path;
+    return withRunJsonLock(manifestPath, () => {
+      const current = parseManifest(manifestPath);
+      if (
+        current.coordination_state.status !== 'running' ||
+        current.refinement?.status !== 'in_progress'
+      ) {
+        throw new CanonicalRunManifestError(
+          'Refinement can complete only from in-progress on a running run',
+          manifestPath,
+        );
+      }
+      let state = structuredClone(
+        current.coordination_state,
+      ) as CoordinatorState;
+      for (const [slotId, query] of Object.entries(queriesBySlot)) {
+        state = setRefinedSlotQuery(state, slotId, query);
+      }
+      const persistedQueries = Object.fromEntries(
+        state.slots.flatMap((slot) =>
+          slot.refined_query === undefined
+            ? []
+            : [[slot.slot_id, slot.refined_query]],
+        ),
+      );
+      return writeManifest(manifestPath, {
+        ...current,
+        revision: current.revision + 1,
+        coordination_state: persistedState(state),
+        refinement: {
+          status: 'completed',
+          queries_by_slot: persistedQueries,
+        },
+      });
+    });
+  }
+
+  failOrInterruptRefinement(): CanonicalRunManifestV3 {
+    const manifestPath = this.manifest_path;
+    return withRunJsonLock(manifestPath, () => {
+      const current = parseManifest(manifestPath);
+      if (
+        !current.refinement ||
+        current.refinement.status === 'completed' ||
+        current.refinement.status === 'failed_or_interrupted'
+      ) {
+        return current;
+      }
+      if (current.terminal_response) return current;
+      return writeManifest(manifestPath, {
+        ...current,
+        revision: current.revision + 1,
+        refinement: { status: 'failed_or_interrupted' },
+      });
+    });
   }
 
   async compareAndSwap(
@@ -1316,6 +1496,7 @@ export function createRegisteredProviderAttemptBridge(
     {
       readonly binding: AdapterBindingIdentity;
       readonly profile: PreparedResearchExecution['request']['slots'][number]['primary'];
+      readonly cancel_policy?: ExactProfileRemoteCancellationPolicy;
     }
   >();
   const profiles = [
@@ -1331,12 +1512,20 @@ export function createRegisteredProviderAttemptBridge(
     }
     const key = `${plan.binding.adapter_id}\u0000${plan.binding.binding_id}`;
     const existing = byBinding.get(key);
-    if (existing && !executionProfilesEqual(existing.profile, profile)) {
+    if (
+      existing &&
+      (!executionProfilesEqual(existing.profile, profile) ||
+        existing.cancel_policy !== plan.cancel_policy)
+    ) {
       throw new Error(
         'One frozen adapter binding cannot identify two profiles.',
       );
     }
-    byBinding.set(key, { binding: plan.binding, profile });
+    byBinding.set(key, {
+      binding: plan.binding,
+      profile,
+      ...(plan.cancel_policy && { cancel_policy: plan.cancel_policy }),
+    });
   }
   return {
     ...(now && { now }),
@@ -1352,6 +1541,9 @@ export function createRegisteredProviderAttemptBridge(
         profile: resolved.profile,
         catalog_digest: source.catalog.digest,
         provider,
+        ...(resolved.cancel_policy && {
+          cancel_policy: resolved.cancel_policy,
+        }),
       };
     },
   };
@@ -1390,14 +1582,26 @@ export async function runCanonicalPreparedExecution(
       'Canonical run.json execution requires inline or durably resumable profiles; process_local background profiles are not supported.',
     );
   }
+  const refinedEntries = Object.entries(
+    dependencies.refined_queries_by_slot ?? {},
+  );
+  const completedRefinement =
+    refinedEntries.length === 0
+      ? undefined
+      : ({
+          status: 'completed',
+          queries_by_slot: Object.fromEntries(
+            refinedEntries.map(([slotId, query]) => [slotId, query.trim()]),
+          ),
+        } satisfies CanonicalRunRefinement);
   const store = new RunJsonCoordinationStateStore({
     runs_root: dependencies.runs_root,
     run_directory: dependencies.run_directory,
     request: prepared.request,
+    ...(completedRefinement && {
+      initial_refinement: completedRefinement,
+    }),
   });
-  const refinedEntries = Object.entries(
-    dependencies.refined_queries_by_slot ?? {},
-  );
   const executionStore: CoordinationStateStore = {
     load: (requestId) => store.load(requestId),
     compareAndSwap: (requestId, expectedVersion, state) =>
@@ -1451,12 +1655,15 @@ export async function materializeCanonicalPreparedExecution(
   dependencies: Omit<
     RunCanonicalPreparedExecutionDependencies,
     'attempt_bridge'
-  >,
+  > & { readonly refinement_requested?: boolean },
 ): Promise<CanonicalPreparedExecutionResult> {
   const store = new RunJsonCoordinationStateStore({
     runs_root: dependencies.runs_root,
     run_directory: dependencies.run_directory,
     request: prepared.request,
+    ...(dependencies.refinement_requested && {
+      initial_refinement: { status: 'not_started' },
+    }),
   });
   const runtime = await runPreparedExecution(prepared, {
     store,
@@ -1589,7 +1796,29 @@ export async function resumeCanonicalPreparedExecution(
     runs_root: dependencies.runs_root,
     run_directory: dependencies.run_directory,
   });
-  const manifest = store.readManifest();
+  let manifest = store.readManifest();
+  if (
+    manifest.coordination_state.status === 'running' &&
+    (manifest.refinement?.status === 'not_started' ||
+      manifest.refinement?.status === 'in_progress')
+  ) {
+    if (
+      dependencies.coordinator.clock.now() <
+      Date.parse(manifest.coordination_state.request_deadline_at)
+    ) {
+      return {
+        runtime: {
+          state: structuredClone(
+            manifest.coordination_state,
+          ) as CoordinatorState,
+          outputs_by_attempt: Object.freeze({}),
+        },
+        manifest,
+      };
+    }
+    store.failOrInterruptRefinement();
+    manifest = store.readManifest();
+  }
   const hasRemoteCustody = manifest.coordination_state.attempts.some(
     (attempt) =>
       attempt.durable_handle &&
