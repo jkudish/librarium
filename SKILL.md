@@ -7,7 +7,7 @@ compatibility: Requires the Librarium 2.x CLI. npm installs require Node.js 22.1
 # Librarium — Evidence-Aware Research
 
 Choose the smallest useful research matrix, inspect saved evidence, and preserve
-profile and collection provenance. The catalog has 33 built-in providers and 39 implemented profiles;
+profile and collection provenance. The catalog has 34 built-in providers and 41 implemented profiles;
 discover their current availability rather than assuming all can run.
 
 ## Check version and permission first
@@ -168,4 +168,6 @@ surface observations share a collector and are correlated visibility evidence,
 not six independent confirmations or a particular logged-in user's experience.
 API baselines are not consumer-surface snapshots. `zeroRetention` is an account
 capability that fails closed when rejected, not a blanket privacy guarantee.
+SerpBase may log search queries for billing, debugging, abuse prevention, and
+account logs; no zero-retention mode or fixed public retention period is documented.
 Source frequency and provider agreement are not a confidence vote.
