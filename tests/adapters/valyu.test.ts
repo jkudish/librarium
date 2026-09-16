@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ValyuResearchProvider } from '../../src/adapters/valyu-research.js';
 import { ValyuSearchProvider } from '../../src/adapters/valyu-search.js';
-import { UnsafeToRetrySubmissionError } from '../../src/core/errors.js';
 import type { HttpClient } from '../../src/core/http-client.js';
 
 const response = <T>(status: number, data: T) => ({
@@ -296,29 +295,98 @@ describe('Valyu DeepResearch', () => {
     });
     await expect(
       provider.submit('x'.repeat(25_001), { timeout: 10 }),
-    ).rejects.toThrow('cannot exceed 25000 characters');
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      message: expect.stringContaining('cannot exceed 25000 characters'),
+      failureDiagnostic: { kind: 'invalid_request' },
+    });
     expect(transport.calls).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['non-202', async () => response(400, { error: 'bad request' })],
-    [
-      'transport error',
-      async () => {
-        throw new Error('connection ended after submit');
-      },
-    ],
-  ])('keeps %s submissions unsafe to retry', async (_case, implementation) => {
-    const transport = client(implementation);
+    [400, { kind: 'invalid_request', httpStatus: 400 }],
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'keeps HTTP %s submission diagnostics bounded without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'raw-provider-secret';
+      const transport = client(async () =>
+        response(status, {
+          error: { message: `Bearer ${secret}`, api_key: secret },
+        }),
+      );
+      const provider = new ValyuResearchProvider();
+      provider.configure({
+        credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+        httpClient: transport.httpClient,
+      });
+
+      const submission = provider.submit('unsafe retry', { timeout: 10 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Valyu submission failed before a valid research task handle was returned.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(transport.calls).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps network and malformed accepted submissions ambiguous', async () => {
+    const network = client(async () => {
+      throw new TypeError('fetch failed with Bearer raw-provider-secret');
+    });
+    const provider = new ValyuResearchProvider();
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: network.httpClient,
+    });
+    await expect(
+      provider.submit('unsafe retry', { timeout: 10 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(network.calls).toHaveBeenCalledOnce();
+
+    const malformedTransport = client(async () =>
+      response(202, { status: 'queued' }),
+    );
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: malformedTransport.httpClient,
+    });
+    const malformed = provider.submit('unsafe retry', { timeout: 10 });
+    await expect(malformed).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(malformed).rejects.not.toHaveProperty(
+      'failureDiagnostic.httpStatus',
+    );
+  });
+
+  it('preserves a valid id from a malformed accepted response', async () => {
+    const transport = client(async () =>
+      response(202, { deepresearch_id: 'dr-preserved', status: 'future' }),
+    );
     const provider = new ValyuResearchProvider();
     provider.configure({
       credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
       httpClient: transport.httpClient,
     });
+
     await expect(
-      provider.submit('unsafe retry', { timeout: 10 }),
-    ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
-    expect(transport.calls).toHaveBeenCalledOnce();
+      provider.submit('preserve custody', { timeout: 10 }),
+    ).resolves.toMatchObject({
+      taskId: 'dr-preserved',
+      status: 'pending',
+      providerStatus: 'invalid_response',
+    });
   });
 
   it.each([

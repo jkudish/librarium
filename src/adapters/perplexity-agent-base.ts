@@ -1005,9 +1005,13 @@ export abstract class PerplexityAgentBaseProvider extends BackgroundBaseProvider
         ...(response.usage === undefined ? {} : { usage: response.usage }),
       };
     } catch (error) {
-      void error;
+      const diagnostic =
+        error instanceof Error && /API key not found/i.test(error.message)
+          ? ({ kind: 'authentication' } as const)
+          : failureDiagnostic(error);
       throw new UnsafeToRetrySubmissionError(
         'Perplexity Agent submission outcome is unknown.',
+        diagnostic,
       );
     }
   }

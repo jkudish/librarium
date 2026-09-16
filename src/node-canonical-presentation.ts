@@ -220,10 +220,15 @@ export function projectCanonicalRunPresentation(
     const status: ProviderReport['status'] = projected
       ? 'success'
       : manifest.coordination_state.status === 'running' &&
-          (!attempt ||
-            ['dispatch_pending', 'submitting', 'submitted', 'running'].includes(
-              attempt.status,
-            ))
+          (slot.status === 'fallback_pending' ||
+            !attempt ||
+            [
+              'dispatch_pending',
+              'submitting',
+              'acceptance_unknown',
+              'submitted',
+              'running',
+            ].includes(attempt.status))
         ? 'async-pending'
         : attempt?.status === 'timed_out'
           ? 'timeout'

@@ -184,6 +184,31 @@ describe('run-wide paid wallet', () => {
     ).toThrowError(/run_deadline_exceeded/);
   });
 
+  it('does not turn unknown remote acceptance into settled cancellation', () => {
+    const subject = wallet();
+    const attemptId = subject.begin({
+      stage: 'research',
+      provider: 'research-a',
+      profile: 'research-a\0default',
+      estimated_cost_microusd: '7000',
+      input_fingerprint: fingerprint('uncertain submission'),
+    });
+
+    subject.cancel();
+    subject.finish(attemptId, { status: 'acceptance_unknown' });
+
+    expect(subject.snapshot()).toMatchObject({
+      cancellation_requested_at: '2026-09-05T12:00:01.000Z',
+      attempts: [
+        {
+          attempt_id: attemptId,
+          status: 'acceptance_unknown',
+          reported: { state: 'unknown' },
+        },
+      ],
+    });
+  });
+
   it('blocks providers outside the frozen no-fallback authorization set', () => {
     const subject = wallet();
     expect(() =>

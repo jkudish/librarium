@@ -106,6 +106,39 @@ describe('SearchAPI Google AI Overview adapter', () => {
     );
   });
 
+  it('rejects credential-bearing reference URLs from the second stage', async () => {
+    const calls: string[] = [];
+    const provider = new SearchApiGoogleAiOverviewProvider({
+      apiKey: SEARCHAPI_GOOGLE_AI_OVERVIEW_SYNTHETIC_KEY,
+      httpClient: async <T>(url) => {
+        calls.push(url);
+        return response(
+          200,
+          (calls.length === 1
+            ? searchApiGoogleAiOverviewFixtures.stageOneWithToken
+            : {
+                markdown: 'Non-empty grounded overview.',
+                reference_links: [
+                  {
+                    url: 'https://username:password@evidence.example.test/private',
+                    title: 'Unsafe reference',
+                  },
+                ],
+              }) as T,
+        );
+      },
+    });
+
+    const result = await provider.execute('unsafe reference', { timeout: 7 });
+
+    expect(calls).toHaveLength(2);
+    expect(result).toMatchObject({
+      content: 'Non-empty grounded overview.',
+      citations: [],
+    });
+    expect(JSON.stringify(result)).not.toContain('username:password');
+  });
+
   it.each([
     ['missing', searchApiGoogleAiOverviewFixtures.missingToken],
     ['invalid', searchApiGoogleAiOverviewFixtures.invalidToken],

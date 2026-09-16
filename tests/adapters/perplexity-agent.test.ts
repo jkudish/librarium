@@ -582,8 +582,8 @@ describe('Perplexity Agent API adapters', () => {
     expect(JSON.stringify(result)).not.toContain('Bearer');
 
     const ambiguous = vi.fn<HttpClient>(async () => {
-      throw new Error(
-        `socket failed with Bearer ${secret} at https://api.perplexity.ai/private`,
+      throw new TypeError(
+        `fetch failed with Bearer ${secret} at https://api.perplexity.ai/private`,
       );
     });
     const submission = expect(
@@ -594,9 +594,57 @@ describe('Perplexity Agent API adapters', () => {
     ).rejects;
     await submission.toBeInstanceOf(UnsafeToRetrySubmissionError);
     await submission.toThrow('submission outcome is unknown');
+    await submission.toMatchObject({ failureDiagnostic: { kind: 'network' } });
     await submission.not.toThrow(secret);
     await submission.not.toThrow('https://');
     expect(ambiguous).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'preserves bounded HTTP %s submission diagnostics without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'synthetic-perplexity-key';
+      const httpClient = vi.fn<HttpClient>(async () =>
+        response(
+          { error: { message: `Bearer ${secret}`, api_key: secret } },
+          status,
+        ),
+      );
+      const provider = new PerplexityDeepResearchProvider({
+        apiKey: secret,
+        httpClient,
+      });
+
+      const submission = provider.submit('question', { timeout: 10 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message: 'Perplexity Agent submission outcome is unknown.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(httpClient).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps a malformed accepted response ambiguous', async () => {
+    const provider = new PerplexityDeepResearchProvider({
+      apiKey: 'synthetic-perplexity-key',
+      httpClient: queuedClient([{ data: { status: 'queued' } }]).client,
+    });
+
+    const submission = provider.submit('question', { timeout: 10 });
+    await expect(submission).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(submission).rejects.not.toHaveProperty(
+      'failureDiagnostic.httpStatus',
+    );
   });
 
   it('maps allowlisted terminal failure codes without exposing provider text', async () => {
