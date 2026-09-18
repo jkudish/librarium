@@ -52,9 +52,7 @@ describe('public v2 documentation drift', () => {
     expect(README).toMatch(
       /\*\*34 built-in providers\*\* and \*\*41 implemented public\s+profiles\*\*/,
     );
-    expect(SKILL).toContain(
-      '34 built-in providers and 41 implemented profiles',
-    );
+    expect(SKILL).toContain('rather than assuming providers');
 
     for (const provider of BUILTIN_PROVIDER_CATALOG) {
       expect(README).toContain(`${provider.provider_id}/`);
@@ -227,26 +225,37 @@ describe('public v2 documentation drift', () => {
     expect(documentedRoster(SKILL)).toEqual(durableProfiles);
   });
 
-  it('keeps both agent selection approaches open with scope-bounded escalation', () => {
+  it('maps capability types to question intent from the live catalog', () => {
+    expect(SKILL).toContain('one provider can offer several profiles');
+    expect(SKILL).toContain('never assume citations or live web access');
+    expect(SKILL).toContain('ungrounded chat-style profiles exist');
+    expect(SKILL).toContain('| search | source lists for discovery |');
+    expect(SKILL).toContain('| grounded answer | short answers backed by');
+    expect(SKILL).toContain('| research report | deeper, multi-source');
+    expect(SKILL).toContain(
+      '| surface (visibility) | observations of how AI answer engines',
+    );
+    expect(SKILL).toContain('not independent factual confirmations');
+  });
+
+  it('keeps the skill a host-neutral operating guide with scope-bounded escalation', () => {
     expect(SKILL).toContain('**Quick-then-deepen**');
     expect(SKILL).toContain('**Upfront planning**');
-    expect(SKILL).toContain('do not funnel every request through');
+    expect(SKILL).toContain('Match the request, not a fixed ladder');
     expect(SKILL).toContain('only within scope and budget');
-    expect(SKILL).toContain('beyond that');
     expect(SKILL).toContain('authorization is a new paid decision');
-    expect(SKILL).toContain('infer spending authority from thin evidence');
-    expect(SKILL).toContain('there is no MCP `plan` tool');
-    expect(SKILL).toContain(
-      'hard constraints. Never drop, silently substitute',
-    );
-    expect(SKILL).toContain('MCP requests carry no per-call budget');
-    expect(SKILL).toContain(
-      'Discovery output alone never establishes affordability',
-    );
-    expect(SKILL).toContain(
-      'caps admission and reported spend, not absolute provider billing',
-    );
+    expect(SKILL).toContain('spending authority from thin');
+    expect(SKILL).toContain('MCP has no `plan` tool');
+    expect(SKILL).toContain('per-call budget or fallback input');
+    expect(SKILL).toContain('override groups');
+    expect(SKILL).toContain('establishes affordability');
+    expect(SKILL).toContain('not absolute provider billing');
     expect(SKILL).toContain('complements research passes');
+    expect(SKILL).toContain('names your host actually');
+    expect(SKILL).toContain('install or version check is needed');
+    expect(SKILL).toContain('do not re-ask for already-authorized scope');
+    expect(SKILL).toContain('Collection and synthesis are separate');
+    expect(SKILL).not.toContain('34 built-in providers');
     expect(SKILL).not.toContain('Never auto-escalate');
     expect(SKILL).not.toContain('always start with `quick`');
   });
