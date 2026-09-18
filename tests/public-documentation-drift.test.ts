@@ -227,6 +227,21 @@ describe('public v2 documentation drift', () => {
     expect(documentedRoster(SKILL)).toEqual(durableProfiles);
   });
 
+  it('keeps both agent selection approaches open with authorization-gated escalation', () => {
+    expect(SKILL).toContain('**Quick-then-deepen**');
+    expect(SKILL).toContain('**Upfront planning**');
+    expect(SKILL).toContain('do not funnel every request through');
+    expect(SKILL).toContain("needs the user's explicit go-ahead");
+    expect(SKILL).toContain('Never auto-escalate');
+    expect(SKILL).toContain('there is no MCP `plan` tool');
+    expect(SKILL).toContain(
+      'hard constraints. Never drop, silently substitute',
+    );
+    expect(SKILL).toContain('complements research passes');
+    expect(SKILL).not.toContain('always start with `quick`');
+    expect(SKILL).not.toContain('start with quick for every');
+  });
+
   it('keeps the execution, provenance, privacy, and paid-validation boundaries explicit', () => {
     for (const text of [README, SKILL, PROVIDER_GUIDE]) {
       expect(text).toContain('background/durable');

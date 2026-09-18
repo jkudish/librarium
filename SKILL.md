@@ -1,6 +1,6 @@
 ---
 name: librarium
-description: "Runs evidence-aware, multi-provider research with the Librarium v2 CLI. Use for deep research, competitive research, answer-engine visibility checks, or questions needing grounded multi-source coverage."
+description: "Runs evidence-aware, multi-provider research with the Librarium v2 CLI. Use for quick source discovery, deep research, competitive research, answer-engine visibility checks, or questions needing grounded multi-source coverage."
 compatibility: Requires the Librarium 2.x CLI. npm installs require Node.js 22.12 or newer; standalone binaries include their runtime.
 ---
 
@@ -61,6 +61,28 @@ final-price certainty, or an executable/replayable plan. Later-stage admission
 depends on earlier attempts. Use the same options when executing.
 
 ## Select and execute deliberately
+
+Match intent to workflow before selecting; do not funnel every request through
+a quick-first default. Both approaches are first-class, chosen from the question
+and its cost/deadline context:
+
+- **Quick-then-deepen** fits bounded questions with uncertain scope: run
+  `quick`, read the saved evidence, and if coverage is thin, propose escalation
+  (a wider group or added exact research-report selectors) as a new paid
+  decision that needs the user's explicit go-ahead. Never auto-escalate and
+  never treat thin coverage as authorization for more calls.
+- **Upfront planning** fits research reports, comparisons, and multi-angle
+  asks: discover capabilities offline first — with the CLI, `librarium ls --json`
+  and `librarium plan "<query>" --json`; over MCP, `list_providers` with
+  `{"detail":"profiles"}` plus `list_groups` (there is no MCP `plan` tool) —
+  agree the matrix and budget with the user, then execute once with those same
+  options.
+
+The user's explicit choices always win: named providers, budgets, modes, and
+limits are hard constraints. Never drop, silently substitute, or exceed them.
+`visibility` answers a different question — how AI answer engines describe a
+brand or product — and complements research passes; do not fold its correlated
+surfaces into research confidence.
 
 With no selector, new CLI/MCP requests use `quick`; the default mode is `sync`.
 Explicit providers override group. Explicit mode/limits override project config,
