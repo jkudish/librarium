@@ -1,0 +1,229 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  autoformat:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Auto-fix formatting
+        run: npx biome check --write src/ tests/ benchmark/
+
+      - name: Commit formatting fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "style: auto-fix formatting [skip ci]"
+          git push
+
+  test:
+    runs-on: ${{ matrix.os }}
+    needs: [autoformat]
+    if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux — full suite
+          - os: ubuntu-latest
+            node-version: 22.12.0
+            run-integration: true
+            run-packed: true
+          - os: ubuntu-latest
+            node-version: 24
+            run-integration: true
+            run-packed: true
+          - os: ubuntu-latest
+            node-version: 26
+            run-integration: true
+            run-packed: true
+          # Windows — unit tests only
+          - os: windows-latest
+            node-version: 22.12.0
+            run-integration: false
+            run-packed: false
+          - os: windows-latest
+            node-version: 24
+            run-integration: false
+            run-packed: false
+          - os: windows-latest
+            node-version: 26
+            run-integration: false
+            run-packed: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Declaration consumer fixtures
+        if: runner.os == 'Linux' && matrix.node-version == 24
+        run: npm run test:declarations
+
+      - name: Contract snapshot drift
+        if: runner.os == 'Linux' && matrix.node-version == 24
+        run: |
+          npm run contracts:generate
+          git diff --exit-code -- contracts/v1
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Native Windows owner-only ACL tests
+        if: runner.os == 'Windows'
+        run: npx vitest run tests/node-config-v2.test.ts -t Windows --reporter=verbose
+
+      - name: Offline benchmark fixture replay
+        if: matrix.run-integration
+        run: npm run benchmark:ci
+
+      - name: Workers compatibility tests
+        if: matrix.run-integration
+        run: npm run test:workers
+
+      - name: Integration tests
+        if: matrix.run-integration
+        run: npm run test:integration
+
+      - name: Packed consumer smoke test
+        if: matrix.run-packed
+        run: npm run test:packed
+
+  below-floor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [autoformat]
+    if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup build Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build package
+        run: npm run build
+
+      - name: Setup below-floor Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.11.0
+
+      - name: Reject packed install below the runtime floor
+        run: npm run test:engine-floor
+
+  sea:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: [autoformat]
+    if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and smoke-test Linux SEA
+        run: npm run test:sea
+
+  pty:
+    # Interactive PTY smoke tests (live table, wizard, browse/pager, Ctrl+C).
+    # Runs the real terminal flows against the built CLI on POSIX runners only;
+    # the suite self-skips on Windows. Single Node version (24) keeps the matrix
+    # small — these exercise terminal behaviour, not Node version compatibility.
+    runs-on: ${{ matrix.os }}
+    needs: [autoformat]
+    if: always() && (needs.autoformat.result == 'success' || needs.autoformat.result == 'skipped')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: PTY smoke tests
+        # `test:pty` builds the CLI first, then runs the PTY suite.
+        # NOTE: if these prove flaky on CI runners (PTY timing under load),
+        # set `continue-on-error: true` here so a flake never blocks merges
+        # while still surfacing in the checks list. Kept required for now —
+        # the suite was flake-free across local runs.
+        run: npm run test:pty

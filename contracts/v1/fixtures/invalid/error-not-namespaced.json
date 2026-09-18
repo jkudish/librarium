@@ -1,0 +1,14 @@
+{
+  "generator": "jkudish/librarium",
+  "generator_version": "1.4.1",
+  "request_id": "request-terminal-1",
+  "status": "failed",
+  "completed_at": "2026-08-09T12:00:02Z",
+  "results": [],
+  "errors": [
+    {
+      "code": "failed",
+      "message": "No"
+    }
+  ]
+}

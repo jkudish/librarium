@@ -1,0 +1,41 @@
+{
+  "generator": "jkudish/librarium",
+  "generator_version": "1.4.1",
+  "request_id": "request-terminal-1",
+  "status": "succeeded",
+  "completed_at": "2026-08-09T12:00:02Z",
+  "results": [
+    {
+      "id": "result-1",
+      "content_format": "markdown",
+      "content": "# Result",
+      "requested_profile": "deep-research",
+      "provider": "example-provider",
+      "profile": "deep-research-v2",
+      "provenance": {
+        "result_kind": "grounded_answer",
+        "retrieval_methods": [
+          "research_agent"
+        ],
+        "corpora": [
+          "web"
+        ],
+        "observed_at": "2026-08-09T12:00:00Z"
+      },
+      "citations": [
+        {
+          "id": "citation-1",
+          "derivation": "provider_reported",
+          "source": {
+            "kind": "web_page",
+            "url": "https://example.com/research",
+            "title": "Research"
+          }
+        }
+      ],
+      "completed_at": "2026-08-09T12:00:01Z",
+      "result_id": "old"
+    }
+  ],
+  "errors": []
+}

@@ -1,0 +1,20 @@
+{
+  "defaults": {
+    "mode": "async",
+    "asyncTimeout": 1800,
+    "asyncPollInterval": 15
+  },
+  "providers": {
+    "openai-research": {
+      "apiKey": "$OPENAI_API_KEY",
+      "enabled": true
+    },
+    "perplexity-search": {
+      "apiKey": "$PERPLEXITY_API_KEY",
+      "enabled": true
+    }
+  },
+  "groups": {
+    "durable-plus-inline": ["openai-research", "perplexity-search"]
+  }
+}

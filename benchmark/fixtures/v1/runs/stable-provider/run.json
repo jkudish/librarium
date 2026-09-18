@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "timestamp": 1784203200,
+  "slug": "capital-australia",
+  "query": "What is the capital city of Australia?",
+  "mode": "sync",
+  "outputDir": ".",
+  "providers": [
+    {
+      "id": "brave-search",
+      "tier": "raw-search",
+      "status": "success",
+      "durationMs": 420,
+      "wordCount": 16,
+      "citationCount": 1,
+      "outputFile": "brave-search.md",
+      "metaFile": "brave-search.meta.json",
+      "metering": {
+        "kind": "request_priced",
+        "pricingVersion": "2026-06",
+        "estimate": {
+          "estimatedCostUsd": 0.005,
+          "billableUnits": 1,
+          "unit": "request",
+          "pricingVersion": "2026-06",
+          "costConfidence": "estimated"
+        }
+      }
+    }
+  ],
+  "sources": { "total": 1, "unique": 1, "file": "sources.json" },
+  "asyncTasks": [],
+  "exitCode": 0
+}

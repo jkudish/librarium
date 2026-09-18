@@ -1,0 +1,467 @@
+{
+  "schemaVersion": 1,
+  "track": "live",
+  "version": "2026-07-16.v2",
+  "curatedAt": "2026-07-16",
+  "questions": [
+    {
+      "id": "live-node-current",
+      "question": "What is the latest Current Node.js release?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Node.js 26.5.0"],
+        "aliases": ["v26.5.0", "26.5.0"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "Node.js 26.5.0 is the latest Current release",
+            "aliases": ["latest release is v26.5.0"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://nodejs.org/en/download/archive/v26.5.0",
+            "title": "Node.js v26.5.0",
+            "publisher": "Node.js",
+            "evidence": "v26.5.0 is listed as the latest release."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 7,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-23",
+        "validator": "maintainer",
+        "instructions": "Check the Node.js download archive and releases page for a newer Current version."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-node-lts",
+      "question": "What is the latest Node.js LTS release and its codename?",
+      "category": "freshness-sensitive",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["Node.js 24.18.0, Krypton"],
+        "aliases": ["v24.18.0 Krypton", "24.18.0 (LTS) Krypton"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "Node.js 24.18.0 is the latest LTS release",
+            "aliases": ["latest LTS is v24.18.0"]
+          },
+          {
+            "id": "codename",
+            "text": "the codename is Krypton",
+            "aliases": ["Krypton LTS"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://nodejs.org/en/blog/release/v24.18.0",
+            "title": "Node.js 24.18.0 (LTS)",
+            "publisher": "Node.js",
+            "evidence": "Version 24.18.0 'Krypton' is an LTS release dated 2026-06-23."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 7,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-23",
+        "validator": "maintainer",
+        "instructions": "Check the Node.js releases page for the latest LTS patch and codename."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-node-npm-bundle",
+      "question": "Which npm version ships with Node.js 26.5.0?",
+      "category": "freshness-sensitive",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["npm 11.17.0"],
+        "aliases": ["v11.17.0", "11.17.0"],
+        "requiredFacts": [
+          {
+            "id": "npm",
+            "text": "Node.js 26.5.0 includes npm 11.17.0",
+            "aliases": ["npm version is 11.17.0"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://nodejs.org/en/download/archive/v26.5.0",
+            "title": "Node.js v26.5.0 archive",
+            "publisher": "Node.js",
+            "evidence": "The archive metadata lists npm version v11.17.0."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 7,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-23",
+        "validator": "maintainer",
+        "instructions": "First revalidate the latest Current Node.js release, then read its archive metadata for npm."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-python",
+      "question": "What is the latest production Python 3 release?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Python 3.14.6"],
+        "aliases": ["3.14.6"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "Python 3.14.6 is the latest production release",
+            "aliases": ["latest Python is 3.14.6"]
+          },
+          {
+            "id": "date",
+            "text": "it was released on 10 June 2026",
+            "aliases": ["June 10, 2026"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.python.org/downloads/release/python-3146/",
+            "title": "Python 3.14.6",
+            "publisher": "Python Software Foundation",
+            "evidence": "Python 3.14.6 was released on June 10, 2026."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Check python.org downloads and exclude prereleases."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-go",
+      "question": "What is the latest stable release in the newest Go release line?",
+      "category": "freshness-sensitive",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["Go 1.26.5"],
+        "aliases": ["go1.26.5", "1.26.5"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "Go 1.26.5 is the latest stable release in the Go 1.26 line",
+            "aliases": ["latest Go 1.26 release is 1.26.5"]
+          },
+          {
+            "id": "date",
+            "text": "Go 1.26.5 was released on 7 July 2026",
+            "aliases": ["July 7, 2026"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://go.dev/doc/devel/release",
+            "title": "Go Release History",
+            "publisher": "Go",
+            "evidence": "go1.26.5 was released 2026-07-07."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Check Go release history for a newer patch in the newest release line."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-rust",
+      "question": "What is the latest stable Rust release?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Rust 1.97.0"],
+        "aliases": ["1.97.0"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "Rust 1.97.0 is the latest stable release",
+            "aliases": ["latest Rust is 1.97.0"]
+          },
+          {
+            "id": "date",
+            "text": "Rust 1.97.0 was released on 9 July 2026",
+            "aliases": ["July 9, 2026"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://blog.rust-lang.org/releases/latest/",
+            "title": "Latest Rust release",
+            "publisher": "Rust",
+            "evidence": "The release announcements list Rust 1.97.0 on July 9, 2026."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Follow the official latest-release redirect and exclude beta or nightly builds."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-react",
+      "question": "What is the latest stable React release listed by the React documentation?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["React 19.2.7"],
+        "aliases": ["v19.2.7", "19.2.7"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "React 19.2.7 is the latest stable release",
+            "aliases": ["latest React is 19.2.7"]
+          },
+          {
+            "id": "month",
+            "text": "it was released in June 2026",
+            "aliases": ["June 2026 release"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://react.dev/versions",
+            "title": "React Versions",
+            "publisher": "React",
+            "evidence": "The React 19 release list shows v19.2.7 in June 2026."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Check React's versions page and GitHub releases for a newer stable patch."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-ubuntu-lts",
+      "question": "What is the latest Ubuntu LTS release and codename?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["Ubuntu 26.04 LTS, Resolute Raccoon"],
+        "aliases": ["26.04 LTS Resolute Raccoon"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "Ubuntu 26.04 is the latest LTS release",
+            "aliases": ["latest Ubuntu LTS is 26.04"]
+          },
+          {
+            "id": "codename",
+            "text": "its codename is Resolute Raccoon",
+            "aliases": ["Resolute Raccoon"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://documentation.ubuntu.com/release-notes/26.04/",
+            "title": "Ubuntu 26.04 LTS release notes",
+            "publisher": "Canonical",
+            "evidence": "Ubuntu 26.04 LTS is named Resolute Raccoon and was released 23 April 2026."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 30,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-08-15",
+        "validator": "maintainer",
+        "instructions": "Check Canonical's supported releases list for the latest LTS."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-typescript",
+      "question": "What is the latest stable TypeScript major release?",
+      "category": "freshness-sensitive",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["TypeScript 6.0"],
+        "aliases": ["TS 6.0", "6.0"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "TypeScript 6.0 is the latest stable major release",
+            "aliases": ["latest TypeScript is 6.0"]
+          },
+          {
+            "id": "transition",
+            "text": "TypeScript 6.0 is a transition release preparing for TypeScript 7.0",
+            "aliases": ["transition to the native TypeScript 7.0 port"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-6-0.html",
+            "title": "TypeScript 6.0",
+            "publisher": "Microsoft",
+            "evidence": "TypeScript 6.0 is a transition release that prepares for TypeScript 7.0."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Check the TypeScript release notes and npm stable tag; exclude native previews."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-ecmascript-edition",
+      "question": "What is the current published edition of ECMA-262?",
+      "category": "freshness-sensitive",
+      "difficulty": "medium",
+      "expected": {
+        "answers": ["ECMAScript 2026, 17th edition"],
+        "aliases": ["ECMA-262 17th edition", "17th edition, June 2026"],
+        "requiredFacts": [
+          {
+            "id": "edition",
+            "text": "the current ECMA-262 is the 17th edition",
+            "aliases": ["ECMA-262 17th edition"]
+          },
+          {
+            "id": "language",
+            "text": "it defines ECMAScript 2026",
+            "aliases": ["ECMAScript 2026 language specification"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://ecma-international.org/publications-and-standards/standards/ecma-262/",
+            "title": "ECMA-262",
+            "publisher": "Ecma International",
+            "evidence": "ECMAScript 2026 language specification, 17th edition, June 2026."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 90,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-10-14",
+        "validator": "maintainer",
+        "instructions": "Check Ecma International's ECMA-262 publication page for a newer edition."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-setup-node",
+      "question": "What is the latest actions/setup-node release?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["actions/setup-node v6.4.0"],
+        "aliases": ["v6.4.0", "6.4.0"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "actions/setup-node v6.4.0 is the latest release",
+            "aliases": ["latest setup-node is 6.4.0"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://github.com/actions/setup-node/releases/tag/v6.4.0",
+            "title": "actions/setup-node v6.4.0",
+            "publisher": "GitHub",
+            "evidence": "The official releases page marks v6.4.0 as Latest."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Check the official actions/setup-node releases page and ignore prereleases."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    },
+    {
+      "id": "live-checkout-action",
+      "question": "What is the latest actions/checkout release?",
+      "category": "freshness-sensitive",
+      "difficulty": "easy",
+      "expected": {
+        "answers": ["actions/checkout v6.0.2"],
+        "aliases": ["v6.0.2", "6.0.2"],
+        "requiredFacts": [
+          {
+            "id": "version",
+            "text": "actions/checkout v6.0.2 is the latest release",
+            "aliases": ["latest checkout action is 6.0.2"]
+          },
+          {
+            "id": "security",
+            "text": "checkout v6 stores persisted credentials under RUNNER_TEMP",
+            "aliases": ["persisted credentials moved out of .git/config"]
+          }
+        ],
+        "requiredSources": [
+          {
+            "url": "https://github.com/actions/checkout/releases/tag/v6.0.2",
+            "title": "actions/checkout v6.0.2",
+            "publisher": "GitHub",
+            "evidence": "The official releases page marks v6.0.2 as Latest."
+          },
+          {
+            "url": "https://github.com/actions/checkout",
+            "title": "Checkout v6",
+            "publisher": "GitHub",
+            "evidence": "Persisted credentials are stored in a separate file under RUNNER_TEMP."
+          }
+        ]
+      },
+      "revalidation": {
+        "requiredBeforePublishedRun": true,
+        "cadenceDays": 14,
+        "lastValidatedAt": "2026-07-16",
+        "validUntil": "2026-07-30",
+        "validator": "maintainer",
+        "instructions": "Check the official actions/checkout releases page and README for a newer stable patch."
+      },
+      "budgets": { "maxLatencyMs": 60000, "maxCostUsd": 0.1 }
+    }
+  ]
+}

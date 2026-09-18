@@ -1,0 +1,71 @@
+{
+  "exportSpecifiers": [
+    {
+      "specifier": "librarium",
+      "retainedSemantic": "The package-level library import target remains available; v1 CLI side effects are not compatibility behavior and the v2 root is side-effect-free."
+    },
+    {
+      "specifier": "librarium/core",
+      "retainedSemantic": "The fetch-only, Worker-safe import boundary remains available without Node filesystem or process requirements."
+    },
+    {
+      "specifier": "librarium/node",
+      "retainedSemantic": "The Node-only filesystem, durable execution, credentials, and trusted custom-provider boundary remains explicit."
+    }
+  ],
+  "cli": {
+    "jsonSemantics": [
+      "Machine-readable commands emit parseable JSON rather than presentation text.",
+      "run --json writes one manifest document to stdout and routes diagnostics to stderr."
+    ],
+    "exitCodes": {
+      "completed": 0,
+      "partial": 1,
+      "failed": 2,
+      "cancelled": 130
+    },
+    "pendingManifestExitCode": null
+  },
+  "library": {
+    "resultSemantics": [
+      "provider identity and semantic outcome",
+      "answer or result text",
+      "citations and source URLs",
+      "duration and provider-reported usage when available",
+      "fallback replacement relationship",
+      "durable pending handle when work is not terminal"
+    ]
+  },
+  "mcp": {
+    "resultSemantics": [
+      "query and execution mode",
+      "provider outcome tallies",
+      "bounded provider summaries",
+      "bounded deduplicated sources",
+      "pending durable task identifiers",
+      "safe tool errors"
+    ],
+    "providerContent": "Full provider content is retrieved separately, bounded, delimited, and treated as untrusted evidence rather than instructions."
+  },
+  "customProviderProtocol": {
+    "protocolVersion": 1,
+    "trustedProviderIdsRequired": true,
+    "operations": ["describe", "execute", "submit", "poll", "retrieve", "test"],
+    "requestEnvelope": [
+      "protocolVersion",
+      "operation",
+      "providerId",
+      "query",
+      "handle",
+      "options",
+      "providerConfig",
+      "sourceOptions"
+    ],
+    "responseEnvelopes": [
+      { "ok": true, "data": "<operation payload>" },
+      { "ok": false, "error": "<safe message>" }
+    ],
+    "backgroundRequires": ["submit", "poll", "retrieve"],
+    "inlineForbids": ["submit", "poll", "retrieve"]
+  }
+}

@@ -1,0 +1,438 @@
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { GeminiDeepProvider } from '../../src/adapters/gemini-deep.js';
+import type { AsyncTaskHandle } from '../../src/types.js';
+
+function jsonResponse(status: number, data: unknown): Response {
+  return {
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    headers: new Headers({}),
+    text: async () => JSON.stringify(data),
+  } as Response;
+}
+
+function makeProvider(): GeminiDeepProvider {
+  const provider = new GeminiDeepProvider();
+  provider.configure({
+    credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+  });
+  return provider;
+}
+
+function makeHandle(taskId = 'int-123'): AsyncTaskHandle {
+  return {
+    provider: 'gemini-deep',
+    taskId,
+    query: 'history of TPUs',
+    submittedAt: Date.now(),
+    status: 'pending',
+  };
+}
+
+describe('GeminiDeepProvider Interactions API', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterAll(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('submits to /v1beta/interactions with the deep-research envelope and returns a pending handle', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 'int-123',
+        status: 'in_progress',
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const handle = await makeProvider().submit('history of TPUs', {
+      timeout: 1800,
+    });
+
+    expect(handle.taskId).toBe('int-123');
+    expect(handle.status).toBe('running');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/interactions',
+    );
+    expect(init.method).toBe('POST');
+
+    const headers = init.headers as Record<string, string>;
+    expect(headers['x-goog-api-key']).toBe('gemini-key');
+    expect(headers['Api-Revision']).toBe('2026-05-20');
+
+    const body = JSON.parse(init.body as string) as {
+      agent: string;
+      input: string;
+      background: boolean;
+      agent_config: {
+        type: string;
+        thinking_summaries: string;
+        visualization: string;
+      };
+      tools: Array<{ type: string }>;
+    };
+    expect(body.agent).toBe('deep-research-preview-04-2026');
+    expect(body.input).toBe('history of TPUs');
+    expect(body.background).toBe(true);
+    expect(body.agent_config).toEqual({
+      type: 'deep-research',
+      thinking_summaries: 'none',
+      visualization: 'off',
+    });
+    expect(body.tools).toEqual([{ type: 'google_search' }]);
+  });
+
+  it('submits the -max agent when overridden via model config', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-9', status: 'in_progress' }),
+      );
+    globalThis.fetch = fetchMock;
+
+    const provider = new GeminiDeepProvider({
+      model: 'deep-research-max-preview-04-2026',
+    });
+    provider.configure({
+      credentials: { env: { GEMINI_API_KEY: 'gemini-key' } },
+    });
+    await provider.submit('history of TPUs', { timeout: 1800 });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { agent: string };
+    expect(body.agent).toBe('deep-research-max-preview-04-2026');
+  });
+
+  it.each([
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'keeps HTTP %s submission diagnostics bounded without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'raw-provider-secret';
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse(status, {
+          error: { message: `Bearer ${secret}`, api_key: secret },
+        }),
+      );
+      globalThis.fetch = fetchMock;
+
+      const submission = makeProvider().submit('history of TPUs', {
+        timeout: 1800,
+      });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Gemini submission failed before a valid interaction handle was returned.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('keeps network and malformed accepted submissions ambiguous', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new TypeError('fetch failed with Bearer raw-provider-secret'),
+      );
+    globalThis.fetch = fetchMock;
+
+    await expect(
+      makeProvider().submit('history of TPUs', { timeout: 1800 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { status: 'in_progress' }));
+    const malformed = makeProvider().submit('history of TPUs', {
+      timeout: 1800,
+    });
+    await expect(malformed).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(malformed).rejects.not.toHaveProperty(
+      'failureDiagnostic.httpStatus',
+    );
+  });
+
+  it('preserves a valid id from a malformed accepted response', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { id: 'int-123' }));
+
+    await expect(
+      makeProvider().submit('history of TPUs', { timeout: 1800 }),
+    ).resolves.toMatchObject({
+      taskId: 'int-123',
+      status: 'pending',
+      providerStatus: 'invalid_response',
+    });
+  });
+
+  it('keeps reversible failed observations provisional', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-123', status: 'in_progress' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          id: 'int-123',
+          status: 'failed',
+          error: { message: 'agent overloaded' },
+        }),
+      );
+
+    const provider = makeProvider();
+    expect(await provider.poll(makeHandle())).toEqual({
+      status: 'running',
+      message: undefined,
+      rawStatus: 'in_progress',
+    });
+    expect(await provider.poll(makeHandle())).toEqual({
+      status: 'running',
+      message: 'Gemini reported provisional status: failed',
+      rawStatus: 'failed',
+    });
+
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[0]?.[0]).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/interactions/int-123',
+    );
+  });
+
+  it('accepts completion after a provisional failed observation', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          id: 'int-reversible',
+          status: 'failed',
+          error: { message: 'temporary agent failure' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-reversible', status: 'completed' }),
+      );
+
+    const provider = makeProvider();
+    const handle = makeHandle('int-reversible');
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'running',
+      rawStatus: 'failed',
+    });
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
+      rawStatus: 'completed',
+    });
+  });
+
+  it.each([
+    ['budget_exceeded', 'failed'],
+    ['cancelled', 'cancelled'],
+  ] as const)('keeps stable %s observations terminal', async (raw, status) => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-terminal', status: raw }),
+      );
+
+    await expect(
+      makeProvider().poll(makeHandle('int-terminal')),
+    ).resolves.toEqual({
+      status,
+      rawStatus: raw,
+      message: undefined,
+    });
+  });
+
+  it('throws on a transport-level poll failure so polling retries', async () => {
+    // A 4xx that is not 429 is returned without internal retry, exercising the
+    // non-200 throw path quickly (a 5xx would resolve only after the client's
+    // own backoff retries). Either way poll() throws so the caller retries.
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(502, { error: 'bad gateway' }));
+
+    await expect(makeProvider().poll(makeHandle())).rejects.toThrow(
+      'Poll returned HTTP 502',
+    );
+  });
+
+  it.each([401, 403, 404])(
+    'keeps accepted custody after HTTP %s and observes eventual completion',
+    async (status) => {
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(status, { error: 'unavailable' }))
+        .mockResolvedValueOnce(
+          jsonResponse(200, { id: 'int-123', status: 'completed' }),
+        );
+      const provider = makeProvider();
+      const handle = makeHandle();
+
+      await expect(provider.poll(handle)).rejects.toThrow(
+        `Poll returned HTTP ${status}`,
+      );
+      await expect(provider.poll(handle)).resolves.toMatchObject({
+        status: 'completed',
+        rawStatus: 'completed',
+      });
+    },
+  );
+
+  it('rejects malformed status observations without fabricating task failure', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { id: 'int-123' }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-123', status: 'completed' }),
+      );
+    const provider = makeProvider();
+    const handle = makeHandle();
+
+    await expect(provider.poll(handle)).rejects.toThrow(
+      'Gemini returned a malformed interaction status response',
+    );
+    await expect(provider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
+    });
+  });
+
+  it('retrieves a completed interaction with output_text, annotation citations, and usage', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 'int-123',
+        status: 'completed',
+        agent: 'deep-research-preview-04-2026',
+        created: '2026-05-20T10:00:00.000Z',
+        updated: '2026-05-20T10:02:00.000Z',
+        output_text: 'Deep research report on TPUs.',
+        steps: [
+          {
+            type: 'model_output',
+            content: [
+              {
+                type: 'text',
+                text: 'Deep research report on TPUs.',
+                annotations: [
+                  {
+                    type: 'url_citation',
+                    url: 'https://example.com/tpu',
+                    title: 'TPU history',
+                    start_index: 0,
+                    end_index: 10,
+                  },
+                  {
+                    type: 'url_citation',
+                    url: 'https://example.com/tpu',
+                    title: 'TPU history (dupe)',
+                  },
+                  {
+                    type: 'place_citation',
+                    url: 'https://maps.example.com/dc',
+                    name: 'Data center',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        usage: {
+          total_input_tokens: 120,
+          total_output_tokens: 3400,
+          total_tokens: 3520,
+        },
+      }),
+    );
+
+    const result = await makeProvider().retrieve(makeHandle());
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe('Deep research report on TPUs.');
+    // Duplicate URL dropped; place_citation mapped via its url.
+    expect(result.citations).toHaveLength(2);
+    expect(result.citations[0]).toEqual({
+      url: 'https://example.com/tpu',
+      title: 'TPU history',
+      provider: 'gemini-deep',
+    });
+    expect(result.citations[1]).toEqual({
+      url: 'https://maps.example.com/dc',
+      title: 'Data center',
+      provider: 'gemini-deep',
+    });
+    expect(result.durationMs).toBe(120_000);
+    expect(result.model).toBe('deep-research-preview-04-2026');
+    expect(result.tokenUsage).toEqual({ input: 120, output: 3400 });
+    expect(result.usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 3400,
+      totalTokens: 3520,
+      raw: {
+        total_input_tokens: 120,
+        total_output_tokens: 3400,
+        total_tokens: 3520,
+      },
+    });
+  });
+
+  it('falls back to steps text when output_text is absent', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        id: 'int-123',
+        status: 'completed',
+        steps: [
+          {
+            type: 'model_output',
+            content: [
+              { type: 'text', text: 'Part one.' },
+              { type: 'text', text: 'Part two.' },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const result = await makeProvider().retrieve(makeHandle());
+    expect(result.content).toBe('Part one.\nPart two.');
+  });
+
+  it('keeps provisional failures nonterminal during retrieval', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          id: 'int-123',
+          status: 'failed',
+          error: { message: 'research failed' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, { id: 'int-123', status: 'in_progress' }),
+      );
+
+    const provider = makeProvider();
+    const failed = await provider.retrieve(makeHandle());
+    expect(failed.error).toContain('not completed yet');
+    expect(failed.error).toContain('failed');
+
+    const pending = await provider.retrieve(makeHandle());
+    expect(pending.error).toContain('not completed yet');
+    expect(pending.error).toContain('in_progress');
+  });
+});

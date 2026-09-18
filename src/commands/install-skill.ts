@@ -1,0 +1,109 @@
+import { existsSync, lstatSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import type { Command } from 'commander';
+import { VERSION } from '../constants.js';
+import { safeWriteFile } from '../core/fs-utils.js';
+
+// Both CLI builds embed the root SKILL.md; no independently maintained copy.
+declare const __BUNDLED_SKILL__: string;
+
+const SKILL_DIR = join(homedir(), '.claude', 'skills', 'librarium');
+const SKILL_FILE = join(SKILL_DIR, 'SKILL.md');
+
+interface InstallSkillDependencies {
+  readonly skill_dir: string;
+  readonly skill_file: string;
+  readonly skill_content: string;
+  readonly write_atomically: (path: string, content: string) => void;
+}
+
+const defaultDependencies: InstallSkillDependencies = {
+  skill_dir: SKILL_DIR,
+  skill_file: SKILL_FILE,
+  skill_content:
+    typeof __BUNDLED_SKILL__ === 'undefined' ? '' : __BUNDLED_SKILL__,
+  write_atomically: safeWriteFile,
+};
+
+function isCompleteLibrariumSkill(content: string): boolean {
+  if (content.length < 200 || content.length > 256 * 1024) return false;
+  const normalized = content.replaceAll('\r\n', '\n');
+  const frontmatter = normalized.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!frontmatter?.[1].match(/^description:\s*\S.+$/m)) return false;
+  if (!/^name: librarium$/m.test(frontmatter[1])) return false;
+  const body = normalized.slice(frontmatter[0].length);
+  return /^# Librarium\b/m.test(body) && /\blibrarium run\b/.test(body);
+}
+
+function assertSafeDestination(skillDir: string, skillFile: string): void {
+  if (existsSync(skillDir)) {
+    const directoryStat = lstatSync(skillDir);
+    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
+      throw new Error(
+        'Skill destination directory is not a regular directory; refusing to replace it.',
+      );
+    }
+  }
+  if (existsSync(skillFile)) {
+    const fileStat = lstatSync(skillFile);
+    if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+      throw new Error(
+        'Skill destination is not a regular file; refusing to replace it.',
+      );
+    }
+  }
+}
+
+export function registerInstallSkillCommand(
+  program: Command,
+  dependencies: Partial<InstallSkillDependencies> = {},
+): void {
+  const resolved = { ...defaultDependencies, ...dependencies };
+  program
+    .command('install-skill')
+    .description('Install the Claude Code skill for AI-assisted research')
+    .option('--force', 'Overwrite existing skill file')
+    .option('--dry-run', 'Show what would happen without installing')
+    .action(async (opts) => {
+      try {
+        assertSafeDestination(resolved.skill_dir, resolved.skill_file);
+        if (existsSync(resolved.skill_file)) {
+          if (!opts.force) {
+            console.log(`Skill already installed at ${resolved.skill_file}`);
+            console.log('Use --force to overwrite.');
+            return;
+          }
+        }
+
+        if (opts.dryRun) {
+          console.log(
+            `Would install the bundled skill for version ${VERSION}.`,
+          );
+          console.log(`Would install to:\n  ${resolved.skill_file}`);
+          return;
+        }
+
+        const content = resolved.skill_content;
+        if (!isCompleteLibrariumSkill(content)) {
+          throw new Error(
+            `The bundled librarium skill for version ${VERSION} is missing or invalid. Reinstall the CLI from a complete build.`,
+          );
+        }
+
+        mkdirSync(resolved.skill_dir, { recursive: true });
+        assertSafeDestination(resolved.skill_dir, resolved.skill_file);
+        // safeWriteFile stages a complete sibling file and commits with rename,
+        // preserving an existing installation if staging or replacement fails.
+        resolved.write_atomically(resolved.skill_file, content);
+
+        console.log(`Skill installed to ${resolved.skill_file}`);
+        console.log(
+          '\nClaude Code will now use librarium for research queries.',
+        );
+      } catch (e) {
+        console.error(e instanceof Error ? e.message : String(e));
+        process.exitCode = 1;
+      }
+    });
+}

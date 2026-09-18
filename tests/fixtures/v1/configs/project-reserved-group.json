@@ -1,0 +1,19 @@
+{
+  "defaults": {
+    "mode": "sync",
+    "timeout": 45
+  },
+  "providers": {
+    "perplexity-search": {
+      "apiKey": "$PERPLEXITY_API_KEY",
+      "enabled": true
+    },
+    "brave-search": {
+      "apiKey": "$BRAVE_API_KEY",
+      "enabled": true
+    }
+  },
+  "groups": {
+    "quick": ["perplexity-search", "brave-search"]
+  }
+}

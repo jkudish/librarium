@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.tgz
+.DS_Store
+agents/
+.agents/*
+!.agents/skills/
+!.agents/setup
+!.agents/resume
+.amp/portals/*
+benchmark/results/

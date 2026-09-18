@@ -1,0 +1,19 @@
+{
+  "provider": "perplexity-search",
+  "transport": "json",
+  "response": {
+    "id": "search-normalized-1",
+    "results": [
+      {
+        "url": "https://docs.example.test/pooling",
+        "title": "Connection pooling guide",
+        "snippet": "A bounded source snippet describing connection pooling."
+      },
+      {
+        "url": "https://research.example.test/pooling",
+        "title": "Pooling behavior study",
+        "snippet": "A second ordered result with independent source metadata."
+      }
+    ]
+  }
+}

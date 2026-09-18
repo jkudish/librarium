@@ -1,0 +1,124 @@
+{
+  "name": "librarium",
+  "version": "2.0.0",
+  "description": "Evidence-aware multi-provider research with explicit profile provenance",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core-entry.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./node": {
+      "types": "./dist/node-entry.d.ts",
+      "import": "./dist/node.js"
+    }
+  },
+  "bin": {
+    "librarium": "dist/cli.js"
+  },
+  "sideEffects": [
+    "./dist/cli.js"
+  ],
+  "scripts": {
+    "build": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup",
+    "build:declarations": "node scripts/run-typescript.mjs --project tsconfig.node-declarations.json && node scripts/run-typescript.mjs --project tsconfig.declarations.json",
+    "build:sea": "node scripts/build-sea.mjs",
+    "contracts:generate": "node scripts/generate-contract-snapshot.mjs",
+    "benchmark": "node benchmark/cli.mjs",
+    "benchmark:performance": "node --experimental-strip-types benchmark/performance/cli.mjs",
+    "benchmark:validate": "node benchmark/validate.mjs",
+    "benchmark:ci": "node benchmark/ci.mjs",
+    "live-validation:fixture": "vitest run tests/node-live-validation.test.ts tests/node-live-validation-production.test.ts",
+    "pricing:snapshot": "node scripts/pricing-snapshot.mjs",
+    "rc:package": "node scripts/rc-artifacts.mjs package",
+    "rc:verify-package": "node scripts/rc-artifacts.mjs verify-package",
+    "rc:assemble": "node scripts/rc-artifacts.mjs assemble",
+    "rc:verify": "node scripts/rc-artifacts.mjs verify",
+    "rc:workflow": "node scripts/rc-workflow.mjs",
+    "rc:distribution-proof": "node scripts/rc-distribution-proof.mjs",
+    "release:promotion": "node scripts/release-promotion.mjs",
+    "dev": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup --watch",
+    "test": "vitest run",
+    "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
+    "test:packed": "npm run build && node scripts/verify-packed-consumer.mjs",
+    "test:engine-floor": "node scripts/verify-packed-consumer.mjs --expect-engine-rejection",
+    "test:declarations": "npm run build && node scripts/run-typescript.mjs --project tsconfig.declaration-fixtures.json && node scripts/run-typescript.mjs --project tsconfig.node-declaration-fixtures.json",
+    "test:sea": "npm run build:sea && node scripts/verify-sea.mjs",
+    "test:workers": "npm run build && vitest run --config vitest.workers.config.ts",
+    "test:pty": "npm run build && vitest run --config vitest.pty.config.ts",
+    "smoke:you-answer": "node scripts/you-answer-live-smoke.mjs",
+    "test:watch": "vitest",
+    "typecheck": "npm run verify:typescript && node scripts/run-typescript.mjs --noEmit --project tsconfig.json",
+    "verify:typescript": "node scripts/verify-typescript-toolchain.mjs",
+    "lint": "biome check src/ tests/ benchmark/",
+    "lint:fix": "biome check --write src/ tests/ benchmark/"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.7.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "commander": "^15.0.0",
+    "marked": "^18.0.9",
+    "ora": "^9.4.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@types/node": "^22.20.1",
+    "@typescript/typescript6": "6.0.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "esbuild": "^0.28.2",
+    "node-pty": "^1.1.0",
+    "postject": "^1.0.0-alpha.6",
+    "strip-ansi": "^7.2.0",
+    "tsup": "^8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "tsup": {
+      "esbuild": "0.28.2"
+    }
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "research",
+    "search",
+    "deep-research",
+    "multi-provider",
+    "evidence",
+    "provenance",
+    "mcp",
+    "perplexity",
+    "brave",
+    "exa",
+    "tavily",
+    "parallel",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Joey Kudish",
+  "homepage": "https://librarium.agentsy.build",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jkudish/librarium.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jkudish/librarium/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

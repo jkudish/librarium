@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "revision": 1,
+  "status": "completed",
+  "timestamp": 1700000000,
+  "completedAt": 1700000001000,
+  "slug": "completed-run",
+  "query": "normalized completed query",
+  "mode": "sync",
+  "outputDir": "/normalized/runs/completed-run",
+  "providers": [
+    {
+      "id": "perplexity-search",
+      "tier": "raw-search",
+      "status": "success",
+      "durationMs": 0,
+      "wordCount": 24,
+      "citationCount": 2,
+      "outputFile": "perplexity-search.md",
+      "metaFile": "perplexity-search.meta.json",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 20,
+        "totalTokens": 30
+      }
+    }
+  ],
+  "sources": {
+    "total": 2,
+    "unique": 2,
+    "file": "sources.json"
+  },
+  "exitCode": 0
+}

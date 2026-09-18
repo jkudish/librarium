@@ -1,0 +1,639 @@
+import type {
+  ClaimSupport,
+  DeduplicatedSource,
+  ProviderMetering,
+  ProviderReport,
+  ProviderUsage,
+  VerificationMetadata,
+  VerificationUsageSummary,
+} from '../types.js';
+import {
+  answerBody,
+  escapeHtml,
+  renderMarkdown,
+  safeUrl,
+} from './html-report-sanitization.js';
+import {
+  createHtmlReportViewModel,
+  type HtmlReportInput,
+  type HtmlReportViewModel,
+} from './html-report-view-model.js';
+import { formatDuration, usageLabel } from './run-format.js';
+
+export {
+  answerBody,
+  escapeHtml,
+  renderMarkdown,
+  safeUrl,
+} from './html-report-sanitization.js';
+export type { HtmlReportInput } from './html-report-view-model.js';
+export { createHtmlReportViewModel } from './html-report-view-model.js';
+
+/**
+ * Self-contained HTML report generator for a run directory.
+ *
+ * generateHtmlReport() is a pure function (manifest + file contents in,
+ * HTML string out) so it stays unit-testable; writeHtmlReport() is the
+ * filesystem wrapper used by `run --html`, `librarium html`, browse, and
+ * status --retrieve regeneration.
+ */
+
+function glyphFor(report: ProviderReport): { glyph: string; cls: string } {
+  switch (report.status) {
+    case 'success':
+      return { glyph: '&#10003;', cls: 'ok' }; // check mark
+    case 'async-pending':
+      return { glyph: '&#9711;', cls: 'pending' }; // large circle (clock-ish)
+    case 'skipped':
+      return { glyph: '-', cls: 'muted' };
+    default:
+      return { glyph: '&#10007;', cls: 'fail' }; // cross
+  }
+}
+
+function countLabel(report: ProviderReport): string {
+  if (report.status === 'async-pending') return 'submitted';
+  if (report.status === 'skipped') return 'skipped';
+  if (report.status === 'error') return report.error ? 'error' : 'error';
+  if (report.tier === 'llm' && report.citationCount === 0) return 'direct';
+  const noun = report.tier === 'raw-search' ? 'results' : 'sources';
+  return `${report.citationCount} ${noun}`;
+}
+
+function formatReportDate(timestampSeconds: number): string {
+  const date = new Date(timestampSeconds * 1000);
+  return date.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function talliesLine(reports: readonly Readonly<ProviderReport>[]): string {
+  const ok = reports.filter((p) => p.status === 'success').length;
+  const failed = reports.filter((p) => p.status === 'error').length;
+  const pending = reports.filter((p) => p.status === 'async-pending').length;
+  return `${ok} succeeded, ${failed} failed, ${pending} async pending`;
+}
+
+function flatError(error: string | undefined): string {
+  return (error ?? 'unknown error').replace(/\s+/g, ' ').trim();
+}
+
+function compactError(error: string | undefined, maxLength = 90): string {
+  const flat = flatError(error);
+  return flat.length > maxLength
+    ? `${flat.slice(0, maxLength - 1)}\u2026`
+    : flat;
+}
+
+/** One single-line tab row in the provider table (also the tab trigger). */
+function providerRow(
+  report: ProviderReport,
+  index: number,
+  selected: boolean,
+): string {
+  const { glyph, cls } = glyphFor(report);
+  const duration =
+    report.status === 'async-pending' || report.status === 'skipped'
+      ? ''
+      : formatDuration(report.durationMs);
+  const usage = usageLabel(report.usage);
+
+  let detail: string;
+  if (report.status === 'error') {
+    detail = `<span class="detail error-text" title="${escapeHtml(flatError(report.error))}">${escapeHtml(compactError(report.error))}</span>`;
+  } else {
+    const fallback = report.fallbackFor
+      ? ` &middot; fallback for ${escapeHtml(report.fallbackFor)}`
+      : '';
+    detail = `<span class="detail">${escapeHtml(countLabel(report))}${fallback}</span>`;
+  }
+
+  return `<button class="row" role="tab" id="tab-${index}" aria-controls="panel-${index}" aria-selected="${selected}" tabindex="${selected ? 0 : -1}">
+<span class="glyph ${cls}">${glyph}</span>
+<span class="pid">${escapeHtml(report.id)}</span>
+<span class="tier">${escapeHtml(report.tier)}</span>
+<span class="duration">${duration}</span>
+${detail}
+<span class="usage">${usage ? escapeHtml(usage) : ''}</span>
+</button>`;
+}
+
+/** Panel body for a provider tab. */
+function providerPanelBody(
+  report: ProviderReport,
+  content: string | undefined,
+): string {
+  if (report.status === 'async-pending') {
+    return '<p class="pending-note">Result not retrieved yet. Run <code>librarium status --wait</code> to poll and retrieve, then regenerate this report with <code>librarium html</code>.</p>';
+  }
+  if (report.status === 'skipped') {
+    return `<p class="pending-note">Provider skipped: ${escapeHtml(report.error ?? 'not enabled')}.</p>`;
+  }
+  if (report.status === 'error' && !content) {
+    return `<p class="error-note">${escapeHtml(report.error ?? 'unknown error')}</p>`;
+  }
+  if (content !== undefined) {
+    const errorBanner =
+      report.status === 'error'
+        ? `<p class="error-note">${escapeHtml(report.error ?? 'unknown error')}</p>`
+        : '';
+    return `${errorBanner}${renderMarkdown(content)}`;
+  }
+  return '<p class="pending-note">No output file found for this provider.</p>';
+}
+
+/**
+ * The "Answer" section that leads the report. Rendered with the same untrusted
+ * handling as provider panels (escaped raw HTML, safeUrl on links). The
+ * provider/model show dimly when recorded in run.json's answer metadata.
+ */
+function answerSection(answer: {
+  content: string;
+  provider?: string;
+  model?: string;
+}): string {
+  const body = answerBody(answer.content);
+  if (body.length === 0) return '';
+  const attribution =
+    answer.provider || answer.model
+      ? `<p class="answer-meta">synthesized by ${escapeHtml(
+          [answer.provider, answer.model].filter(Boolean).join(' / '),
+        )}</p>`
+      : '';
+  return `<section class="answer">
+<p class="eyebrow">answer</p>
+${attribution}
+<div class="answer-body">${renderMarkdown(body)}</div>
+</section>`;
+}
+
+function verificationStatusClass(status: ClaimSupport['status']): string {
+  return status === 'supported'
+    ? 'ok'
+    : status === 'conflicting'
+      ? 'conflict'
+      : 'muted';
+}
+
+function verificationUrls(urls: string[]): string {
+  if (urls.length === 0) return 'none';
+  return urls
+    .map((url) => {
+      const href = safeUrl(url);
+      return href === null
+        ? `<span class="unsafe-url">${escapeHtml(url)}</span>`
+        : `<a href="${escapeHtml(href)}" rel="noopener" target="_blank">${escapeHtml(url)}</a>`;
+    })
+    .join('<br>');
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function verificationDuration(durationMs: unknown): string {
+  return finiteNumber(durationMs) ? formatDuration(durationMs) : 'unknown';
+}
+
+function verificationCount(value: unknown): string {
+  return finiteNumber(value) ? String(Math.trunc(value)) : '0';
+}
+
+function verificationUsageDetail(usage: ProviderUsage | undefined): string {
+  if (!usage) return 'not reported';
+  const fields: string[] = [];
+  if (finiteNumber(usage.inputTokens))
+    fields.push(`input ${usage.inputTokens}`);
+  if (finiteNumber(usage.outputTokens))
+    fields.push(`output ${usage.outputTokens}`);
+  if (finiteNumber(usage.totalTokens))
+    fields.push(`total ${usage.totalTokens}`);
+  if (finiteNumber(usage.costUsd))
+    fields.push(`reported $${usage.costUsd.toFixed(6)}`);
+  return fields.length > 0 ? fields.join(', ') : 'not reported';
+}
+
+function verificationMeteringDetail(
+  metering: ProviderMetering | undefined,
+): string {
+  if (!metering) return 'unknown';
+  const fields = [`kind ${metering.kind}`];
+  const estimate = metering.estimate;
+  if (finiteNumber(estimate?.estimatedCostUsd)) {
+    fields.push(
+      `estimate $${estimate.estimatedCostUsd.toFixed(6)} (${estimate.costConfidence})`,
+    );
+  } else if (estimate) {
+    fields.push(`estimate unknown (${estimate.costConfidence})`);
+  } else {
+    fields.push('estimate unavailable');
+  }
+  if (finiteNumber(estimate?.billableUnits)) {
+    fields.push(`${estimate.billableUnits} ${estimate.unit ?? 'units'}`);
+  }
+  if (finiteNumber(metering.actual?.costUsd)) {
+    fields.push(
+      `actual $${metering.actual.costUsd.toFixed(6)} (${metering.actual.source})`,
+    );
+  }
+  return fields.join(', ');
+}
+
+function legacyUsageSummary(
+  verification: VerificationMetadata,
+  lane: 'provider' | 'llm',
+): VerificationUsageSummary {
+  const present =
+    lane === 'provider'
+      ? verification.usage.providerAttempts > 0
+      : verification.usage.llmCalls > 0;
+  return {
+    tokenCountsAreLowerBound: present,
+    reportedCostUsd:
+      lane === 'provider' ? verification.usage.reportedCostUsd : 0,
+    reportedCostIsLowerBound: present,
+    estimatedCostUsd:
+      lane === 'provider' ? verification.usage.estimatedCostUsd : 0,
+    estimatedCostIsLowerBound: present,
+  };
+}
+
+function summaryTokenDetail(summary: VerificationUsageSummary): string {
+  const fields: string[] = [];
+  if (finiteNumber(summary.inputTokens))
+    fields.push(`input ${summary.inputTokens}`);
+  if (finiteNumber(summary.outputTokens))
+    fields.push(`output ${summary.outputTokens}`);
+  if (finiteNumber(summary.totalTokens))
+    fields.push(`total ${summary.totalTokens}`);
+  if (fields.length === 0) return 'not reported';
+  return `${summary.tokenCountsAreLowerBound ? 'at least ' : ''}${fields.join(', ')}`;
+}
+
+function summaryCost(value: number, lowerBound: boolean): string {
+  return `${lowerBound ? 'at least ' : ''}$${finiteNumber(value) ? value.toFixed(6) : '0.000000'}`;
+}
+
+/** Human-readable companion to the full structured verification JSON/JSONL. */
+function verificationSection(verification: VerificationMetadata): string {
+  const rows = verification.matrix
+    .map((claim) => {
+      const urls = verificationUrls(claim.sourceUrls);
+      return `<tr><td>${escapeHtml(claim.claim)}</td><td><span class="verification-status ${verificationStatusClass(claim.status)}">${escapeHtml(claim.status)}</span></td><td>${urls}</td><td>${escapeHtml(claim.reason ?? '')}</td></tr>`;
+    })
+    .join('');
+  const reasons = verification.reasons.length
+    ? `<ul class="verification-reasons">${verification.reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>`
+    : '<p class="verification-reasons">No verification warnings recorded.</p>';
+  const providerUsage =
+    verification.usage.provider ?? legacyUsageSummary(verification, 'provider');
+  const llmUsage =
+    verification.usage.llm ?? legacyUsageSummary(verification, 'llm');
+  const successfulLlmCalls =
+    verification.usage.successfulLlmCalls ??
+    verification.llm.filter((call) => call.status === 'success').length;
+  const usageRows = [
+    {
+      lane: 'Provider follow-ups',
+      attempts: verification.usage.providerAttempts,
+      successful: verification.usage.successfulProviderAttempts,
+      summary: providerUsage,
+    },
+    {
+      lane: 'Verification LLM',
+      attempts: verification.usage.llmCalls,
+      successful: successfulLlmCalls,
+      summary: llmUsage,
+    },
+  ]
+    .map(
+      ({ lane, attempts, successful, summary }) =>
+        `<tr><td>${lane}</td><td>${verificationCount(attempts)}</td><td>${verificationCount(successful)}</td><td>${escapeHtml(summaryTokenDetail(summary))}</td><td>${escapeHtml(summaryCost(summary.reportedCostUsd, summary.reportedCostIsLowerBound))}</td><td>${escapeHtml(summaryCost(summary.estimatedCostUsd, summary.estimatedCostIsLowerBound))}</td></tr>`,
+    )
+    .join('');
+  const followUps = verification.followUps.length
+    ? verification.followUps
+        .map((followUp) => {
+          const attemptRows = followUp.attempts
+            .map(
+              (attempt) =>
+                `<tr><td>${escapeHtml(attempt.provider)}</td><td>${escapeHtml(attempt.tier)}</td><td>${escapeHtml(attempt.status)}</td><td>${escapeHtml(verificationDuration(attempt.durationMs))}</td><td>${escapeHtml(verificationUsageDetail(attempt.usage))}</td><td>${escapeHtml(verificationMeteringDetail(attempt.metering))}</td><td>${escapeHtml(attempt.error ?? '')}</td><td>${verificationUrls(attempt.sourceUrls ?? [])}</td></tr>`,
+            )
+            .join('');
+          return `<article class="verification-follow-up">
+<h4>Claim ${escapeHtml(followUp.claimId)}</h4>
+<p><strong>Query:</strong> ${escapeHtml(followUp.query)}</p>
+<p><strong>Collected source URLs:</strong><br>${verificationUrls(followUp.sourceUrls)}</p>
+<table><thead><tr><th>Provider</th><th>Tier</th><th>Status</th><th>Duration</th><th>Usage</th><th>Metering</th><th>Error</th><th>Source URLs</th></tr></thead><tbody>${attemptRows || '<tr><td colspan="8">No attempts recorded.</td></tr>'}</tbody></table>
+</article>`;
+        })
+        .join('')
+    : '<p class="verification-meta">No follow-up queries were dispatched.</p>';
+  const llmRows = verification.llm
+    .map(
+      (call) =>
+        `<tr><td>${escapeHtml(call.stage)}</td><td>${escapeHtml(call.provider)}</td><td>${escapeHtml(call.model)}</td><td>${escapeHtml(call.status ?? 'legacy')}</td><td>${escapeHtml(verificationDuration(call.durationMs))}</td><td>${escapeHtml(verificationUsageDetail(call.usage))}</td><td>${escapeHtml(verificationMeteringDetail(call.metering))}</td><td>${escapeHtml(call.error ?? '')}</td></tr>`,
+    )
+    .join('');
+  const totalReported = summaryCost(
+    verification.usage.reportedCostUsd,
+    verification.usage.reportedCostIsLowerBound ?? false,
+  );
+  const totalEstimated = summaryCost(
+    verification.usage.estimatedCostUsd,
+    verification.usage.estimatedCostIsLowerBound ?? false,
+  );
+  return `<section class="verification">
+<p class="eyebrow">claim verification</p>
+<p class="verification-meta">verification ${escapeHtml(verification.status)}: ${verificationCount(verification.usage.providerAttempts)} provider attempts (${verificationCount(verification.usage.successfulProviderAttempts)} successful), ${verificationCount(verification.usage.llmCalls)} LLM calls (${verificationCount(successfulLlmCalls)} successful); ${escapeHtml(totalReported)} reported total, ${escapeHtml(totalEstimated)} estimated total; revised: ${verification.revised ? 'yes' : 'no'}</p>
+${reasons}
+<h3>Verification-only usage</h3>
+<table><thead><tr><th>Lane</th><th>Attempts</th><th>Successful</th><th>Tokens</th><th>Reported cost</th><th>Estimated cost</th></tr></thead><tbody>${usageRows}</tbody></table>
+<h3>Claim-support matrix</h3>
+<table><thead><tr><th>Claim</th><th>Status</th><th>Independent evidence</th><th>Reason</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No material claims were selected.</td></tr>'}</tbody></table>
+<h3>Follow-up queries and attempts</h3>
+${followUps}
+<h3>Verification LLM calls</h3>
+<table><thead><tr><th>Stage</th><th>Provider</th><th>Model</th><th>Status</th><th>Duration</th><th>Usage</th><th>Metering</th><th>Error</th></tr></thead><tbody>${llmRows || '<tr><td colspan="8">No verification LLM calls recorded.</td></tr>'}</tbody></table>
+</section>`;
+}
+
+function sourcesSection(
+  sources: readonly Readonly<DeduplicatedSource>[],
+): string {
+  if (sources.length === 0) {
+    return '<p class="pending-note">No sources recorded.</p>';
+  }
+  const items = sources
+    .map((source) => {
+      const label = source.title?.trim() || source.url;
+      const cited = source.providers.length
+        ? `<span class="cited">${escapeHtml(source.providers.join(', '))}</span>`
+        : '';
+      const href = safeUrl(source.url);
+      if (href === null) {
+        return `<li><span>${escapeHtml(label)}</span> ${cited}</li>`;
+      }
+      return `<li><a href="${escapeHtml(href)}" rel="noopener" target="_blank">${escapeHtml(label)}</a> ${cited}</li>`;
+    })
+    .join('\n');
+  return `<ol class="sources">\n${items}\n</ol>`;
+}
+
+const STYLE = `
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: #0a0a0a;
+  font-family: 'Geist', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+}
+code, pre, .mono, .pid, .tier, .duration, .detail, .wordmark, .eyebrow, .meta, .cited, .usage {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1.25rem 2rem;
+  border-bottom: 1px solid rgba(10, 10, 10, 0.1);
+}
+.wordmark { font-weight: 600; letter-spacing: -0.02em; }
+header .meta { color: #525252; font-size: 0.8rem; }
+main { max-width: 940px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+h1 {
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  margin: 0.35rem 0 0.75rem;
+}
+h2, h3, h4 { font-weight: 600; letter-spacing: -0.02em; }
+.eyebrow {
+  color: #d97706;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 0.25rem;
+}
+section { margin-top: 3rem; }
+.meta { color: #525252; font-size: 0.85rem; }
+a { color: #b45309; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.tabs {
+  border: 1px solid rgba(10, 10, 10, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.tabs .row {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(11rem, max-content) 8.5rem 4.5rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  padding: 0.6rem 1rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(10, 10, 10, 0.08);
+  font: inherit;
+  font-size: 0.85rem;
+  color: #525252;
+  cursor: pointer;
+}
+.tabs .row:last-child { border-bottom: 0; }
+.tabs .row[aria-selected="true"] { background: rgba(10, 10, 10, 0.04); color: #0a0a0a; }
+.tabs .row > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.glyph.ok { color: #16a34a; }
+.glyph.fail { color: #dc2626; }
+.glyph.pending { color: #d97706; }
+.glyph.muted, .tier, .duration { color: #525252; }
+.detail, .cited, .usage { color: #525252; font-size: 0.8rem; }
+.detail.error-text { color: #dc2626; }
+.usage { justify-self: end; }
+.panel {
+  border: 1px solid rgba(10, 10, 10, 0.1);
+  border-radius: 10px;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1.5rem 1.25rem;
+  font-size: 0.95rem;
+}
+.panel img { max-width: 100%; }
+pre {
+  background: #0a0a0a;
+  color: #fafafa;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+:not(pre) > code {
+  background: rgba(10, 10, 10, 0.05);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.85em;
+}
+pre code { background: none; padding: 0; }
+blockquote {
+  border-left: 2px solid rgba(10, 10, 10, 0.1);
+  margin: 1rem 0;
+  padding-left: 1rem;
+  color: #525252;
+}
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border: 1px solid rgba(10, 10, 10, 0.1); padding: 0.4rem 0.6rem; text-align: left; }
+ol.sources { padding-left: 1.4rem; font-size: 0.9rem; }
+ol.sources li { margin: 0.35rem 0; }
+.error-note { color: #dc2626; font-size: 0.9rem; }
+.pending-note { color: #525252; font-size: 0.9rem; }
+section.answer {
+  margin-top: 2rem;
+  border: 1px solid rgba(10, 10, 10, 0.1);
+  border-radius: 10px;
+  padding: 0.5rem 1.5rem 1.25rem;
+  background: rgba(217, 119, 6, 0.03);
+}
+.answer-meta { color: #a3a3a3; font-size: 0.78rem; margin: 0.25rem 0 0; }
+.answer-body { font-size: 0.97rem; }
+.verification-meta, .verification-reasons { color: #525252; font-size: 0.85rem; }
+.verification-follow-up { margin: 1.25rem 0; }
+.verification-follow-up h4 { margin-bottom: 0.3rem; }
+.unsafe-url { overflow-wrap: anywhere; }
+.verification-status { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 0.8rem; }
+.verification-status.ok { color: #16a34a; }
+.verification-status.conflict { color: #dc2626; }
+.verification-status.muted { color: #525252; }
+footer {
+  border-top: 1px solid rgba(10, 10, 10, 0.1);
+  padding: 1.25rem 2rem;
+  color: #525252;
+  font-size: 0.78rem;
+}
+`;
+
+/** Tiny vanilla tab controller (click + arrow keys, roving tabindex). */
+const SCRIPT = `(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function activate(tab, focus) {
+    for (var i = 0; i < tabs.length; i++) {
+      var t = tabs[i];
+      var selected = t === tab;
+      t.setAttribute('aria-selected', selected ? 'true' : 'false');
+      t.tabIndex = selected ? 0 : -1;
+      var panel = document.getElementById(t.getAttribute('aria-controls'));
+      if (panel) panel.hidden = !selected;
+    }
+    if (focus) tab.focus();
+  }
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener('click', function () { activate(tab, false); });
+    tab.addEventListener('keydown', function (event) {
+      var delta = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1
+        : event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 0;
+      if (delta === 0) return;
+      event.preventDefault();
+      activate(tabs[(index + delta + tabs.length) % tabs.length], true);
+    });
+  });
+})();`;
+
+/** Pure generator: manifest plus file contents in, full HTML document out. */
+export function generateHtmlReport(input: HtmlReportInput): string {
+  return renderHtmlReport(createHtmlReportViewModel(input));
+}
+
+/** Render a pure, already-loaded report view. */
+export function renderHtmlReport(view: HtmlReportViewModel): string {
+  const {
+    manifest,
+    providerContents,
+    sources,
+    answer,
+    reports,
+    sourceSummary,
+  } = view;
+
+  const answerHtml =
+    answer && answer.content.trim().length > 0 ? answerSection(answer) : '';
+  const verificationHtml = manifest.verification
+    ? verificationSection(manifest.verification)
+    : '';
+
+  // Default active tab: first successful provider, else the first row.
+  const { activeIndex } = view;
+
+  const rows = reports
+    .map((report, index) => providerRow(report, index, index === activeIndex))
+    .join('\n');
+  const sourcesRow = `<button class="row" role="tab" id="tab-sources" aria-controls="panel-sources" aria-selected="false" tabindex="-1">
+<span class="glyph muted">&#9656;</span>
+<span class="pid">sources</span>
+<span class="tier">all providers</span>
+<span class="duration"></span>
+<span class="detail">${sources.length} unique</span>
+<span class="usage"></span>
+</button>`;
+
+  const panels = reports
+    .map((report, index) => {
+      const hidden = index === activeIndex ? '' : ' hidden';
+      const body = providerPanelBody(
+        report,
+        report.outputFile && Object.hasOwn(providerContents, report.outputFile)
+          ? providerContents[report.outputFile]
+          : undefined,
+      );
+      return `<div class="panel" role="tabpanel" id="panel-${index}" aria-labelledby="tab-${index}"${hidden}>${body}</div>`;
+    })
+    .join('\n');
+  const sourcesPanel = `<div class="panel" role="tabpanel" id="panel-sources" aria-labelledby="tab-sources" hidden>
+${sourcesSection(sources)}
+</div>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(manifest.query)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>${STYLE}</style>
+</head>
+<body>
+<header>
+<span class="wordmark">librarium</span>
+<span class="meta">research report</span>
+</header>
+<main>
+<p class="eyebrow">query</p>
+<h1>${escapeHtml(manifest.query)}</h1>
+<p class="meta">${escapeHtml(formatReportDate(manifest.timestamp))} &middot; mode ${escapeHtml(manifest.mode)} &middot; ${escapeHtml(talliesLine(reports))} &middot; ${sourceSummary.unique} unique sources after dedupe (${sourceSummary.total} total citations)</p>
+${answerHtml}
+${verificationHtml}
+<section>
+<p class="eyebrow">providers</p>
+<div class="tabs" role="tablist" aria-label="Provider results">
+${rows}
+${sourcesRow}
+</div>
+${panels}
+${sourcesPanel}
+</section>
+</main>
+<footer>generated by librarium</footer>
+<script>${SCRIPT}</script>
+<noscript><style>.panel[hidden] { display: block; }</style></noscript>
+</body>
+</html>
+`;
+}

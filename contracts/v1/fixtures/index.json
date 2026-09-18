@@ -1,0 +1,534 @@
+{
+  "fixtures": [
+    {
+      "id": "markdown-success",
+      "path": "fixtures/valid/markdown-success.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "php-text-success",
+      "path": "fixtures/valid/php-text-success.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "json-object-success",
+      "path": "fixtures/valid/json-object-success.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "json-array-success",
+      "path": "fixtures/valid/json-array-success.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "partial-top-level-usage",
+      "path": "fixtures/valid/partial-top-level-usage.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "failed",
+      "path": "fixtures/valid/failed.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "provider-reference-source",
+      "path": "fixtures/valid/provider-reference-source.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "untrusted-url-identifier",
+      "path": "fixtures/valid/untrusted-url-identifier.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "enum-branch-coverage",
+      "path": "fixtures/valid/enum-branch-coverage.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "empty-retrieval-and-corpora",
+      "path": "fixtures/valid/empty-retrieval-and-corpora.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "surface-context-authentication-anonymous",
+      "path": "fixtures/valid/surface-context-authentication-anonymous.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "surface-context-authentication-authenticated",
+      "path": "fixtures/valid/surface-context-authentication-authenticated.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "surface-context-authentication-managed",
+      "path": "fixtures/valid/surface-context-authentication-managed.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "surface-context-authentication-unknown",
+      "path": "fixtures/valid/surface-context-authentication-unknown.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "optional-result-fields",
+      "path": "fixtures/valid/optional-result-fields.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "provider-meta-namespaces",
+      "path": "fixtures/valid/provider-meta-namespaces.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "provider-meta-benign-keys",
+      "path": "fixtures/valid/provider-meta-benign-keys.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "terminal-version",
+      "path": "fixtures/invalid/terminal-version.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "terminal-source-registry",
+      "path": "fixtures/invalid/terminal-source-registry.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "terminal-extensions",
+      "path": "fixtures/invalid/terminal-extensions.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "terminal-execution-field",
+      "path": "fixtures/invalid/terminal-execution-field.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-legacy-fields",
+      "path": "fixtures/invalid/result-legacy-fields.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-plain-text-format",
+      "path": "fixtures/invalid/result-plain-text-format.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-semantic-facts",
+      "path": "fixtures/invalid/result-semantic-facts.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-profile-graph",
+      "path": "fixtures/invalid/result-profile-graph.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-target-graph",
+      "path": "fixtures/invalid/result-target-graph.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-collection-graph",
+      "path": "fixtures/invalid/result-collection-graph.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "result-wrong-content",
+      "path": "fixtures/invalid/result-wrong-content.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "citation-no-source",
+      "path": "fixtures/invalid/citation-no-source.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "source-no-locator",
+      "path": "fixtures/invalid/source-no-locator.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "source.locator_required"
+    },
+    {
+      "id": "provider-meta-top-level",
+      "path": "fixtures/invalid/provider-meta-top-level.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "provider-meta-non-object",
+      "path": "fixtures/invalid/provider-meta-non-object.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "provider-meta-secret",
+      "path": "fixtures/invalid/provider-meta-secret.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-raw",
+      "path": "fixtures/invalid/provider-meta-raw.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-fused-api-key",
+      "path": "fixtures/invalid/provider-meta-fused-api-key.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-fused-access-token",
+      "path": "fixtures/invalid/provider-meta-fused-access-token.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-fused-raw-response",
+      "path": "fixtures/invalid/provider-meta-fused-raw-response.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-api-key",
+      "path": "fixtures/invalid/provider-meta-wrapped-api-key.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-credentials",
+      "path": "fixtures/invalid/provider-meta-wrapped-credentials.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-raw-response",
+      "path": "fixtures/invalid/provider-meta-wrapped-raw-response.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-session-token",
+      "path": "fixtures/invalid/provider-meta-wrapped-session-token.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "provider-meta-wrapped-binary-payload",
+      "path": "fixtures/invalid/provider-meta-wrapped-binary-payload.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "provider_meta.safe_metadata"
+    },
+    {
+      "id": "error-rich",
+      "path": "fixtures/invalid/error-rich.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "error-not-namespaced",
+      "path": "fixtures/invalid/error-not-namespaced.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "usage-rich",
+      "path": "fixtures/invalid/usage-rich.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "usage-negative",
+      "path": "fixtures/invalid/usage-negative.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "usage-malformed-decimal",
+      "path": "fixtures/invalid/usage-malformed-decimal.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "usage-cost-no-currency",
+      "path": "fixtures/invalid/usage-cost-no-currency.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "usage.cost_requires_currency"
+    },
+    {
+      "id": "provenance-context-unknown",
+      "path": "fixtures/invalid/provenance-context-unknown.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "provenance-surface-no-collector",
+      "path": "fixtures/invalid/provenance-surface-no-collector.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "result_provenance.surface_requires_collector"
+    },
+    {
+      "id": "provenance-surface-snapshot-wrong-result",
+      "path": "fixtures/invalid/provenance-surface-snapshot-wrong-result.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "result_provenance.surface_snapshot_boundary"
+    },
+    {
+      "id": "invalid-enum",
+      "path": "fixtures/invalid/invalid-enum.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "invalid-timestamp",
+      "path": "fixtures/invalid/invalid-timestamp.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "invalid-id",
+      "path": "fixtures/invalid/invalid-id.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "succeeded-shape",
+      "path": "fixtures/invalid/succeeded-shape.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "research_response.terminal_shape"
+    },
+    {
+      "id": "partial-shape",
+      "path": "fixtures/invalid/partial-shape.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "research_response.terminal_shape"
+    },
+    {
+      "id": "failed-shape",
+      "path": "fixtures/invalid/failed-shape.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "semantic_rule",
+      "semantic_rule_id": "research_response.terminal_shape"
+    }
+  ]
+}

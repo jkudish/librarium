@@ -1,0 +1,19 @@
+{
+  "provider": "parallel-turbo",
+  "tier": "raw-search",
+  "durationMs": 220,
+  "citationCount": 1,
+  "metering": {
+    "kind": "request_priced",
+    "pricingVersion": "2026-06",
+    "estimate": { "estimatedCostUsd": 0.001, "costConfidence": "estimated" }
+  },
+  "citations": [
+    {
+      "url": "https://nodejs.org/en/download/archive/v26.5.0",
+      "title": "Node.js v26.5.0",
+      "snippet": "Node.js v26.5.0 is the current release.",
+      "provider": "parallel-turbo"
+    }
+  ]
+}

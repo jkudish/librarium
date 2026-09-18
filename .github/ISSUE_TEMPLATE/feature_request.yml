@@ -1,0 +1,51 @@
+name: Feature Request
+description: Suggest an idea or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea? We'd love to hear it. The more context you can share, the easier it is to evaluate and prioritize.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the workflow or limitation that prompted this request
+      placeholder: "When I run librarium with multiple providers, I have no way to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: What would you want librarium to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Any workarounds or other approaches you've tried?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this touch?
+      multiple: true
+      options:
+        - New provider / adapter
+        - Configuration
+        - CLI / commands
+        - Output format
+        - Async / polling
+        - Fallback / resilience
+        - Performance
+        - Documentation
+        - Other
+    validations:
+      required: false

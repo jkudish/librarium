@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/jkudish/librarium/discussions/categories/q-a
+    about: Use GitHub Discussions for questions and general help
+  - name: Show and tell
+    url: https://github.com/jkudish/librarium/discussions/categories/show-and-tell
+    about: Share how you're using librarium

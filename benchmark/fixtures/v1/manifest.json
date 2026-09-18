@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "v1",
+  "recordedAt": "2026-07-16T12:00:00.000Z",
+  "network": "offline-replay-only",
+  "cases": [
+    {
+      "questionId": "stable-capital-australia",
+      "targetId": "provider:brave-search",
+      "runDirectory": "runs/stable-provider",
+      "answerFile": "answers/stable.md",
+      "synthesisFile": "synthesis.json",
+      "judgmentFile": "judgment.json"
+    },
+    {
+      "questionId": "stable-capital-australia",
+      "targetId": "group:quick",
+      "runDirectory": "runs/stable-group",
+      "answerFile": "answers/stable.md",
+      "synthesisFile": "synthesis.json",
+      "judgmentFile": "judgment.json"
+    },
+    {
+      "questionId": "live-node-current",
+      "targetId": "provider:brave-search",
+      "runDirectory": "runs/live-provider",
+      "answerFile": "answers/live.md",
+      "synthesisFile": "synthesis.json",
+      "judgmentFile": "judgment.json"
+    },
+    {
+      "questionId": "live-node-current",
+      "targetId": "group:quick",
+      "runDirectory": "runs/live-group",
+      "answerFile": "answers/live.md",
+      "synthesisFile": "synthesis.json",
+      "judgmentFile": "judgment.json"
+    }
+  ]
+}

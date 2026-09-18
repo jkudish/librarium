@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "defaults": {
+    "outputDir": "./agents/librarium",
+    "maxParallel": 4,
+    "timeout": 45,
+    "asyncTimeout": 1800,
+    "asyncPollInterval": 15,
+    "mode": "mixed",
+    "llmWebSearch": true
+  },
+  "providers": {
+    "perplexity-sonar-deep": {
+      "apiKey": "$PERPLEXITY_API_KEY",
+      "enabled": true
+    },
+    "perplexity-search": {
+      "apiKey": "$PERPLEXITY_API_KEY",
+      "enabled": true
+    }
+  },
+  "customProviders": {},
+  "trustedProviderIds": [],
+  "groups": {
+    "research-team": ["perplexity-sonar-deep", "perplexity-search"]
+  }
+}

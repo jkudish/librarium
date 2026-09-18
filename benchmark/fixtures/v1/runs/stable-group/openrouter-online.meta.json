@@ -1,0 +1,20 @@
+{
+  "provider": "openrouter-online",
+  "tier": "ai-grounded",
+  "model": "openrouter/online",
+  "durationMs": 720,
+  "citationCount": 1,
+  "usage": { "costUsd": 0.0021 },
+  "metering": {
+    "kind": "native_cost",
+    "actual": { "costUsd": 0.0021, "source": "provider_reported" }
+  },
+  "citations": [
+    {
+      "url": "https://www.australia.gov.au/about-australia/facts-and-figures",
+      "title": "Facts and figures",
+      "snippet": "Canberra is the national capital.",
+      "provider": "openrouter-online"
+    }
+  ]
+}

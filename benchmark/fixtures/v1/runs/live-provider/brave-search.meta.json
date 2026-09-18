@@ -1,0 +1,26 @@
+{
+  "provider": "brave-search",
+  "tier": "raw-search",
+  "model": "brave-web",
+  "durationMs": 460,
+  "citationCount": 1,
+  "metering": {
+    "kind": "request_priced",
+    "pricingVersion": "2026-06",
+    "estimate": {
+      "estimatedCostUsd": 0.005,
+      "billableUnits": 1,
+      "unit": "request",
+      "pricingVersion": "2026-06",
+      "costConfidence": "estimated"
+    }
+  },
+  "citations": [
+    {
+      "url": "https://nodejs.org/en/download/archive/v26.5.0",
+      "title": "Node.js v26.5.0",
+      "snippet": "v26.5.0 Latest Release",
+      "provider": "brave-search"
+    }
+  ]
+}

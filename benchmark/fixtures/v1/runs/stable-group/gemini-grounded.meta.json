@@ -1,0 +1,16 @@
+{
+  "provider": "gemini-grounded",
+  "tier": "ai-grounded",
+  "model": "gemini-2.5-flash",
+  "durationMs": 610,
+  "citationCount": 1,
+  "metering": { "kind": "native_tokens" },
+  "citations": [
+    {
+      "url": "https://www.australia.gov.au/about-australia/facts-and-figures",
+      "title": "Facts and figures",
+      "snippet": "Canberra is the national capital.",
+      "provider": "gemini-grounded"
+    }
+  ]
+}

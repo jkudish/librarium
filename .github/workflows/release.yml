@@ -1,0 +1,374 @@
+name: Promote certified release candidate
+run-name: "Promote ${{ inputs.candidate_sha }} (${{ inputs.promotion_mode }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Exact certified protected-main SHA (40 lowercase hex)'
+        required: true
+        type: string
+      candidate_fingerprint:
+        description: 'Exact candidate fingerprint (sha256: followed by 64 lowercase hex)'
+        required: true
+        type: string
+      candidate_archive_sha256:
+        description: 'SHA-256 of candidate.tar.gz (64 lowercase hex)'
+        required: true
+        type: string
+      certification_run_id:
+        description: 'Successful release-candidate workflow run ID containing the immutable candidate'
+        required: true
+        type: string
+      promotion_mode:
+        description: 'new requires current main; recover requires exact npm candidate bytes and permits forward-only main advance'
+        required: true
+        type: choice
+        options:
+          - new
+          - recover
+
+permissions:
+  actions: read
+  contents: write
+  deployments: read
+  id-token: write
+
+concurrency:
+  group: release-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.actor == 'jkudish' && github.repository_owner == 'jkudish'
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      CANDIDATE_FINGERPRINT: ${{ inputs.candidate_fingerprint }}
+      CANDIDATE_ARCHIVE_SHA256: ${{ inputs.candidate_archive_sha256 }}
+      CERTIFICATION_RUN_ID: ${{ inputs.certification_run_id }}
+      PROMOTION_MODE: ${{ inputs.promotion_mode }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Validate dispatch authority before candidate code
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_FINGERPRINT" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CERTIFICATION_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$PROMOTION_MODE" =~ ^(new|recover)$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "${{ github.ref_protected }}" = true
+          if [ "$PROMOTION_MODE" = new ]; then
+            test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-environment.json"
+          jq -e '.protection_rules | any(.type == "required_reviewers" and ((.reviewers // []) | length > 0))' "$RUNNER_TEMP/release-environment.json"
+          jq -e '.deployment_branch_policy.protected_branches == true and .deployment_branch_policy.custom_branch_policies == false' "$RUNNER_TEMP/release-environment.json"
+
+      - name: Checkout exact certified candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Revalidate protected main authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/main
+          if [ "$PROMOTION_MODE" = new ]; then
+            test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          fi
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Verify trusted-publishing toolchain floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(printf '%s\n' 11.5.1 "$(npm --version)" | sort -V | head -n1)" = 11.5.1
+
+      - name: Install locked verification dependencies
+        run: npm ci
+
+      - name: Verify successful certification run identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CERTIFICATION_RUN_ID" > "$RUNNER_TEMP/certification-run.json"
+          test "$(jq -r '.conclusion' "$RUNNER_TEMP/certification-run.json")" = success
+          test "$(jq -r '.event' "$RUNNER_TEMP/certification-run.json")" = workflow_dispatch
+          test "$(jq -r '.head_branch' "$RUNNER_TEMP/certification-run.json")" = main
+          test "$(jq -r '.head_sha' "$RUNNER_TEMP/certification-run.json")" = "$CANDIDATE_SHA"
+          test "$(jq -r '.path' "$RUNNER_TEMP/certification-run.json")" = .github/workflows/release-candidate.yml
+
+      - name: Download exact certified candidate artifact
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: librarium-rc-${{ inputs.candidate_sha }}-candidate
+          path: ${{ runner.temp }}/candidate-archive
+          run-id: ${{ inputs.certification_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify and extract candidate archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/candidate-archive/candidate.tar.gz"
+          test "$(sha256sum "$ARCHIVE" | awk '{print $1}')" = "$CANDIDATE_ARCHIVE_SHA256"
+          mkdir "$RUNNER_TEMP/candidate"
+          ARCHIVE="$ARCHIVE" DESTINATION="$RUNNER_TEMP/candidate" python3 - <<'PY'
+          import os, pathlib, tarfile
+          archive = os.environ['ARCHIVE']
+          destination = os.environ['DESTINATION']
+          with tarfile.open(archive, 'r:gz') as candidate:
+              for member in candidate.getmembers():
+                  path = pathlib.PurePosixPath(member.name)
+                  if path.is_absolute() or '..' in path.parts or not (member.isdir() or member.isfile()):
+                      raise SystemExit(f'unsafe candidate archive member: {member.name}')
+              candidate.extractall(destination, filter='data')
+          PY
+
+      - name: Verify candidate and stage exact publication bytes
+        run: >-
+          node scripts/release-promotion.mjs prepare
+          --repository "$GITHUB_WORKSPACE"
+          --candidate "$RUNNER_TEMP/candidate"
+          --output "$RUNNER_TEMP/promotion"
+
+      - name: Match preregistered candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          SPEC="$RUNNER_TEMP/promotion/promotion.json"
+          test "$(jq -r '.candidate.git_sha' "$SPEC")" = "$CANDIDATE_SHA"
+          test "$(jq -r '.candidate.fingerprint' "$SPEC")" = "$CANDIDATE_FINGERPRINT"
+          node scripts/release-promotion.mjs verify --promotion "$RUNNER_TEMP/promotion"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - name: Inspect initial publication state
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Verify Homebrew credential readiness before publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'HOMEBREW_TAP_TOKEN is required before publishing any channel.' >&2
+            exit 1
+          fi
+          gh api repos/jkudish/homebrew-tap --jq '.permissions.push == true' > "$RUNNER_TEMP/tap-permission.txt"
+          test "$(cat "$RUNNER_TEMP/tap-permission.txt")" = true
+          gh api repos/jkudish/homebrew-tap/git/ref/heads/main --silent
+
+      - name: Reconcile npm stage
+        id: npm-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Publish exact certified npm tarball
+        if: steps.npm-plan.outputs.publish_npm == 'true'
+        run: |
+          set -euo pipefail
+          ASSET="$(jq -r '.npm.asset' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          npm publish "$RUNNER_TEMP/promotion/$ASSET" --provenance --access public --tag "$DIST_TAG"
+
+      - name: Reinspect after npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="$(jq -r '.npm.sha256' "$RUNNER_TEMP/promotion/promotion.json")"
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          for delay in 0 2 4 8 16; do
+            sleep "$delay"
+            scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+            OBSERVED="$(jq -r '.npm_sha256 // empty' "$RUNNER_TEMP/inventory.json")"
+            if [ -n "$OBSERVED" ]; then
+              test "$OBSERVED" = "$EXPECTED"
+              if [ "$(jq -r --arg tag "$DIST_TAG" '.npm_dist_tags[$tag] // empty' "$RUNNER_TEMP/inventory.json")" = "$VERSION" ]; then
+                exit 0
+              fi
+            fi
+          done
+          if [ "${OBSERVED:-}" != "$EXPECTED" ]; then
+            echo 'npm registry did not expose the published candidate before the propagation deadline.' >&2
+            exit 1
+          fi
+
+      - name: Reconcile npm dist-tag stage
+        id: npm-tag-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Restore exact expected npm dist-tag
+        if: steps.npm-tag-plan.outputs.set_npm_dist_tag == 'true'
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$NODE_AUTH_TOKEN"
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          npm dist-tag add "librarium@$VERSION" "$DIST_TAG"
+
+      - name: Reinspect after npm dist-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          DIST_TAG="$(jq -r '.npm.dist_tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          for delay in 0 2 4 8 16; do
+            sleep "$delay"
+            scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+            if [ "$(jq -r --arg tag "$DIST_TAG" '.npm_dist_tags[$tag] // empty' "$RUNNER_TEMP/inventory.json")" = "$VERSION" ]; then
+              exit 0
+            fi
+          done
+          echo 'npm registry did not expose the expected dist-tag before the propagation deadline.' >&2
+          exit 1
+
+      - name: Reconcile tag stage
+        id: tag-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Create immutable Git tag
+        if: steps.tag-plan.outputs.create_tag == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          git tag "$TAG" "$CANDIDATE_SHA"
+          BASIC="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $BASIC" push origin "refs/tags/$TAG:refs/tags/$TAG"
+
+      - name: Reinspect after tag
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile GitHub release stage
+        id: release-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Create non-clobbering GitHub release
+        if: steps.release-plan.outputs.create_github_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          RELEASE_KIND="$(jq -r '.candidate.release_kind' "$RUNNER_TEMP/promotion/promotion.json")"
+          PRERELEASE=()
+          case "$RELEASE_KIND" in
+            rc) PRERELEASE=(--prerelease) ;;
+            stable) ;;
+            *) exit 1 ;;
+          esac
+          gh release create "$TAG" --verify-tag --target "$CANDIDATE_SHA" --title "$TAG" --notes "Immutable promotion of certified candidate $CANDIDATE_SHA ($CANDIDATE_FINGERPRINT)." "${PRERELEASE[@]}"
+
+      - name: Reinspect before GitHub assets
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile GitHub asset stage
+        id: asset-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Upload only absent exact GitHub assets
+        if: steps.asset-plan.outputs.upload_github_assets != ''
+        shell: bash
+        env:
+          ASSETS: ${{ steps.asset-plan.outputs.upload_github_assets }}
+        run: |
+          set -euo pipefail
+          TAG="$(jq -r '.tag' "$RUNNER_TEMP/promotion/promotion.json")"
+          IFS=',' read -r -a names <<< "$ASSETS"
+          for name in "${names[@]}"; do
+            test -n "$name"
+            gh release upload "$TAG" "$RUNNER_TEMP/promotion/$name"
+          done
+
+      - name: Reinspect before Homebrew
+        run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
+
+      - name: Reconcile Homebrew stage
+        id: homebrew-plan
+        run: >-
+          node scripts/release-promotion.mjs reconcile
+          --spec "$RUNNER_TEMP/promotion/promotion.json"
+          --inventory "$RUNNER_TEMP/inventory.json"
+          --mode "$PROMOTION_MODE"
+          --github-output
+
+      - name: Publish forward-only Homebrew formula commit
+        if: steps.homebrew-plan.outputs.publish_homebrew == 'true'
+        shell: bash
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/jkudish/homebrew-tap.git "$RUNNER_TEMP/tap"
+          cp "$RUNNER_TEMP/promotion/librarium.rb" "$RUNNER_TEMP/tap/Formula/librarium.rb"
+          git -C "$RUNNER_TEMP/tap" config user.name "github-actions[bot]"
+          git -C "$RUNNER_TEMP/tap" config user.email "github-actions[bot]@users.noreply.github.com"
+          git -C "$RUNNER_TEMP/tap" add Formula/librarium.rb
+          git -C "$RUNNER_TEMP/tap" diff --cached --exit-code && exit 1
+          VERSION="$(jq -r '.candidate.version' "$RUNNER_TEMP/promotion/promotion.json")"
+          git -C "$RUNNER_TEMP/tap" commit -m "Update librarium to v$VERSION"
+          BASIC="$(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 -w0)"
+          git -C "$RUNNER_TEMP/tap" -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $BASIC" push origin HEAD:main
+
+      - name: Verify complete cross-channel identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/final-inventory.json"
+          node scripts/release-promotion.mjs reconcile \
+            --spec "$RUNNER_TEMP/promotion/promotion.json" \
+            --inventory "$RUNNER_TEMP/final-inventory.json" \
+            --mode "$PROMOTION_MODE" > "$RUNNER_TEMP/final-plan.json"
+          test "$(jq -r '.complete' "$RUNNER_TEMP/final-plan.json")" = true
+          node scripts/release-promotion.mjs verify --promotion "$RUNNER_TEMP/promotion"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
