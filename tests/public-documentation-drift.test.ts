@@ -227,19 +227,28 @@ describe('public v2 documentation drift', () => {
     expect(documentedRoster(SKILL)).toEqual(durableProfiles);
   });
 
-  it('keeps both agent selection approaches open with authorization-gated escalation', () => {
+  it('keeps both agent selection approaches open with scope-bounded escalation', () => {
     expect(SKILL).toContain('**Quick-then-deepen**');
     expect(SKILL).toContain('**Upfront planning**');
     expect(SKILL).toContain('do not funnel every request through');
-    expect(SKILL).toContain("needs the user's explicit go-ahead");
-    expect(SKILL).toContain('Never auto-escalate');
+    expect(SKILL).toContain('only within scope and budget');
+    expect(SKILL).toContain('beyond that');
+    expect(SKILL).toContain('authorization is a new paid decision');
+    expect(SKILL).toContain('infer spending authority from thin evidence');
     expect(SKILL).toContain('there is no MCP `plan` tool');
     expect(SKILL).toContain(
       'hard constraints. Never drop, silently substitute',
     );
+    expect(SKILL).toContain('MCP requests carry no per-call budget');
+    expect(SKILL).toContain(
+      'Discovery output alone never establishes affordability',
+    );
+    expect(SKILL).toContain(
+      'caps admission and reported spend, not absolute provider billing',
+    );
     expect(SKILL).toContain('complements research passes');
+    expect(SKILL).not.toContain('Never auto-escalate');
     expect(SKILL).not.toContain('always start with `quick`');
-    expect(SKILL).not.toContain('start with quick for every');
   });
 
   it('keeps the execution, provenance, privacy, and paid-validation boundaries explicit', () => {

@@ -67,10 +67,11 @@ a quick-first default. Both approaches are first-class, chosen from the question
 and its cost/deadline context:
 
 - **Quick-then-deepen** fits bounded questions with uncertain scope: run
-  `quick`, read the saved evidence, and if coverage is thin, propose escalation
-  (a wider group or added exact research-report selectors) as a new paid
-  decision that needs the user's explicit go-ahead. Never auto-escalate and
-  never treat thin coverage as authorization for more calls.
+  `quick`, read the saved evidence, and if coverage is thin, escalate (a wider
+  group or added exact research-report selectors) only within scope and budget
+  the user already authorized for this request; anything beyond that
+  authorization is a new paid decision needing an explicit go-ahead. Never
+  infer spending authority from thin evidence alone.
 - **Upfront planning** fits research reports, comparisons, and multi-angle
   asks: discover capabilities offline first — with the CLI, `librarium ls --json`
   and `librarium plan "<query>" --json`; over MCP, `list_providers` with
@@ -80,6 +81,13 @@ and its cost/deadline context:
 
 The user's explicit choices always win: named providers, budgets, modes, and
 limits are hard constraints. Never drop, silently substitute, or exceed them.
+MCP requests carry no per-call budget or fallback flags: budget and fallback
+behavior come from merged configuration, so for a requested cap or exact-only
+matrix over MCP, inspect or confirm the applicable config through authorized
+CLI/config access — or stop and ask — rather than assuming the constraint is
+enforced. Discovery output alone never establishes affordability. `--max-cost`
+caps admission and reported spend, not absolute provider billing: estimates are
+not quotes and unknown costs stay unknown.
 `visibility` answers a different question — how AI answer engines describe a
 brand or product — and complements research passes; do not fold its correlated
 surfaces into research confidence.

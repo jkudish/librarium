@@ -183,6 +183,13 @@ describe('mcp tool surface', () => {
     expect(researchDescription).toContain(
       'intentional matrix via explicit providers',
     );
+    expect(researchDescription).toContain(
+      'governed by merged configuration, not this call',
+    );
+    expect(researchDescription).toContain(
+      'no per-call budget or fallback input',
+    );
+    expect(researchDescription).toContain('beyond the authorized scope');
     expect(researchDescription).toContain('requiring user approval');
     expect(researchDescription).toContain('there is no MCP plan tool');
     const researchSchema = tools.find((tool) => tool.name === 'research')
