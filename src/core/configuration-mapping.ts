@@ -42,6 +42,7 @@ import {
 } from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 import {
+  isRetiredUpstreamProviderId,
   migrateRetiredProviderId,
   retiredProviderGuidance,
   retiredProviderMigrationPriority,
@@ -127,7 +128,9 @@ export type ConfigurationProfileTokenResolution =
   | {
       readonly kind: 'retired';
       readonly token: string;
-      readonly replacement: string;
+      /** Present only for a renamed id; upstream retirements have none. */
+      readonly replacement?: string;
+      readonly message: string;
     }
   | {
       readonly kind: 'ambiguous';
@@ -206,9 +209,23 @@ export function resolveConfigurationProfileToken(
   options: ConfigurationProfileTokenOptions = {},
 ): ConfigurationProfileTokenResolution {
   const sourceToken = token.trim();
+  // An upstream retirement has no migration target, so even the explicit v1
+  // migration option must reject it rather than resolve a different profile.
+  if (isRetiredUpstreamProviderId(sourceToken.split('/')[0] ?? '')) {
+    return {
+      kind: 'retired',
+      token: sourceToken,
+      message: retiredProviderGuidance(sourceToken)!,
+    };
+  }
   const replacement = retiredProviderTokenReplacement(sourceToken);
   if (replacement !== undefined && !options.migrateRetired) {
-    return { kind: 'retired', token: sourceToken, replacement };
+    return {
+      kind: 'retired',
+      token: sourceToken,
+      replacement,
+      message: `Provider "${sourceToken}" was removed; use "${replacement}".`,
+    };
   }
   const trimmed = replacement ?? sourceToken;
   const qualified = trimmed.split('/');
@@ -311,7 +328,7 @@ export function resolveConfigurationProfileToken(
     return {
       kind: 'unknown',
       token: sourceToken,
-      suggestions: [provider.replacement],
+      suggestions: provider.replacement ? [provider.replacement] : [],
     };
   }
   const matches = [
@@ -703,12 +720,14 @@ function canonicalizeGroups(
         continue;
       }
       if (resolution.kind === 'retired') {
-        issues.push({
-          code: 'configuration_group_member_unknown',
+        // Migration resolves renamed ids, so only an upstream retirement with
+        // no equivalent profile reaches this branch. A v1 group keeps working
+        // without it; the notice says why and names the alternative.
+        notices.push({
+          code: 'configuration_group_member_retired',
           phase: 'migration',
           path,
-          message:
-            'The group member does not resolve to an implemented exact provider profile.',
+          message: resolution.message,
         });
         continue;
       }

@@ -117,7 +117,6 @@ function surfaceProfiles(): readonly ExecutionProfile[] {
   return [
     'searchapi-chatgpt',
     'searchapi-gemini',
-    'searchapi-perplexity',
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
@@ -853,6 +852,21 @@ describe('canonical v3 run.json', () => {
       projectCanonicalRunPresentation(fallbackPending, runDirectory, 'fixture')
         .reports,
     ).toMatchObject([{ id: 'adapter-primary', status: 'async-pending' }]);
+
+    // Failed attempts report their real elapsed time, not zero (#4769).
+    const elapsed = (manifest: typeof result.manifest) => {
+      const timed = structuredClone(manifest);
+      const attempt = timed.coordination_state.attempts.find(
+        (candidate) => candidate.attempt_id === failedPrimary.attempt_id,
+      );
+      if (!attempt) throw new Error('Expected failed primary attempt.');
+      attempt.started_at = new Date(START).toISOString();
+      attempt.finished_at = new Date(START + 29_990).toISOString();
+      return projectCanonicalRunPresentation(timed, runDirectory, 'fixture')
+        .reports[0]?.durationMs;
+    };
+    expect(elapsed(result.manifest)).toBe(29_990);
+    expect(elapsed(fallbackPending)).toBe(29_990);
   });
 
   it('derives partial and failed terminal shapes from exact slot outcomes', async () => {
@@ -1986,7 +2000,7 @@ describe('canonical v3 run.json', () => {
     });
 
     expect(result.response?.status).toBe('succeeded');
-    expect(result.response?.results).toHaveLength(6);
+    expect(result.response?.results).toHaveLength(5);
     for (const profile of selected) {
       const projected = result.response?.results.find(
         (item) => item.provider === profile.identity.provider_id,

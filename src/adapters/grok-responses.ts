@@ -58,6 +58,9 @@ interface GrokUsage {
   total_tokens?: number;
   reasoning_tokens?: number;
   cached_tokens?: number;
+  /** Live xAI responses nest cached and reasoning counts in these objects. */
+  input_tokens_details?: { cached_tokens?: number };
+  output_tokens_details?: { reasoning_tokens?: number };
   cost_in_usd_ticks?: number;
   [key: string]: unknown;
 }
@@ -435,8 +438,13 @@ export class GrokResponsesProvider extends BaseProvider {
       inputTokens: usage?.input_tokens,
       outputTokens: usage?.output_tokens,
       totalTokens: usage?.total_tokens,
-      cacheReadInputTokens: this.validTokenCount(usage?.cached_tokens),
-      reasoningTokens: this.validTokenCount(usage?.reasoning_tokens),
+      cacheReadInputTokens: this.validTokenCount(
+        usage?.input_tokens_details?.cached_tokens ?? usage?.cached_tokens,
+      ),
+      reasoningTokens: this.validTokenCount(
+        usage?.output_tokens_details?.reasoning_tokens ??
+          usage?.reasoning_tokens,
+      ),
       raw,
     };
     if (

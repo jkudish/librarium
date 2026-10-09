@@ -65,7 +65,10 @@ export function createSearchApiRequest(
       headers: { Authorization: `Bearer ${input.apiKey}` },
       timeout: input.timeout,
       signal: input.signal,
-      ...(input.retry ? { retry: input.retry } : {}),
+      // SearchAPI GETs would otherwise inherit the client's safe-GET retries.
+      // Its 5xx bodies are deterministic (for example a deprecated engine), so
+      // a retry only adds backoff. Callers may still opt in explicitly.
+      retry: input.retry ?? { mode: 'never' },
     },
   };
 }

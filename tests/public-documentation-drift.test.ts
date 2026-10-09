@@ -38,10 +38,10 @@ const mcpTools = [
 
 describe('public v2 documentation drift', () => {
   it('keeps the generated catalog facts in README aligned with source', () => {
-    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(34);
-    expect(profileKeys).toHaveLength(41);
+    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(33);
+    expect(profileKeys).toHaveLength(40);
     expect(README).toMatch(
-      /\*\*34 built-in providers\*\* and \*\*41 implemented public\s+profiles\*\*/,
+      /\*\*33 built-in providers\*\* and \*\*40 implemented public\s+profiles\*\*/,
     );
     expect(SKILL).toContain('rather than assuming providers');
 
@@ -243,11 +243,9 @@ describe('public v2 documentation drift', () => {
     expect(README).toContain('process-local');
     expect(PROVIDER_GUIDE).toContain('process-local');
     expect(README).toContain(
-      'correlated visibility evidence, not six independent confirmations',
+      'correlated visibility evidence, not five independent confirmations',
     );
-    expect(README).toContain(
-      'not official OpenAI, Google, Microsoft, or Perplexity',
-    );
+    expect(README).toContain('not official OpenAI, Google, or Microsoft APIs');
     expect(README).toContain('fails closed if the account rejects it');
     expect(README).toContain(
       'missing estimate, missing reported cost, API unit, or token price is unknown',

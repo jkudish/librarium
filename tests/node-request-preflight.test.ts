@@ -95,7 +95,6 @@ describe('Node production request preflight', () => {
     const profiles = [
       'searchapi-chatgpt/surface',
       'searchapi-gemini/surface',
-      'searchapi-perplexity/surface',
       'searchapi-google-ai-mode/surface',
       'searchapi-bing-copilot/surface',
       'searchapi-google-ai-overview/surface',
@@ -115,10 +114,10 @@ describe('Node production request preflight', () => {
       },
     });
 
-    expect(result.prepared.request.slots).toHaveLength(6);
+    expect(result.prepared.request.slots).toHaveLength(5);
     expect(
       result.prepared.request.slots.map((slot) => slot.primary.result_kind),
-    ).toEqual(Array(6).fill('surface_observation'));
+    ).toEqual(Array(5).fill('surface_observation'));
   });
 
   it('rejects a future unprojectable profile at the structural boundary', () => {

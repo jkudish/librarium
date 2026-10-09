@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SearchApiChatGptProvider } from '../../src/adapters/searchapi-chatgpt.js';
 import { SearchApiGeminiProvider } from '../../src/adapters/searchapi-gemini.js';
-import { SearchApiPerplexityProvider } from '../../src/adapters/searchapi-perplexity.js';
 import type { HttpClient, HttpResponse } from '../../src/core/http-client.js';
 import {
   normalizeSearchApiAiAnswer,
@@ -28,16 +27,6 @@ const engines = [
     engine: 'gemini',
     create: (httpClient: HttpClient, zeroRetention = false) =>
       new SearchApiGeminiProvider({
-        apiKey: SEARCHAPI_AI_SYNTHETIC_KEY,
-        httpClient,
-        zeroRetention,
-      }),
-  },
-  {
-    id: 'searchapi-perplexity',
-    engine: 'perplexity',
-    create: (httpClient: HttpClient, zeroRetention = false) =>
-      new SearchApiPerplexityProvider({
         apiKey: SEARCHAPI_AI_SYNTHETIC_KEY,
         httpClient,
         zeroRetention,

@@ -21,7 +21,6 @@ const GROUNDED_GROUPS = [
 const SEARCHAPI_SURFACES = [
   'searchapi-chatgpt',
   'searchapi-gemini',
-  'searchapi-perplexity',
   'searchapi-google-ai-mode',
   'searchapi-bing-copilot',
   'searchapi-google-ai-overview',
@@ -81,8 +80,15 @@ describe('default groups -- grok membership invariant', () => {
 });
 
 describe('default groups -- visibility expansion', () => {
-  it('defines exactly the nine-provider visibility roster in policy order', () => {
+  it('defines exactly the eight-provider visibility roster in policy order', () => {
     expect(DEFAULT_GROUPS.visibility).toEqual([...VISIBILITY_PROVIDERS]);
+    expect(DEFAULT_GROUPS.visibility).toHaveLength(8);
+  });
+
+  it('keeps the upstream-retired searchapi-perplexity out of every default group', () => {
+    for (const members of Object.values(DEFAULT_GROUPS)) {
+      expect(members).not.toContain('searchapi-perplexity');
+    }
   });
 
   it('puts all SearchAPI surfaces in comprehensive/all and no other default group', () => {
@@ -106,9 +112,9 @@ describe('default groups -- visibility expansion', () => {
     }
   });
 
-  it('has eight default groups and all 35 grounded providers', () => {
+  it('has eight default groups and all 34 grounded providers', () => {
     expect(Object.keys(DEFAULT_GROUPS)).toHaveLength(8);
-    expect(DEFAULT_GROUPS.all).toHaveLength(35);
+    expect(DEFAULT_GROUPS.all).toHaveLength(34);
   });
 });
 

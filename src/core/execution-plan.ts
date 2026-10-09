@@ -136,6 +136,19 @@ export interface PreparedProfilePlan {
   /** Missing on historical records and therefore treated as reconcile-only. */
   readonly cancel_policy?: ExactProfileRemoteCancellationPolicy;
   readonly estimate?: NetworkFreeEstimate;
+  /**
+   * Inline attempt deadline for this profile when it differs from the global
+   * policy limit. Resolved once at preparation so resumed runs reuse it.
+   */
+  readonly inline_attempt_deadline_ms?: number;
+}
+
+/** Optional per-profile policy resolved by the request compiler. */
+export interface MaterializationOptions {
+  /** Inline deadline for a profile, or undefined to use the global limit. */
+  readonly inlineAttemptDeadlineMs?: (
+    profile: ExecutionProfile,
+  ) => number | undefined;
 }
 
 export interface PrivateExecutionPolicy {
@@ -1027,8 +1040,14 @@ function resolveReserve(
   return retained;
 }
 
-function profilePlan(selection: AdmittedSelectedProfile): PreparedProfilePlan {
+function profilePlan(
+  selection: AdmittedSelectedProfile,
+  options: MaterializationOptions,
+): PreparedProfilePlan {
   const { entry } = selection;
+  const inlineAttemptDeadlineMs = options.inlineAttemptDeadlineMs?.(
+    entry.profile,
+  );
   return {
     profile_key: profileIdentityKey(entry.profile.identity),
     identity: { ...entry.profile.identity },
@@ -1046,6 +1065,9 @@ function profilePlan(selection: AdmittedSelectedProfile): PreparedProfilePlan {
           })),
         }
       : undefined,
+    ...(inlineAttemptDeadlineMs !== undefined && {
+      inline_attempt_deadline_ms: inlineAttemptDeadlineMs,
+    }),
   };
 }
 
@@ -1284,6 +1306,7 @@ export function materializeResearchExecution(
   admission: ResearchExecutionAdmission,
   limits: CanonicalResearchRequest['limits'],
   dependencies: PreparationDependencies,
+  options: MaterializationOptions = {},
 ): PreparationResult {
   if (!isMintedResearchExecutionAdmission(admission)) {
     return {
@@ -1373,7 +1396,7 @@ export function materializeResearchExecution(
 
   const profilePlans = Object.fromEntries(
     [...primaries, ...reserve].map((selection) => {
-      const plan = profilePlan(selection);
+      const plan = profilePlan(selection, options);
       return [plan.profile_key, plan];
     }),
   );

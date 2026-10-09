@@ -176,6 +176,22 @@ export interface CanonicalRunPresentation {
   readonly generatorManifest: RunManifest;
 }
 
+/**
+ * Wall-clock time a finished attempt spent between start and finish. Failed
+ * and timed-out attempts carry no provider duration metadata, so derive it
+ * from the persisted attempt chronology instead of reporting zero.
+ */
+function attemptElapsedMs(
+  attempt:
+    | { readonly started_at?: string; readonly finished_at?: string }
+    | undefined,
+): number {
+  if (!attempt?.started_at || !attempt.finished_at) return 0;
+  const elapsed =
+    Date.parse(attempt.finished_at) - Date.parse(attempt.started_at);
+  return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
+}
+
 export function projectCanonicalRunPresentation(
   manifest: CanonicalRunManifestV3,
   outputDir: string,
@@ -238,7 +254,7 @@ export function projectCanonicalRunPresentation(
         id: earlierId,
         tier: tierFor(earlier.profile.result_kind),
         status: earlierStatus,
-        durationMs: 0,
+        durationMs: attemptElapsedMs(earlier),
         wordCount: 0,
         citationCount: 0,
         outputFile: earlierFiles.outputFile,
@@ -252,7 +268,7 @@ export function projectCanonicalRunPresentation(
         text: '',
         sourceUrls: [],
         citations: [],
-        durationMs: 0,
+        durationMs: attemptElapsedMs(earlier),
         error: earlierError,
       });
     }
@@ -273,7 +289,7 @@ export function projectCanonicalRunPresentation(
       : tierFor(profile.result_kind);
     const durationMs = projected
       ? (numberMetadata(projected, 'librarium:duration_ms') ?? 0)
-      : 0;
+      : attemptElapsedMs(attempt);
     const citations = projected ? legacyCitations(projected, adapterId) : [];
     const content = projected ? markdown(projected) : '';
     const status: ProviderReport['status'] = projected

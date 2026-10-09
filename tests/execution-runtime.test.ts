@@ -2137,3 +2137,99 @@ describe('private prepared execution runtime', () => {
     expect(JSON.stringify(result.state)).not.toContain('secret-token');
   });
 });
+
+describe('execution runtime -- per-profile inline deadlines and causes (#4769)', () => {
+  it('gives an inline attempt its planned per-profile deadline and others the global one', async () => {
+    const execute = vi.fn(
+      async (_query: string, options: { timeout: number }) =>
+        successfulResult(`timeout-${options.timeout}`),
+    );
+    const provider = (id: string): Provider => ({
+      id: `adapter-${id}`,
+      displayName: id,
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute,
+    });
+    const slow = profile('slow');
+    const normal = profile('normal');
+    const plan = prepared([slow, normal]);
+    const slowKey = profileIdentityKey(slow.identity);
+    const withDeadline: PreparedResearchExecution = {
+      ...plan,
+      profile_plans_by_identity: {
+        ...plan.profile_plans_by_identity,
+        [slowKey]: {
+          ...plan.profile_plans_by_identity[slowKey]!,
+          inline_attempt_deadline_ms: 30_000,
+        },
+      },
+    };
+
+    const result = await runPreparedExecution(withDeadline, {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: (binding) =>
+          binding.adapter_id === 'adapter-slow'
+            ? resolvedBinding('slow', provider('slow'))
+            : binding.adapter_id === 'adapter-normal'
+              ? resolvedBinding('normal', provider('normal'))
+              : undefined,
+        now: () => start,
+      }),
+    });
+
+    const deadlineFor = (providerId: string) =>
+      result.state.attempts.find(
+        (attempt) => attempt.profile.identity.provider_id === providerId,
+      )?.deadline_at;
+    expect(deadlineFor('slow')).toBe(new Date(start + 30_000).toISOString());
+    expect(deadlineFor('normal')).toBe(new Date(start + 10_000).toISOString());
+    expect(
+      execute.mock.calls.map(([, options]) => options.timeout).sort(),
+    ).toEqual([10, 30]);
+    expect(result.state.inline_attempt_deadline_ms).toBe(10_000);
+    expect(() => CoordinatorStateSchema.parse(result.state)).not.toThrow();
+  });
+
+  it('keeps a SearchAPI HTTP 503 cause as provider_code in the canonical error', async () => {
+    const { SearchApiChatGptProvider } = await import(
+      '../src/adapters/searchapi-chatgpt.js'
+    );
+    const httpClient = vi.fn(async () => ({
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: {},
+      data: { error: 'This API has been deprecated.' },
+      durationMs: 1,
+    })) as unknown as HttpClient;
+    const surface = new SearchApiChatGptProvider({
+      apiKey: 'searchapi-synthetic-test-key',
+      httpClient,
+    });
+    const bound: Provider = Object.assign(Object.create(surface), {
+      id: 'adapter-surface',
+    });
+
+    const result = await runPreparedExecution(prepared([profile('surface')]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: (binding) =>
+          binding.adapter_id === 'adapter-surface'
+            ? resolvedBinding('surface', bound)
+            : undefined,
+        now: () => start,
+      }),
+    });
+
+    expect(httpClient).toHaveBeenCalledOnce();
+    expect(result.state.attempts[0]?.error).toMatchObject({
+      code: 'provider_reported_error',
+      category: 'provider',
+      provider_code: 'http_503',
+    });
+  });
+});

@@ -1,4 +1,7 @@
-import { configGroupProvenance } from './core/config.js';
+import {
+  configGroupProvenance,
+  configInlineAttemptDeadlineAuthored,
+} from './core/config.js';
 import type { CredentialContext } from './core/credentials.js';
 import type {
   PreparationDependencies,
@@ -220,6 +223,9 @@ export function preflightProductionRequestStructure(
   const common = {
     ...input,
     authoredGroups: configGroupProvenance(input.config),
+    applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
+      input.config,
+    ),
   };
   try {
     const compiled = requireCompiled(
@@ -267,6 +273,9 @@ export function preflightProductionRequest(
   const common = {
     ...input,
     authoredGroups: configGroupProvenance(input.config),
+    applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
+      input.config,
+    ),
   };
 
   preflightProductionRequestStructure(input);
