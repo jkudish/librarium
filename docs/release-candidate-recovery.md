@@ -3,7 +3,7 @@
 The release-candidate workflow certifies exact bytes but has no publication authority. The release workflow promotes those bytes without changing source, package metadata, tags, artifacts, or provenance. It is owner-only and uses the `release` environment.
 
 This is an operator procedure for the workflows committed in this repository,
-not a record that v2 has been certified or published. A `2.0.0` source version
+not a record of any certified or published release. A source version alone
 does not establish an npm dist-tag, GitHub release, standalone download, or
 Homebrew version. Verify each channel read-only before directing users to it.
 Certification dispatch and publication each require explicit authorization;

@@ -44,6 +44,16 @@ not independent factual confirmations.
   reports v1, report the blocker; never silently fall back to v1 or a
   mutable branch.
 
+Setup, when the user has authorized installing software: `npm install -g
+librarium` (Node.js 22.12 or newer) or `brew install jkudish/tap/librarium`,
+then check `librarium --version` reports 2.x. `librarium init --auto` enables
+providers whose keys are already exported; opt-in providers such as the
+SearchAPI visibility surfaces also need `--enable <ids>` (for example
+`librarium init --auto --enable searchapi-chatgpt,searchapi-gemini`). Run
+`librarium doctor` to check configuration offline. Never print secret values.
+To connect MCP, a user registers `librarium mcp` as a stdio server in their
+host (for example `claude mcp add --scope user librarium -- librarium mcp`).
+
 Minimal lifecycle — MCP, then the CLI equivalent:
 
 ```json
@@ -81,11 +91,13 @@ Match the request, not a fixed ladder — both styles are valid:
 
 Workflows: `quick` = curated low-latency discovery and grounded answers; use
 `deep` for research-report profiles; `visibility` for AI answer-engine
-surfaces (six SearchAPI-collected consumer surfaces vs three first-party API
-baselines); `all` for catalog-wide coverage only after reviewing scope/cost;
-`custom:<name>` for a configured custom group. Exact `provider/profile`
-selectors (MCP `providers` / CLI `--providers`) build an intentional matrix:
-explicit unavailable selections fail rather than substitute; unavailable
+surfaces (SearchAPI-collected consumer surfaces vs first-party API
+baselines; the surfaces are opt-in, and a run names any it skips with the
+`librarium init --enable` command that enables them); `all` for
+catalog-wide coverage only after reviewing scope/cost; `custom:<name>` for a
+configured custom group. Exact `provider/profile` selectors (MCP
+`providers` / CLI `--providers`) build an intentional matrix: explicit
+unavailable selections fail rather than substitute; unavailable
 workflow members are omitted with notices.
 
 The user's explicit providers, budgets, modes, and limits override groups
@@ -156,9 +168,9 @@ before sharing, and keep partial/failed/skipped outcomes visible.
 ## 6. Synthesize
 
 Synthesize from cited source substance and contradictions; preserve profile,
-target, operator, collector, surface, and retrieval provenance. The six
+target, operator, collector, surface, and retrieval provenance. The
 SearchAPI surface observations share one collector: correlated visibility
-evidence, not six independent confirmations or a particular logged-in
+evidence, not independent confirmations or a particular logged-in
 user's experience; API baselines are not consumer-surface snapshots.
 `zeroRetention` is an account capability that fails closed when rejected,
 not a privacy guarantee; SerpBase may log queries for billing, debugging,

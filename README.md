@@ -22,27 +22,40 @@ the evidence.
 The CLI and MCP server are complete applications. The package also exposes
 composable library boundaries for custom runtimes.
 
-## Install v2
+## Install
 
-The source version is `2.0.0`, but npm latest is still v1.4.1. Check npm before
-using a registry install:
-
-```bash
-npm view librarium@2 version
-
-# Use only after npm reports a matching v2 release.
-npm install -g librarium@^2
-librarium --version # Must report major version 2.
-```
-
-Until then, build a reviewed v2 checkout with Node.js **22.12 or newer**:
+Install with npm (requires Node.js **22.12 or newer**):
 
 ```bash
-npm ci
-npm run build
-npm install -g .
-librarium --version # Must report major version 2.
+npm install -g librarium
 ```
+
+Or install the standalone binary, which bundles its own runtime:
+
+```bash
+# Homebrew (macOS and Linux)
+brew install jkudish/tap/librarium
+
+# Installer (macOS and Linux, x64 and arm64)
+curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh
+```
+
+Then check the version:
+
+```bash
+librarium --version
+```
+
+The installer downloads the latest GitHub release, verifies its SHA-256
+against the release's `SHA256SUMS`, and installs to `/usr/local/bin` (it uses
+`sudo` when that directory is not writable). Set `LIBRARIUM_INSTALL_DIR` to
+install elsewhere. On Windows, download `librarium-windows-x64.exe` from
+[GitHub releases](https://github.com/jkudish/librarium/releases) or use npm.
+Standalone binaries skip npm custom-provider modules; use the npm package if
+you need them.
+
+`librarium upgrade` updates npm and Homebrew installs. For an installer
+install, run the installer again.
 
 ## Run your first query
 
@@ -56,6 +69,22 @@ librarium plan "What changed in PostgreSQL 17?"
 # May make paid provider requests.
 librarium run "What changed in PostgreSQL 17?" --group quick
 ```
+
+`init` walks you through choosing providers and where to store each key: the
+OS keychain (macOS), a shell environment variable, or the config file. If your
+provider keys are already exported as environment variables, run
+`librarium init --auto` instead. It enables every provider whose key it finds,
+except opt-in providers.
+
+The SearchAPI consumer surfaces in the `visibility` workflow are opt-in. With
+`SEARCHAPI_API_KEY` exported, enable them in the same step:
+
+```bash
+librarium init --auto --enable searchapi-chatgpt,searchapi-gemini,searchapi-google-ai-mode,searchapi-bing-copilot,searchapi-google-ai-overview
+```
+
+A `visibility` run names each member it skips and the `init --enable` command
+that enables it.
 
 `doctor` checks configuration and credential presence offline. Only
 `doctor --live` loads trusted custom code, makes provider requests, and may
@@ -156,7 +185,7 @@ librarium answer <query> [run options] [--verify]
 | `completions` | no explicit option |
 | `ls` | `--json` |
 | `groups` | `--json` |
-| `init` | `--auto` |
+| `init` | `--auto`, `--enable` |
 | `doctor` | `--json`, `--live` |
 | `config` | `--json`, `--global`, `--menu` |
 | `config migrate` | `--from`, `--project`, `--output`, `--force` |
@@ -177,17 +206,49 @@ recovery; deleting a ledger does not reset a budget.
 
 ## Use Librarium with agents
 
-Install the version-matched skill:
+Install the skill that matches your CLI version. It is written to
+`~/.claude/skills/librarium/SKILL.md` for Claude Code; other hosts that read
+Agent Skills can use the same file.
 
 ```bash
 librarium install-skill
 ```
 
-Or register the MCP stdio server:
+To give the agent tools, register `librarium mcp` as a stdio MCP server. Every
+host runs the same command:
 
 ```bash
-claude mcp add librarium -- librarium mcp
+claude mcp add --scope user librarium -- librarium mcp   # Claude Code
+codex mcp add librarium -- librarium mcp                 # Codex
+amp mcp add librarium -- librarium mcp                   # Amp
 ```
+
+For Cursor, add the server to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a
+project):
+
+```json
+{
+  "mcpServers": {
+    "librarium": {
+      "command": "librarium",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+For any other host, register a stdio server named `librarium` with command
+`librarium` and arguments `["mcp"]`. If the host cannot find `librarium`, use
+the absolute path that `command -v librarium` prints.
+
+The MCP server reads the same configuration as the CLI. Keys saved in the
+config file or the macOS keychain work in every host. Keys stored as
+environment-variable references, which `init --auto` writes, must be present in
+the server's environment. Claude Code passes your shell environment. Codex
+passes only a small default set, so list the variables in `env_vars` under
+`[mcp_servers.librarium]` in `~/.codex/config.toml`. In Cursor, add an `env`
+entry such as `"EXA_API_KEY": "${env:EXA_API_KEY}"`. Other hosts have their own
+`env` setting, such as `amp mcp add --env`.
 
 The MCP tools are `research`, `get_results`, `check_async`, `list_providers`,
 and `list_groups`. Research returns a bounded index. Read complete evidence and
