@@ -8,7 +8,6 @@ import {
   searchApiOptionsSchema,
 } from '../core/searchapi.js';
 import {
-  normalizeSearchApiAiAnswer,
   type SearchApiAiResponse,
   searchApiAiResponseError,
 } from '../core/searchapi-ai.js';
@@ -20,15 +19,20 @@ import type {
 import { BaseProvider, type BaseProviderOptions } from './base.js';
 import {
   extractSearchApiGoogleAiOverviewPageToken,
+  hasSearchApiGoogleAiOverviewPayload,
+  readSearchApiGoogleAiOverview,
   type SearchApiGoogleResponse,
+  type SearchApiGoogleSection,
 } from './searchapi-google.js';
 
 export const SEARCHAPI_GOOGLE_AI_OVERVIEW_MAX_LOGICAL_OPERATIONS = 2;
 
-const MISSING_TOKEN_ERROR =
-  'SearchAPI Google AI Overview unverified: stage 1 returned no valid ai_overview.page_token';
-const NO_RESULT_ERROR =
-  'SearchAPI Google AI Overview capability unverified: no result';
+/** Google showed no AI Overview for this search (PHP: searchapi.no_ai_overview). */
+export const SEARCHAPI_GOOGLE_AI_OVERVIEW_NO_OVERVIEW_ERROR =
+  'SearchAPI Google AI Overview unavailable: Google showed no AI Overview for this search';
+/** An overview was present but unreadable (PHP: searchapi.ai_overview_unparsed). */
+export const SEARCHAPI_GOOGLE_AI_OVERVIEW_UNPARSED_ERROR =
+  'SearchAPI Google AI Overview unparsed: SearchAPI returned an AI Overview the adapter could not read';
 
 export interface SearchApiGoogleAiOverviewProviderOptions
   extends BaseProviderOptions {
@@ -36,7 +40,11 @@ export interface SearchApiGoogleAiOverviewProviderOptions
   retry?: HttpRetryPolicy;
 }
 
-/** SearchAPI's immediate two-stage Google AI Overview workflow. */
+/**
+ * SearchAPI's Google AI Overview workflow: read an overview inline from the
+ * first google request, and follow ai_overview.page_token with a second
+ * google_ai_overview request only when no inline overview is present.
+ */
 export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
   readonly id = 'searchapi-google-ai-overview';
   readonly tier: ProviderTier = 'ai-grounded';
@@ -93,10 +101,21 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
         );
       }
 
-      const pageToken = extractSearchApiGoogleAiOverviewPageToken(
-        firstResponse.data.ai_overview,
-      );
-      if (!pageToken) return this.errorResult(start, MISSING_TOKEN_ERROR);
+      // Google returns the overview inline, behind a page_token (often beside
+      // a misleading "not available" error), or not at all. Only the token
+      // shape costs a second request.
+      const overview = firstResponse.data.ai_overview;
+      if (!isNonEmptyRecord(overview)) {
+        return this.errorResult(
+          start,
+          SEARCHAPI_GOOGLE_AI_OVERVIEW_NO_OVERVIEW_ERROR,
+        );
+      }
+      const inline = readSearchApiGoogleAiOverview(overview, this.id);
+      if (inline.content) return this.overviewResult(start, inline, 'inline');
+
+      const pageToken = extractSearchApiGoogleAiOverviewPageToken(overview);
+      if (!pageToken) return this.unreadableResult(start, overview);
       if (options.signal?.aborted) throw new HttpRequestAbortedError();
 
       const secondRequest = createSearchApiRequest({
@@ -129,12 +148,13 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
         );
       }
 
-      return {
-        provider: this.id,
-        tier: this.tier,
-        ...normalizeSearchApiAiAnswer(secondResponse.data, this.id),
-        durationMs: this.duration(start),
-      };
+      const loaded = readSearchApiGoogleAiOverview(
+        secondResponse.data,
+        this.id,
+      );
+      return loaded.content
+        ? this.overviewResult(start, loaded, 'page_token')
+        : this.unreadableResult(start, secondResponse.data);
     } catch (error) {
       return this.errorResult(
         start,
@@ -145,10 +165,37 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
 
   async test(): Promise<{ ok: boolean; error?: string }> {
     const result = await this.execute('test', { timeout: 10 });
-    if (result.error) return { ok: false, error: result.error };
-    return result.content.trim()
-      ? { ok: true }
-      : { ok: false, error: NO_RESULT_ERROR };
+    return result.error ? { ok: false, error: result.error } : { ok: true };
+  }
+
+  private overviewResult(
+    start: number,
+    overview: SearchApiGoogleSection,
+    retrieval: 'inline' | 'page_token',
+  ): ProviderResult {
+    return {
+      provider: this.id,
+      tier: this.tier,
+      content: overview.content,
+      citations: overview.citations,
+      durationMs: this.duration(start),
+      // Observed request facts: SearchAPI bills each successful search, and
+      // only the page_token shape needs the second google_ai_overview call.
+      providerMeta: {
+        'searchapi:ai_overview_retrieval': retrieval,
+        'searchapi:request_count': retrieval === 'inline' ? 1 : 2,
+      },
+    };
+  }
+
+  /** No readable overview: unparsed when material exists, otherwise absent. */
+  private unreadableResult(start: number, overview: unknown): ProviderResult {
+    return this.errorResult(
+      start,
+      hasSearchApiGoogleAiOverviewPayload(overview)
+        ? SEARCHAPI_GOOGLE_AI_OVERVIEW_UNPARSED_ERROR
+        : SEARCHAPI_GOOGLE_AI_OVERVIEW_NO_OVERVIEW_ERROR,
+    );
   }
 
   private httpError(
@@ -184,4 +231,13 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
   private duration(start: number): number {
     return Math.round(performance.now() - start);
   }
+}
+
+function isNonEmptyRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
 }
