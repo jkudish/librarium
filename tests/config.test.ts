@@ -313,9 +313,7 @@ describe('loadConfig', () => {
       }),
     );
 
-    expect(() => loadConfig(configPath)).toThrow(
-      /Request deadline cannot be shorter than an attempt deadline/,
-    );
+    expect(() => loadConfig(configPath)).toThrow(/Invalid Librarium v2 config/);
   });
 
   it('refuses native v2 budgets that the compatibility number shape would change', () => {

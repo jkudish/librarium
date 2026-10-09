@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - Unreleased
+
+Version 2 replaces Librarium's provider, configuration, execution, package,
+and artifact contracts. Review the breaking changes before upgrading from v1.
 
 ### Removed
 
@@ -13,11 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incompatible HTTP-success payloads, including after accepting both documented
   content shapes. Parallel Search, Turbo, and Research remain supported through
   their separate Search and Task APIs; this is not a live-validation claim.
-
-## [2.0.0] - 2026-08-27
-
-Version 2 replaces Librarium's provider, configuration, execution, package,
-and artifact contracts. Review the breaking changes before upgrading from v1.
 
 ### Breaking changes
 
@@ -92,7 +90,7 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
 
 ### Added
 
-- A typed public catalog with 33 built-in providers and 40 retained public
+- A typed public catalog with 34 built-in providers and 41 retained public
   profiles. Descriptors are the source of truth for profile identity,
   selection, credentials, models, options, metering, execution capabilities,
   and provenance.
@@ -476,7 +474,6 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/jkudish/librarium/compare/v1.4.1...v2.0.0
 [1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0

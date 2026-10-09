@@ -6,6 +6,7 @@ import type { ResearchResponse } from '../contracts/interchange/research-respons
 import { generateSlug } from '../core/prompt-builder.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
+  type CanonicalRunRefinement,
   canonicalRunsRoot,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
@@ -49,6 +50,7 @@ export interface CheckAsyncResult {
   error?: 'artifact.reconciliation_failed';
   regenerationError?: 'artifact.regeneration_failed';
   state?: 'pending' | 'terminal';
+  refinementStatus?: CanonicalRunRefinement['status'];
   response?: ResearchResponse;
 }
 
@@ -145,9 +147,12 @@ export async function checkAsyncTasks(
           resolveExactProvider,
         ),
       });
-      const afterResults =
-        canonical.manifest.terminal_response?.results.length ?? 0;
-      const beforeResults = before.terminal_response?.results.length ?? 0;
+      const retrieved = Object.keys(
+        canonical.manifest.provider_outputs_by_attempt,
+      ).filter(
+        (attemptId) =>
+          !Object.hasOwn(before.provider_outputs_by_attempt, attemptId),
+      ).length;
       const activeBefore = before.coordination_state.attempts.filter(
         (attempt) =>
           attempt.durable_handle &&
@@ -163,12 +168,15 @@ export async function checkAsyncTasks(
       return {
         runDir,
         polled: activeBefore,
-        retrieved: Math.max(0, afterResults - beforeResults),
+        retrieved,
         tasks: [],
         state:
           canonical.manifest.coordination_state.status === 'running'
             ? 'pending'
             : 'terminal',
+        ...(canonical.manifest.refinement && {
+          refinementStatus: canonical.manifest.refinement.status,
+        }),
         ...(canonical.response && { response: canonical.response }),
       };
     }

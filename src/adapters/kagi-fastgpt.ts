@@ -82,6 +82,17 @@ export class KagiFastGPTProvider extends BaseProvider {
         };
       }
 
+      if (typeof data.data?.output !== 'string' || !data.data.output.trim()) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: 'Kagi response did not include a non-empty answer',
+        };
+      }
+
       const content = this.buildContent(data);
       const citations = this.extractCitations(data.data?.references);
 

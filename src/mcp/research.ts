@@ -16,9 +16,14 @@ import {
 } from '../core/provider-selection.js';
 import { writeCanonicalPresentationArtifacts } from '../node-canonical-artifacts.js';
 import {
+  beginCanonicalRefinement,
   type CanonicalPreparedExecutionResult,
+  completeCanonicalRefinement,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
+  failOrInterruptCanonicalRefinement,
+  materializeCanonicalPreparedExecution,
+  resumeCanonicalPreparedExecution,
   runCanonicalPreparedExecution,
 } from '../node-canonical-run.js';
 import {
@@ -214,7 +219,9 @@ export async function runResearchSilent(
   const createdAt = preflight.prepared.request.requested_at;
   const wallet = new RunPaidWallet({
     request_id: preflight.prepared.request.request_id,
-    request_fingerprint: fingerprint(preflight.prepared.request),
+    request_fingerprint: fingerprint(
+      JSON.parse(JSON.stringify(preflight.prepared.request)),
+    ),
     config_fingerprint: fingerprint({
       defaults: config.defaults,
       refine: config.refine,
@@ -236,21 +243,46 @@ export async function runResearchSilent(
   });
 
   // Optional one-shot LLM refine. Never allowed to break the run.
+  const coordinator = createNodeCoordinatorDependencies();
   let refined: RefinedQueries | null = null;
   if (args.refine) {
-    try {
-      refined = await refineQuery(
-        args.query,
-        config,
-        process.env,
-        (message) => onWarn(`[librarium] refine: ${message}`),
-        credentials,
-        wallet,
-      );
-    } catch (e) {
-      onWarn(
-        `[librarium] warning: refine failed (${e instanceof Error ? e.message : String(e)}); dispatching the original query`,
-      );
+    await materializeCanonicalPreparedExecution(preflight.prepared, {
+      runs_root: baseDir,
+      run_directory: outputDir,
+      coordinator,
+      paid_wallet: wallet,
+      refinement_requested: true,
+    });
+    if (wallet.remainingMs() > 0) {
+      beginCanonicalRefinement({
+        runs_root: baseDir,
+        run_directory: outputDir,
+      });
+      try {
+        refined = await refineQuery(
+          args.query,
+          config,
+          process.env,
+          (message) => onWarn(`[librarium] refine: ${message}`),
+          credentials,
+          wallet,
+        );
+      } catch (e) {
+        failOrInterruptCanonicalRefinement({
+          runs_root: baseDir,
+          run_directory: outputDir,
+        });
+        if (wallet.remainingMs() > 0) {
+          onWarn(
+            `[librarium] warning: refine failed (${e instanceof Error ? e.message : String(e)}); dispatching the original query`,
+          );
+        }
+      }
+    } else {
+      failOrInterruptCanonicalRefinement({
+        runs_root: baseDir,
+        run_directory: outputDir,
+      });
     }
   }
 
@@ -268,21 +300,36 @@ export async function runResearchSilent(
       return variant ? [[slot.slot_id, variant]] : [];
     }),
   );
+  if (args.refine && refined) {
+    completeCanonicalRefinement({
+      runs_root: baseDir,
+      run_directory: outputDir,
+      queries_by_slot: refinedQueriesBySlot,
+    });
+  }
   const runCanonical = deps.runCanonical ?? runCanonicalPreparedExecution;
-  const canonical = await runCanonical(preflight.prepared, {
-    runs_root: baseDir,
-    run_directory: outputDir,
-    coordinator: createNodeCoordinatorDependencies(),
-    attempt_bridge: {
-      ...createRegisteredProviderAttemptBridge(
-        preflight.prepared,
-        resolveExactProvider,
-      ),
-      signal: wallet.signal,
-    },
-    paid_wallet: wallet,
-    refined_queries_by_slot: refinedQueriesBySlot,
-  });
+  const attemptBridge = {
+    ...createRegisteredProviderAttemptBridge(
+      preflight.prepared,
+      resolveExactProvider,
+    ),
+    signal: wallet.signal,
+  };
+  const canonical = args.refine
+    ? await resumeCanonicalPreparedExecution({
+        runs_root: baseDir,
+        run_directory: outputDir,
+        coordinator,
+        attempt_bridge: attemptBridge,
+        paid_wallet: wallet,
+      })
+    : await runCanonical(preflight.prepared, {
+        runs_root: baseDir,
+        run_directory: outputDir,
+        coordinator,
+        attempt_bridge: attemptBridge,
+        paid_wallet: wallet,
+      });
   const presentation = writeCanonicalPresentationArtifacts(
     canonical.manifest,
     outputDir,

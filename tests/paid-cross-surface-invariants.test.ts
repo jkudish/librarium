@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -150,8 +156,17 @@ describe('paid cross-surface invariants', () => {
   it('uses one real run authority, preserves synthesis reserve, and retains readable research at the ceiling', async () => {
     const executeCliProvider = vi.fn(async () => researchResult());
     const cliProvider = provider(executeCliProvider);
-    const fetchMock = vi.fn(async () =>
-      Promise.resolve(
+    let activeOutputRoot = state.config!.defaults.outputDir;
+    const refinementStatesAtPaidCall: unknown[] = [];
+    const fetchMock = vi.fn(async () => {
+      const runDirectory = join(
+        activeOutputRoot,
+        readdirSync(activeOutputRoot)[0] as string,
+      );
+      refinementStatesAtPaidCall.push(
+        readCanonicalRunManifest(activeOutputRoot, runDirectory).refinement,
+      );
+      return Promise.resolve(
         new Response(
           JSON.stringify({
             choices: [
@@ -170,8 +185,8 @@ describe('paid cross-surface invariants', () => {
           }),
           { status: 200 },
         ),
-      ),
-    );
+      );
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     const cli = await executeRun(
@@ -198,6 +213,7 @@ describe('paid cross-surface invariants', () => {
     expect(cli.outputDir).toBeDefined();
     expect(executeCliProvider).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(refinementStatesAtPaidCall).toEqual([{ status: 'in_progress' }]);
     const cliOutputDir = cli.outputDir as string;
     const cliLedger = readLedger(cliOutputDir);
     expect(cliLedger.limits.max_actual_cost_microusd).toBe('21000');
@@ -229,6 +245,10 @@ describe('paid cross-surface invariants', () => {
     expect(
       readCanonicalRunManifest(dirname(cliOutputDir), cliOutputDir),
     ).toMatchObject({
+      refinement: {
+        status: 'completed',
+        queries_by_slot: { 'preflight-slot-1': 'Grounded retained research' },
+      },
       terminal_response: { status: 'succeeded' },
     });
     expect(readRunResults(cliOutputDir)).toMatchObject({
@@ -246,6 +266,7 @@ describe('paid cross-surface invariants', () => {
     const mcpConfig = runConfig(mcpRoot);
     const executeMcpProvider = vi.fn(async () => researchResult());
     const mcpProvider = provider(executeMcpProvider);
+    activeOutputRoot = mcpRoot;
     const mcp = await runResearchSilent(
       {
         query: 'prove paid cross-surface invariants',
@@ -270,6 +291,18 @@ describe('paid cross-surface invariants', () => {
 
     expect(executeMcpProvider).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refinementStatesAtPaidCall).toEqual([
+      { status: 'in_progress' },
+      { status: 'in_progress' },
+    ]);
+    expect(
+      readCanonicalRunManifest(dirname(mcp.outputDir), mcp.outputDir),
+    ).toMatchObject({
+      refinement: {
+        status: 'completed',
+        queries_by_slot: { 'preflight-slot-1': 'Grounded retained research' },
+      },
+    });
     const mcpLedger = readLedger(mcp.outputDir);
     const sharedStages = ['refinement', 'research'] as const;
     for (const stage of sharedStages) {

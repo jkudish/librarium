@@ -27,6 +27,13 @@ It must not claim runtime success, citations, correctness, a cost, independent
 corroboration, a timestamp, or a particular account’s consumer experience.
 Those facts belong in a result’s provenance and usage records after execution.
 
+`plan` and MCP `list_providers` with `detail: "profiles"` inspect declared
+profiles without constructing adapters, importing custom modules, or spawning
+scripts. Missing custom declarations cannot be filled in by running `describe`
+during preflight. Declare capabilities explicitly if the provider is to be
+selected by the canonical planner. Discovery is not an authentication check;
+even a declared available profile can fail at execution time.
+
 ## Execution contract
 
 An inline profile executes once and has `resumability: "none"`.
@@ -131,6 +138,20 @@ Existing callers may continue to pass the camelCase
 `CustomProviderLoadConfig` shape. Use `customProviderLoadConfigFromV2()` when a
 caller needs that converted shape separately rather than loading immediately.
 
+This standalone loader's disabled-provider rule is distinct from CLI/MCP
+canonical execution. After preflight, those application paths can load the
+exact admitted custom IDs, including a trusted disabled provider admitted only
+as a fallback reserve. They do not enable unrelated custom code or mutate the
+saved configuration. `--no-fallback` removes that fallback authority. Do not
+equate `enabled: false` with a universal execution prohibition when the same
+provider is explicitly configured and admitted as a fallback.
+
+Homebrew and standalone SEA binaries skip npm custom-provider modules with a
+warning; npm module loading requires a Node package installation. Script
+providers remain subject to trust and require their configured executable to
+exist on the host. Inspect `loadedIds`, `skippedIds`, and `warnings` rather than
+assuming every declaration became a provider instance.
+
 An npm source exports a provider object or a factory that receives its provider
 ID, config, and source options. The returned ID must match the configured ID.
 Inline providers implement `execute`. Background providers also implement
@@ -173,6 +194,14 @@ it exact. Unknown, token-priced, API-unit, and account-specific prices are not
 zero. Validate model and option overrides before adapter construction. A bad
 configuration blocks new `execute`, `submit`, and `test` work before HTTP but
 must leave safe `poll` and `retrieve` available for existing durable work.
+
+CLI/MCP paid calls use the run-wide wallet: refinement, research, synthesis,
+verification, and admitted fallbacks share limits and one original deadline.
+Report actual usage when known, including for a failed attempt if available;
+do not substitute an estimate for provider-reported cost. An unknown estimate
+cannot admit a new call under a hard budget. The paid-attempt ledger is a
+private run sidecar, not part of the terminal TypeScript/PHP interchange
+contract. See [pricing and recovery](../README.md#pricing-and-privacy).
 
 ## Required checks
 

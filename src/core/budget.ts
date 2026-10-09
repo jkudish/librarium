@@ -1,5 +1,60 @@
 import type { MeteringEstimate, ProviderUsage } from '../types.js';
 
+/** Every finite JavaScript number converted to microusd fits in this bound. */
+export const MAX_REPORTED_COST_MICROUSD_DIGITS = 315;
+/** A coordinator persists at most 256 reported attempt costs. */
+export const MAX_AGGREGATE_COST_MICROUSD_DIGITS = 318;
+
+function expandedNonNegativeDecimal(value: number): string {
+  const [coefficient, exponentText] = value.toString().toLowerCase().split('e');
+  const exponent = exponentText === undefined ? 0 : Number(exponentText);
+  const [integer = '0', fraction = ''] = coefficient.split('.');
+  const digits = `${integer}${fraction}`;
+  const decimalPosition = integer.length + exponent;
+  let whole: string;
+  let remainder: string;
+  if (decimalPosition <= 0) {
+    whole = '0';
+    remainder = `${'0'.repeat(-decimalPosition)}${digits}`;
+  } else if (decimalPosition >= digits.length) {
+    whole = `${digits}${'0'.repeat(decimalPosition - digits.length)}`;
+    remainder = '';
+  } else {
+    whole = digits.slice(0, decimalPosition);
+    remainder = digits.slice(decimalPosition);
+  }
+  whole = whole.replace(/^0+(?=\d)/, '');
+  remainder = remainder.replace(/0+$/, '');
+  return remainder ? `${whole}.${remainder}` : whole;
+}
+
+/** Canonical non-exponent USD decimal accepted by the terminal usage schema. */
+export function decimalUsdFromNumber(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Usage costs must be finite non-negative numbers.');
+  }
+  const fixed = value.toFixed(18).replace(/0+$/, '').replace(/\.$/, '');
+  return /^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(fixed)
+    ? fixed
+    : expandedNonNegativeDecimal(value);
+}
+
+export function costMicrousdFromUsd(
+  value: number | undefined,
+): string | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  const [whole, fraction = ''] = expandedNonNegativeDecimal(value).split('.');
+  const microusdFraction = fraction.slice(0, 6).padEnd(6, '0');
+  const roundsUp = /[1-9]/.test(fraction.slice(6));
+  return (
+    BigInt(whole) * 1_000_000n +
+    BigInt(microusdFraction) +
+    (roundsUp ? 1n : 0n)
+  ).toString();
+}
+
 /**
  * Runtime spend circuit breaker for a dispatch.
  *

@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { OpaqueIdSchema } from '../contracts/common.js';
-import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import {
+  diagnosticForSubmissionError,
+  diagnosticForSubmissionHttpStatus,
+  UnsafeToRetrySubmissionError,
+} from '../core/errors.js';
 import { normalizeUrl } from '../core/normalizer.js';
 import type {
   AsyncPollResult,
@@ -25,6 +29,8 @@ import {
 } from './parallel-options.js';
 
 const API = 'https://api.parallel.ai';
+const RESEARCH_SUBMISSION_FAILED =
+  'Parallel submission failed before a valid task handle was returned.';
 const RESEARCH_PROCESSORS = new Set(['pro', 'pro-fast', 'ultra', 'ultra-fast']);
 const STATUS: Record<string, AsyncTaskStatus> = {
   queued: 'pending',
@@ -426,10 +432,14 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
   ): Promise<AsyncTaskHandle> {
     const parsed = ParallelResearchOptionsSchema.safeParse(this.options);
     if (!parsed.success)
-      throw new Error(`parallel-research options: ${parsed.error.message}`);
+      throw new UnsafeToRetrySubmissionError(
+        `parallel-research options: ${parsed.error.message}`,
+        { kind: 'invalid_request' },
+      );
     if (!RESEARCH_PROCESSORS.has(this.processor))
-      throw new Error(
+      throw new UnsafeToRetrySubmissionError(
         'parallel-research processor must be one of: pro, pro-fast, ultra, ultra-fast',
+        { kind: 'invalid_request' },
       );
     let response;
     try {
@@ -458,18 +468,36 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+        RESEARCH_SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
       );
     }
     if (response.status !== 202 && response.status !== 200)
       throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+        RESEARCH_SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     const parsedResponse = taskRunSchema.safeParse(response.data);
-    if (!parsedResponse.success)
-      throw new UnsafeToRetrySubmissionError(
-        'Parallel accepted an invalid task response',
+    if (!parsedResponse.success) {
+      const id = OpaqueIdSchema.safeParse(
+        (response.data as { run_id?: unknown })?.run_id,
       );
+      if (id.success) {
+        return {
+          provider: this.id,
+          taskId: id.data,
+          query,
+          submittedAt: Date.now(),
+          status: 'pending',
+          providerStatus: 'invalid_response',
+          lastPollError: 'Parallel returned an invalid task response',
+        };
+      }
+      throw new UnsafeToRetrySubmissionError(
+        RESEARCH_SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
+      );
+    }
     const id = parsedResponse.data.run_id;
     // Creation establishes the remote identity used for every later request.
     // The returned handle therefore derives only from the validated response.
@@ -496,31 +524,13 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       },
     );
     if (response.status !== 200) {
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      )
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      return {
-        status: 'failed',
-        rawStatus: `http_${response.status}`,
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
     const parsedResponse = taskRunSchema.safeParse(response.data);
     if (!parsedResponse.success)
-      return {
-        status: 'failed',
-        rawStatus: 'invalid_response',
-        message: 'Parallel returned an invalid task status response',
-      };
+      throw new Error('Parallel returned an invalid task status response');
     if (parsedResponse.data.run_id !== handle.taskId)
-      return {
-        status: 'failed',
-        rawStatus: 'identity_mismatch',
-        message: 'Parallel returned task status for a different run_id',
-      };
+      throw new Error('Parallel returned task status for a different run_id');
     const rawStatus = parsedResponse.data.status;
     const status = STATUS[rawStatus];
     return status

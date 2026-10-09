@@ -17,6 +17,7 @@ import { SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION } from '../src/node-entry.js';
 const read = (path: string) =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const README = read('README.md');
+const CHANGELOG = read('CHANGELOG.md');
 const SKILL = read('SKILL.md');
 const PROVIDER_GUIDE = read('docs/provider-development.md');
 const CONTRACTS_GUIDE = read('contracts/README.md');
@@ -31,15 +32,6 @@ const profileKeys = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
     (profile) => `${provider.provider_id}/${profile.profile_id}`,
   ),
 );
-const durableProfileKeys = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
-  provider.profiles
-    .filter(
-      (profile) =>
-        profile.invocation === 'background' &&
-        profile.resumability === 'durable',
-    )
-    .map((profile) => `${provider.provider_id}/${profile.profile_id}`),
-);
 const mcpTools = [
   ...MCP_SOURCE.matchAll(/server\.registerTool\(\s*'([^']+)'/g),
 ].map((match) => match[1]);
@@ -51,9 +43,7 @@ describe('public v2 documentation drift', () => {
     expect(README).toMatch(
       /\*\*34 built-in providers\*\* and \*\*41 implemented public\s+profiles\*\*/,
     );
-    expect(SKILL).toContain(
-      '34 built-in providers and 41 implemented profiles',
-    );
+    expect(SKILL).toContain('rather than assuming providers');
 
     for (const provider of BUILTIN_PROVIDER_CATALOG) {
       expect(README).toContain(`${provider.provider_id}/`);
@@ -128,23 +118,13 @@ describe('public v2 documentation drift', () => {
     expect(SKILL).toContain('`deep` for research-report profiles');
   });
 
-  it('keeps the skill durable-profile roster aligned with source', () => {
-    const row = SKILL.split('\n').find((line) =>
-      line.startsWith('| background/durable |'),
-    );
-    expect(row).toBeDefined();
-    expect(
-      [...(row ?? '').matchAll(/`([^`]+\/[^`]+)`/g)].map((match) => match[1]),
-    ).toEqual(durableProfileKeys);
-  });
-
   it('documents every registered public command and long option', () => {
     const program = createCliProgram();
     for (const command of program.commands) {
       expect(README).toContain(`\`${command.name()}\``);
       for (const option of command.options) {
         if (option.long && option.long !== '--help') {
-          expect(README).toContain(option.long);
+          expect(README).toMatch(new RegExp(`${option.long}(?![A-Za-z0-9_-])`));
         }
       }
     }
@@ -158,8 +138,19 @@ describe('public v2 documentation drift', () => {
     expect(migrate).toBeDefined();
     expect(README).toContain('`config migrate`');
     for (const option of migrate?.options ?? []) {
-      if (option.long) expect(README).toContain(option.long);
+      if (option.long) {
+        expect(README).toMatch(new RegExp(`${option.long}(?![A-Za-z0-9_-])`));
+      }
     }
+  });
+
+  it('keeps the pending v2 changelog truthful', () => {
+    expect(CHANGELOG).toContain('## [2.0.0] - Unreleased');
+    expect(CHANGELOG).not.toMatch(/## \[2\.0\.0\] - \d{4}-\d{2}-\d{2}/);
+    expect(CHANGELOG).toContain(
+      'A typed public catalog with 34 built-in providers and 41 retained public',
+    );
+    expect(CHANGELOG).not.toContain('40 retained public');
   });
 
   it('documents the source-derived MCP tool roster', () => {
@@ -194,25 +185,55 @@ describe('public v2 documentation drift', () => {
     expect(PROVIDER_GUIDE).toContain('There is no separate `1.0.0`');
   });
 
-  it('keeps shipped durable-profile rosters aligned with the catalog', () => {
-    const durableProfiles = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
-      provider.profiles
-        .filter(
-          (profile) =>
-            profile.invocation === 'background' &&
-            profile.resumability === 'durable',
-        )
-        .map((profile) => `${provider.provider_id}/${profile.profile_id}`),
-    ).sort();
-    const documentedRoster = (document: string) => {
-      const row = document.match(/\| background\/durable \| ([^|]+) \|/);
-      expect(row).not.toBeNull();
-      return [...(row?.[1] ?? '').matchAll(/`([^`]+)`/g)]
-        .map((match) => match[1])
-        .sort();
-    };
+  it('maps capability types to question intent from the configured catalog', () => {
+    expect(SKILL).toContain('one provider can offer several profiles');
+    expect(SKILL).toContain('assume citations or live web access');
+    expect(SKILL).toContain('Ungrounded chat-style profiles exist');
+    expect(SKILL).toContain('| search | source lists for discovery |');
+    expect(SKILL).toContain('| grounded answer | short answers backed by');
+    expect(SKILL).toContain('| research report | deeper, multi-source');
+    expect(SKILL).toContain(
+      '| surface (visibility) | observations of how AI answer engines',
+    );
+    expect(SKILL).toContain('not independent factual confirmations');
+  });
 
-    expect(documentedRoster(SKILL)).toEqual(durableProfiles);
+  it('shows an executable MCP lifecycle example with a CLI equivalent', () => {
+    expect(SKILL).toContain(
+      'Researches across search engines and AI providers',
+    );
+    expect(SKILL).toContain(
+      '"query":"Compare managed Postgres options","group":"quick","mode":"sync"',
+    );
+    expect(SKILL).toContain('"part":"content","cursor":"<nextCursor>"');
+    expect(SKILL).toContain('"part":"citations"');
+    expect(SKILL).toContain(
+      'librarium run "Compare managed Postgres options" --group quick --mode sync',
+    );
+    expect(SKILL).toContain('`--json` prints the run');
+    expect(SKILL).toContain('MCP `refine` / CLI `--refine`');
+  });
+
+  it('keeps the skill a host-neutral operating guide with scope-bounded escalation', () => {
+    expect(SKILL).toContain('**Quick-then-deepen**');
+    expect(SKILL).toContain('**Upfront planning**');
+    expect(SKILL).toContain('Match the request, not a fixed ladder');
+    expect(SKILL).toContain('within scope and budget');
+    expect(SKILL).toContain('authorization is a new paid decision');
+    expect(SKILL).toContain('spending authority from thin');
+    expect(SKILL).toContain('has no `plan` tool');
+    expect(SKILL).toContain('per-call budget or fallback input');
+    expect(SKILL).toContain('override groups');
+    expect(SKILL).toContain('establishes affordability');
+    expect(SKILL).toContain('not absolute provider billing');
+    expect(SKILL).toContain('complements research passes');
+    expect(SKILL).toContain('names your host actually');
+    expect(SKILL).toContain('no CLI is needed');
+    expect(SKILL).toContain('do not re-ask for already-authorized scope');
+    expect(SKILL).toContain('Collection and synthesis are separate');
+    expect(SKILL).not.toContain('34 built-in providers');
+    expect(SKILL).not.toContain('Never auto-escalate');
+    expect(SKILL).not.toContain('always start with `quick`');
   });
 
   it('keeps the execution, provenance, privacy, and paid-validation boundaries explicit', () => {
