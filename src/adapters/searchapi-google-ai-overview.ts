@@ -11,7 +11,12 @@ import {
   type SearchApiAiResponse,
   searchApiAiResponseError,
 } from '../core/searchapi-ai.js';
+import {
+  searchApiErrorFailureDiagnostic,
+  searchApiHttpFailureDiagnostic,
+} from '../core/searchapi-diagnostics.js';
 import type {
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -159,6 +164,7 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
       return this.errorResult(
         start,
         redactSearchApiErrorText(this.formatCatchError(error), apiKey),
+        searchApiErrorFailureDiagnostic(error, options.signal),
       );
     }
   }
@@ -213,10 +219,15 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
         zeroRetention: this.zeroRetention,
         credentialEnvVar: this.envVar,
       }),
+      searchApiHttpFailureDiagnostic(status),
     );
   }
 
-  private errorResult(start: number, error: string): ProviderResult {
+  private errorResult(
+    start: number,
+    error: string,
+    failureDiagnostic?: ProviderFailureDiagnostic,
+  ): ProviderResult {
     return {
       provider: this.id,
       tier: this.tier,
@@ -225,6 +236,7 @@ export class SearchApiGoogleAiOverviewProvider extends BaseProvider {
       durationMs: this.duration(start),
       preventFallback: true,
       error,
+      ...(failureDiagnostic && { failureDiagnostic }),
     };
   }
 
