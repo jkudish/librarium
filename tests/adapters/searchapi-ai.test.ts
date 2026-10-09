@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SearchApiChatGptProvider } from '../../src/adapters/searchapi-chatgpt.js';
 import { SearchApiGeminiProvider } from '../../src/adapters/searchapi-gemini.js';
-import { SearchApiPerplexityProvider } from '../../src/adapters/searchapi-perplexity.js';
 import type { HttpClient, HttpResponse } from '../../src/core/http-client.js';
-import { normalizeSearchApiAiAnswer } from '../../src/core/searchapi-ai.js';
+import {
+  normalizeSearchApiAiAnswer,
+  normalizeSearchApiReferenceLinks,
+} from '../../src/core/searchapi-ai.js';
 import {
   SEARCHAPI_AI_SYNTHETIC_KEY,
   searchApiAiFixtures,
@@ -25,16 +27,6 @@ const engines = [
     engine: 'gemini',
     create: (httpClient: HttpClient, zeroRetention = false) =>
       new SearchApiGeminiProvider({
-        apiKey: SEARCHAPI_AI_SYNTHETIC_KEY,
-        httpClient,
-        zeroRetention,
-      }),
-  },
-  {
-    id: 'searchapi-perplexity',
-    engine: 'perplexity',
-    create: (httpClient: HttpClient, zeroRetention = false) =>
-      new SearchApiPerplexityProvider({
         apiKey: SEARCHAPI_AI_SYNTHETIC_KEY,
         httpClient,
         zeroRetention,
@@ -71,6 +63,24 @@ describe('SearchAPI AI answer normalizer', () => {
       {
         url: 'https://example.test/valid',
         title: 'Valid reference',
+        provider: 'searchapi-gemini',
+      },
+    ]);
+  });
+
+  it('rejects reference URLs containing usernames or passwords', () => {
+    expect(
+      normalizeSearchApiReferenceLinks(
+        [
+          { url: 'https://username@example.test/private' },
+          { url: 'https://username:password@example.test/private' },
+          { url: 'https://example.test/public' },
+        ],
+        'searchapi-gemini',
+      ),
+    ).toEqual([
+      {
+        url: 'https://example.test/public',
         provider: 'searchapi-gemini',
       },
     ]);
@@ -129,6 +139,29 @@ describe('SearchAPI consumer AI adapters', () => {
         citations: [],
       });
       expect(result.error).toBeUndefined();
+    },
+  );
+
+  it.each(engines)(
+    '$id rejects credential-bearing reference URLs',
+    async ({ create }) => {
+      const result = await create(
+        fixtureClient({
+          markdown: 'Non-empty grounded answer.',
+          reference_links: [
+            {
+              url: 'https://username:password@evidence.example.test/private',
+              title: 'Unsafe reference',
+            },
+          ],
+        }),
+      ).execute('unsafe reference', { timeout: 7 });
+
+      expect(result).toMatchObject({
+        content: 'Non-empty grounded answer.',
+        citations: [],
+      });
+      expect(JSON.stringify(result)).not.toContain('username:password');
     },
   );
 

@@ -41,7 +41,7 @@ export const SCENARIO_CONFORMANCE_EVIDENCE: Readonly<
   },
   collected_surface_provenance: {
     file: 'tests/result-provenance.test.ts',
-    assertion: 'gives the six surfaces one shared collector correlation',
+    assertion: 'gives the five surfaces one shared collector correlation',
   },
   transport_consistency: {
     file: 'tests/run-artifact-cross-transport.test.ts',

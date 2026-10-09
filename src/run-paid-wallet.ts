@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
+import { costMicrousdFromUsd } from './core/budget.js';
 import type { ProviderUsage } from './types.js';
+
+export { costMicrousdFromUsd } from './core/budget.js';
 
 export type PaidRunStage =
   | 'refinement'
@@ -115,21 +118,33 @@ export function fingerprint(value: unknown): string {
     .digest('hex');
 }
 
-export function costMicrousdFromUsd(
-  value: number | undefined,
-): string | undefined {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
-    return undefined;
-  }
-  return BigInt(Math.ceil(value * 1_000_000)).toString();
+/**
+ * Fingerprint a canonical request in the representation run.json persists.
+ * The paid-attempt ledger binds to this value when a run is created, and
+ * resume recomputes it from the parsed run.json; both sides must hash the
+ * same JSON value, so in-memory-only details (undefined optional fields)
+ * never reach the hash.
+ */
+export function canonicalRequestFingerprint(request: unknown): string {
+  return fingerprint(JSON.parse(JSON.stringify(request)));
 }
 
+/**
+ * Hash input follows JSON semantics: an object key whose value is undefined is
+ * omitted and an undefined array element is null. A fingerprint therefore
+ * matches the same value after it is persisted to and re-read from JSON.
+ */
 function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (Array.isArray(value)) {
+    return `[${value
+      .map((child) => (child === undefined ? 'null' : canonicalJson(child)))
+      .join(',')}]`;
+  }
   if (value && typeof value === 'object') {
     return `{${Object.entries(value)
       .filter(
-        ([key]) =>
+        ([key, child]) =>
+          child !== undefined &&
           !/(?:api[_-]?key|token|secret|password|credential)/i.test(key),
       )
       .sort(([left], [right]) => left.localeCompare(right))
@@ -534,7 +549,12 @@ export class RunPaidWallet {
     const reported = costMicrousdFromUsd(completion.usage?.costUsd);
     this.#attempts[index] = {
       ...prior,
-      status: this.#cancellationRequestedAt ? 'cancelled' : completion.status,
+      status:
+        completion.status === 'acceptance_unknown'
+          ? 'acceptance_unknown'
+          : this.#cancellationRequestedAt
+            ? 'cancelled'
+            : completion.status,
       finished_at: new Date(this.#now()).toISOString(),
       reported:
         reported === undefined

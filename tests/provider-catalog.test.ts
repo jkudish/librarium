@@ -131,7 +131,6 @@ const IMPLEMENTED_MATRIX = [
   ['valyu', 'search'],
   ['searchapi-chatgpt', 'surface'],
   ['searchapi-gemini', 'surface'],
-  ['searchapi-perplexity', 'surface'],
   ['searchapi-google-ai-mode', 'surface'],
   ['searchapi-bing-copilot', 'surface'],
   ['searchapi-google-ai-overview', 'surface'],
@@ -150,7 +149,6 @@ const PLANNED_PROVIDER_IDS = [
 const SURFACE_PROFILES = [
   'searchapi-chatgpt/surface',
   'searchapi-gemini/surface',
-  'searchapi-perplexity/surface',
   'searchapi-google-ai-mode/surface',
   'searchapi-bing-copilot/surface',
   'searchapi-google-ai-overview/surface',
@@ -934,7 +932,6 @@ describe('provider catalog -- built-in workflows', () => {
     expect(keysOf(catalog().workflow('visibility').members)).toEqual([
       'searchapi-chatgpt/surface',
       'searchapi-gemini/surface',
-      'searchapi-perplexity/surface',
       'searchapi-google-ai-mode/surface',
       'searchapi-bing-copilot/surface',
       'searchapi-google-ai-overview/surface',
@@ -1007,14 +1004,17 @@ describe('provider catalog -- built-in workflows', () => {
     expect(omitted).toContainEqual({
       profile_key: 'exa/search',
       reason: 'profile_disabled',
+      remedy: 'Enable it with `librarium init --enable exa`.',
     });
     expect(omitted).toContainEqual({
       profile_key: 'exa/research',
       reason: 'profile_disabled',
+      remedy: 'Enable it with `librarium init --enable exa`.',
     });
     expect(omitted).toContainEqual({
       profile_key: 'kagi-fastgpt/grounded',
       reason: 'credential_missing',
+      remedy: 'Set KAGI_API_KEY or configure its API key.',
     });
   });
 
@@ -1182,13 +1182,56 @@ describe('provider catalog -- target selection', () => {
       ['you-research', 'grounded'],
       ['you-answer', 'grounded'],
       ['searchapi-chatgpt', 'surface'],
-      ['you-research', 'research'],
     ] as const) {
       const primary = built.get(providerId, profileId)?.profile.identity.target
         .primary;
       expect(primary?.model_selection).toBe('provider_managed');
       expect(primary?.target_id).toBeUndefined();
     }
+  });
+
+  it('resolves You.com research to the priced research_effort preset', () => {
+    expect(
+      built.get('you-research', 'research')?.profile.identity.target.primary,
+    ).toEqual({
+      model_selection: 'configurable',
+      kind: 'preset',
+      target_id: 'standard',
+    });
+    for (const effort of [
+      'lite',
+      'standard',
+      'deep',
+      'exhaustive',
+      'frontier',
+    ] as const) {
+      const configured = buildProviderCatalog({
+        providerConfigs: enabledConfigs({
+          'you-research': { options: { researchEffort: effort } },
+        }),
+        credentials: allCredentials(),
+      }).get('you-research', 'research');
+      expect(configured?.profile.identity.target.primary).toEqual({
+        model_selection: 'configurable',
+        kind: 'preset',
+        target_id: effort,
+      });
+    }
+  });
+
+  it('rejects a top-level model for You.com research, which sends only an effort', () => {
+    const binding = BUILTIN_PROFILE_BINDING_SPECS.find(
+      (spec) =>
+        spec.provider_id === 'you-research' && spec.profile_id === 'research',
+    );
+    expect(binding?.adapter_id).toBe('you-research-background');
+    const configured = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        'you-research': { model: 'deep' },
+      }),
+      credentials: allCredentials(),
+    }).get('you-research', 'research');
+    expect(configured?.availability.configuration_valid).toBe(false);
   });
 
   it('declares not-applicable targets for raw retrieval endpoints', () => {
@@ -1796,7 +1839,7 @@ describe('provider catalog -- hard budget admission', () => {
     const result = prepare({
       selector: {
         kind: 'targets',
-        targets: [{ provider_id: 'exa', profile_id: 'search' }],
+        targets: [{ provider_id: 'brave-answers', profile_id: 'grounded' }],
       },
       budgets: { max_estimated_cost_microusd: '0' },
     });
@@ -1816,6 +1859,173 @@ describe('provider catalog -- hard budget admission', () => {
       budgets: { max_estimated_cost_microusd: '5000' },
     });
     expect(result.ok).toBe(true);
+  });
+
+  it('bounds a complete quote even when its units are provider-namespaced', () => {
+    const exa = catalog().get('exa', 'search');
+    // 1 request at $7/1000 plus 10 content pages at $1/1000.
+    expect(exa?.estimate?.estimated_cost_microusd).toBe('17000');
+    // The namespaced unit cannot cross the terminal contract, so the whole
+    // breakdown is withheld rather than reported partially.
+    expect(exa?.estimate?.billable_units).toBeUndefined();
+    const result = prepare({
+      selector: {
+        kind: 'targets',
+        targets: [{ provider_id: 'exa', profile_id: 'search' }],
+      },
+      budgets: { max_actual_cost_microusd: '17000' },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('names every unbounded visibility member and how to proceed', () => {
+    const built = catalog();
+    const members = built.workflow('visibility').members;
+    const unbounded = members.filter(
+      (identity) =>
+        built.get(identity.provider_id, identity.profile_id)?.estimate ===
+        undefined,
+    );
+    expect(unbounded.length).toBeGreaterThan(0);
+    const result = prepare(
+      {
+        selector: { kind: 'group', group_id: 'visibility' },
+        budgets: { max_actual_cost_microusd: '1500000' },
+      },
+      built,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const issues = result.issues.filter(
+      (issue) => issue.code === 'budget_estimate_required',
+    );
+    const named = issues.map(
+      (issue) => /^Profile "([^"]+)"/.exec(issue.message)?.[1],
+    );
+    expect(named.sort()).toEqual(keysOf(unbounded).sort());
+    for (const issue of issues) {
+      // The CLI rejection renders each message with a 320-character cap.
+      expect(issue.message.length).toBeLessThanOrEqual(320);
+    }
+    const surface = issues.find((issue) =>
+      issue.message.startsWith('Profile "searchapi-chatgpt/surface"'),
+    );
+    expect(surface?.message).toContain(
+      'Set options.perRequestUsd for provider "searchapi-chatgpt"',
+    );
+    const tokenPriced = issues.find((issue) =>
+      issue.message.startsWith('Profile "grok/web"'),
+    );
+    expect(tokenPriced?.message).toContain('Leave the profile out');
+    expect(tokenPriced?.message).not.toContain('perRequestUsd');
+  });
+
+  it('keeps every built-in budget diagnostic within the CLI render cap', () => {
+    const built = catalog();
+    for (const entry of built.profiles) {
+      if (entry.estimate) continue;
+      const result = prepare(
+        {
+          selector: { kind: 'targets', targets: [entry.profile.identity] },
+          budgets: { max_estimated_cost_microusd: '1000000' },
+        },
+        built,
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      for (const issue of result.issues) {
+        expect(issue.message.length).toBeLessThanOrEqual(320);
+      }
+    }
+  });
+
+  it('bounds account-priced surfaces with a configured per-request rate', () => {
+    const base = catalog();
+    const configurable = base.resolved.filter(
+      (item) =>
+        item.binding !== undefined &&
+        item.guidance?.estimate_option === 'perRequestUsd' &&
+        item.profile.identity.provider_id.startsWith('searchapi-'),
+    );
+    expect(configurable.length).toBeGreaterThan(0);
+    const built = catalog({
+      providerConfigs: enabledConfigs(
+        Object.fromEntries(
+          configurable.map((item) => [
+            item.binding?.adapter_id ?? '',
+            { options: { perRequestUsd: 0.004 } },
+          ]),
+        ),
+      ),
+    });
+    for (const item of configurable) {
+      const resolved = built.get(
+        item.profile.identity.provider_id,
+        item.declaration.profile_id,
+      );
+      // The reviewed snapshot fixes the request count; the user supplies only
+      // the rate. Google AI Overview's two-stage lane reserves two requests.
+      const requests = Number(
+        resolved?.estimate?.billable_units?.find(
+          (unit) => unit.unit === 'requests',
+        )?.quantity,
+      );
+      expect(requests).toBeGreaterThanOrEqual(1);
+      expect(resolved?.estimate?.estimated_cost_microusd).toBe(
+        String(4000 * requests),
+      );
+    }
+    expect(built.digest).not.toBe(base.digest);
+  });
+
+  it('does not let a per-request option bound a token-priced profile', () => {
+    const built = catalog({
+      providerConfigs: enabledConfigs({
+        grok: { options: { perRequestUsd: 0.01 } },
+      }),
+    });
+    expect(built.get('grok', 'web')?.estimate).toBeUndefined();
+    expect(built.get('grok', 'web')?.guidance?.estimate_option).toBeUndefined();
+  });
+
+  it('keeps diagnostic guidance out of the catalog digest', () => {
+    const built = catalog();
+    expect(built.profiles.some((entry) => entry.guidance)).toBe(true);
+    const stripped = buildProviderCatalog({
+      providerConfigs: enabledConfigs(),
+      credentials: allCredentials(),
+    });
+    expect(stripped.digest).toBe(built.digest);
+    expect(JSON.stringify(built.digest)).not.toContain('guidance');
+  });
+
+  it('says how to enable a disabled explicit profile', () => {
+    const built = catalog({
+      providerConfigs: enabledConfigs({
+        'searchapi-chatgpt': { enabled: false },
+      }),
+    });
+    const result = prepare(
+      {
+        selector: {
+          kind: 'targets',
+          targets: [
+            { provider_id: 'searchapi-chatgpt', profile_id: 'surface' },
+          ],
+        },
+      },
+      built,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'profile_disabled',
+        message: expect.stringMatching(
+          /^Profile "searchapi-chatgpt\/surface" is disabled\. Enable it with `librarium init --enable searchapi-chatgpt`/,
+        ),
+      }),
+    );
   });
 
   it('rejects an exactly estimated plan over its budget', () => {
@@ -1952,11 +2162,12 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(13);
+    expect(configurable).toHaveLength(14);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',
         'openrouter/grounded',
+        'you-research/research',
       ]),
     );
   });

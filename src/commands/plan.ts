@@ -244,6 +244,9 @@ function planProfile(
       'canonical_profile_plan',
       plan.estimate?.billable_units,
     ),
+    ...(plan.inline_attempt_deadline_ms !== undefined && {
+      inline_attempt_deadline_ms: plan.inline_attempt_deadline_ms,
+    }),
   };
 }
 
@@ -325,13 +328,15 @@ function omissions(notices: readonly PreparationDiagnostic[]) {
   return notices
     .filter(({ code }) => code === 'workflow_profile_unavailable')
     .map((notice) => {
-      const match = /omitted unavailable profile "([^"]+)" \(([^)]+)\)\.$/.exec(
-        notice.message,
-      );
+      const match =
+        /omitted unavailable profile "([^"]+)" \(([^)]+)\)\.(?: (.+))?$/.exec(
+          notice.message,
+        );
       return {
         code: notice.code,
         ...(match?.[1] && { profile: match[1] }),
         ...(match?.[2] && { reason: match[2] }),
+        ...(match?.[3] && { remedy: match[3] }),
         message: notice.message,
       };
     });
@@ -580,7 +585,12 @@ function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
   const profileLine = (profile: (typeof receipt.primary_profiles)[number]) => {
     const target = humanTarget(profile.target);
     const cost = profile.estimate.cost_microusd;
-    return `${profile.provider_id}/${profile.profile_id}${target ? ` (${target})` : ''} · ${cost === undefined ? 'estimate unknown' : `est. ${humanCost(cost)}`}`;
+    const deadline =
+      'inline_attempt_deadline_ms' in profile &&
+      profile.inline_attempt_deadline_ms !== undefined
+        ? ` · ${humanDuration(profile.inline_attempt_deadline_ms)} per call`
+        : '';
+    return `${profile.provider_id}/${profile.profile_id}${target ? ` (${target})` : ''} · ${cost === undefined ? 'estimate unknown' : `est. ${humanCost(cost)}`}${deadline}`;
   };
   const budgetLabels = [
     budgets?.max_estimated_cost_microusd !== undefined &&
@@ -626,7 +636,7 @@ function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
     lines.push(
       ...receipt.workflow_omissions.map(
         (item) =>
-          `  ${item.profile ?? 'Profile'} — ${humanReason(item.reason ?? item.message)}`,
+          `  ${item.profile ?? 'Profile'} — ${humanReason(item.reason ?? item.message)}${'remedy' in item && item.remedy ? `. ${item.remedy}` : ''}`,
       ),
     );
   }

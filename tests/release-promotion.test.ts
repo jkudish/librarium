@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   parseReleasePromotionInventory,
@@ -328,6 +331,56 @@ describe('release workflow policy', () => {
   const ci = readFileSync('.github/workflows/ci.yml', 'utf8');
   const recovery = readFileSync('docs/release-candidate-recovery.md', 'utf8');
 
+  it.each([
+    ['', 'true', 0, false],
+    ['test-token', 'false', 0, false],
+    ['test-token', 'true', 1, false],
+    ['test-token', 'true', 0, true],
+  ])(
+    'checks tap access before any publication (%s/%s/%s)',
+    (token, permission, apiExit, succeeds) => {
+      const start = workflow.indexOf(
+        '- name: Verify Homebrew credential readiness before publication',
+      );
+      const end = workflow.indexOf('- name: Reconcile npm stage', start);
+      expect(start).toBeGreaterThan(0);
+      expect(end).toBeLessThan(
+        workflow.indexOf('- name: Publish exact certified npm tarball'),
+      );
+      const step = workflow.slice(start, end);
+      expect(step).toContain('GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}');
+      const script = step
+        .split('run: |\n')[1]
+        .split('\n')
+        .map((line) => line.replace(/^ {10}/, ''))
+        .join('\n');
+      const dir = mkdtempSync(join(tmpdir(), 'librarium-tap-preflight-'));
+      try {
+        const result = spawnSync(
+          'bash',
+          [
+            '-c',
+            `gh() { if [ "$*" = "api repos/jkudish/homebrew-tap/git/ref/heads/main --silent" ]; then return "$API_EXIT"; fi; printf '%s\\n' "$PERMISSION"; return "$API_EXIT"; }\n${script}`,
+          ],
+          {
+            encoding: 'utf8',
+            env: {
+              PATH: process.env.PATH,
+              GH_TOKEN: token,
+              RUNNER_TEMP: dir,
+              PERMISSION: permission,
+              API_EXIT: String(apiExit),
+            },
+          },
+        );
+        expect(result.status === 0).toBe(succeeds);
+        expect(result.stdout + result.stderr).not.toContain('test-token');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('is owner-only, SHA-qualified, pinned, and non-rebuilding', () => {
     expect(workflow).toContain("github.actor == 'jkudish'");
     expect(workflow).toContain('environment: release');
@@ -370,6 +423,11 @@ describe('release workflow policy', () => {
     expect(recovery).toContain('newly reviewed stable-version commit');
     expect(recovery).toContain('npm already contains that exact candidate');
     expect(recovery).toContain('environment secret named `NPM_TOKEN`');
+    expect(recovery).toContain('environment secret named `HOMEBREW_TAP_TOKEN`');
+    expect(recovery).toContain("--jq '.permissions.push == true'");
+    expect(recovery).toContain(
+      'does not validate those optional provenance values against a local manifest',
+    );
     expect(recovery).toContain('retained for 30 days');
     expect(recovery).toContain(
       'Merely writing `environment: release` in workflow YAML does not protect it',

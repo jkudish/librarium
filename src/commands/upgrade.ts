@@ -9,6 +9,10 @@ import {
 const GITHUB_REPO = 'jkudish/librarium';
 const RELEASE_VERSION_PATTERN =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-rc\.[1-9]\d*)?$/;
+const STANDALONE_UPGRADE_GUIDANCE =
+  'Standalone binaries cannot self-upgrade. After this command exits, run the supported installer: curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh';
+
+class StandaloneUpgradeUnsupportedError extends Error {}
 
 interface UpgradeDependencies {
   readonly current_version: string;
@@ -127,11 +131,7 @@ function runUpgrade(
 ): void {
   const invocation = upgradeInvocation(method, target);
   if (!invocation) {
-    console.log(
-      'Standalone binary cannot self-replace while running.\n' +
-        'To upgrade, re-run the installer with an exact version and checksum.\n',
-    );
-    return;
+    throw new StandaloneUpgradeUnsupportedError(STANDALONE_UPGRADE_GUIDANCE);
   }
   console.log(`Running: ${displayInvocation(invocation)}`);
   runCommand(invocation.executable, invocation.arguments_);
@@ -233,7 +233,9 @@ export function registerUpgradeCommand(
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
-          if (/EACCES|permission denied/i.test(message)) {
+          if (error instanceof StandaloneUpgradeUnsupportedError) {
+            console.error(error.message);
+          } else if (/EACCES|permission denied/i.test(message)) {
             if (method === 'npm') {
               console.error(
                 `Permission denied. Try: sudo npm install -g librarium@${target}`,

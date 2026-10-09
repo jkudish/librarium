@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { OpenAIResearchProvider } from '../src/adapters/openai-research.js';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
 import {
   advanceCoordination,
@@ -19,6 +20,7 @@ import {
   type AttemptExecutionPort,
   runPreparedExecution,
 } from '../src/core/execution-runtime.js';
+import type { HttpClient } from '../src/core/http-client.js';
 import { createProviderAttemptBridge } from '../src/core/provider-attempt-bridge.js';
 import type { Provider, ProviderResult } from '../src/types.js';
 
@@ -507,6 +509,109 @@ describe('private prepared execution runtime', () => {
     expect(result.state.unresolved_acceptances).toEqual([]);
   });
 
+  it.each([
+    ['HTTP 401', 401, 'failed'],
+    ['HTTP 408', 408, 'acceptance_unknown'],
+    ['HTTP 503', 503, 'acceptance_unknown'],
+    ['network failure', undefined, 'acceptance_unknown'],
+    ['malformed HTTP 200 response', 200, 'acceptance_unknown'],
+    ['unlisted HTTP 418', 418, 'acceptance_unknown'],
+  ] as const)(
+    'classifies a real OpenAI %s submit through the canonical bridge without resubmission',
+    async (_label, responseStatus, expectedStatus) => {
+      const secret = 'raw-provider-secret';
+      const transport = vi.fn(async () => {
+        if (responseStatus === undefined) {
+          throw new TypeError(`fetch failed with Bearer ${secret}`);
+        }
+        return {
+          status: responseStatus,
+          statusText: 'Error',
+          headers: {},
+          durationMs: 1,
+          data: {
+            error: { message: `Bearer ${secret}`, api_key: secret },
+          },
+        };
+      });
+      const durable = new OpenAIResearchProvider({
+        apiKey: 'synthetic-openai-key',
+        httpClient: transport as HttpClient,
+      });
+      const durableProfile = profile('durable', 'background');
+      const execution = prepared([durableProfile], [profile('reserve')]);
+      const durableKey = profileIdentityKey(durableProfile.identity);
+      const durablePlan = execution.profile_plans_by_identity[durableKey];
+      if (!durablePlan) throw new Error('missing durable fixture plan');
+      const boundExecution: PreparedResearchExecution = {
+        ...execution,
+        profile_plans_by_identity: {
+          ...execution.profile_plans_by_identity,
+          [durableKey]: {
+            ...durablePlan,
+            binding: {
+              adapter_id: durable.id,
+              binding_id: 'binding-openai-research',
+            },
+          },
+        },
+      };
+      const fallbackExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const fallback: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: fallbackExecute,
+      };
+
+      const result = await runPreparedExecution(boundExecution, {
+        store: new InMemoryCoordinationStateStore(),
+        coordinator: coordinatorDependencies(),
+        attempts: createProviderAttemptBridge({
+          resolveExactBinding: (binding) =>
+            binding.adapter_id === durable.id
+              ? {
+                  binding: {
+                    adapter_id: durable.id,
+                    binding_id: 'binding-openai-research',
+                  },
+                  profile: durableProfile,
+                  catalog_digest: 'runtime-digest',
+                  provider: durable,
+                }
+              : binding.adapter_id === 'adapter-reserve'
+                ? resolvedBinding('reserve', fallback)
+                : undefined,
+          now: () => start,
+        }),
+      });
+
+      expect(transport).toHaveBeenCalledOnce();
+      expect(fallbackExecute).not.toHaveBeenCalled();
+      expect(result.state.attempts).toHaveLength(1);
+      expect(result.state.attempts[0]?.status).toBe(expectedStatus);
+      expect(JSON.stringify(result.state)).not.toContain(secret);
+      if (responseStatus === 401) {
+        expect(result.state.attempts[0]?.error).toMatchObject({
+          code: 'provider_authentication_failed',
+          provider_code: 'http_401',
+          retryable: false,
+          fallback_allowed: false,
+        });
+        expect(result.state.unresolved_acceptances).toEqual([]);
+      } else {
+        expect(result.state.unresolved_acceptances).toHaveLength(1);
+        expect(result.state.unresolved_acceptances[0]).toMatchObject({
+          reason: 'submission_response_uncertain',
+        });
+      }
+    },
+  );
+
   it('rechecks concurrent orphan submissions after the request expires', async () => {
     const plan = prepared(
       [profile('durable-a', 'background'), profile('durable-b', 'background')],
@@ -906,6 +1011,79 @@ describe('private prepared execution runtime', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it.each([
+    ['HTTP 401', new Error('Poll returned HTTP 401')],
+    ['HTTP 403', new Error('Poll returned HTTP 403')],
+    ['HTTP 404', new Error('Poll returned HTTP 404')],
+    ['malformed schema', new Error('Malformed provider status response')],
+  ])(
+    'keeps accepted custody through a %s observation and eventually succeeds',
+    async (_label, observationError) => {
+      const poll = vi
+        .fn()
+        .mockRejectedValueOnce(observationError)
+        .mockResolvedValueOnce({ status: 'completed' as const });
+      const durable: Provider = {
+        id: 'adapter-durable',
+        displayName: 'Durable',
+        tier: 'deep-research',
+        envVar: '',
+        execution: 'background',
+        execute: vi.fn(),
+        submit: vi.fn(async () => ({
+          provider: 'adapter-durable',
+          taskId: 'eventual-success',
+          query: 'runtime query',
+          submittedAt: start,
+          status: 'pending' as const,
+        })),
+        poll,
+        retrieve: vi.fn(async () => successfulResult('adapter-durable')),
+      };
+      const fallbackExecute = vi.fn(async () =>
+        successfulResult('adapter-reserve'),
+      );
+      const fallback: Provider = {
+        id: 'adapter-reserve',
+        displayName: 'Reserve',
+        tier: 'raw-search',
+        envVar: '',
+        execution: 'inline',
+        execute: fallbackExecute,
+      };
+
+      const result = await runPreparedExecution(
+        prepared([profile('durable', 'background')], [profile('reserve')]),
+        {
+          store: new InMemoryCoordinationStateStore(),
+          coordinator: coordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-durable'
+                ? resolvedBinding('durable', durable)
+                : binding.adapter_id === 'adapter-reserve'
+                  ? resolvedBinding('reserve', fallback)
+                  : undefined,
+            now: () => start,
+            wait: async () => {},
+          }),
+        },
+      );
+
+      expect(poll).toHaveBeenCalledTimes(2);
+      expect(fallbackExecute).not.toHaveBeenCalled();
+      expect(result.state.status).toBe('succeeded');
+      expect(result.state.attempts).toHaveLength(1);
+      expect(result.state.attempts[0]).toMatchObject({
+        status: 'succeeded',
+        durable_handle: {
+          provider_task_id: 'eventual-success',
+          status: 'succeeded',
+        },
+      });
+    },
+  );
 
   it('returns an async accepted handle without polling or retrieving', async () => {
     const durable: Provider = {
@@ -1542,6 +1720,102 @@ describe('private prepared execution runtime', () => {
     }
   });
 
+  it.each([
+    ['submit', 'hung'],
+    ['poll', 'hung'],
+    ['poll', 'failed'],
+    ['poll', 'unpriced'],
+  ])(
+    'blocks the next walletless launch after billed completed %s and %s retrieval',
+    async (boundary, retrieval) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(start);
+      try {
+        const durable: Provider = {
+          id: 'adapter-durable',
+          displayName: 'Durable',
+          tier: 'deep-research',
+          envVar: '',
+          execution: 'background',
+          execute: vi.fn(),
+          submit: vi.fn(async () => ({
+            provider: 'adapter-durable',
+            taskId: 'billed-completed',
+            query: 'runtime query',
+            submittedAt: start,
+            status:
+              boundary === 'submit'
+                ? ('completed' as const)
+                : ('pending' as const),
+            ...(boundary === 'submit' && { usage: { costUsd: 0.02 } }),
+          })),
+          poll: vi.fn(async () => ({
+            status: 'completed' as const,
+            usage: { costUsd: 0.02 },
+          })),
+          retrieve: vi.fn(async () => {
+            if (retrieval === 'hung') return new Promise<never>(() => {});
+            if (retrieval === 'failed') throw new Error('Retrieval failed');
+            return successfulResult('adapter-durable');
+          }),
+        };
+        const next: Provider = {
+          id: 'adapter-next',
+          displayName: 'Next',
+          tier: 'raw-search',
+          envVar: '',
+          execution: 'inline',
+          execute: vi.fn(async () => successfulResult('adapter-next')),
+        };
+        const plan = prepared(
+          [profile('durable', 'background'), profile('next')],
+          [],
+          'sync',
+          { max_concurrency: 1, background_attempt_deadline_ms: 50 },
+        );
+        plan.policy.budgets = { max_actual_cost_microusd: '10000' };
+        for (const profilePlan of Object.values(plan.profile_plans_by_identity))
+          profilePlan.estimate = { estimated_cost_microusd: '1000' };
+        const store = new InMemoryCoordinationStateStore();
+        const running = runPreparedExecution(plan, {
+          store,
+          coordinator: systemCoordinatorDependencies(),
+          attempts: createProviderAttemptBridge({
+            resolveExactBinding: (binding) =>
+              binding.adapter_id === 'adapter-durable'
+                ? resolvedBinding('durable', durable)
+                : resolvedBinding('next', next),
+            now: Date.now,
+          }),
+        });
+        await vi.advanceTimersByTimeAsync(50);
+        const result = await running;
+        expect(result.state.attempts).toHaveLength(1);
+        expect(result.state.attempts[0]).toMatchObject({
+          status:
+            retrieval === 'hung'
+              ? 'timed_out'
+              : retrieval === 'failed'
+                ? 'failed'
+                : 'succeeded',
+          actual_cost_microusd: '20000',
+        });
+        expect(result.state.budget.actual_cost_microusd).toBe('20000');
+        expect(next.execute).not.toHaveBeenCalled();
+        expect(durable.submit).toHaveBeenCalledOnce();
+        expect(durable.poll).toHaveBeenCalledTimes(
+          boundary === 'submit' ? 0 : 1,
+        );
+        expect(durable.retrieve).toHaveBeenCalledOnce();
+        expect((await store.load(plan.request.request_id))?.state).toEqual(
+          result.state,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('preserves a succeeded handle when retrieval fails and permits fallback', async () => {
     const durable: Provider = {
       id: 'adapter-durable',
@@ -1861,5 +2135,101 @@ describe('private prepared execution runtime', () => {
       fallback_allowed: true,
     });
     expect(JSON.stringify(result.state)).not.toContain('secret-token');
+  });
+});
+
+describe('execution runtime -- per-profile inline deadlines and causes (#4769)', () => {
+  it('gives an inline attempt its planned per-profile deadline and others the global one', async () => {
+    const execute = vi.fn(
+      async (_query: string, options: { timeout: number }) =>
+        successfulResult(`timeout-${options.timeout}`),
+    );
+    const provider = (id: string): Provider => ({
+      id: `adapter-${id}`,
+      displayName: id,
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute,
+    });
+    const slow = profile('slow');
+    const normal = profile('normal');
+    const plan = prepared([slow, normal]);
+    const slowKey = profileIdentityKey(slow.identity);
+    const withDeadline: PreparedResearchExecution = {
+      ...plan,
+      profile_plans_by_identity: {
+        ...plan.profile_plans_by_identity,
+        [slowKey]: {
+          ...plan.profile_plans_by_identity[slowKey]!,
+          inline_attempt_deadline_ms: 30_000,
+        },
+      },
+    };
+
+    const result = await runPreparedExecution(withDeadline, {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: (binding) =>
+          binding.adapter_id === 'adapter-slow'
+            ? resolvedBinding('slow', provider('slow'))
+            : binding.adapter_id === 'adapter-normal'
+              ? resolvedBinding('normal', provider('normal'))
+              : undefined,
+        now: () => start,
+      }),
+    });
+
+    const deadlineFor = (providerId: string) =>
+      result.state.attempts.find(
+        (attempt) => attempt.profile.identity.provider_id === providerId,
+      )?.deadline_at;
+    expect(deadlineFor('slow')).toBe(new Date(start + 30_000).toISOString());
+    expect(deadlineFor('normal')).toBe(new Date(start + 10_000).toISOString());
+    expect(
+      execute.mock.calls.map(([, options]) => options.timeout).sort(),
+    ).toEqual([10, 30]);
+    expect(result.state.inline_attempt_deadline_ms).toBe(10_000);
+    expect(() => CoordinatorStateSchema.parse(result.state)).not.toThrow();
+  });
+
+  it('keeps a SearchAPI HTTP 503 cause as provider_code in the canonical error', async () => {
+    const { SearchApiChatGptProvider } = await import(
+      '../src/adapters/searchapi-chatgpt.js'
+    );
+    const httpClient = vi.fn(async () => ({
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: {},
+      data: { error: 'This API has been deprecated.' },
+      durationMs: 1,
+    })) as unknown as HttpClient;
+    const surface = new SearchApiChatGptProvider({
+      apiKey: 'searchapi-synthetic-test-key',
+      httpClient,
+    });
+    const bound: Provider = Object.assign(Object.create(surface), {
+      id: 'adapter-surface',
+    });
+
+    const result = await runPreparedExecution(prepared([profile('surface')]), {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: (binding) =>
+          binding.adapter_id === 'adapter-surface'
+            ? resolvedBinding('surface', bound)
+            : undefined,
+        now: () => start,
+      }),
+    });
+
+    expect(httpClient).toHaveBeenCalledOnce();
+    expect(result.state.attempts[0]?.error).toMatchObject({
+      code: 'provider_reported_error',
+      category: 'provider',
+      provider_code: 'http_503',
+    });
   });
 });

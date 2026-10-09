@@ -7,7 +7,9 @@ import {
   providerIdentityKey,
 } from './contracts/domain/index.js';
 import type { ResearchResult } from './contracts/interchange/research-result.js';
+import type { CoordinatorState } from './core/coordinator.js';
 import { deduplicateSources } from './core/normalizer.js';
+import { projectSucceededResearchResults } from './core/research-response-projector.js';
 import type { CanonicalRunManifestV3 } from './node-canonical-run.js';
 import { providerArtifactFileNames } from './node-provider-artifact-names.js';
 import type {
@@ -31,6 +33,64 @@ function tierFor(resultKind: string): ProviderTier {
     default:
       return 'ai-grounded';
   }
+}
+
+type PresentedAttempt =
+  CanonicalRunManifestV3['coordination_state']['attempts'][number];
+type UnresolvedAcceptanceMarker =
+  CanonicalRunManifestV3['coordination_state']['unresolved_acceptances'][number];
+
+function unresolvedAcceptanceCause(
+  marker: UnresolvedAcceptanceMarker | undefined,
+): string {
+  if (marker?.reason === 'submission_deadline_exceeded') {
+    return 'the attempt deadline expired while the submission was in flight';
+  }
+  const diagnostic = marker?.diagnostic;
+  if (!diagnostic) return 'no provider response confirmed or rejected it';
+  if (diagnostic.http_status !== undefined) {
+    return `the provider answered HTTP ${diagnostic.http_status}`;
+  }
+  switch (diagnostic.kind) {
+    case 'network':
+      return 'a network error interrupted the request';
+    case 'timeout':
+      return 'the provider did not answer before the submission timeout';
+    case 'provider':
+      return 'the provider returned an unrecognized response';
+    default:
+      return `the provider reported ${diagnostic.kind.replace('_', ' ')}`;
+  }
+}
+
+/**
+ * Fixed, actionable text for a submission whose remote acceptance is unknown.
+ * Built only from persisted enums and an HTTP status, never provider text.
+ */
+function unresolvedAcceptanceMessage(
+  manifest: CanonicalRunManifestV3,
+  attempt: PresentedAttempt,
+): string {
+  const state = manifest.coordination_state;
+  const marker = state.unresolved_acceptances.find(
+    (entry) => entry.attempt_id === attempt.attempt_id,
+  );
+  const wait =
+    state.status === 'running'
+      ? ` The run stays pending until its request deadline (${state.request_deadline_at}).`
+      : '';
+  return `Submission outcome unknown: ${unresolvedAcceptanceCause(marker)}. The provider may have accepted and may bill this job, so Librarium will not resubmit it; check the provider dashboard before rerunning.${wait}`;
+}
+
+function attemptErrorMessage(
+  manifest: CanonicalRunManifestV3,
+  attempt: PresentedAttempt | undefined,
+): string | undefined {
+  if (!attempt) return undefined;
+  if (attempt.error) return attempt.error.message;
+  return attempt.status === 'acceptance_unknown'
+    ? unresolvedAcceptanceMessage(manifest, attempt)
+    : undefined;
 }
 
 function numberMetadata(
@@ -116,12 +176,33 @@ export interface CanonicalRunPresentation {
   readonly generatorManifest: RunManifest;
 }
 
+/**
+ * Wall-clock time a finished attempt spent between start and finish. Failed
+ * and timed-out attempts carry no provider duration metadata, so derive it
+ * from the persisted attempt chronology instead of reporting zero.
+ */
+function attemptElapsedMs(
+  attempt:
+    | { readonly started_at?: string; readonly finished_at?: string }
+    | undefined,
+): number {
+  if (!attempt?.started_at || !attempt.finished_at) return 0;
+  const elapsed =
+    Date.parse(attempt.finished_at) - Date.parse(attempt.started_at);
+  return Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
+}
+
 export function projectCanonicalRunPresentation(
   manifest: CanonicalRunManifestV3,
   outputDir: string,
   slug: string,
 ): CanonicalRunPresentation {
-  const responseResults = manifest.terminal_response?.results ?? [];
+  const responseResults =
+    manifest.terminal_response?.results ??
+    projectSucceededResearchResults(
+      manifest.coordination_state as CoordinatorState,
+      manifest.provider_outputs_by_attempt,
+    );
   const resultById = new Map(
     responseResults.map((result) => [result.id, result]),
   );
@@ -167,12 +248,13 @@ export function projectCanonicalRunPresentation(
       const earlierStatus: ProviderReport['status'] =
         earlier.status === 'timed_out' ? 'timeout' : 'error';
       const earlierError =
-        earlier.error?.message ?? 'The provider attempt did not succeed.';
+        attemptErrorMessage(manifest, earlier) ??
+        'The provider attempt did not succeed.';
       reports.push({
         id: earlierId,
         tier: tierFor(earlier.profile.result_kind),
         status: earlierStatus,
-        durationMs: 0,
+        durationMs: attemptElapsedMs(earlier),
         wordCount: 0,
         citationCount: 0,
         outputFile: earlierFiles.outputFile,
@@ -186,7 +268,7 @@ export function projectCanonicalRunPresentation(
         text: '',
         sourceUrls: [],
         citations: [],
-        durationMs: 0,
+        durationMs: attemptElapsedMs(earlier),
         error: earlierError,
       });
     }
@@ -207,22 +289,27 @@ export function projectCanonicalRunPresentation(
       : tierFor(profile.result_kind);
     const durationMs = projected
       ? (numberMetadata(projected, 'librarium:duration_ms') ?? 0)
-      : 0;
+      : attemptElapsedMs(attempt);
     const citations = projected ? legacyCitations(projected, adapterId) : [];
     const content = projected ? markdown(projected) : '';
     const status: ProviderReport['status'] = projected
       ? 'success'
       : manifest.coordination_state.status === 'running' &&
-          (!attempt ||
-            ['dispatch_pending', 'submitting', 'submitted', 'running'].includes(
-              attempt.status,
-            ))
+          (slot.status === 'fallback_pending' ||
+            !attempt ||
+            [
+              'dispatch_pending',
+              'submitting',
+              'acceptance_unknown',
+              'submitted',
+              'running',
+            ].includes(attempt.status))
         ? 'async-pending'
         : attempt?.status === 'timed_out'
           ? 'timeout'
           : 'error';
     const files = providerArtifactFileNames(id);
-    const error = attempt?.error?.message ?? slot.error?.message;
+    const error = attemptErrorMessage(manifest, attempt) ?? slot.error?.message;
     const replaced = attempt?.replaces_attempt_id
       ? manifest.coordination_state.attempts.find(
           (candidate) => candidate.attempt_id === attempt.replaces_attempt_id,

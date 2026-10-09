@@ -62,8 +62,12 @@ export function generateSummary(options: SynthesisOptions): string {
       lines.push(`- **Citations:** ${report.citationCount}`);
       lines.push(`- **Output:** ${report.outputFile}`);
     } else if (report.status === 'async-pending') {
+      // A pending report with an error is a submission of unknown outcome,
+      // not an accepted task.
       lines.push(
-        '- *Async task submitted, use `librarium status` to check progress*',
+        report.error
+          ? `- **Pending:** ${report.error}`
+          : '- *Async task submitted, use `librarium status` to check progress*',
       );
     } else if (report.error) {
       lines.push(`- **Error:** ${report.error}`);

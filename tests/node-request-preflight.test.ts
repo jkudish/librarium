@@ -95,7 +95,6 @@ describe('Node production request preflight', () => {
     const profiles = [
       'searchapi-chatgpt/surface',
       'searchapi-gemini/surface',
-      'searchapi-perplexity/surface',
       'searchapi-google-ai-mode/surface',
       'searchapi-bing-copilot/surface',
       'searchapi-google-ai-overview/surface',
@@ -115,10 +114,10 @@ describe('Node production request preflight', () => {
       },
     });
 
-    expect(result.prepared.request.slots).toHaveLength(6);
+    expect(result.prepared.request.slots).toHaveLength(5);
     expect(
       result.prepared.request.slots.map((slot) => slot.primary.result_kind),
-    ).toEqual(Array(6).fill('surface_observation'));
+    ).toEqual(Array(5).fill('surface_observation'));
   });
 
   it('rejects a future unprojectable profile at the structural boundary', () => {
@@ -396,6 +395,34 @@ describe('Node production request preflight', () => {
 
     expect(warnings).toEqual([
       '[librarium] preflight: notices=1 notices_codes=legacy_mixed_mode_migrated',
+    ]);
+    expect(warnings.join()).not.toContain('private query text');
+  });
+
+  it('names each skipped group member and its remedy, but no other notice text', () => {
+    const warnings: string[] = [];
+    emitRequestPreflightNotices(
+      [
+        {
+          code: 'workflow_profile_unavailable',
+          phase: 'selection',
+          path: '/selector/group_id',
+          message:
+            'Workflow "visibility" omitted unavailable profile "searchapi-chatgpt/surface" (profile_disabled). Enable it with `librarium init --enable searchapi-chatgpt`.',
+        },
+        {
+          code: 'legacy_mixed_mode_migrated',
+          phase: 'migration',
+          path: '/mode',
+          message: 'private query text',
+        },
+      ],
+      (message) => warnings.push(message),
+    );
+
+    expect(warnings).toEqual([
+      '[librarium] preflight: notices=2 notices_codes=legacy_mixed_mode_migrated,workflow_profile_unavailable',
+      '[librarium] warning: Workflow "visibility" omitted unavailable profile "searchapi-chatgpt/surface" (profile_disabled). Enable it with `librarium init --enable searchapi-chatgpt`.',
     ]);
     expect(warnings.join()).not.toContain('private query text');
   });

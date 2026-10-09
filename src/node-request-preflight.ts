@@ -1,4 +1,7 @@
-import { configGroupProvenance } from './core/config.js';
+import {
+  configGroupProvenance,
+  configInlineAttemptDeadlineAuthored,
+} from './core/config.js';
 import type { CredentialContext } from './core/credentials.js';
 import type {
   PreparationDependencies,
@@ -220,6 +223,9 @@ export function preflightProductionRequestStructure(
   const common = {
     ...input,
     authoredGroups: configGroupProvenance(input.config),
+    applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
+      input.config,
+    ),
   };
   try {
     const compiled = requireCompiled(
@@ -267,6 +273,9 @@ export function preflightProductionRequest(
   const common = {
     ...input,
     authoredGroups: configGroupProvenance(input.config),
+    applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
+      input.config,
+    ),
   };
 
   preflightProductionRequestStructure(input);
@@ -314,6 +323,12 @@ export function emitRequestPreflightNotices(
     onWarn(
       `[librarium] preflight: ${formatRequestDiagnosticCodes('notices', notices)}`,
     );
+    // A group that runs fewer members than it names must say which ones it
+    // skipped and how to restore them, not only a diagnostic code.
+    for (const notice of notices) {
+      if (notice.code !== 'workflow_profile_unavailable') continue;
+      onWarn(`[librarium] warning: ${sanitizeDiagnostic(notice.message)}`);
+    }
   } catch {
     // The request is already admitted. Diagnostics cannot change execution.
   }

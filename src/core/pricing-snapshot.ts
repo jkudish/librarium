@@ -7,7 +7,12 @@ import type {
 } from './pricing.js';
 import { validatePricingSnapshot } from './pricing.js';
 
-const REVIEWED_AT = '2026-08-27T00:00:00.000Z';
+/** Original review of every definition not re-checked since. */
+const INITIAL_REVIEW_AT = '2026-08-27T00:00:00.000Z';
+/** Re-check of the xAI and You.com definitions (#4769). */
+const RECHECKED_AT = '2026-10-09T00:00:00.000Z';
+/** The snapshot review time covers its most recently retrieved definition. */
+const REVIEWED_AT = RECHECKED_AT;
 
 interface DefinitionOptions {
   readonly target?: PriceDefinitionInput['effective_target'];
@@ -20,6 +25,8 @@ interface DefinitionOptions {
   readonly reason?: string;
   readonly reference: string;
   readonly fallback?: true;
+  /** When the definition was last retrieved; defaults to the initial review. */
+  readonly reviewedAt?: string;
 }
 
 function definition(
@@ -51,8 +58,8 @@ function definition(
         ? 'frozen_reviewed_fallback'
         : 'frozen_official_snapshot',
       source_reference: options.reference,
-      effective_at: REVIEWED_AT,
-      retrieved_at: REVIEWED_AT,
+      effective_at: options.reviewedAt ?? INITIAL_REVIEW_AT,
+      retrieved_at: options.reviewedAt ?? INITIAL_REVIEW_AT,
     },
   };
 }
@@ -220,27 +227,56 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
   }),
 
   // xAI
+  // Source: https://docs.x.ai/developers/pricing (accessed 2026-10-09).
+  // Web search is $5 per 1k calls, so the web-only profile stays priced.
+  definition('grok', 'web', {
+    target: { kind: 'model', target_id: 'grok-4.6' },
+    expected: [
+      ...tokenUnits,
+      'cache_read_tokens',
+      'reasoning_tokens',
+      'searches',
+    ],
+    rates: [
+      rate('uncached_input_tokens', '2', '1000000'),
+      rate('output_tokens', '6', '1000000'),
+      rate('reasoning_tokens', '6', '1000000'),
+      rate('cache_read_tokens', '0.5', '1000000'),
+      rate('searches', '5', '1000'),
+    ],
+    reference: 'official:docs.x.ai/developers/pricing',
+    reviewedAt: RECHECKED_AT,
+  }),
+  // Source: https://docs.x.ai/developers/pricing (accessed 2026-10-09).
+  // Since 2026-09-21 X Search bills per item fetched ($5 per 1k posts, $10 per
+  // 1k profiles), including parent and quoted posts, and no request control
+  // bounds that count. Any profile using x_search therefore has no bounded
+  // price and must fail closed under a hard budget.
   ...[
-    ['grok', 'web'],
     ['grok-x-only', 'x'],
     ['grok-combined', 'combined'],
   ].map(([providerId, profileId]) =>
     definition(providerId, profileId, {
       target: { kind: 'model', target_id: 'grok-4.6' },
+      completeness: 'unavailable',
       expected: [
         ...tokenUnits,
         'cache_read_tokens',
         'reasoning_tokens',
-        'searches',
+        'xai:x_posts',
+        'xai:x_profiles',
       ],
-      rates: [
-        rate('uncached_input_tokens', '2', '1000000'),
-        rate('output_tokens', '6', '1000000'),
-        rate('reasoning_tokens', '6', '1000000'),
-        rate('cache_read_tokens', '0.5', '1000000'),
-        rate('searches', '5', '1000'),
+      missing: [
+        ...tokenUnits,
+        'cache_read_tokens',
+        'reasoning_tokens',
+        'xai:x_posts',
+        'xai:x_profiles',
       ],
+      reason:
+        'X Search bills per post and profile fetched, and no request control bounds that count.',
       reference: 'official:docs.x.ai/developers/pricing',
+      reviewedAt: RECHECKED_AT,
     }),
   ),
 
@@ -278,18 +314,35 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
   }),
 
   // You.com
+  // Source: https://you.com/pricing (accessed 2026-10-09). Research API price
+  // per 1k calls by research_effort: lite $12, standard $50, deep $100,
+  // exhaustive $450, frontier $1,200 (background only).
+  // The inline grounded profile always sends research_effort "standard".
   definition('you-research', 'grounded', {
     expected: ['research_requests'],
     fixed: { research_requests: '1' },
     rates: [rate('research_requests', '50', '1000')],
-    reference: 'official:you.com/docs/administration/billing',
+    reference: 'official:you.com/pricing',
+    reviewedAt: RECHECKED_AT,
   }),
-  definition('you-research', 'research', {
-    expected: ['research_requests'],
-    fixed: { research_requests: '1' },
-    rates: [rate('research_requests', '50', '1000')],
-    reference: 'official:you.com/docs/guides/research',
-  }),
+  ...(
+    [
+      ['lite', '12'],
+      ['standard', '50'],
+      ['deep', '100'],
+      ['exhaustive', '450'],
+      ['frontier', '1200'],
+    ] as const
+  ).map(([effort, perThousandUsd]) =>
+    definition('you-research', 'research', {
+      target: { kind: 'preset', target_id: effort },
+      expected: ['research_requests'],
+      fixed: { research_requests: '1' },
+      rates: [rate('research_requests', perThousandUsd, '1000')],
+      reference: 'official:you.com/pricing',
+      reviewedAt: RECHECKED_AT,
+    }),
+  ),
   unavailable(
     'you-answer',
     'grounded',
@@ -347,7 +400,6 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     ['searchapi', 'search', '1'],
     ['searchapi-chatgpt', 'surface', '1'],
     ['searchapi-gemini', 'surface', '1'],
-    ['searchapi-perplexity', 'surface', '1'],
     ['searchapi-google-ai-mode', 'surface', '1'],
     ['searchapi-bing-copilot', 'surface', '1'],
     ['searchapi-google-ai-overview', 'surface', '2'],
@@ -440,10 +492,10 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
 export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
   validatePricingSnapshot({
     schema_version: 1,
-    version: '2026-08-27.v1',
+    version: '2026-10-09.v1',
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:81799cecd440f70b2e891b56cb8fa4e0f1014daeb87a750cda6746512df7e5fe',
+      'sha256:b078131a73f2cd0a7dcc3d38e429d2ad5fef996858d8a7726611adeaf514d033',
     definitions: DEFINITIONS,
   });

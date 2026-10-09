@@ -15,8 +15,10 @@ import {
   CitationSchema,
   ProviderMetaSchema,
   type ResearchResult,
+  ResearchResultSchema,
   UsageSchema,
 } from '../contracts/interchange/research-result.js';
+import { decimalUsdFromNumber } from './budget.js';
 import type {
   AttemptLaunch,
   CoordinatorAttemptState,
@@ -206,18 +208,6 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function decimalFromNumber(value: number): string {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error('Usage costs must be finite non-negative numbers.');
-  }
-  if (Number.isInteger(value)) return String(value);
-  const fixed = value.toFixed(18).replace(/0+$/, '').replace(/\.$/, '');
-  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(fixed)) {
-    throw new Error('Usage cost cannot be represented as an exact decimal.');
-  }
-  return fixed;
-}
-
 function legacyUsage(
   result: z.infer<typeof LegacyProviderResultSchema>,
 ): CanonicalProviderOutput['usage'] {
@@ -241,10 +231,10 @@ function legacyUsage(
       reasoning_tokens: result.usage.reasoningTokens,
     }),
     ...(actualCost !== undefined && {
-      actual_cost: decimalFromNumber(actualCost),
+      actual_cost: decimalUsdFromNumber(actualCost),
     }),
     ...(estimatedCost !== undefined && {
-      estimated_cost: decimalFromNumber(estimatedCost),
+      estimated_cost: decimalUsdFromNumber(estimatedCost),
     }),
     ...((actualCost !== undefined || estimatedCost !== undefined) && {
       currency: 'USD',
@@ -406,8 +396,6 @@ const SUPPORTED_CORPORA = new Set([
   'x',
   'files',
   'places',
-  // Specialized is internal-only: project it by omitting it from the older
-  // terminal provenance vocabulary.
   'specialized',
 ]);
 
@@ -460,10 +448,7 @@ function terminalProvenance(
     retrieval_methods: [
       profile.retrieval_method as ResearchResult['provenance']['retrieval_methods'][number],
     ],
-    corpora: profile.corpora.filter(
-      (corpus): corpus is ResearchResult['provenance']['corpora'][number] =>
-        corpus !== 'specialized',
-    ),
+    corpora: [...profile.corpora],
     ...(profile.result_kind === 'surface_observation' && {
       observation_mode: profile.observation_mode,
     }),
@@ -685,16 +670,12 @@ export interface ResearchResponseProjectionOptions {
   readonly generator_version: string;
 }
 
-/** Deterministically project private coordinator state into the public receipt. */
-export function projectResearchResponse(
+/** Project committed successes without requiring or inventing a terminal state. */
+export function projectSucceededResearchResults(
   state: CoordinatorState,
   outputsByAttempt: Readonly<Record<string, CanonicalProviderOutput>>,
-  options: ResearchResponseProjectionOptions,
-): ResearchResponse {
-  if (state.status === 'running') {
-    throw new Error('A running coordinator state has no terminal response.');
-  }
-  const results = [...state.slots]
+): ResearchResult[] {
+  return [...state.slots]
     .sort((left, right) => left.position - right.position)
     .flatMap((slot) => {
       if (slot.status !== 'succeeded') return [];
@@ -708,8 +689,22 @@ export function projectResearchResponse(
           `Succeeded attempt ${attempt.attempt_id} has no durable provider output.`,
         );
       }
-      return [projectResult(state, slot, attempt, output)];
+      return [
+        ResearchResultSchema.parse(projectResult(state, slot, attempt, output)),
+      ];
     });
+}
+
+/** Deterministically project private coordinator state into the public receipt. */
+export function projectResearchResponse(
+  state: CoordinatorState,
+  outputsByAttempt: Readonly<Record<string, CanonicalProviderOutput>>,
+  options: ResearchResponseProjectionOptions,
+): ResearchResponse {
+  if (state.status === 'running') {
+    throw new Error('A running coordinator state has no terminal response.');
+  }
+  const results = projectSucceededResearchResults(state, outputsByAttempt);
   const errors = terminalErrors(state);
   const status =
     results.length > 0

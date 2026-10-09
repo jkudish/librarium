@@ -7,12 +7,29 @@ import {
   StructuredErrorSchema,
 } from '../contracts/domain/index.js';
 import { LifecycleTraceSchema } from '../contracts/interchange/lifecycle.js';
-import type { CoordinatorState } from './coordinator.js';
+import {
+  MAX_AGGREGATE_COST_MICROUSD_DIGITS,
+  MAX_REPORTED_COST_MICROUSD_DIGITS,
+} from './budget.js';
+import {
+  type CoordinatorState,
+  UnresolvedAcceptanceDiagnosticSchema,
+} from './coordinator.js';
 import { profileIdentityKey } from './execution-plan.js';
 
 const NonNegativeDecimalIntegerSchema = z
   .string()
   .max(128)
+  .regex(/^(?:0|[1-9]\d*)$/, 'Expected a non-negative decimal integer');
+
+const ReportedCostMicrousdSchema = z
+  .string()
+  .max(MAX_REPORTED_COST_MICROUSD_DIGITS)
+  .regex(/^(?:0|[1-9]\d*)$/, 'Expected a non-negative decimal integer');
+
+const AggregateCostMicrousdSchema = z
+  .string()
+  .max(MAX_AGGREGATE_COST_MICROUSD_DIGITS)
   .regex(/^(?:0|[1-9]\d*)$/, 'Expected a non-negative decimal integer');
 
 const AdapterBindingIdentitySchema = z.strictObject({
@@ -36,7 +53,13 @@ const PreparedProfilePlanSchema = z.strictObject({
   profile_key: z.string().min(1),
   identity: ProviderIdentitySchema,
   binding: AdapterBindingIdentitySchema,
+  // Historical records omit this field and fail closed at the effect boundary.
+  cancel_policy: z
+    .enum(['supported_exact_profile', 'reconcile_only'])
+    .optional(),
   estimate: NetworkFreeEstimateSchema.optional(),
+  // Absent on historical records and for profiles using the global deadline.
+  inline_attempt_deadline_ms: z.number().int().safe().positive().optional(),
 });
 
 const CoordinatorSlotStatusSchema = z.enum([
@@ -100,7 +123,7 @@ const CoordinatorAttemptStateSchema = z.strictObject({
   result_id: OpaqueIdSchema.optional(),
   error: StructuredErrorSchema.optional(),
   reserved_estimated_cost_microusd: NonNegativeDecimalIntegerSchema,
-  actual_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
+  actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
 });
 
 const CoordinatorReserveCandidateSchema = z.strictObject({
@@ -132,6 +155,7 @@ const UnresolvedAcceptanceSchema = z.strictObject({
     'infrastructure_failure_while_acceptance_unknown',
   ]),
   adapter_state_ref: OpaqueIdSchema.optional(),
+  diagnostic: UnresolvedAcceptanceDiagnosticSchema.optional(),
 });
 
 /**
@@ -176,7 +200,7 @@ export const CoordinatorStateSchema = z
       max_estimated_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
       max_actual_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
       reserved_estimated_cost_microusd: NonNegativeDecimalIntegerSchema,
-      actual_cost_microusd: NonNegativeDecimalIntegerSchema,
+      actual_cost_microusd: AggregateCostMicrousdSchema,
     }),
     cancellation: z
       .strictObject({

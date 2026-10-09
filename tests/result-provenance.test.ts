@@ -123,13 +123,12 @@ describe('result provenance -- SearchAPI collector correlation', () => {
   const surfaces = [
     'searchapi-chatgpt',
     'searchapi-gemini',
-    'searchapi-perplexity',
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
   ] as const;
 
-  it('gives the six surfaces one shared collector correlation', () => {
+  it('gives the five surfaces one shared collector correlation', () => {
     const correlation = collectorCorrelation('searchapi', 'sweep-2026-08-09');
     const provenances = surfaces.map((providerId) =>
       collectionProvenanceFor({
@@ -147,7 +146,7 @@ describe('result provenance -- SearchAPI collector correlation', () => {
     expect(CorrelationKeysSchema.safeParse(correlation).success).toBe(true);
   });
 
-  it('keeps them six distinct observations, not six independent confirmations', () => {
+  it('keeps them five distinct observations, not five independent confirmations', () => {
     const correlation = collectorCorrelation('searchapi', 'sweep-2026-08-09');
     const provenances = surfaces.map((providerId) =>
       collectionProvenanceFor({
@@ -157,10 +156,10 @@ describe('result provenance -- SearchAPI collector correlation', () => {
     );
 
     // Distinct measured surfaces and distinct providers ...
-    expect(new Set(provenances.map((item) => item.surface_id)).size).toBe(6);
+    expect(new Set(provenances.map((item) => item.surface_id)).size).toBe(5);
     expect(
       new Set(provenances.map((item) => item.provider.provider_id)).size,
-    ).toBe(6);
+    ).toBe(5);
     // ... sharing one collection event, and asserting nothing about agreement.
     expect(new Set(provenances.map((item) => item.collector_id))).toEqual(
       new Set(['searchapi']),

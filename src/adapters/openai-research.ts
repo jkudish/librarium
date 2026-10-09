@@ -1,4 +1,9 @@
-import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import { OpaqueIdSchema } from '../contracts/common.js';
+import {
+  diagnosticForSubmissionError,
+  diagnosticForSubmissionHttpStatus,
+  UnsafeToRetrySubmissionError,
+} from '../core/errors.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -51,6 +56,8 @@ export interface OpenAIResearchProviderOptions extends BaseProviderOptions {
 }
 
 const DEFAULT_MODEL = 'gpt-5.6-sol';
+const SUBMISSION_FAILED =
+  'OpenAI submission failed before a valid handle was returned.';
 const REASONING_EFFORTS = [
   'none',
   'low',
@@ -196,7 +203,48 @@ export class OpenAIResearchProvider extends BackgroundBaseProvider {
     query: string,
     options: ProviderOptions,
   ): Promise<AsyncTaskHandle> {
-    const apiKey = this.getApiKey();
+    let apiKey: string;
+    try {
+      apiKey = this.getApiKey();
+    } catch (error) {
+      throw new UnsafeToRetrySubmissionError(
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
+      );
+    }
+    try {
+      // fetch rejects an invalid header value (control or non-Latin-1
+      // character, e.g. a pasted key) with a TypeError before sending. That
+      // TypeError would otherwise be classified as a network failure and
+      // leave a request that never left this process as acceptance-unknown.
+      new Headers({ Authorization: `Bearer ${apiKey}` });
+    } catch {
+      throw new UnsafeToRetrySubmissionError(
+        `${this.envVar} contains characters that are not valid in an HTTP header; re-copy the key.`,
+        { kind: 'authentication' },
+      );
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = {
+        model: this.model,
+        input: [{ role: 'user', content: query }],
+        tools: [
+          {
+            type: 'web_search',
+            return_token_budget: this.returnTokenBudget,
+          },
+        ],
+        reasoning: { effort: this.reasoningEffort },
+        ...(this.maxToolCalls ? { max_tool_calls: this.maxToolCalls } : {}),
+        background: true,
+      };
+    } catch (error) {
+      throw new UnsafeToRetrySubmissionError(
+        error instanceof Error ? error.message : String(error),
+        { kind: 'invalid_request' },
+      );
+    }
     let response;
     try {
       response = await this.request<OpenAIResponseBody>(
@@ -204,47 +252,63 @@ export class OpenAIResearchProvider extends BackgroundBaseProvider {
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}` },
-          body: {
-            model: this.model,
-            input: [{ role: 'user', content: query }],
-            tools: [
-              {
-                type: 'web_search',
-                return_token_budget: this.returnTokenBudget,
-              },
-            ],
-            reasoning: { effort: this.reasoningEffort },
-            ...(this.maxToolCalls ? { max_tool_calls: this.maxToolCalls } : {}),
-            background: true,
-          },
+          body,
           timeout: 30000,
           signal: options.signal,
         },
       );
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
       );
     }
 
     if (response.status !== 200 && response.status !== 201) {
       throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     }
 
-    const status = mapStatus(response.data.status);
+    const received = response.data as {
+      id?: unknown;
+      status?: unknown;
+    } | null;
+    const id = OpaqueIdSchema.safeParse(received?.id);
+    if (!id.success) {
+      throw new UnsafeToRetrySubmissionError(
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
+      );
+    }
+    const rawStatus =
+      typeof received?.status === 'string' && received.status.trim()
+        ? received.status
+        : undefined;
+    if (!rawStatus) {
+      return {
+        provider: this.id,
+        taskId: id.data,
+        query,
+        submittedAt: Date.now(),
+        status: 'pending',
+        providerStatus: 'invalid_response',
+        lastPollError: 'OpenAI returned a malformed create response',
+      };
+    }
+    const status = mapStatus(rawStatus);
     return {
       provider: this.id,
-      taskId: response.data.id,
+      taskId: id.data,
       query,
       submittedAt: Date.now(),
       status: status ?? 'pending',
-      providerStatus: response.data.status,
+      providerStatus: rawStatus,
       ...(status
         ? {}
         : {
-            lastPollError: `Unknown OpenAI response status: ${response.data.status}`,
+            lastPollError: `Unknown OpenAI response status: ${rawStatus}`,
           }),
     };
   }
@@ -261,21 +325,17 @@ export class OpenAIResearchProvider extends BackgroundBaseProvider {
     );
 
     if (response.status !== 200) {
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      ) {
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      }
-      return {
-        status: 'failed',
-        rawStatus: `http_${response.status}`,
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
 
     const data = response.data;
+    if (
+      typeof data?.id !== 'string' ||
+      data.id !== handle.taskId ||
+      typeof data.status !== 'string'
+    ) {
+      throw new Error('OpenAI returned a malformed status response');
+    }
     const mapped = mapStatus(data.status);
     if (!mapped) {
       return {

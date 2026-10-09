@@ -8,6 +8,7 @@ import { LifecycleTraceSchema } from '../src/contracts/interchange/lifecycle.js'
 import {
   acceptedDurableHandles,
   advanceCoordination,
+  advanceDeadlines,
   type CoordinatorState,
   cancelCoordination,
   claimFallbackRound,
@@ -18,6 +19,8 @@ import {
   recordAcceptanceRejected,
   recordAcceptanceUnknown,
   recordAttemptFinished,
+  recordAttemptProgress,
+  recordAttemptRunning,
   recordLaunchDispatched,
   recordSubmissionAccepted,
   recordTransientPollFailure,
@@ -25,6 +28,7 @@ import {
   setRefinedSlotQuery,
   startLaunchableAttempts,
 } from '../src/core/coordinator.js';
+import { CoordinatorStateSchema } from '../src/core/coordinator-state-schema.js';
 import {
   InMemoryCoordinationStateStore,
   updateCoordinationState,
@@ -550,6 +554,47 @@ describe('deterministic coordinator rounds', () => {
 });
 
 describe('acceptance, deadlines, cancellation, and budgets', () => {
+  it('keeps the request deadline anchored to ingress across delayed preparation', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const prepared = preparedExecution({
+      primaries: [inlineProfile('inline')],
+      requestDeadlineMs: 60_000,
+    });
+    const delayed = dependencies(start + 30_000);
+    const state = createCoordinatorState(prepared, delayed);
+
+    expect(state.created_at).toBe(new Date(start).toISOString());
+    expect(state.request_deadline_at).toBe(
+      new Date(start + 60_000).toISOString(),
+    );
+  });
+
+  it('terminalizes an already-expired request without dispatching work', () => {
+    const start = Date.parse('2026-08-08T12:00:00Z');
+    const prepared = preparedExecution({
+      primaries: [inlineProfile('inline')],
+      requestDeadlineMs: 60_000,
+    });
+    const delayed = dependencies(start + 90_000);
+    const created = createCoordinatorState(prepared, delayed);
+    const advanced = advanceCoordination(created, delayed);
+
+    expect(created.created_at).toBe(new Date(start).toISOString());
+    expect(created.request_deadline_at).toBe(
+      new Date(start + 60_000).toISOString(),
+    );
+    expect(advanced.launches).toEqual([]);
+    expect(advanced.state.attempts).toEqual([]);
+    expect(advanced.state.status).toBe('unsuccessful');
+    expect(advanced.state.lifecycle.map((event) => event.event_kind)).toEqual([
+      'request_started',
+      'request_completed',
+    ]);
+    expect(
+      LifecycleTraceSchema.safeParse(advanced.state.lifecycle).success,
+    ).toBe(true);
+  });
+
   it('assigns separate inline and background attempt deadlines', () => {
     const start = Date.parse('2026-08-08T12:00:00Z');
     const deps = dependencies(start);
@@ -640,6 +685,161 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     );
     expect(durable.attempts[0]?.status).toBe('acceptance_unknown');
     expect(durable.attempts[0]?.durable_handle).toBeUndefined();
+  });
+
+  it.each(['attempt deadline', 'request deadline', 'cancellation'])(
+    'reconciles only unknown cost after %s, idempotently through concurrent CAS delivery',
+    async (boundary) => {
+      const start = Date.parse('2026-08-08T12:00:00Z');
+      const deps = dependencies(start);
+      const profile = durableProfile('durable');
+      let state = startAll(
+        preparedExecution({
+          primaries: [profile],
+          backgroundAttemptDeadlineMs: 10_000,
+        }),
+        deps,
+      );
+      const attemptId = state.attempts[0]!.attempt_id;
+      state = recordSubmissionAccepted(
+        state,
+        attemptId,
+        handle(profile, 'pending'),
+        deps,
+      );
+      deps.setNow(
+        boundary === 'request deadline'
+          ? Date.parse(state.request_deadline_at)
+          : start + 10_000,
+      );
+      state =
+        boundary === 'cancellation'
+          ? cancelCoordination(state, deps)
+          : advanceDeadlines(state, deps);
+      const snapshot = structuredClone(state);
+      const receipt = {
+        outcome: 'succeeded',
+        result_id: 'late-result',
+        durable_handle: handle(profile, 'succeeded'),
+        actual_cost_microusd: '20000',
+      };
+      const store = new InMemoryCoordinationStateStore();
+      await store.create(state);
+      let deliveries = 0;
+      const update = () =>
+        updateCoordinationState(store, state.request_id, (current) => {
+          deliveries++;
+          return recordAttemptFinished(current, attemptId, receipt, deps);
+        });
+      await Promise.all([update(), update()]);
+      const reconciled = (await store.load(state.request_id))!.state;
+      expect(deliveries).toBe(3);
+      expect(reconciled).toEqual({
+        ...snapshot,
+        attempts: snapshot.attempts.map((attempt) => ({
+          ...attempt,
+          actual_cost_microusd: '20000',
+        })),
+        budget: { ...snapshot.budget, actual_cost_microusd: '20000' },
+      });
+      expect(state).toEqual(snapshot);
+      // Stale/absent bills never erase the recorded charge or resurrect output.
+      for (const cost of ['0', undefined])
+        expect(
+          recordAttemptFinished(
+            reconciled,
+            attemptId,
+            { ...receipt, actual_cost_microusd: cost },
+            deps,
+          ),
+        ).toEqual(reconciled);
+    },
+  );
+
+  it('validates late receipts and treats a recorded zero as known, not missing', () => {
+    const deps = dependencies();
+    const state = cancelCoordination(
+      startAll(
+        preparedExecution({ primaries: [inlineProfile('inline')] }),
+        deps,
+      ),
+      deps,
+    );
+    const attemptId = state.attempts[0]!.attempt_id;
+    const receipt = { outcome: 'failed', error: providerFailure(true) };
+    for (const cost of ['-1', '01', '1.5', '9'.repeat(316), 20000, null])
+      expect(() =>
+        recordAttemptFinished(
+          state,
+          attemptId,
+          { ...receipt, actual_cost_microusd: cost },
+          deps,
+        ),
+      ).toThrow();
+    expect(() =>
+      recordAttemptFinished(
+        state,
+        attemptId,
+        { ...receipt, secret: 'extra' },
+        deps,
+      ),
+    ).toThrow();
+    const free = recordAttemptFinished(
+      state,
+      attemptId,
+      { ...receipt, actual_cost_microusd: '0' },
+      deps,
+    );
+    expect(free.attempts[0]?.actual_cost_microusd).toBe('0');
+    expect(free.budget.actual_cost_microusd).toBe('0');
+    expect(
+      recordAttemptFinished(
+        free,
+        attemptId,
+        { ...receipt, actual_cost_microusd: '20000' },
+        deps,
+      ),
+    ).toEqual(free);
+  });
+
+  it('admits a maximum receipt and persists the 256-receipt aggregate', () => {
+    const deps = dependencies();
+    const receipt = '9'.repeat(315);
+    const state = startAll(
+      preparedExecution({ primaries: [inlineProfile('inline')] }),
+      deps,
+    );
+    const attemptId = state.attempts[0]!.attempt_id;
+    const accepted = recordAttemptFinished(
+      state,
+      attemptId,
+      {
+        outcome: 'failed',
+        error: providerFailure(false),
+        actual_cost_microusd: receipt,
+      },
+      deps,
+    );
+    expect(accepted.attempts[0]?.actual_cost_microusd).toBe(receipt);
+
+    const aggregate = (BigInt(receipt) * 256n).toString();
+    expect(aggregate).toHaveLength(318);
+    const persisted = CoordinatorStateSchema.parse({
+      ...accepted,
+      slots: accepted.slots.map((slot) => ({
+        ...slot,
+        latest_attempt_id: 'attempt-boundary-255',
+      })),
+      attempts: Array.from({ length: 256 }, (_, index) => ({
+        ...accepted.attempts[0],
+        attempt_id: `attempt-boundary-${index}`,
+      })),
+      budget: {
+        ...accepted.budget,
+        actual_cost_microusd: aggregate,
+      },
+    });
+    expect(persisted.budget.actual_cost_microusd).toBe(aggregate);
   });
 
   it('retains a timely target callback while advancing an overdue sibling', () => {
@@ -864,6 +1064,74 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
     });
     expect(state.lifecycle).toHaveLength(lifecycleLength);
     expect(state.status).toBe('running');
+  });
+
+  it('coalesces a saturated progress trace while retaining terminal events', () => {
+    const deps = dependencies();
+    const profile = durableProfile('durable');
+    let state = startAll(preparedExecution({ primaries: [profile] }), deps);
+    const attemptId = state.attempts[0]?.attempt_id ?? '';
+    state = recordSubmissionAccepted(
+      state,
+      attemptId,
+      handle(profile, 'pending'),
+      deps,
+    );
+    state = recordAttemptRunning(state, attemptId, deps);
+    state = recordAttemptProgress(state, attemptId, 1, 'first poll', deps);
+    const progress = state.lifecycle.at(-1);
+    if (progress?.event_kind !== 'attempt_progress') {
+      throw new Error('Expected a progress fixture event.');
+    }
+    while (state.lifecycle.length < 10_000) {
+      const sequence = state.lifecycle.length;
+      state.lifecycle.push({
+        ...progress,
+        event_id: `legacy-progress-${sequence}`,
+        sequence,
+        data: { progress_percent: sequence % 101 },
+      });
+    }
+    state.lifecycle_sequence = state.lifecycle.length;
+    expect(LifecycleTraceSchema.safeParse(state.lifecycle).success).toBe(true);
+    expect(CoordinatorStateSchema.safeParse(state).success).toBe(true);
+
+    state = recordAttemptProgress(state, attemptId, 75, 'latest poll', deps);
+    expect(state.lifecycle).toHaveLength(4);
+    expect(
+      state.lifecycle.filter(
+        (event) => event.event_kind === 'attempt_progress',
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        data: { progress_percent: 75, message: 'latest poll' },
+      }),
+    ]);
+
+    state = recordAttemptFinished(
+      state,
+      attemptId,
+      {
+        outcome: 'failed',
+        error: providerFailure(false),
+        durable_handle: handle(profile, 'failed'),
+      },
+      deps,
+    );
+    state = finalizeCoordination(state, deps);
+    expect(state.lifecycle.map((event) => event.event_kind)).toEqual([
+      'request_started',
+      'attempt_started',
+      'durable_task_submitted',
+      'attempt_progress',
+      'attempt_finished',
+      'request_completed',
+    ]);
+    expect(state.lifecycle.map((event) => event.sequence)).toEqual([
+      0, 1, 2, 3, 4, 5,
+    ]);
+    expect(LifecycleTraceSchema.safeParse(state.lifecycle).success).toBe(true);
+    expect(CoordinatorStateSchema.safeParse(state).success).toBe(true);
   });
 
   it('uses a zero ceiling to suppress paid slots while permitting zero reservations', () => {
@@ -1197,7 +1465,7 @@ describe('durable handles and terminal mapping', () => {
         {
           outcome: 'failed',
           error: providerFailure(true),
-          actual_cost_microusd: '9'.repeat(65),
+          actual_cost_microusd: '9'.repeat(316),
         },
         deps,
       ),
@@ -1216,6 +1484,52 @@ describe('durable handles and terminal mapping', () => {
       error: { code: 'definitively_rejected' },
     });
     expect(advanceCoordination(state, deps).launches).toHaveLength(1);
+  });
+
+  it('keeps the bounded submission diagnostic when a later reason replaces it', () => {
+    const deps = dependencies();
+    const prepared = preparedExecution({
+      primaries: [durableProfile('uncertain')],
+    });
+    let state = createCoordinatorState(prepared, deps);
+    const started = advanceCoordination(state, deps);
+    const launch = started.launches[0]!;
+    state = recordLaunchDispatched(
+      started.state,
+      launch.attempt_id,
+      launch.delivery_lease_id,
+      deps,
+    );
+    state = recordAcceptanceUnknown(
+      state,
+      launch.attempt_id,
+      deps,
+      undefined,
+      'submission_response_uncertain',
+      { kind: 'provider', http_status: 502 },
+    );
+    expect(state.unresolved_acceptances[0]?.diagnostic).toEqual({
+      kind: 'provider',
+      http_status: 502,
+    });
+    expect(() =>
+      CoordinatorStateSchema.parse(structuredClone(state)),
+    ).not.toThrow();
+    const cancelled = cancelCoordination(state, deps);
+    expect(cancelled.unresolved_acceptances[0]).toMatchObject({
+      reason: 'cancelled_while_acceptance_unknown',
+      diagnostic: { kind: 'provider', http_status: 502 },
+    });
+    expect(() =>
+      recordAcceptanceUnknown(
+        state,
+        launch.attempt_id,
+        deps,
+        undefined,
+        'submission_response_uncertain',
+        { kind: 'provider', message: 'raw provider text' },
+      ),
+    ).toThrow();
   });
 
   it('applies the canonical 100k character bound to refined slot queries', () => {

@@ -9,6 +9,7 @@ import {
 } from '../contracts/domain/index.js';
 import type { LifecycleEvent } from '../contracts/interchange/internal.js';
 import { INTERCHANGE_VERSION } from '../contracts/interchange/internal.js';
+import { MAX_REPORTED_COST_MICROUSD_DIGITS } from './budget.js';
 import {
   assertCompareAndSwapAttemptBudget,
   type CoordinationStateStore,
@@ -19,10 +20,7 @@ import {
   type PreparedResearchExecution,
   profileIdentityKey,
 } from './execution-plan.js';
-import {
-  ExactMicrousdSchema,
-  RESEARCH_REQUEST_LIMITS,
-} from './research-request.js';
+import { RESEARCH_REQUEST_LIMITS } from './research-request.js';
 
 export type CoordinatorTerminalOutcome =
   | 'succeeded'
@@ -127,7 +125,39 @@ export interface UnresolvedAcceptance {
     | 'cancelled_while_acceptance_unknown'
     | 'infrastructure_failure_while_acceptance_unknown';
   adapter_state_ref?: string;
+  /**
+   * Bounded transport facts from the uncertain submission. Never a provider
+   * or transport message, which may echo request content or credentials.
+   */
+  diagnostic?: UnresolvedAcceptanceDiagnostic;
 }
+
+export interface UnresolvedAcceptanceDiagnostic {
+  kind:
+    | 'authentication'
+    | 'plan_required'
+    | 'billing'
+    | 'rate_limit'
+    | 'invalid_request'
+    | 'network'
+    | 'timeout'
+    | 'provider';
+  http_status?: number;
+}
+
+export const UnresolvedAcceptanceDiagnosticSchema = z.strictObject({
+  kind: z.enum([
+    'authentication',
+    'plan_required',
+    'billing',
+    'rate_limit',
+    'invalid_request',
+    'network',
+    'timeout',
+    'provider',
+  ]),
+  http_status: z.number().int().min(100).max(599).optional(),
+});
 
 const UnresolvedAcceptanceReasonSchema = z.enum([
   'submission_response_uncertain',
@@ -194,24 +224,29 @@ export interface CoordinatorAdvanceResult {
   readonly launches: readonly AttemptLaunch[];
 }
 
+const ReportedCostMicrousdSchema = z
+  .string()
+  .max(MAX_REPORTED_COST_MICROUSD_DIGITS)
+  .regex(/^(?:0|[1-9]\d*)$/, 'Expected an exact non-negative integer string');
+
 const AttemptFinishedInputSchema = z.discriminatedUnion('outcome', [
   z.strictObject({
     outcome: z.literal('succeeded'),
     result_id: OpaqueIdSchema,
     durable_handle: DurableHandleSchema.optional(),
-    actual_cost_microusd: ExactMicrousdSchema.optional(),
+    actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
   }),
   z.strictObject({
     outcome: z.enum(['failed', 'timed_out']),
     error: StructuredErrorSchema,
     durable_handle: DurableHandleSchema.optional(),
-    actual_cost_microusd: ExactMicrousdSchema.optional(),
+    actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
   }),
   z.strictObject({
     outcome: z.literal('cancelled'),
     error: StructuredErrorSchema.optional(),
     durable_handle: DurableHandleSchema.optional(),
-    actual_cost_microusd: ExactMicrousdSchema.optional(),
+    actual_cost_microusd: ReportedCostMicrousdSchema.optional(),
   }),
 ]);
 
@@ -238,6 +273,16 @@ const TERMINAL_SLOT_STATUSES = new Set<CoordinatorSlotStatus>([
   'cancelled',
 ]);
 
+const MAX_LIFECYCLE_EVENTS = 10_000;
+const MAX_COORDINATOR_ATTEMPTS = 256;
+const MAX_FALLBACK_SELECTIONS = 64;
+// Retain enough room for every allowed attempt to start, record durable
+// acceptance, and finish, plus every fallback selection and request boundary.
+// Progress is observational and may be coalesced; these semantic events may not.
+const MAX_RETAINED_PROGRESS_EVENTS =
+  MAX_LIFECYCLE_EVENTS -
+  (MAX_COORDINATOR_ATTEMPTS * 3 + MAX_FALLBACK_SELECTIONS + 2);
+
 function cloneState(state: CoordinatorState): CoordinatorState {
   return structuredClone(state);
 }
@@ -254,8 +299,59 @@ function exactGreaterThan(left: string, right: string): boolean {
   return BigInt(left) > BigInt(right);
 }
 
+function compactProgressLifecycle(
+  state: CoordinatorState,
+  supersededAttemptId?: string,
+): void {
+  const latestProgressByAttempt = new Set<string>();
+  const retainedProgress = new Set<number>();
+  for (let index = state.lifecycle.length - 1; index >= 0; index -= 1) {
+    const event = state.lifecycle[index];
+    if (event?.event_kind !== 'attempt_progress') continue;
+    const attemptId = event.attempt_id;
+    if (attemptId === supersededAttemptId) continue;
+    if (latestProgressByAttempt.has(attemptId)) continue;
+    latestProgressByAttempt.add(attemptId);
+    retainedProgress.add(index);
+  }
+
+  let progressToDrop = Math.max(
+    0,
+    retainedProgress.size - MAX_RETAINED_PROGRESS_EVENTS,
+  );
+  state.lifecycle = state.lifecycle
+    .filter((event, index) => {
+      if (event.event_kind !== 'attempt_progress') return true;
+      if (!retainedProgress.has(index)) return false;
+      if (progressToDrop > 0) {
+        progressToDrop -= 1;
+        return false;
+      }
+      return true;
+    })
+    .map((event, sequence) =>
+      event.sequence === sequence ? event : { ...event, sequence },
+    ) as LifecycleEvent[];
+  state.lifecycle_sequence = state.lifecycle.length;
+}
+
 function appendLifecycle(state: CoordinatorState, event: LifecycleEvent): void {
-  state.lifecycle.push(event);
+  if (
+    event.event_kind === 'attempt_progress' ||
+    state.lifecycle.length >= MAX_LIFECYCLE_EVENTS
+  ) {
+    compactProgressLifecycle(
+      state,
+      event.event_kind === 'attempt_progress' ? event.attempt_id : undefined,
+    );
+  }
+  if (state.lifecycle.length >= MAX_LIFECYCLE_EVENTS) {
+    throw new Error('Lifecycle trace exhausted its semantic event capacity.');
+  }
+  state.lifecycle.push({
+    ...event,
+    sequence: state.lifecycle_sequence,
+  } as LifecycleEvent);
   state.lifecycle_sequence += 1;
 }
 
@@ -414,16 +510,20 @@ function rememberUnresolvedAcceptance(
   attempt: CoordinatorAttemptState,
   observedAt: string,
   reason: UnresolvedAcceptance['reason'],
+  diagnosticInput?: UnresolvedAcceptanceDiagnostic,
 ): void {
   const existing = state.unresolved_acceptances.find(
     (entry) => entry.attempt_id === attempt.attempt_id,
   );
+  // A later reason (deadline, cancellation) keeps the submission's cause.
+  const diagnostic = diagnosticInput ?? existing?.diagnostic;
   const marker: UnresolvedAcceptance = {
     attempt_id: attempt.attempt_id,
     profile_key: profileIdentityKey(attempt.profile.identity),
     observed_at: observedAt,
     reason,
     adapter_state_ref: attempt.adapter_state_ref,
+    ...(diagnostic && { diagnostic }),
   };
   if (existing) Object.assign(existing, marker);
   else state.unresolved_acceptances.push(marker);
@@ -557,11 +657,14 @@ export function createCoordinatorState(
   prepared: PreparedResearchExecution,
   dependencies: CoordinatorDependencies,
 ): CoordinatorState {
-  const createdAtMs = dependencies.clock.now();
+  const requestedAtMs = Date.parse(prepared.request.requested_at);
+  const requestDeadlineAtMs =
+    requestedAtMs + prepared.policy.limits.request_deadline_ms;
+  // The coordinator chronology begins at request ingress. Preparation may be
+  // delayed, but it cannot extend or move the persisted request window.
+  const createdAtMs = requestedAtMs;
   const createdAt = iso(createdAtMs);
-  const requestDeadlineAt = iso(
-    createdAtMs + prepared.policy.limits.request_deadline_ms,
-  );
+  const requestDeadlineAt = iso(requestDeadlineAtMs);
   const state: CoordinatorState = {
     request_id: prepared.request.request_id,
     mode: prepared.request.mode,
@@ -718,7 +821,9 @@ function claimDispatchPendingAttempts(
     const deliveryLeaseId = dependencies.ids.next('delivery_lease');
     const attemptDeadlineMs =
       attempt.profile.invocation === 'inline'
-        ? state.inline_attempt_deadline_ms
+        ? (state.profile_plans_by_identity[
+            profileIdentityKey(attempt.profile.identity)
+          ]?.inline_attempt_deadline_ms ?? state.inline_attempt_deadline_ms)
         : state.background_attempt_deadline_ms;
     attempt.deadline_at = iso(
       Math.min(nowMs + attemptDeadlineMs, requestDeadlineMs),
@@ -1024,6 +1129,7 @@ function markAcceptanceUnknownUnchecked(
   dependencies: CoordinatorDependencies,
   adapterStateRefInput?: unknown,
   reasonInput: unknown = 'submission_response_uncertain',
+  diagnosticInput?: unknown,
 ): CoordinatorState {
   const next = cloneState(state);
   const attempt = attemptFor(next, attemptId);
@@ -1032,6 +1138,10 @@ function markAcceptanceUnknownUnchecked(
       ? undefined
       : OpaqueIdSchema.parse(adapterStateRefInput);
   const reason = UnresolvedAcceptanceReasonSchema.parse(reasonInput);
+  const diagnostic =
+    diagnosticInput === undefined
+      ? undefined
+      : UnresolvedAcceptanceDiagnosticSchema.parse(diagnosticInput);
   if (!canHaveRemoteAcceptanceUncertainty(attempt.profile)) {
     throw new Error(
       'Only durable background profiles can have unknown acceptance.',
@@ -1048,6 +1158,7 @@ function markAcceptanceUnknownUnchecked(
     attempt,
     iso(dependencies.clock.now()),
     reason,
+    diagnostic,
   );
   return next;
 }
@@ -1058,6 +1169,7 @@ export function recordAcceptanceUnknown(
   dependencies: CoordinatorDependencies,
   adapterStateRefInput?: unknown,
   reasonInput: unknown = 'submission_response_uncertain',
+  diagnosticInput?: unknown,
 ): CoordinatorState {
   const priorAttempt = attemptFor(state, attemptId);
   if (!canHaveRemoteAcceptanceUncertainty(priorAttempt.profile)) {
@@ -1082,6 +1194,7 @@ export function recordAcceptanceUnknown(
     dependencies,
     adapterStateRefInput,
     reasonInput,
+    diagnosticInput,
   );
 }
 
@@ -1194,19 +1307,36 @@ export function recordAttemptFinished(
   input: unknown,
   dependencies: CoordinatorDependencies,
 ): CoordinatorState {
+  const finished = AttemptFinishedInputSchema.parse(input);
   const deadlineState = advanceDeadlines(state, dependencies);
-  if (deadlineState.status !== 'running') return deadlineState;
   const attempt = attemptFor(deadlineState, attemptId);
+  if (attempt.status === 'acceptance_unknown') return deadlineState;
   if (
-    TERMINAL_ATTEMPT_STATUSES.has(attempt.status) ||
-    attempt.status === 'acceptance_unknown'
+    deadlineState.status !== 'running' ||
+    TERMINAL_ATTEMPT_STATUSES.has(attempt.status)
   ) {
-    return deadlineState;
+    // A deadline/cancellation wins the outcome, not the bill. Fill unknown
+    // accounting only: repeated or stale deliveries cannot double-charge or
+    // replace an already-recorded actual, nor change terminal custody.
+    if (
+      finished.actual_cost_microusd === undefined ||
+      attempt.actual_cost_microusd !== undefined
+    ) {
+      return deadlineState;
+    }
+    const next = cloneState(deadlineState);
+    attemptFor(next, attemptId).actual_cost_microusd =
+      finished.actual_cost_microusd;
+    next.budget.actual_cost_microusd = exactAdd(
+      next.budget.actual_cost_microusd,
+      finished.actual_cost_microusd,
+    );
+    return next;
   }
   return finishAttemptUnchecked(
     deadlineState,
     attemptId,
-    AttemptFinishedInputSchema.parse(input),
+    finished,
     dependencies,
   );
 }

@@ -9,6 +9,7 @@ import {
   writePaidRunLedger,
 } from '../src/node-paid-attempt-ledger.js';
 import {
+  canonicalRequestFingerprint,
   fingerprint,
   PaidRunAdmissionError,
   type PaidStageDeclaration,
@@ -83,6 +84,39 @@ function wallet(
     ...(options.onChange && { on_change: options.onChange }),
   });
 }
+
+describe('paid-ledger fingerprints (#4045)', () => {
+  it('hashes a value the same before and after a JSON round trip', () => {
+    const inMemory = {
+      query: 'q',
+      slots: [
+        {
+          requirements: {
+            result_kind: 'research_report',
+            surface_id: undefined,
+          },
+        },
+      ],
+      sparse: [1, undefined, 2],
+    };
+    const persisted = JSON.parse(JSON.stringify(inMemory));
+    expect(persisted.slots[0].requirements).not.toHaveProperty('surface_id');
+    expect(fingerprint(inMemory)).toBe(fingerprint(persisted));
+    expect(fingerprint({ a: 1, b: undefined })).toBe(fingerprint({ a: 1 }));
+    expect(fingerprint([undefined])).toBe(fingerprint([null]));
+  });
+
+  it('binds the request in its persisted run.json representation', () => {
+    const request = {
+      request_id: 'request-1',
+      slots: [{ requirements: { surface_id: undefined, corpora: ['web'] } }],
+    };
+    expect(canonicalRequestFingerprint(request)).toBe(
+      fingerprint(JSON.parse(JSON.stringify(request))),
+    );
+    expect(canonicalRequestFingerprint(request)).toBe(fingerprint(request));
+  });
+});
 
 describe('run-wide paid wallet', () => {
   it('exposes side-effect-free preparation identical to constructor admission', () => {
@@ -182,6 +216,31 @@ describe('run-wide paid wallet', () => {
         input_fingerprint: fingerprint('expired'),
       }),
     ).toThrowError(/run_deadline_exceeded/);
+  });
+
+  it('does not turn unknown remote acceptance into settled cancellation', () => {
+    const subject = wallet();
+    const attemptId = subject.begin({
+      stage: 'research',
+      provider: 'research-a',
+      profile: 'research-a\0default',
+      estimated_cost_microusd: '7000',
+      input_fingerprint: fingerprint('uncertain submission'),
+    });
+
+    subject.cancel();
+    subject.finish(attemptId, { status: 'acceptance_unknown' });
+
+    expect(subject.snapshot()).toMatchObject({
+      cancellation_requested_at: '2026-09-05T12:00:01.000Z',
+      attempts: [
+        {
+          attempt_id: attemptId,
+          status: 'acceptance_unknown',
+          reported: { state: 'unknown' },
+        },
+      ],
+    });
   });
 
   it('blocks providers outside the frozen no-fallback authorization set', () => {

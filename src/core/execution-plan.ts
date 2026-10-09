@@ -7,6 +7,7 @@ import {
 import {
   type ExecutionProfile,
   ExecutionProfileSchema,
+  executionProfilesEqual,
   type ProviderIdentity,
   providerIdentityKey,
 } from '../contracts/domain/index.js';
@@ -52,6 +53,22 @@ export interface NetworkFreeEstimate {
   }[];
 }
 
+/** Provider options that can declare an account rate for a fixed billable unit. */
+export type ConfiguredRateOption = 'perRequestUsd' | 'creditUsd';
+
+/**
+ * Diagnostic-only remediation facts. They shape actionable messages and never
+ * affect selection, admission, budgets, or the catalog digest.
+ */
+export interface PlanningProfileGuidance {
+  /** The provider id users enable or configure, e.g. `searchapi-chatgpt`. */
+  readonly config_provider_id?: string;
+  /** Why the frozen pricing snapshot cannot bound this profile's cost. */
+  readonly estimate_unavailable_reason?: string;
+  /** Provider option that can supply an account rate and bound the cost. */
+  readonly estimate_option?: ConfiguredRateOption;
+}
+
 export interface PlanningProfile {
   readonly profile: ExecutionProfile;
   readonly binding: AdapterBindingIdentity;
@@ -61,6 +78,7 @@ export interface PlanningProfile {
   readonly configuration_valid: boolean;
   /** Disabled in v1 but deliberately retained for fallback reserve only. */
   readonly reserve_only?: boolean;
+  readonly guidance?: PlanningProfileGuidance;
 }
 
 /**
@@ -75,6 +93,18 @@ export interface FrozenPlanningCatalog<
   readonly revision: string;
   readonly digest: string;
   readonly profiles: readonly TProfile[];
+  /** Optional exact declaration lookup; omission fails closed to reconciliation. */
+  get?(
+    providerId: string,
+    profileId: string,
+  ):
+    | {
+        readonly profile: ExecutionProfile;
+        readonly declaration: {
+          readonly features?: { readonly remote_cancellation?: true };
+        };
+      }
+    | undefined;
   resolveGroup(groupId: string): readonly ProviderIdentity[] | undefined;
   resolveDefault(): readonly ProviderIdentity[];
   resolveConfiguredReserve(
@@ -95,11 +125,30 @@ export interface PreparationDependencies {
   readonly ids: PreparationIdGenerator;
 }
 
+export type ExactProfileRemoteCancellationPolicy =
+  | 'supported_exact_profile'
+  | 'reconcile_only';
+
 export interface PreparedProfilePlan {
   readonly profile_key: string;
   readonly identity: ProviderIdentity;
   readonly binding: AdapterBindingIdentity;
+  /** Missing on historical records and therefore treated as reconcile-only. */
+  readonly cancel_policy?: ExactProfileRemoteCancellationPolicy;
   readonly estimate?: NetworkFreeEstimate;
+  /**
+   * Inline attempt deadline for this profile when it differs from the global
+   * policy limit. Resolved once at preparation so resumed runs reuse it.
+   */
+  readonly inline_attempt_deadline_ms?: number;
+}
+
+/** Optional per-profile policy resolved by the request compiler. */
+export interface MaterializationOptions {
+  /** Inline deadline for a profile, or undefined to use the global limit. */
+  readonly inlineAttemptDeadlineMs?: (
+    profile: ExecutionProfile,
+  ) => number | undefined;
 }
 
 export interface PrivateExecutionPolicy {
@@ -141,6 +190,7 @@ export interface AdmittedSelectedProfile {
   readonly entry: PlanningProfile;
   readonly path: string;
   readonly requirements?: EvidenceRequirements;
+  readonly cancel_policy: ExactProfileRemoteCancellationPolicy;
 }
 
 const RESEARCH_ADMISSION_BRAND: unique symbol = Symbol(
@@ -384,6 +434,22 @@ function findCatalogEntry(
   return byKey.get(profileIdentityKey(identity));
 }
 
+function cancellationPolicyForCatalogProfile(
+  catalog: FrozenPlanningCatalog,
+  entry: PlanningProfile,
+): ExactProfileRemoteCancellationPolicy {
+  const resolved = catalog.get?.(
+    entry.profile.identity.provider_id,
+    entry.profile.identity.profile_id,
+  );
+  const parsedResolved = ExecutionProfileSchema.safeParse(resolved?.profile);
+  return parsedResolved.success &&
+    executionProfilesEqual(entry.profile, parsedResolved.data) &&
+    resolved?.declaration.features?.remote_cancellation === true
+    ? 'supported_exact_profile'
+    : 'reconcile_only';
+}
+
 function resolveTargets(
   targets: readonly ProfileTarget[],
   catalog: FrozenPlanningCatalog,
@@ -420,7 +486,13 @@ function resolveTargets(
       });
       continue;
     }
-    selected.push(...matches.map((entry) => ({ entry, path })));
+    selected.push(
+      ...matches.map((entry) => ({
+        entry,
+        path,
+        cancel_policy: cancellationPolicyForCatalogProfile(catalog, entry),
+      })),
+    );
   }
   return selected;
 }
@@ -428,6 +500,7 @@ function resolveTargets(
 function resolveIdentities(
   identities: readonly ProviderIdentity[],
   byKey: ReadonlyMap<string, PlanningProfile>,
+  catalog: FrozenPlanningCatalog,
   path: string,
   issues: PreparationIssue[],
 ): AdmittedSelectedProfile[] {
@@ -444,9 +517,62 @@ function resolveIdentities(
       });
       continue;
     }
-    selected.push({ entry, path });
+    selected.push({
+      entry,
+      path,
+      cancel_policy: cancellationPolicyForCatalogProfile(catalog, entry),
+    });
   }
   return selected;
+}
+
+/** The `provider/profile` spelling users type and see in plans. */
+function displayProfileKey(entry: PlanningProfile): string {
+  const { provider_id, profile_id } = entry.profile.identity;
+  return `${provider_id}/${profile_id}`;
+}
+
+/** A catalog-supplied provider id, accepted only as a safe opaque token. */
+function guidanceProviderId(entry: PlanningProfile): string | undefined {
+  const id = entry.guidance?.config_provider_id;
+  return id !== undefined && OpaqueIdSchema.safeParse(id).success
+    ? id
+    : undefined;
+}
+
+/** How to enable a disabled profile, phrased for both v1 and v2 config. */
+export function disabledProfileMessage(entry: PlanningProfile): string {
+  const key = displayProfileKey(entry);
+  const id = guidanceProviderId(entry);
+  return id === undefined
+    ? `Profile "${key}" is disabled. Enable its provider in the Librarium config.`
+    : `Profile "${key}" is disabled. Enable it with \`librarium init --enable ${id}\` or set "enabled": true for provider "${id}" in the Librarium config.`;
+}
+
+const MAX_GUIDANCE_REASON_LENGTH = 120;
+
+/** Why a hard budget cannot admit a profile, and every way to proceed. */
+export function budgetEstimateRequiredMessage(
+  entry: PlanningProfile,
+  role: 'primary' | 'fallback' = 'primary',
+): string {
+  const key = displayProfileKey(entry);
+  const id = guidanceProviderId(entry);
+  const rawReason = entry.guidance?.estimate_unavailable_reason?.trim();
+  const reason =
+    rawReason && rawReason.length <= MAX_GUIDANCE_REASON_LENGTH
+      ? ` ${rawReason.endsWith('.') ? rawReason : `${rawReason}.`}`
+      : '';
+  const option = entry.guidance?.estimate_option;
+  const omit =
+    role === 'fallback'
+      ? 'disable fallback for this request'
+      : 'leave the profile out of the selection';
+  const remedy =
+    option !== undefined && id !== undefined
+      ? `Set options.${option} for provider "${id}" to your account rate, ${omit}, or drop the budget.`
+      : `${omit[0]?.toUpperCase()}${omit.slice(1)} or drop the budget.`;
+  return `${role === 'fallback' ? 'Fallback profile' : 'Profile'} "${key}" has no bounded price, so a hard budget cannot admit it.${reason} ${remedy}`;
 }
 
 function profileAvailabilityIssues(
@@ -470,7 +596,7 @@ function profileAvailabilityIssues(
       code: 'profile_disabled',
       phase: 'validation',
       path,
-      message: 'The selected profile is disabled.',
+      message: disabledProfileMessage(entry),
       profile_key: key,
     });
   }
@@ -547,7 +673,13 @@ function selectPrimaries(
         });
         return [];
       }
-      selected = resolveIdentities(identities, byKey, '/selector', issues);
+      selected = resolveIdentities(
+        identities,
+        byKey,
+        catalog,
+        '/selector',
+        issues,
+      );
       break;
     }
     case 'capabilities': {
@@ -560,6 +692,7 @@ function selectPrimaries(
           entry,
           path: '/selector/requirements',
           requirements: selector.requirements,
+          cancel_policy: cancellationPolicyForCatalogProfile(catalog, entry),
         }));
       if (
         selector.result_count !== undefined &&
@@ -580,6 +713,7 @@ function selectPrimaries(
       selected = resolveIdentities(
         catalog.resolveDefault(),
         byKey,
+        catalog,
         '/selector',
         issues,
       );
@@ -818,6 +952,7 @@ function resolveReserve(
             primaries.map(({ entry }) => entry.profile.identity),
           ),
           byKey,
+          catalog,
           '/fallback',
           issues,
         );
@@ -905,7 +1040,14 @@ function resolveReserve(
   return retained;
 }
 
-function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
+function profilePlan(
+  selection: AdmittedSelectedProfile,
+  options: MaterializationOptions,
+): PreparedProfilePlan {
+  const { entry } = selection;
+  const inlineAttemptDeadlineMs = options.inlineAttemptDeadlineMs?.(
+    entry.profile,
+  );
   return {
     profile_key: profileIdentityKey(entry.profile.identity),
     identity: { ...entry.profile.identity },
@@ -913,6 +1055,7 @@ function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
       adapter_id: entry.binding.adapter_id,
       binding_id: entry.binding.binding_id,
     },
+    cancel_policy: selection.cancel_policy,
     estimate: entry.estimate
       ? {
           estimated_cost_microusd: entry.estimate.estimated_cost_microusd,
@@ -922,6 +1065,9 @@ function profilePlan(entry: PlanningProfile): PreparedProfilePlan {
           })),
         }
       : undefined,
+    ...(inlineAttemptDeadlineMs !== undefined && {
+      inline_attempt_deadline_ms: inlineAttemptDeadlineMs,
+    }),
   };
 }
 
@@ -940,8 +1086,10 @@ function validatePrimaryBudgetAdmission(
         code: 'budget_estimate_required',
         phase: 'validation',
         path: selection.path,
-        message:
-          'A hard request budget requires a bounded network-free estimate for every planned profile.',
+        message: budgetEstimateRequiredMessage(
+          selection.entry,
+          primaries.includes(selection) ? 'primary' : 'fallback',
+        ),
         profile_key: profileIdentityKey(selection.entry.profile.identity),
       });
       continue;
@@ -1158,6 +1306,7 @@ export function materializeResearchExecution(
   admission: ResearchExecutionAdmission,
   limits: CanonicalResearchRequest['limits'],
   dependencies: PreparationDependencies,
+  options: MaterializationOptions = {},
 ): PreparationResult {
   if (!isMintedResearchExecutionAdmission(admission)) {
     return {
@@ -1246,8 +1395,8 @@ export function materializeResearchExecution(
   }
 
   const profilePlans = Object.fromEntries(
-    [...primaries, ...reserve].map(({ entry }) => {
-      const plan = profilePlan(entry);
+    [...primaries, ...reserve].map((selection) => {
+      const plan = profilePlan(selection, options);
       return [plan.profile_key, plan];
     }),
   );

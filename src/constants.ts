@@ -4,7 +4,11 @@ import {
   BUILTIN_PROVIDER_DEFINITIONS,
   BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER,
 } from './core/provider-descriptor.js';
-import { retiredProviderReplacement } from './core/retired-provider-ids.js';
+import {
+  isRetiredUpstreamProviderId,
+  retiredProviderGuidance,
+  retiredProviderReplacement,
+} from './core/retired-provider-ids.js';
 
 export const VERSION =
   typeof __VERSION__ !== 'undefined' ? __VERSION__ : '0.1.0';
@@ -175,7 +179,13 @@ export function suggestProviders(
 export type ProviderTokenResolution =
   | { kind: 'id'; token: string; id: string }
   | { kind: 'alias'; token: string; id: string }
-  | { kind: 'retired'; token: string; replacement: string }
+  | {
+      kind: 'retired';
+      token: string;
+      /** Present only for a renamed id; upstream retirements have none. */
+      replacement?: string;
+      message: string;
+    }
   | { kind: 'name'; token: string; id: string }
   | { kind: 'ambiguous'; token: string; candidates: ProviderNameEntry[] }
   | { kind: 'unknown'; token: string; suggestions: ProviderNameEntry[] };
@@ -199,7 +209,20 @@ export function resolveProviderToken(
   // even if a compromised provider index includes the old spelling.
   const replacement = retiredProviderReplacement(trimmed);
   if (replacement !== undefined) {
-    return { kind: 'retired', token: trimmed, replacement };
+    return {
+      kind: 'retired',
+      token: trimmed,
+      replacement,
+      message: `Provider "${trimmed}" was removed; use "${replacement}".`,
+    };
+  }
+  // Upstream retirements have no migration target; guidance names the
+  // nearest alternative without ever resolving to it.
+  const upstreamGuidance = isRetiredUpstreamProviderId(trimmed)
+    ? retiredProviderGuidance(trimmed)
+    : undefined;
+  if (upstreamGuidance !== undefined) {
+    return { kind: 'retired', token: trimmed, message: upstreamGuidance };
   }
 
   // 2. Exact canonical id.
@@ -280,9 +303,7 @@ export function resolveProviderTokens(
         push(outcome.id);
         break;
       case 'retired':
-        errors.push(
-          `Provider "${outcome.token}" was removed; use "${outcome.replacement}".`,
-        );
+        errors.push(outcome.message);
         break;
       case 'ambiguous': {
         const candidateList = outcome.candidates
@@ -359,7 +380,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   visibility: [
     'searchapi-chatgpt',
     'searchapi-gemini',
-    'searchapi-perplexity',
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
@@ -387,7 +407,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'kagi-fastgpt',
     'searchapi-chatgpt',
     'searchapi-gemini',
-    'searchapi-perplexity',
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',
@@ -429,7 +448,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
     'valyu-search',
     'searchapi-chatgpt',
     'searchapi-gemini',
-    'searchapi-perplexity',
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'searchapi-google-ai-overview',

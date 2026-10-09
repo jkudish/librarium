@@ -38,6 +38,10 @@ export default defineConfig([
     platform: 'node',
     splitting: false,
     clean: false,
+    define: {
+      ...shared.define,
+      __BUNDLED_SKILL__: JSON.stringify(readFileSync('./SKILL.md', 'utf8')),
+    },
     banner: {
       js: '#!/usr/bin/env node',
     },
