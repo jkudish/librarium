@@ -3,6 +3,8 @@ import { SearchApiProvider } from '../../src/adapters/searchapi.js';
 import { SearchApiBingCopilotProvider } from '../../src/adapters/searchapi-bing-copilot.js';
 import { SearchApiChatGptProvider } from '../../src/adapters/searchapi-chatgpt.js';
 import { SearchApiGeminiProvider } from '../../src/adapters/searchapi-gemini.js';
+import { SearchApiGoogleAiModeProvider } from '../../src/adapters/searchapi-google-ai-mode.js';
+import { SearchApiGoogleAiOverviewProvider } from '../../src/adapters/searchapi-google-ai-overview.js';
 import { createSearchApiRequest } from '../../src/core/searchapi.js';
 import { searchApiHttpFailureDiagnostic } from '../../src/core/searchapi-diagnostics.js';
 
@@ -27,6 +29,14 @@ const adapters = [
   [
     'searchapi-bing-copilot',
     () => new SearchApiBingCopilotProvider({ apiKey: SYNTHETIC_KEY }),
+  ],
+  [
+    'searchapi-google-ai-mode',
+    () => new SearchApiGoogleAiModeProvider({ apiKey: SYNTHETIC_KEY }),
+  ],
+  [
+    'searchapi-google-ai-overview',
+    () => new SearchApiGoogleAiOverviewProvider({ apiKey: SYNTHETIC_KEY }),
   ],
 ] as const;
 
@@ -120,4 +130,57 @@ describe('SearchAPI failure handling (#4769)', () => {
       });
     },
   );
+
+  it('keeps the stage-two cause when the AI Overview page_token request fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(200, { ai_overview: { page_token: 'synthetic-token' } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(503, { error: 'synthetic upstream failure' }),
+      );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const result = await new SearchApiGoogleAiOverviewProvider({
+      apiKey: SYNTHETIC_KEY,
+    }).execute('stage two failure', { timeout: 5 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.error).toContain('API returned 503');
+    expect(result.failureDiagnostic).toEqual({
+      kind: 'provider',
+      httpStatus: 503,
+    });
+  });
+
+  it('classifies an abort between AI Overview stages as a timeout', async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort();
+      return jsonResponse(200, { ai_overview: { page_token: 'synthetic' } });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const result = await new SearchApiGoogleAiOverviewProvider({
+      apiKey: SYNTHETIC_KEY,
+    }).execute('abort', { timeout: 5, signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.error).toBe('Request aborted');
+    expect(result.failureDiagnostic).toEqual({ kind: 'timeout' });
+  });
+
+  it('attaches no transport diagnostic to a missing AI Overview', async () => {
+    globalThis.fetch = vi.fn(async () =>
+      jsonResponse(200, { organic_results: [] }),
+    ) as typeof fetch;
+
+    const result = await new SearchApiGoogleAiOverviewProvider({
+      apiKey: SYNTHETIC_KEY,
+    }).execute('no overview', { timeout: 5 });
+
+    expect(result.error).toContain('no AI Overview');
+    expect(result.failureDiagnostic).toBeUndefined();
+  });
 });
