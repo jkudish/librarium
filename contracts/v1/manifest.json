@@ -60,6 +60,13 @@
       ]
     },
     {
+      "path": "fixtures/valid/php-audit-usage-specialized-corpus.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
       "path": "fixtures/valid/json-object-success.json",
       "role": "fixture",
       "areas": [
@@ -362,6 +369,13 @@
     },
     {
       "path": "fixtures/invalid/usage-negative.json",
+      "role": "fixture",
+      "areas": [
+        "interchange"
+      ]
+    },
+    {
+      "path": "fixtures/invalid/usage-negative-tool-use-tokens.json",
       "role": "fixture",
       "areas": [
         "interchange"
