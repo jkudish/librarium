@@ -13,6 +13,7 @@ import {
   canonicalRunsRoot,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
+  describeCanonicalReconciliationFailure,
   discoverCanonicalRunDirectories,
   readCanonicalRunManifest,
   resumeCanonicalPreparedExecution,
@@ -259,27 +260,56 @@ function jsonPayload(
   };
 }
 
-async function reconcileCanonicalRuns(
-  baseDir: string,
-  _config: Config,
-): Promise<{
-  readonly runs: readonly {
-    readonly runDir: string;
-    readonly state: 'pending' | 'terminal' | 'error';
-    readonly refinementStatus?: CanonicalRunRefinement['status'];
-    readonly response?: unknown;
-    readonly error?: typeof RECONCILIATION_FAILED;
-  }[];
+interface CanonicalRunStatus {
+  readonly runDir: string;
+  readonly state: 'pending' | 'terminal' | 'error';
+  readonly refinementStatus?: CanonicalRunRefinement['status'];
+  readonly response?: unknown;
+  readonly error?: typeof RECONCILIATION_FAILED;
+  /** Fixed, actionable diagnostic; never provider or parser text. */
+  readonly message?: string;
+  /** Accepted remote tasks still being polled. */
+  readonly activeTasks?: number;
+  /** Submissions whose remote acceptance is unknown; never polled. */
+  readonly unknownSubmissions?: number;
+  /** Attempts that gained a result during this pass. */
+  readonly retrieved?: number;
+}
+
+type CanonicalAttempts = ReturnType<
+  typeof readCanonicalRunManifest
+>['coordination_state']['attempts'];
+
+function activeRemoteTasks(attempts: CanonicalAttempts): number {
+  return attempts.filter(
+    (attempt) =>
+      attempt.durable_handle &&
+      ['pending', 'running'].includes(attempt.durable_handle.status),
+  ).length;
+}
+
+function newlyRetrieved(
+  before: CanonicalAttempts,
+  after: CanonicalAttempts,
+): number {
+  const known = new Set(
+    before.flatMap((attempt) =>
+      attempt.result_id ? [attempt.attempt_id] : [],
+    ),
+  );
+  return after.filter(
+    (attempt) => attempt.result_id && !known.has(attempt.attempt_id),
+  ).length;
+}
+
+async function reconcileCanonicalRuns(baseDir: string): Promise<{
+  readonly runs: readonly CanonicalRunStatus[];
   readonly pending: number;
+  readonly activeTasks: number;
+  readonly retrieved: number;
   readonly errors: readonly (typeof RECONCILIATION_FAILED)[];
 }> {
-  const runs: Array<{
-    runDir: string;
-    state: 'pending' | 'terminal' | 'error';
-    refinementStatus?: CanonicalRunRefinement['status'];
-    response?: unknown;
-    error?: typeof RECONCILIATION_FAILED;
-  }> = [];
+  const runs: CanonicalRunStatus[] = [];
   const errors: (typeof RECONCILIATION_FAILED)[] = [];
   for (const runDir of discoverCanonicalRunDirectories(
     baseDir,
@@ -321,6 +351,10 @@ async function reconcileCanonicalRuns(
         runDir,
         generateSlug(canonical.manifest.request.query),
       );
+      const after = canonical.manifest.coordination_state.attempts;
+      const unknownSubmissions = after.filter(
+        (attempt) => attempt.status === 'acceptance_unknown',
+      ).length;
       runs.push({
         runDir,
         state:
@@ -331,25 +365,33 @@ async function reconcileCanonicalRuns(
           refinementStatus: canonical.manifest.refinement.status,
         }),
         ...(canonical.response && { response: canonical.response }),
+        activeTasks: activeRemoteTasks(after),
+        ...(unknownSubmissions > 0 && { unknownSubmissions }),
+        retrieved: newlyRetrieved(before.coordination_state.attempts, after),
       });
-    } catch {
+    } catch (error) {
       errors.push(RECONCILIATION_FAILED);
       runs.push({
         runDir,
         state: 'error',
         error: RECONCILIATION_FAILED,
+        message: describeCanonicalReconciliationFailure(error),
       });
     }
   }
+  const sum = (field: 'activeTasks' | 'retrieved'): number =>
+    runs.reduce((total, run) => total + (run[field] ?? 0), 0);
   return {
     runs,
     pending: runs.filter((run) => run.state === 'pending').length,
+    activeTasks: sum('activeTasks'),
+    retrieved: sum('retrieved'),
     errors,
   };
 }
 
 function printCanonicalRuns(
-  runs: Awaited<ReturnType<typeof reconcileCanonicalRuns>>['runs'],
+  runs: readonly CanonicalRunStatus[],
   print: (line: string) => void,
 ): void {
   if (runs.length === 0) return;
@@ -370,7 +412,11 @@ function printCanonicalRuns(
             : ''
         }`
       : '';
-    print(`  ${run.runDir} | Status: ${detail}${refinement}`);
+    const unknown = run.unknownSubmissions
+      ? ` | ${run.unknownSubmissions} submission${run.unknownSubmissions === 1 ? '' : 's'} with unknown outcome (not resubmitted)`
+      : '';
+    print(`  ${run.runDir} | Status: ${detail}${refinement}${unknown}`);
+    if (run.message) print(`    ${run.message}`);
   }
 }
 
@@ -381,6 +427,7 @@ export function registerStatusCommand(program: Command): void {
     .option('--wait', 'Block and poll until all tasks complete, then retrieve')
     .option('--retrieve', 'Fetch completed results')
     .option('--json', 'Output JSON')
+    .option('-o, --output <dir>', 'Output base directory')
     .action(async (opts) => {
       try {
         const config = mergeConfigs(
@@ -388,19 +435,24 @@ export function registerStatusCommand(program: Command): void {
           loadProjectConfig(process.cwd()),
         );
         const runtime = createNodeRunReconciliationRuntime(config);
-        const baseDir = resolve(config.defaults.outputDir);
+        const baseDir = resolve(opts.output ?? config.defaults.outputDir);
         const canonicalRunDirs = discoverCanonicalRunDirectories(
           baseDir,
           Number.MAX_SAFE_INTEGER,
         );
         const admittedCanonicalAdapters = [
           ...new Set(
-            canonicalRunDirs.flatMap((runDir) =>
-              Object.values(
-                readCanonicalRunManifest(canonicalRunsRoot(runDir), runDir)
-                  .coordination_state.profile_plans_by_identity,
-              ).map((plan) => plan.binding.adapter_id),
-            ),
+            canonicalRunDirs.flatMap((runDir) => {
+              try {
+                return Object.values(
+                  readCanonicalRunManifest(canonicalRunsRoot(runDir), runDir)
+                    .coordination_state.profile_plans_by_identity,
+                ).map((plan) => plan.binding.adapter_id);
+              } catch {
+                // Reported per run by reconcileCanonicalRuns below.
+                return [];
+              }
+            }),
           ),
         ];
         const runDirs = runtime.repository
@@ -433,7 +485,8 @@ export function registerStatusCommand(program: Command): void {
         for (const warning of initialized.warnings)
           process.stderr.write(`[librarium] warning: ${warning}\n`);
 
-        let canonical = await reconcileCanonicalRuns(baseDir, config);
+        let canonical = await reconcileCanonicalRuns(baseDir);
+        const canonicalRetrieved = canonical.retrieved;
         let tasks = persistedTasks(runtime, runDirs);
         if (tasks.length === 0 && canonical.runs.length === 0) {
           if (opts.json)
@@ -461,13 +514,30 @@ export function registerStatusCommand(program: Command): void {
           }
         };
 
+        const activeLegacyTasks = (): number =>
+          tasks.filter(
+            (task) => task.status === 'pending' || task.status === 'running',
+          ).length;
+        const pollingText = (): string => {
+          const unknown = canonical.runs.reduce(
+            (total, run) => total + (run.unknownSubmissions ?? 0),
+            0,
+          );
+          return `Polling ${activeLegacyTasks() + canonical.activeTasks} async tasks${
+            unknown > 0
+              ? `; ${unknown} submission${unknown === 1 ? '' : 's'} with unknown outcome hold${unknown === 1 ? 's' : ''} ${canonical.pending === 1 ? 'its run' : 'runs'} open until the request deadline`
+              : ''
+          }...`;
+        };
+
         if (opts.wait) {
-          const spinner = ora(`Polling ${tasks.length} async tasks...`).start();
-          let totalRetrieved = 0;
+          const spinner = ora(pollingText()).start();
+          let totalRetrieved = canonicalRetrieved;
           let remaining = true;
           try {
             while (remaining) {
-              canonical = await reconcileCanonicalRuns(baseDir, config);
+              canonical = await reconcileCanonicalRuns(baseDir);
+              totalRetrieved += canonical.retrieved;
               errors.push(...canonical.errors);
               const pass = await reconcileRuns(runtime, runDirs, true);
               totalRetrieved += pass.retrieved;
@@ -486,7 +556,7 @@ export function registerStatusCommand(program: Command): void {
                     (task.status === 'pending' || task.status === 'running'),
                 );
               if (remaining) {
-                spinner.text = `Polling ${tasks.filter((task) => task.status === 'pending' || task.status === 'running').length} async tasks...`;
+                spinner.text = pollingText();
                 await new Promise<void>((done) =>
                   setTimeout(done, config.defaults.asyncPollInterval * 1000),
                 );
@@ -512,12 +582,13 @@ export function registerStatusCommand(program: Command): void {
             const pass = await reconcileRuns(runtime, runDirs, true);
             withSpinnerStopped(spinner, () => record(pass), false);
             tasks = persistedTasks(runtime, runDirs);
-            if (pass.errors.length > 0 || pass.regenerationErrors.length > 0) {
+            const retrieved = pass.retrieved + canonicalRetrieved;
+            if (errors.length > 0 || pass.regenerationErrors.length > 0) {
               spinner.warn('Async reconciliation finished with errors.');
             } else {
               spinner.succeed(
-                pass.retrieved > 0
-                  ? `Retrieved ${pass.retrieved} results.`
+                retrieved > 0
+                  ? `Retrieved ${retrieved} results.`
                   : 'No completed tasks to retrieve.',
               );
             }
@@ -565,8 +636,10 @@ export function registerStatusCommand(program: Command): void {
           printCanonicalRuns(canonical.runs, print);
           if (tasks.length > 0) printTasks(tasks, print);
         }
-      } catch {
-        process.stderr.write(`[librarium] warning: ${RECONCILIATION_FAILED}\n`);
+      } catch (error) {
+        process.stderr.write(
+          `[librarium] warning: ${RECONCILIATION_FAILED}: ${describeCanonicalReconciliationFailure(error)}\n`,
+        );
         process.exitCode = 1;
       }
     });

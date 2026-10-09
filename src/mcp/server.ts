@@ -271,6 +271,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
           polled: result.polled,
           retrieved: result.retrieved,
           ...(result.error && { error: result.error }),
+          ...(result.errorDetail && { errorDetail: result.errorDetail }),
           ...(result.regenerationError && {
             regenerationError: result.regenerationError,
           }),

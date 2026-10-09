@@ -799,9 +799,17 @@ export function createProviderAttemptBridge(
           };
         }
         // Timeout/5xx/connection-drop after POST cannot prove rejection.
+        // Keep the bounded cause so the caller can act on it; the error
+        // message itself stays local to the adapter.
         await context.submissionAcceptanceUnknown(
           undefined,
           'submission_response_uncertain',
+          diagnostic && {
+            kind: diagnostic.kind,
+            ...(diagnostic.httpStatus !== undefined && {
+              http_status: diagnostic.httpStatus,
+            }),
+          },
         );
         return { kind: 'acceptance_unknown' };
       }

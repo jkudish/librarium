@@ -212,6 +212,18 @@ export class OpenAIResearchProvider extends BackgroundBaseProvider {
         diagnosticForSubmissionError(error, options.signal),
       );
     }
+    try {
+      // fetch rejects an invalid header value (control or non-Latin-1
+      // character, e.g. a pasted key) with a TypeError before sending. That
+      // TypeError would otherwise be classified as a network failure and
+      // leave a request that never left this process as acceptance-unknown.
+      new Headers({ Authorization: `Bearer ${apiKey}` });
+    } catch {
+      throw new UnsafeToRetrySubmissionError(
+        `${this.envVar} contains characters that are not valid in an HTTP header; re-copy the key.`,
+        { kind: 'authentication' },
+      );
+    }
     let body: Record<string, unknown>;
     try {
       body = {

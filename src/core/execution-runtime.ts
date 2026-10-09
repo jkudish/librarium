@@ -18,6 +18,7 @@ import {
   recordTransientPollFailure,
   resumeCoordination,
   type UnresolvedAcceptance,
+  type UnresolvedAcceptanceDiagnostic,
 } from './coordinator.js';
 import {
   type CoordinationStateStore,
@@ -59,6 +60,7 @@ export interface AttemptExecutionContext {
   submissionAcceptanceUnknown(
     adapterStateRef?: string,
     reason?: UnresolvedAcceptance['reason'],
+    diagnostic?: UnresolvedAcceptanceDiagnostic,
   ): Promise<void>;
   transientPollFailure(error: StructuredError): Promise<void>;
   running(progress?: number, message?: string): Promise<void>;
@@ -272,7 +274,11 @@ export async function runPreparedExecution(
           attempt.durable_handle.provider_task_id === handle.provider_task_id
         );
       },
-      submissionAcceptanceUnknown: async (adapterStateRef, reason) => {
+      submissionAcceptanceUnknown: async (
+        adapterStateRef,
+        reason,
+        diagnostic,
+      ) => {
         await transition(effectiveDependencies, requestId, (state) =>
           recordAcceptanceUnknown(
             state,
@@ -280,6 +286,7 @@ export async function runPreparedExecution(
             effectiveDependencies.coordinator,
             adapterStateRef,
             reason,
+            diagnostic,
           ),
         );
       },

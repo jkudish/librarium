@@ -10,6 +10,7 @@ import {
   canonicalRunsRoot,
   createNodeCoordinatorDependencies,
   createRegisteredProviderAttemptBridge,
+  describeCanonicalReconciliationFailure,
   readCanonicalRunManifest,
   readRunJsonSchemaVersion,
   resumeCanonicalPreparedExecution,
@@ -48,6 +49,8 @@ export interface CheckAsyncResult {
   tasks: TaskState[];
   /** Fixed diagnostic only; never a provider or filesystem error string. */
   error?: 'artifact.reconciliation_failed';
+  /** Fixed, path-free explanation of `error` from Librarium's typed errors. */
+  errorDetail?: string;
   regenerationError?: 'artifact.regeneration_failed';
   state?: 'pending' | 'terminal';
   refinementStatus?: CanonicalRunRefinement['status'];
@@ -226,6 +229,7 @@ export async function checkAsyncTasks(
       retrieved: 0,
       tasks: [],
       error: 'artifact.reconciliation_failed',
+      errorDetail: describeCanonicalReconciliationFailure(error),
     };
   }
 }

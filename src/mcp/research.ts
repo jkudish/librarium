@@ -40,7 +40,11 @@ import {
 } from '../node-request-preflight.js';
 import { type CreateRunDirDeps, createRunDir } from '../node-run-directory.js';
 import { buildPaidStageDeclarations } from '../paid-stage-planning.js';
-import { fingerprint, RunPaidWallet } from '../run-paid-wallet.js';
+import {
+  canonicalRequestFingerprint,
+  fingerprint,
+  RunPaidWallet,
+} from '../run-paid-wallet.js';
 import type { Config, Defaults, Provider } from '../types.js';
 
 /**
@@ -219,8 +223,8 @@ export async function runResearchSilent(
   const createdAt = preflight.prepared.request.requested_at;
   const wallet = new RunPaidWallet({
     request_id: preflight.prepared.request.request_id,
-    request_fingerprint: fingerprint(
-      JSON.parse(JSON.stringify(preflight.prepared.request)),
+    request_fingerprint: canonicalRequestFingerprint(
+      preflight.prepared.request,
     ),
     config_fingerprint: fingerprint({
       defaults: config.defaults,
