@@ -1,3 +1,4 @@
+import type { ExecutionProfile } from '../contracts/domain/index.js';
 import type { Config } from '../types.js';
 import {
   type BuiltinWorkflowId,
@@ -20,6 +21,7 @@ import {
   materializeResearchExecution,
 } from './execution-plan.js';
 import type { CustomCatalogProfile } from './profile-catalog.js';
+import { profileDefaultInlineAttemptDeadlineMs } from './profile-deadlines.js';
 import { deriveV1RequestDeadline } from './request-deadline-migration.js';
 import type {
   PreparationIssue,
@@ -75,6 +77,13 @@ export interface RequestCompilationInput {
   readonly structuralOnly?: boolean;
   /** Optional explicit total; otherwise the exact selected plan derives it. */
   readonly requestDeadlineMs?: number;
+  /**
+   * Let profiles with a known slower default (see profile-deadlines.ts) use
+   * it in place of the global inline deadline. Production transports set this
+   * only when no inline timeout was authored; it is ignored when the CLI
+   * passes an explicit timeout.
+   */
+  readonly applyProfileDeadlineDefaults?: boolean;
   readonly transport: RequestCompilationTransport;
   readonly preparation: PreparationDependencies;
 }
@@ -141,7 +150,7 @@ function resolveProviderTokens(
         code: 'request_provider_token_retired',
         phase: 'transport',
         path,
-        message: `Provider "${resolution.token}" was removed; use "${resolution.replacement}".`,
+        message: resolution.message,
       });
       continue;
     }
@@ -376,6 +385,17 @@ function normalizeTransport(
   }
 }
 
+function profileInlineDeadlineResolver(
+  input: RequestCompilationInput,
+): ((profile: ExecutionProfile) => number | undefined) | undefined {
+  const explicitCliTimeout =
+    input.transport.kind === 'cli' &&
+    input.transport.input.timeoutSeconds !== undefined;
+  return input.applyProfileDeadlineDefaults && !explicitCliTimeout
+    ? profileDefaultInlineAttemptDeadlineMs
+    : undefined;
+}
+
 /**
  * Compile a v1 configuration plus one transport-shaped input without touching
  * runtime execution, stores, bridges, files, imports, registries, credentials,
@@ -385,6 +405,7 @@ export function compileRequest(
   input: RequestCompilationInput,
 ): RequestCompilationResult {
   const rawGroup = input.transport.input.group?.trim();
+  const inlineAttemptDeadlineMs = profileInlineDeadlineResolver(input);
   const mapped = mapConfiguration(input.config, {
     authoredGroups: input.authoredGroups,
     ...(input.credentials && { credentials: input.credentials }),
@@ -563,6 +584,7 @@ export function compileRequest(
         poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
       },
       input.preparation,
+      { inlineAttemptDeadlineMs },
     );
     const notices = sortPreparationDiagnostics([
       ...mapperNotices,
@@ -593,6 +615,7 @@ export function compileRequest(
         unresolvedMode === 'mixed' ? 'mixed' : admitted.admission.request.mode,
     },
     admitted.admission,
+    inlineAttemptDeadlineMs,
   );
   if (!derived.ok) {
     return {
@@ -621,6 +644,7 @@ export function compileRequest(
       poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
     },
     input.preparation,
+    { inlineAttemptDeadlineMs },
   );
   const notices = sortPreparationDiagnostics([
     ...mapperNotices,

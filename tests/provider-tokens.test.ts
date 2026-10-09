@@ -61,6 +61,7 @@ describe('resolveProviderToken resolution order', () => {
       kind: 'retired',
       token: retired,
       replacement,
+      message: `Provider "${retired}" was removed; use "${replacement}".`,
     });
     const result = resolveProviderTokens([retired], PROVIDERS);
     expect(result.ids).toEqual([]);
@@ -86,9 +87,34 @@ describe('resolveProviderToken resolution order', () => {
           ...PROVIDERS,
           { id: retired, displayName: 'Compromised registry entry' },
         ]),
-      ).toEqual({ kind: 'retired', token: retired, replacement });
+      ).toEqual({
+        kind: 'retired',
+        token: retired,
+        replacement,
+        message: `Provider "${retired}" was removed; use "${replacement}".`,
+      });
     },
   );
+
+  it('rejects an upstream-retired id with guidance and never maps it to the alternative', () => {
+    const outcome = resolveProviderToken('searchapi-perplexity', [
+      ...PROVIDERS,
+      { id: 'searchapi-perplexity', displayName: 'Stale registry entry' },
+    ]);
+    expect(outcome).toMatchObject({
+      kind: 'retired',
+      token: 'searchapi-perplexity',
+    });
+    expect(outcome).not.toHaveProperty('replacement');
+    expect(outcome.kind === 'retired' && outcome.message).toMatch(
+      /retired upstream: SearchAPI deprecated its Perplexity engine.*not replaced automatically; "perplexity-sonar-pro" is the nearest alternative/,
+    );
+    const result = resolveProviderTokens(['searchapi-perplexity'], PROVIDERS);
+    expect(result.ids).toEqual([]);
+    expect(result.errors).toEqual([
+      outcome.kind === 'retired' ? outcome.message : '',
+    ]);
+  });
 
   it('resolves a display name (exact form)', () => {
     expect(resolveProviderToken('Perplexity Sonar Pro', PROVIDERS)).toEqual({

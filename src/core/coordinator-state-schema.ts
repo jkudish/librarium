@@ -55,6 +55,8 @@ const PreparedProfilePlanSchema = z.strictObject({
     .enum(['supported_exact_profile', 'reconcile_only'])
     .optional(),
   estimate: NetworkFreeEstimateSchema.optional(),
+  // Absent on historical records and for profiles using the global deadline.
+  inline_attempt_deadline_ms: z.number().int().safe().positive().optional(),
 });
 
 const CoordinatorSlotStatusSchema = z.enum([

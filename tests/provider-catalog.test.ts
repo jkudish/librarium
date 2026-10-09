@@ -131,7 +131,6 @@ const IMPLEMENTED_MATRIX = [
   ['valyu', 'search'],
   ['searchapi-chatgpt', 'surface'],
   ['searchapi-gemini', 'surface'],
-  ['searchapi-perplexity', 'surface'],
   ['searchapi-google-ai-mode', 'surface'],
   ['searchapi-bing-copilot', 'surface'],
   ['searchapi-google-ai-overview', 'surface'],
@@ -150,7 +149,6 @@ const PLANNED_PROVIDER_IDS = [
 const SURFACE_PROFILES = [
   'searchapi-chatgpt/surface',
   'searchapi-gemini/surface',
-  'searchapi-perplexity/surface',
   'searchapi-google-ai-mode/surface',
   'searchapi-bing-copilot/surface',
   'searchapi-google-ai-overview/surface',
@@ -934,7 +932,6 @@ describe('provider catalog -- built-in workflows', () => {
     expect(keysOf(catalog().workflow('visibility').members)).toEqual([
       'searchapi-chatgpt/surface',
       'searchapi-gemini/surface',
-      'searchapi-perplexity/surface',
       'searchapi-google-ai-mode/surface',
       'searchapi-bing-copilot/surface',
       'searchapi-google-ai-overview/surface',
@@ -1182,13 +1179,56 @@ describe('provider catalog -- target selection', () => {
       ['you-research', 'grounded'],
       ['you-answer', 'grounded'],
       ['searchapi-chatgpt', 'surface'],
-      ['you-research', 'research'],
     ] as const) {
       const primary = built.get(providerId, profileId)?.profile.identity.target
         .primary;
       expect(primary?.model_selection).toBe('provider_managed');
       expect(primary?.target_id).toBeUndefined();
     }
+  });
+
+  it('resolves You.com research to the priced research_effort preset', () => {
+    expect(
+      built.get('you-research', 'research')?.profile.identity.target.primary,
+    ).toEqual({
+      model_selection: 'configurable',
+      kind: 'preset',
+      target_id: 'standard',
+    });
+    for (const effort of [
+      'lite',
+      'standard',
+      'deep',
+      'exhaustive',
+      'frontier',
+    ] as const) {
+      const configured = buildProviderCatalog({
+        providerConfigs: enabledConfigs({
+          'you-research': { options: { researchEffort: effort } },
+        }),
+        credentials: allCredentials(),
+      }).get('you-research', 'research');
+      expect(configured?.profile.identity.target.primary).toEqual({
+        model_selection: 'configurable',
+        kind: 'preset',
+        target_id: effort,
+      });
+    }
+  });
+
+  it('rejects a top-level model for You.com research, which sends only an effort', () => {
+    const binding = BUILTIN_PROFILE_BINDING_SPECS.find(
+      (spec) =>
+        spec.provider_id === 'you-research' && spec.profile_id === 'research',
+    );
+    expect(binding?.adapter_id).toBe('you-research-background');
+    const configured = buildProviderCatalog({
+      providerConfigs: enabledConfigs({
+        'you-research': { model: 'deep' },
+      }),
+      credentials: allCredentials(),
+    }).get('you-research', 'research');
+    expect(configured?.availability.configuration_valid).toBe(false);
   });
 
   it('declares not-applicable targets for raw retrieval endpoints', () => {
@@ -1952,11 +1992,12 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(13);
+    expect(configurable).toHaveLength(14);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',
         'openrouter/grounded',
+        'you-research/research',
       ]),
     );
   });

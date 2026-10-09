@@ -73,7 +73,7 @@ verified claim.
 
 ## Catalog
 
-The v2 catalog has **34 built-in providers** and **41 implemented public
+The v2 catalog has **33 built-in providers** and **40 implemented public
 profiles**. Selection and provenance use `provider_id/profile_id`.
 
 | Provider family | Public profiles |
@@ -90,7 +90,7 @@ profiles**. Selection and provenance use `provider_id/profile_id`.
 | OpenRouter | `openrouter/grounded`, `openrouter/chat` |
 | Parallel | `parallel/search`, `parallel/turbo`, `parallel/research` |
 | Perplexity | `perplexity-search/search`, `perplexity-sonar-pro/grounded`, `perplexity-deep-research/research`, `perplexity-sonar-deep/research` |
-| SearchAPI | `searchapi/search`, `searchapi-chatgpt/surface`, `searchapi-gemini/surface`, `searchapi-perplexity/surface`, `searchapi-google-ai-mode/surface`, `searchapi-bing-copilot/surface`, `searchapi-google-ai-overview/surface` |
+| SearchAPI | `searchapi/search`, `searchapi-chatgpt/surface`, `searchapi-gemini/surface`, `searchapi-google-ai-mode/surface`, `searchapi-bing-copilot/surface`, `searchapi-google-ai-overview/surface` |
 | SerpAPI | `serpapi/search` |
 | SerpBase | `serpbase/search`, `serpbase/news` |
 | Tavily | `tavily/search` |
@@ -103,7 +103,7 @@ Built-in workflows:
 | --- | --- |
 | `quick` | Curated low-latency search and grounded answers |
 | `deep` | Derived from implemented research-report profiles |
-| `visibility` | Six collected consumer surfaces and three API baselines |
+| `visibility` | Five collected consumer surfaces and three API baselines |
 | `all` | Derived from every selectable profile allowed by workflow policy |
 
 Custom groups must be stored and selected as `custom:<name>`. `quick` includes
@@ -114,9 +114,9 @@ does not silently widen to all enabled providers.
 
 - Direct APIs are `api_output`. SearchAPI consumer profiles are
   `surface_snapshot` records collected by SearchAPI. They are
-  not official OpenAI, Google, Microsoft, or Perplexity APIs.
-- The six SearchAPI surfaces share one collector. Agreement is
-  correlated visibility evidence, not six independent confirmations.
+  not official OpenAI, Google, or Microsoft APIs.
+- The five SearchAPI surfaces share one collector. Agreement is
+  correlated visibility evidence, not five independent confirmations.
 - Citations are untrusted source references, not guarantees that a URL is safe,
   authoritative, reachable, or supportive of a nearby claim.
 - `background/durable` work keeps provider-scoped handles for later polling and

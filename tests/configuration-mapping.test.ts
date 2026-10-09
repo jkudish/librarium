@@ -430,6 +430,8 @@ describe('configuration mapping', () => {
       kind: 'retired',
       token: 'perplexity-sonar',
       replacement: 'perplexity-sonar-pro',
+      message:
+        'Provider "perplexity-sonar" was removed; use "perplexity-sonar-pro".',
     });
     expect(
       resolveConfigurationProfileToken('perplexity-sonar', [], {
@@ -458,6 +460,7 @@ describe('configuration mapping', () => {
       kind: 'retired',
       token,
       replacement,
+      message: `Provider "${token}" was removed; use "${replacement}".`,
     });
     expect(
       resolveConfigurationProfileToken(token, [], { migrateRetired: true }),

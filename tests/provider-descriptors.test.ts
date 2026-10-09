@@ -25,7 +25,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(39);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(38);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -104,7 +104,6 @@ describe('built-in provider descriptors', () => {
       'parallel-turbo',
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
@@ -124,7 +123,6 @@ describe('built-in provider descriptors', () => {
       expect.arrayContaining([
         'searchapi-chatgpt',
         'searchapi-gemini',
-        'searchapi-perplexity',
         'searchapi-google-ai-mode',
         'searchapi-bing-copilot',
         'searchapi-google-ai-overview',
@@ -230,7 +228,6 @@ describe('built-in provider descriptors', () => {
     for (const id of [
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
@@ -367,7 +364,6 @@ describe('built-in provider descriptors', () => {
     const ids = [
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',

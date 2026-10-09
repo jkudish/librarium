@@ -763,11 +763,9 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       setupUrl: 'https://console.x.ai',
       order: 156,
     },
-    metering: {
-      kind: 'native_tokens',
-      defaultPerRequestUsd: 0.015,
-      unit: 'request',
-    },
+    // X Search bills per post and profile fetched with no bounding control,
+    // so no per-request baseline exists; the provider reports actual cost.
+    metering: { kind: 'native_tokens', unit: 'request' },
     capabilities: inline(),
   }),
   define({
@@ -787,11 +785,9 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       setupUrl: 'https://console.x.ai',
       order: 157,
     },
-    metering: {
-      kind: 'native_tokens',
-      defaultPerRequestUsd: 0.025,
-      unit: 'request',
-    },
+    // X Search bills per post and profile fetched with no bounding control,
+    // so no per-request baseline exists; the provider reports actual cost.
+    metering: { kind: 'native_tokens', unit: 'request' },
     capabilities: inline('always'),
   }),
   define({
@@ -1040,29 +1036,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       bestFor: 'Comparing the cited answer visible on the Gemini surface.',
       setupUrl: 'https://www.searchapi.io/',
       order: 202,
-    },
-    metering: {
-      kind: 'request_priced',
-      defaultPerRequestUsd: 0.004,
-      defaultUnitsPerRequest: 1,
-      unit: 'request',
-    },
-    capabilities: inline('always'),
-  }),
-  define({
-    id: 'searchapi-perplexity',
-    registrationOrder: 27,
-    tier: 'ai-grounded',
-    envVar: 'SEARCHAPI_API_KEY',
-    autoEnable: false,
-    optionsSchema: searchApiOptionsSchema,
-    display: {
-      family: 'SearchAPI',
-      name: 'SearchAPI Perplexity',
-      description: 'SearchAPI-observed Perplexity consumer answer.',
-      bestFor: 'Comparing the cited answer visible on the Perplexity surface.',
-      setupUrl: 'https://www.searchapi.io/',
-      order: 203,
     },
     metering: {
       kind: 'request_priced',
