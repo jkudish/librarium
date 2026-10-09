@@ -190,6 +190,35 @@ const fullUsage = {
 const valid = {
   'markdown-success': success,
   'php-text-success': phpSuccess,
+  'php-audit-usage-specialized-corpus': {
+    ...phpSuccess,
+    results: [
+      {
+        ...phpSuccess.results[0],
+        id: 'result-php-audit-usage',
+        provider: 'valyu',
+        profile: 'valyu-search',
+        provenance: {
+          ...provenance,
+          result_kind: 'search_results',
+          retrieval_methods: ['search_endpoint'],
+          corpora: ['web', 'specialized'],
+        },
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 25,
+          server_tool_search_requests: 2,
+          tool_use_tokens: 50,
+        },
+      },
+    ],
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 25,
+      server_tool_search_requests: 2,
+      tool_use_tokens: 50,
+    },
+  },
   'json-object-success': {
     ...success,
     results: [
@@ -278,7 +307,7 @@ const valid = {
             'research_agent',
             'model_only',
           ],
-          corpora: ['web', 'news', 'x', 'files', 'places'],
+          corpora: ['web', 'news', 'x', 'files', 'places', 'specialized'],
         },
         citations: [
           {
@@ -613,6 +642,10 @@ const invalid = {
   },
   'usage-rich': { ...success, usage: { ...fullUsage, total_tokens: 30 } },
   'usage-negative': { ...success, usage: { prompt_tokens: -1 } },
+  'usage-negative-tool-use-tokens': {
+    ...success,
+    usage: { tool_use_tokens: -1 },
+  },
   'usage-malformed-decimal': {
     ...success,
     usage: { actual_cost: '1.2.3', currency: 'USD' },

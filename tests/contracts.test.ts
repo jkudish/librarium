@@ -82,6 +82,22 @@ describe('terminal interchange schemas', () => {
     expect(
       UsageSchema.safeParse({ actual_cost: '0.1', currency: 'USD' }).success,
     ).toBe(true);
+    for (const field of [
+      'server_tool_search_requests',
+      'tool_use_tokens',
+    ] as const) {
+      expect(UsageSchema.safeParse({ [field]: 0 }).success, field).toBe(true);
+      expect(
+        UsageSchema.safeParse({ [field]: Number.MAX_SAFE_INTEGER }).success,
+        field,
+      ).toBe(true);
+      // PHP omits unknown usage values rather than emitting null.
+      for (const value of [null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+        expect(UsageSchema.safeParse({ [field]: value }).success, field).toBe(
+          false,
+        );
+      }
+    }
     const providerMeta = read<Record<string, any>>(
       'fixtures/valid/provider-meta-namespaces.json',
     ).results[0].provider_meta;
@@ -218,6 +234,7 @@ describe('terminal interchange schemas', () => {
       'x',
       'files',
       'places',
+      'specialized',
     ]);
     expect(provenance[4]).toMatchObject({
       result_kind: 'surface_observation',
