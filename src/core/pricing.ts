@@ -1244,7 +1244,7 @@ export function usdDecimalToMicrousd(
 export function budgetEstimateFromQuote(quote: PricingQuote):
   | {
       readonly estimated_cost_microusd: string;
-      readonly billable_units: readonly { unit: string; quantity: string }[];
+      readonly billable_units?: readonly { unit: string; quantity: string }[];
     }
   | undefined {
   if (
@@ -1257,21 +1257,19 @@ export function budgetEstimateFromQuote(quote: PricingQuote):
   const definitionQuantities = Object.entries(quote.billable_quantities)
     .filter((entry): entry is [string, string] => entry[1] !== undefined)
     .map(([unit, quantity]) => ({ unit, quantity }));
-  // The accepted terminal contract permits snake-case units only. Keep
-  // namespaced provider units private and fail closed instead of widening the
-  // shared TypeScript/PHP interchange contract for pricing.
-  if (
-    definitionQuantities.some(
-      ({ unit }) => !/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(unit),
-    )
-  ) {
-    return undefined;
-  }
+  // The accepted terminal contract permits snake-case units only. Namespaced
+  // provider units stay private rather than widening the shared TypeScript/PHP
+  // interchange contract. The complete quote still bounds the exact cost, so
+  // the bound is kept and only the unit breakdown is withheld. A partial list
+  // would misdescribe what the bound covers.
+  const contractUnits = definitionQuantities.every(({ unit }) =>
+    /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(unit),
+  );
   return ownFrozen({
     estimated_cost_microusd: usdDecimalToMicrousd(
       quote.known_maximum_decimal,
       'ceil',
     ),
-    billable_units: definitionQuantities,
+    ...(contractUnits && { billable_units: definitionQuantities }),
   });
 }

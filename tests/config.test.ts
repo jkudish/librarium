@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_GROUPS } from '../src/constants.js';
 import {
+  authoredGlobalGroups,
+  configGroupProvenance,
   hasApiKey,
   loadConfig,
   mergeConfigs,
@@ -111,6 +113,41 @@ describe('loadConfig', () => {
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('does not treat a stored copy of a shipped built-in roster as authored', () => {
+    const configPath = join(tmpDir, 'config.json');
+    const edited = [...(DEFAULT_GROUPS.quick ?? []), 'tavily'];
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        defaults: {
+          outputDir: './agents/librarium',
+          maxParallel: 6,
+          timeout: 30,
+          asyncTimeout: 1800,
+          asyncPollInterval: 30,
+          mode: 'sync',
+        },
+        providers: {},
+        // An earlier `init` wrote every injected default roster to disk.
+        groups: { ...DEFAULT_GROUPS, quick: edited, mine: ['exa'] },
+      }),
+    );
+    const config = loadConfig(configPath);
+    const authored = configGroupProvenance(config).global;
+    // Exact shipped copies under built-in workflow names stay built-in.
+    expect(authored.visibility).toBeUndefined();
+    expect(authored.deep).toBeUndefined();
+    expect(authored.all).toBeUndefined();
+    // Any edit, and every non-workflow name, remains the user's group.
+    expect(authored.quick).toEqual(edited);
+    expect(authored.mine).toEqual(['exa']);
+    expect(authored.raw).toEqual(DEFAULT_GROUPS.raw);
+    // v1 behaviour still sees the full injected set.
+    expect(config.groups.visibility).toEqual(DEFAULT_GROUPS.visibility);
+    expect(authoredGlobalGroups(config)).toEqual(authored);
   });
 
   it('returns defaults when file does not exist', () => {
