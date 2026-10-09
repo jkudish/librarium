@@ -56,6 +56,7 @@ import {
   type ResearchResponseProjectionOptions,
 } from './core/research-response-projector.js';
 import {
+  PaidRunLedgerError,
   readPaidRunLedger,
   withPaidRunLedgerLock,
   writePaidRunLedger,
@@ -65,8 +66,13 @@ import {
   resolveContainedPathWithFs,
   resolveRunDirectoryWithFs,
 } from './node-run-artifact-codecs.js';
-import { RUN_JSON_FILE, withRunJsonLock } from './node-run-json-lock.js';
 import {
+  RUN_JSON_FILE,
+  RunJsonLockError,
+  withRunJsonLock,
+} from './node-run-json-lock.js';
+import {
+  canonicalRequestFingerprint,
   fingerprint,
   PaidRunAdmissionError,
   RunPaidWallet,
@@ -577,13 +583,44 @@ export type CanonicalRunManifestV3 = z.infer<
 >;
 
 export class CanonicalRunManifestError extends Error {
+  /** Fixed diagnostic without the local path. */
+  readonly detail: string;
+
   constructor(
     message: string,
     readonly path: string,
   ) {
     super(`${message}: ${path}`);
     this.name = 'CanonicalRunManifestError';
+    this.detail = message;
   }
+}
+
+/** Fixed, actionable resume refusal that is safe to show to the caller. */
+export class CanonicalRunReconciliationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CanonicalRunReconciliationError';
+  }
+}
+
+const UNEXPECTED_RECONCILIATION_FAILURE =
+  'Reconciliation stopped on an unexpected local error. Inspect run.json and paid-attempt-ledger.json in the run directory.';
+
+/**
+ * Public reconciliation diagnostic. Only fixed messages from Librarium's own
+ * typed errors pass through; provider, filesystem, and parser text never does.
+ */
+export function describeCanonicalReconciliationFailure(error: unknown): string {
+  if (error instanceof CanonicalRunManifestError) return error.detail;
+  if (
+    error instanceof CanonicalRunReconciliationError ||
+    error instanceof PaidRunLedgerError ||
+    error instanceof RunJsonLockError
+  ) {
+    return error.message;
+  }
+  return UNEXPECTED_RECONCILIATION_FAILURE;
 }
 
 export interface RunJsonCoordinationStateStoreOptions {
@@ -1738,20 +1775,24 @@ function restoreCanonicalPaidWallet(
     dependencies.runs_root,
     dependencies.run_directory,
   );
-  if (
-    persistedLedger &&
-    (persistedLedger.request_id !== manifest.request.request_id ||
-      persistedLedger.request_fingerprint !== fingerprint(manifest.request) ||
-      persistedLedger.created_at !== manifest.request.requested_at ||
-      persistedLedger.deadline_at !==
-        new Date(
-          Date.parse(manifest.request.requested_at) +
-            prepared.policy.limits.request_deadline_ms,
-        ).toISOString())
-  ) {
-    throw new Error(
-      'The paid-attempt ledger does not match the canonical run.',
-    );
+  if (persistedLedger) {
+    const expected = {
+      request_id: manifest.request.request_id,
+      request_fingerprint: canonicalRequestFingerprint(manifest.request),
+      created_at: manifest.request.requested_at,
+      deadline_at: new Date(
+        Date.parse(manifest.request.requested_at) +
+          prepared.policy.limits.request_deadline_ms,
+      ).toISOString(),
+    };
+    const mismatched = (
+      Object.keys(expected) as (keyof typeof expected)[]
+    ).filter((field) => persistedLedger[field] !== expected[field]);
+    if (mismatched.length > 0) {
+      throw new CanonicalRunReconciliationError(
+        `The paid-attempt ledger does not match the canonical run (${mismatched.join(', ')} ${mismatched.length === 1 ? 'differs' : 'differ'}). Resume was refused so recorded spending stays bound to this request; accepted provider task IDs remain in run.json.`,
+      );
+    }
   }
   return (
     dependencies.paid_wallet ??

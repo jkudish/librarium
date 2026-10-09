@@ -129,13 +129,25 @@ export function withPaidRunLedgerLock<T>(
   return withRunJsonLock(paidLedgerPath(runsRoot, runDirectory), action);
 }
 
+/**
+ * Fixed, path-free ledger diagnostics that may cross a public boundary. Parse
+ * failures never carry file contents, which can include provider usage.
+ */
+export class PaidRunLedgerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PaidRunLedgerError';
+  }
+}
+
 export function readPaidRunLedger(
   runsRoot: string,
   runDirectory: string,
 ): PaidRunLedger | undefined {
   const path = paidLedgerPath(runsRoot, runDirectory);
+  let raw: string;
   try {
-    return PaidRunLedgerSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    raw = readFileSync(path, 'utf8');
   } catch (error) {
     if (
       error instanceof Error &&
@@ -143,11 +155,20 @@ export function readPaidRunLedger(
       (error as NodeJS.ErrnoException).code === 'ENOENT'
     ) {
       if (existsSync(paidLedgerRequiredPath(runsRoot, runDirectory))) {
-        throw new Error('The required paid-attempt ledger is missing.');
+        throw new PaidRunLedgerError(
+          'The required paid-attempt ledger is missing.',
+        );
       }
       return undefined;
     }
     throw error;
+  }
+  try {
+    return PaidRunLedgerSchema.parse(JSON.parse(raw));
+  } catch {
+    throw new PaidRunLedgerError(
+      `The paid-attempt ledger (${PAID_ATTEMPT_LEDGER_FILE}) is malformed or was written by an incompatible Librarium version.`,
+    );
   }
 }
 

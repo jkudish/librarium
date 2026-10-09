@@ -35,7 +35,11 @@ import {
   emitRequestPreflightNotices,
 } from '../node-request-preflight.js';
 import { createRunDir } from '../node-run-directory.js';
-import { fingerprint, RunPaidWallet } from '../run-paid-wallet.js';
+import {
+  canonicalRequestFingerprint,
+  fingerprint,
+  RunPaidWallet,
+} from '../run-paid-wallet.js';
 import type {
   Config,
   DeduplicatedSource,
@@ -297,8 +301,8 @@ export async function executeRun(
     const createdAt = preflight.prepared.request.requested_at;
     const wallet = new RunPaidWallet({
       request_id: preflight.prepared.request.request_id,
-      request_fingerprint: fingerprint(
-        JSON.parse(JSON.stringify(preflight.prepared.request)),
+      request_fingerprint: canonicalRequestFingerprint(
+        preflight.prepared.request,
       ),
       config_fingerprint: fingerprint({
         defaults: config.defaults,
@@ -584,6 +588,7 @@ export async function executeRun(
       uniqueSources: presentation.sources.length,
       totalCitations: presentation.totalCitations,
       outputDir,
+      ...(opts.output !== undefined && { outputBase: baseDir }),
       color,
       totalDurationMs: presentation.totalDurationMs,
     })) {

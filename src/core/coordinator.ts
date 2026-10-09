@@ -125,7 +125,39 @@ export interface UnresolvedAcceptance {
     | 'cancelled_while_acceptance_unknown'
     | 'infrastructure_failure_while_acceptance_unknown';
   adapter_state_ref?: string;
+  /**
+   * Bounded transport facts from the uncertain submission. Never a provider
+   * or transport message, which may echo request content or credentials.
+   */
+  diagnostic?: UnresolvedAcceptanceDiagnostic;
 }
+
+export interface UnresolvedAcceptanceDiagnostic {
+  kind:
+    | 'authentication'
+    | 'plan_required'
+    | 'billing'
+    | 'rate_limit'
+    | 'invalid_request'
+    | 'network'
+    | 'timeout'
+    | 'provider';
+  http_status?: number;
+}
+
+export const UnresolvedAcceptanceDiagnosticSchema = z.strictObject({
+  kind: z.enum([
+    'authentication',
+    'plan_required',
+    'billing',
+    'rate_limit',
+    'invalid_request',
+    'network',
+    'timeout',
+    'provider',
+  ]),
+  http_status: z.number().int().min(100).max(599).optional(),
+});
 
 const UnresolvedAcceptanceReasonSchema = z.enum([
   'submission_response_uncertain',
@@ -478,16 +510,20 @@ function rememberUnresolvedAcceptance(
   attempt: CoordinatorAttemptState,
   observedAt: string,
   reason: UnresolvedAcceptance['reason'],
+  diagnosticInput?: UnresolvedAcceptanceDiagnostic,
 ): void {
   const existing = state.unresolved_acceptances.find(
     (entry) => entry.attempt_id === attempt.attempt_id,
   );
+  // A later reason (deadline, cancellation) keeps the submission's cause.
+  const diagnostic = diagnosticInput ?? existing?.diagnostic;
   const marker: UnresolvedAcceptance = {
     attempt_id: attempt.attempt_id,
     profile_key: profileIdentityKey(attempt.profile.identity),
     observed_at: observedAt,
     reason,
     adapter_state_ref: attempt.adapter_state_ref,
+    ...(diagnostic && { diagnostic }),
   };
   if (existing) Object.assign(existing, marker);
   else state.unresolved_acceptances.push(marker);
@@ -1091,6 +1127,7 @@ function markAcceptanceUnknownUnchecked(
   dependencies: CoordinatorDependencies,
   adapterStateRefInput?: unknown,
   reasonInput: unknown = 'submission_response_uncertain',
+  diagnosticInput?: unknown,
 ): CoordinatorState {
   const next = cloneState(state);
   const attempt = attemptFor(next, attemptId);
@@ -1099,6 +1136,10 @@ function markAcceptanceUnknownUnchecked(
       ? undefined
       : OpaqueIdSchema.parse(adapterStateRefInput);
   const reason = UnresolvedAcceptanceReasonSchema.parse(reasonInput);
+  const diagnostic =
+    diagnosticInput === undefined
+      ? undefined
+      : UnresolvedAcceptanceDiagnosticSchema.parse(diagnosticInput);
   if (!canHaveRemoteAcceptanceUncertainty(attempt.profile)) {
     throw new Error(
       'Only durable background profiles can have unknown acceptance.',
@@ -1115,6 +1156,7 @@ function markAcceptanceUnknownUnchecked(
     attempt,
     iso(dependencies.clock.now()),
     reason,
+    diagnostic,
   );
   return next;
 }
@@ -1125,6 +1167,7 @@ export function recordAcceptanceUnknown(
   dependencies: CoordinatorDependencies,
   adapterStateRefInput?: unknown,
   reasonInput: unknown = 'submission_response_uncertain',
+  diagnosticInput?: unknown,
 ): CoordinatorState {
   const priorAttempt = attemptFor(state, attemptId);
   if (!canHaveRemoteAcceptanceUncertainty(priorAttempt.profile)) {
@@ -1149,6 +1192,7 @@ export function recordAcceptanceUnknown(
     dependencies,
     adapterStateRefInput,
     reasonInput,
+    diagnosticInput,
   );
 }
 

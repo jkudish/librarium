@@ -1486,6 +1486,52 @@ describe('durable handles and terminal mapping', () => {
     expect(advanceCoordination(state, deps).launches).toHaveLength(1);
   });
 
+  it('keeps the bounded submission diagnostic when a later reason replaces it', () => {
+    const deps = dependencies();
+    const prepared = preparedExecution({
+      primaries: [durableProfile('uncertain')],
+    });
+    let state = createCoordinatorState(prepared, deps);
+    const started = advanceCoordination(state, deps);
+    const launch = started.launches[0]!;
+    state = recordLaunchDispatched(
+      started.state,
+      launch.attempt_id,
+      launch.delivery_lease_id,
+      deps,
+    );
+    state = recordAcceptanceUnknown(
+      state,
+      launch.attempt_id,
+      deps,
+      undefined,
+      'submission_response_uncertain',
+      { kind: 'provider', http_status: 502 },
+    );
+    expect(state.unresolved_acceptances[0]?.diagnostic).toEqual({
+      kind: 'provider',
+      http_status: 502,
+    });
+    expect(() =>
+      CoordinatorStateSchema.parse(structuredClone(state)),
+    ).not.toThrow();
+    const cancelled = cancelCoordination(state, deps);
+    expect(cancelled.unresolved_acceptances[0]).toMatchObject({
+      reason: 'cancelled_while_acceptance_unknown',
+      diagnostic: { kind: 'provider', http_status: 502 },
+    });
+    expect(() =>
+      recordAcceptanceUnknown(
+        state,
+        launch.attempt_id,
+        deps,
+        undefined,
+        'submission_response_uncertain',
+        { kind: 'provider', message: 'raw provider text' },
+      ),
+    ).toThrow();
+  });
+
   it('applies the canonical 100k character bound to refined slot queries', () => {
     const deps = dependencies();
     const state = createCoordinatorState(
