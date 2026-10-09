@@ -1007,7 +1007,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       family: 'SearchAPI',
       name: 'SearchAPI Google AI Overview',
       description:
-        'Dedicated two-stage SearchAPI-observed Google AI Overview answer.',
+        'SearchAPI-observed Google AI Overview answer, read inline first; a page-token request follows only when needed.',
       best_for: 'Comparing the dedicated Google AI Overview and its citations.',
       setup_url: SEARCHAPI_SETUP_URL,
     },

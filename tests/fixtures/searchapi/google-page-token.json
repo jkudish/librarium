@@ -1,0 +1,11 @@
+{
+  "search_metadata": { "id": "search_synthetic_token", "status": "Success" },
+  "search_parameters": {
+    "engine": "google",
+    "q": "best synthetic photo tools"
+  },
+  "ai_overview": {
+    "error": "An AI Overview is not available for this search",
+    "page_token": "synthetic-page-token"
+  }
+}

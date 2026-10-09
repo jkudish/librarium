@@ -1129,7 +1129,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       family: 'SearchAPI',
       name: 'SearchAPI Google AI Overview',
       description:
-        'Dedicated two-stage SearchAPI-observed Google AI Overview answer.',
+        'SearchAPI-observed Google AI Overview answer, read inline first; a page-token request follows only when needed.',
       bestFor: 'Comparing the dedicated Google AI Overview and its citations.',
       setupUrl: 'https://www.searchapi.io/',
       order: 206,
