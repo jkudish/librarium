@@ -315,9 +315,12 @@ describe('private request compiler in workerd', () => {
       config: {
         ...config,
         defaults: { ...config.defaults, maxEstimatedCostUsd: 1 },
+        providers: { ...config.providers, claude: { enabled: true } },
       } satisfies Config,
-      credentials: { env: { EXA_API_KEY: 'worker-test-key' } },
-      providers: ['exa'],
+      credentials: { env: { ANTHROPIC_API_KEY: 'worker-test-key' } },
+      // Token-priced Claude has no bounded network-free estimate; Exa Search
+      // now has an exact one, so it no longer exercises this rejection.
+      providers: ['claude'],
       requestDeadlineMs: undefined,
       code: 'budget_estimate_required',
     },

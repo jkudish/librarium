@@ -16,6 +16,11 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
   incompatible HTTP-success payloads, including after accepting both documented
   content shapes. Parallel Search, Turbo, and Research remain supported through
   their separate Search and Task APIs; this is not a live-validation claim.
+- Retired `searchapi-perplexity/surface` because SearchAPI deprecated its
+  Perplexity engine (HTTP 503, no replacement). Selecting it fails with
+  guidance; `perplexity-sonar-pro` is the nearest alternative but is a direct
+  API answer, not a surface observation. The `visibility` workflow now has
+  eight members.
 
 ### Breaking changes
 
@@ -70,6 +75,26 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
 
 ### Fixed
 
+- Async runs resume again: the paid-attempt ledger fingerprint now follows JSON
+  semantics, so `status --retrieve` no longer fails with
+  `artifact.reconciliation_failed`. `status` explains reconciliation failures,
+  accepts `-o/--output`, and counts canonical tasks. Submissions with an
+  unknown outcome report their HTTP or transport cause instead of "unknown
+  error".
+- `--max-cost` names every profile without a bounded network-free price and
+  says how to proceed. `options.perRequestUsd`/`creditUsd` bound account-priced
+  profiles such as the SearchAPI surfaces, and `answer --max-cost` stops before
+  spending when its synthesis model has no bounded price. Workflows never
+  shrink silently: skipped members are listed with the command that enables
+  them, and `init` no longer saves built-in rosters into config.
+- Grok profiles default to a 120-second inline deadline (authored timeouts
+  still win), so normal reasoning-plus-search latency no longer times out.
+- SearchAPI requests no longer retry 5xx responses, and failures keep their
+  HTTP status as the canonical `provider_code`.
+- Price You.com research per `research_effort` tier (lite through frontier)
+  instead of the standard rate for every tier. Grok X-only and combined quotes
+  are unavailable, because X Search bills per fetched item without a bounding
+  control; a hard budget now fails closed for them.
 - Keep Gemini Deep Research's reversible preview `failed` and `incomplete`
   observations provisional until completion or the frozen request deadline,
   while preserving terminal cancellation and budget-exhaustion states.
@@ -90,7 +115,9 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
 
 ### Added
 
-- A typed public catalog with 34 built-in providers and 41 retained public
+- `librarium init --enable <ids>` enables opt-in providers, such as the
+  SearchAPI consumer surfaces, without editing config.
+- A typed public catalog with 33 built-in providers and 40 retained public
   profiles. Descriptors are the source of truth for profile identity,
   selection, credentials, models, options, metering, execution capabilities,
   and provenance.
@@ -164,13 +191,19 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
 - Claude defaults to `claude-sonnet-5` with a 16,000-token output limit,
   adaptive thinking, and medium effort. Gemini Chat defaults to
   `gemini-3.6-flash`.
+- The terminal contract accepts PHP's optional `usage.server_tool_search_requests`
+  and `usage.tool_use_tokens` audit counts and the `specialized` corpus; Valyu
+  results now report `specialized` instead of omitting it.
 - SearchAPI authentication now uses an `Authorization: Bearer` header rather
   than URL credentials. The optional `zeroRetention` setting sends
   `zero_retention=true` and fails closed if the account rejects it.
 - SearchAPI Google now normalizes AI Overview, top stories, discussions,
   inline videos, and Knowledge Graph evidence from one request. The dedicated
-  Google AI Overview profile owns the separate page-token retrieval and
-  reserves two logical request units.
+  Google AI Overview profile reads an overview returned inline by the first
+  request and follows its page token only when none is inline (one request
+  instead of two when inline), reserving up to two logical request units.
+  Overview citations resolve Google redirect links to publisher URLs, and a
+  missing or unreadable overview fails with distinct errors.
 - CLI and MCP research use the same Node run service, lifecycle events,
   provider catalog, reconciliation path, artifact store, and report
   presentation. Machine-readable CLI output stays on stdout while progress and

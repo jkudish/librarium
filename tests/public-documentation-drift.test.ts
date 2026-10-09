@@ -148,9 +148,9 @@ describe('public v2 documentation drift', () => {
     expect(CHANGELOG).toContain('## [2.0.0] - Unreleased');
     expect(CHANGELOG).not.toMatch(/## \[2\.0\.0\] - \d{4}-\d{2}-\d{2}/);
     expect(CHANGELOG).toContain(
-      'A typed public catalog with 34 built-in providers and 41 retained public',
+      'A typed public catalog with 33 built-in providers and 40 retained public',
     );
-    expect(CHANGELOG).not.toContain('40 retained public');
+    expect(CHANGELOG).not.toContain('41 retained public');
   });
 
   it('documents the source-derived MCP tool roster', () => {
