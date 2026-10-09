@@ -396,8 +396,6 @@ const SUPPORTED_CORPORA = new Set([
   'x',
   'files',
   'places',
-  // Specialized is internal-only: project it by omitting it from the older
-  // terminal provenance vocabulary.
   'specialized',
 ]);
 
@@ -450,10 +448,7 @@ function terminalProvenance(
     retrieval_methods: [
       profile.retrieval_method as ResearchResult['provenance']['retrieval_methods'][number],
     ],
-    corpora: profile.corpora.filter(
-      (corpus): corpus is ResearchResult['provenance']['corpora'][number] =>
-        corpus !== 'specialized',
-    ),
+    corpora: [...profile.corpora],
     ...(profile.result_kind === 'surface_observation' && {
       observation_mode: profile.observation_mode,
     }),

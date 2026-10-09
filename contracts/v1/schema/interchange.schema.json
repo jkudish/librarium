@@ -102,7 +102,8 @@
                             "news",
                             "x",
                             "files",
-                            "places"
+                            "places",
+                            "specialized"
                           ]
                         }
                       },
@@ -306,6 +307,16 @@
                         "maximum": 9007199254740991
                       },
                       "reasoning_tokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "server_tool_search_requests": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "tool_use_tokens": {
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
@@ -412,7 +423,8 @@
                             "news",
                             "x",
                             "files",
-                            "places"
+                            "places",
+                            "specialized"
                           ]
                         }
                       },
@@ -616,6 +628,16 @@
                         "maximum": 9007199254740991
                       },
                       "reasoning_tokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "server_tool_search_requests": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "tool_use_tokens": {
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
@@ -722,7 +744,8 @@
                             "news",
                             "x",
                             "files",
-                            "places"
+                            "places",
+                            "specialized"
                           ]
                         }
                       },
@@ -926,6 +949,16 @@
                         "maximum": 9007199254740991
                       },
                       "reasoning_tokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "server_tool_search_requests": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "tool_use_tokens": {
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
@@ -1047,6 +1080,16 @@
               "maximum": 9007199254740991
             },
             "reasoning_tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "server_tool_search_requests": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool_use_tokens": {
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
@@ -1231,7 +1274,8 @@
                       "news",
                       "x",
                       "files",
-                      "places"
+                      "places",
+                      "specialized"
                     ]
                   }
                 },
@@ -1435,6 +1479,16 @@
                   "maximum": 9007199254740991
                 },
                 "reasoning_tokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "server_tool_search_requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "tool_use_tokens": {
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
@@ -1541,7 +1595,8 @@
                       "news",
                       "x",
                       "files",
-                      "places"
+                      "places",
+                      "specialized"
                     ]
                   }
                 },
@@ -1745,6 +1800,16 @@
                   "maximum": 9007199254740991
                 },
                 "reasoning_tokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "server_tool_search_requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "tool_use_tokens": {
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
@@ -1851,7 +1916,8 @@
                       "news",
                       "x",
                       "files",
-                      "places"
+                      "places",
+                      "specialized"
                     ]
                   }
                 },
@@ -2055,6 +2121,16 @@
                   "maximum": 9007199254740991
                 },
                 "reasoning_tokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "server_tool_search_requests": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "tool_use_tokens": {
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
@@ -2388,7 +2464,8 @@
               "news",
               "x",
               "files",
-              "places"
+              "places",
+              "specialized"
             ]
           }
         },
@@ -2486,6 +2563,16 @@
           "maximum": 9007199254740991
         },
         "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "server_tool_search_requests": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "tool_use_tokens": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991

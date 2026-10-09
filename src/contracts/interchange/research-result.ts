@@ -65,6 +65,13 @@ export const UsageSchema = z
     cache_write_input_tokens: z.number().int().safe().nonnegative().optional(),
     cache_read_input_tokens: z.number().int().safe().nonnegative().optional(),
     reasoning_tokens: z.number().int().safe().nonnegative().optional(),
+    server_tool_search_requests: z
+      .number()
+      .int()
+      .safe()
+      .nonnegative()
+      .optional(),
+    tool_use_tokens: z.number().int().safe().nonnegative().optional(),
     actual_cost: DecimalSchema.optional(),
     estimated_cost: DecimalSchema.optional(),
     currency: OpenStringSchema.optional(),
@@ -171,7 +178,9 @@ export const ResultProvenanceSchema = z
         'surface_collector',
       ]),
     ),
-    corpora: z.array(z.enum(['web', 'news', 'x', 'files', 'places'])),
+    corpora: z.array(
+      z.enum(['web', 'news', 'x', 'files', 'places', 'specialized']),
+    ),
     observation_mode: z.enum(['api_output', 'surface_snapshot']).optional(),
     observed_at: Rfc3339UtcSchema,
     collector: OpenStringSchema.optional(),

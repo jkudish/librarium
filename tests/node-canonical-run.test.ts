@@ -1897,7 +1897,7 @@ describe('canonical v3 run.json', () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it('projects specialized Valyu provenance without widening public corpora', async () => {
+  it('projects specialized Valyu provenance into public corpora', async () => {
     const { root, runDirectory } = directories();
     const selected: ExecutionProfile = {
       ...profile('valyu'),
@@ -1938,7 +1938,7 @@ describe('canonical v3 run.json', () => {
       attempt_bridge: exactBindings([selected], { 'adapter-valyu': provider }),
     });
     expect(result.response?.results[0]).toMatchObject({
-      provenance: { corpora: [] },
+      provenance: { corpora: ['specialized'] },
       usage: { actual_cost: '0.004', currency: 'USD' },
       citations: [
         {
@@ -1953,7 +1953,9 @@ describe('canonical v3 run.json', () => {
         'valyu:dataset': 'valyu/medical',
       },
     });
-    expect(result.response?.results[0]?.provenance.corpora).toEqual([]);
+    expect(result.response?.results[0]?.provenance.corpora).toEqual([
+      'specialized',
+    ]);
   });
 
   it('truthfully projects every SearchAPI surface profile to terminal provenance', async () => {
@@ -2005,7 +2007,7 @@ describe('canonical v3 run.json', () => {
     }
   });
 
-  it('projects specialized-only Valyu research without widening public corpora', async () => {
+  it('projects specialized-only Valyu research into public corpora', async () => {
     const { root, runDirectory } = directories();
     const selected: ExecutionProfile = {
       ...profile('valyu', 'background'),
@@ -2055,7 +2057,7 @@ describe('canonical v3 run.json', () => {
       },
     );
     expect(result.response?.results[0]).toMatchObject({
-      provenance: { result_kind: 'research_report', corpora: [] },
+      provenance: { result_kind: 'research_report', corpora: ['specialized'] },
       provider_meta: { 'valyu:mode': 'heavy' },
     });
   });
