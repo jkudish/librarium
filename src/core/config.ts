@@ -9,6 +9,7 @@ import {
 } from '../constants.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
 import { ConfigSchema, ProjectConfigSchema } from '../types.js';
+import { RESERVED_WORKFLOW_IDS } from './builtin-workflows.js';
 import { validateConfigV2 } from './config-v2.js';
 import type { EnvRecord } from './credentials.js';
 import { hasCredential, resolveCredential } from './credentials.js';
@@ -63,6 +64,32 @@ function setConfigGroupProvenance(
 export function configGroupProvenance(config: Config): ConfigGroupProvenance {
   const known = groupProvenanceByConfig.get(config);
   return known ?? { global: config.groups, project: {} };
+}
+
+/**
+ * The global groups a writer may persist: exactly what the user authored.
+ * Built-in rosters injected by `loadConfig` are never written back.
+ */
+export function authoredGlobalGroups(config: Config): Record<string, string[]> {
+  return cloneGroups(configGroupProvenance(config).global);
+}
+
+/**
+ * Earlier `init` runs wrote every injected default roster to disk. A stored
+ * group named after a built-in workflow whose members exactly match the
+ * shipped default is that copy, not a user's choice, so it must not shadow the
+ * built-in workflow as a custom group. Any edit keeps it authored.
+ */
+function isStoredBuiltinRosterCopy(
+  name: string,
+  members: readonly string[],
+): boolean {
+  const shipped = DEFAULT_GROUPS[name];
+  return (
+    RESERVED_WORKFLOW_IDS.has(name) &&
+    shipped !== undefined &&
+    orderedExactMatch(members, shipped)
+  );
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -268,7 +295,13 @@ export function loadConfig(globalPath?: string): Config {
   // Keep the authored spelling for the pure v2 mapper. v1 still mutates
   // config.groups below, but doing that here would erase alias provenance
   // before the mapper can issue its structured migration diagnostic.
-  const explicitGlobalGroups = cloneGroups(config.groups);
+  const explicitGlobalGroups = cloneGroups(
+    Object.fromEntries(
+      Object.entries(config.groups).filter(
+        ([name, members]) => !isStoredBuiltinRosterCopy(name, members),
+      ),
+    ),
+  );
   const storedDefaultGroupRosters = captureStoredDefaultGroupRosters(
     config.groups,
   );

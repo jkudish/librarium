@@ -6,6 +6,7 @@ import {
   RESERVED_WORKFLOW_IDS,
 } from '../core/builtin-workflows.js';
 import {
+  authoredGlobalGroups,
   configGroupProvenance,
   loadConfig,
   saveConfig,
@@ -21,6 +22,28 @@ interface GroupsCommandDependencies {
 export interface ProviderGroupListing {
   readonly name: string;
   readonly members: readonly string[];
+  /** Members a run would skip, with why and how to restore them. */
+  readonly skipped: readonly {
+    readonly profile: string;
+    readonly reason: string;
+    readonly remedy?: string;
+  }[];
+}
+
+function skippedMembers(
+  omissions: readonly {
+    profile_key: string;
+    reason: string;
+    remedy?: string;
+  }[],
+): ProviderGroupListing['skipped'] {
+  return omissions
+    .filter(({ reason }) => reason !== 'profile_not_implemented')
+    .map(({ profile_key, reason, remedy }) => ({
+      profile: profile_key,
+      reason,
+      ...(remedy && { remedy }),
+    }));
 }
 
 function profileKey(identity: {
@@ -38,13 +61,18 @@ export function canonicalProviderGroups(
     authoredGroups: configGroupProvenance(config),
     assumeCredentialAvailability: true,
   });
-  const builtins = BUILTIN_WORKFLOW_IDS.map((name) => ({
-    name,
-    members: mapped.catalog.workflow(name).members.map(profileKey),
-  }));
+  const builtins = BUILTIN_WORKFLOW_IDS.map((name) => {
+    const workflow = mapped.catalog.workflow(name);
+    return {
+      name,
+      members: workflow.members.map(profileKey),
+      skipped: skippedMembers(workflow.omitted),
+    };
+  });
   const custom = mapped.catalog.custom_group_ids.map((name) => ({
     name,
     members: (mapped.catalog.resolveGroup(name) ?? []).map(profileKey),
+    skipped: skippedMembers(mapped.catalog.groupOmissions(name) ?? []),
   }));
   return [...builtins, ...custom];
 }
@@ -64,14 +92,6 @@ function customGroupNameIssue(name: string): string | null {
     return `Invalid custom group id "${name}". Use "${CUSTOM_WORKFLOW_PREFIX}<name>" with a non-empty name and no surrounding whitespace or control characters.`;
   }
   return null;
-}
-
-function authoredGlobalGroups(config: Config): Record<string, string[]> {
-  return Object.fromEntries(
-    Object.entries(configGroupProvenance(config).global).map(
-      ([name, members]) => [name, [...members]],
-    ),
-  );
 }
 
 export function registerGroupsCommand(
@@ -104,9 +124,18 @@ export function registerGroupsCommand(
       }
 
       console.log('\nProvider Groups:\n');
-      for (const { name, members } of groups) {
+      for (const { name, members, skipped } of groups) {
         console.log(`  ${name}`);
-        console.log(`    ${members.join(', ')}`);
+        console.log(`    ${members.join(', ') || '(no available members)'}`);
+        // `all` spans the whole catalog; listing every disabled profile there
+        // would bury the curated groups' actionable gaps.
+        if (name !== 'all') {
+          for (const item of skipped) {
+            console.log(
+              `    skipped: ${item.profile} (${item.reason.replaceAll('_', ' ')})${item.remedy ? ` — ${item.remedy}` : ''}`,
+            );
+          }
+        }
         console.log('');
       }
     } catch (e) {

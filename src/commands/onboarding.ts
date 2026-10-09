@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import * as p from '@clack/prompts';
 import { computeInitProviderChoices, PROVIDER_ENV_VARS } from '../constants.js';
 import {
+  authoredGlobalGroups,
   loadConfig,
   loadProjectConfig,
   mergeConfigs,
@@ -567,7 +568,7 @@ export async function runOnboardingWizard(
         enabled: true,
       };
     }
-    saveConfig(globalConfig);
+    saveConfig({ ...globalConfig, groups: authoredGlobalGroups(globalConfig) });
     p.log.success('Selected providers were already configured.');
     const updatedConfig = loadMergedConfig();
     const updatedCredentials = createNodeCredentialContext();
@@ -611,7 +612,7 @@ export async function runOnboardingWizard(
   }
 
   enableSelectedProviders(globalConfig, selected, storage, keys, credentials);
-  saveConfig(globalConfig);
+  saveConfig({ ...globalConfig, groups: authoredGlobalGroups(globalConfig) });
 
   const updatedConfig = loadMergedConfig();
   const updatedCredentials = createNodeCredentialContext();

@@ -53,6 +53,22 @@ export interface NetworkFreeEstimate {
   }[];
 }
 
+/** Provider options that can declare an account rate for a fixed billable unit. */
+export type ConfiguredRateOption = 'perRequestUsd' | 'creditUsd';
+
+/**
+ * Diagnostic-only remediation facts. They shape actionable messages and never
+ * affect selection, admission, budgets, or the catalog digest.
+ */
+export interface PlanningProfileGuidance {
+  /** The provider id users enable or configure, e.g. `searchapi-chatgpt`. */
+  readonly config_provider_id?: string;
+  /** Why the frozen pricing snapshot cannot bound this profile's cost. */
+  readonly estimate_unavailable_reason?: string;
+  /** Provider option that can supply an account rate and bound the cost. */
+  readonly estimate_option?: ConfiguredRateOption;
+}
+
 export interface PlanningProfile {
   readonly profile: ExecutionProfile;
   readonly binding: AdapterBindingIdentity;
@@ -62,6 +78,7 @@ export interface PlanningProfile {
   readonly configuration_valid: boolean;
   /** Disabled in v1 but deliberately retained for fallback reserve only. */
   readonly reserve_only?: boolean;
+  readonly guidance?: PlanningProfileGuidance;
 }
 
 /**
@@ -496,6 +513,55 @@ function resolveIdentities(
   return selected;
 }
 
+/** The `provider/profile` spelling users type and see in plans. */
+function displayProfileKey(entry: PlanningProfile): string {
+  const { provider_id, profile_id } = entry.profile.identity;
+  return `${provider_id}/${profile_id}`;
+}
+
+/** A catalog-supplied provider id, accepted only as a safe opaque token. */
+function guidanceProviderId(entry: PlanningProfile): string | undefined {
+  const id = entry.guidance?.config_provider_id;
+  return id !== undefined && OpaqueIdSchema.safeParse(id).success
+    ? id
+    : undefined;
+}
+
+/** How to enable a disabled profile, phrased for both v1 and v2 config. */
+export function disabledProfileMessage(entry: PlanningProfile): string {
+  const key = displayProfileKey(entry);
+  const id = guidanceProviderId(entry);
+  return id === undefined
+    ? `Profile "${key}" is disabled. Enable its provider in the Librarium config.`
+    : `Profile "${key}" is disabled. Enable it with \`librarium init --enable ${id}\` or set "enabled": true for provider "${id}" in the Librarium config.`;
+}
+
+const MAX_GUIDANCE_REASON_LENGTH = 120;
+
+/** Why a hard budget cannot admit a profile, and every way to proceed. */
+export function budgetEstimateRequiredMessage(
+  entry: PlanningProfile,
+  role: 'primary' | 'fallback' = 'primary',
+): string {
+  const key = displayProfileKey(entry);
+  const id = guidanceProviderId(entry);
+  const rawReason = entry.guidance?.estimate_unavailable_reason?.trim();
+  const reason =
+    rawReason && rawReason.length <= MAX_GUIDANCE_REASON_LENGTH
+      ? ` ${rawReason.endsWith('.') ? rawReason : `${rawReason}.`}`
+      : '';
+  const option = entry.guidance?.estimate_option;
+  const omit =
+    role === 'fallback'
+      ? 'disable fallback for this request'
+      : 'leave the profile out of the selection';
+  const remedy =
+    option !== undefined && id !== undefined
+      ? `Set options.${option} for provider "${id}" to your account rate, ${omit}, or drop the budget.`
+      : `${omit[0]?.toUpperCase()}${omit.slice(1)} or drop the budget.`;
+  return `${role === 'fallback' ? 'Fallback profile' : 'Profile'} "${key}" has no bounded price, so a hard budget cannot admit it.${reason} ${remedy}`;
+}
+
 function profileAvailabilityIssues(
   selection: AdmittedSelectedProfile,
   mode: CanonicalResearchRequest['mode'],
@@ -517,7 +583,7 @@ function profileAvailabilityIssues(
       code: 'profile_disabled',
       phase: 'validation',
       path,
-      message: 'The selected profile is disabled.',
+      message: disabledProfileMessage(entry),
       profile_key: key,
     });
   }
@@ -998,8 +1064,10 @@ function validatePrimaryBudgetAdmission(
         code: 'budget_estimate_required',
         phase: 'validation',
         path: selection.path,
-        message:
-          'A hard request budget requires a bounded network-free estimate for every planned profile.',
+        message: budgetEstimateRequiredMessage(
+          selection.entry,
+          primaries.includes(selection) ? 'primary' : 'fallback',
+        ),
         profile_key: profileIdentityKey(selection.entry.profile.identity),
       });
       continue;

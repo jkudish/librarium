@@ -400,6 +400,34 @@ describe('Node production request preflight', () => {
     expect(warnings.join()).not.toContain('private query text');
   });
 
+  it('names each skipped group member and its remedy, but no other notice text', () => {
+    const warnings: string[] = [];
+    emitRequestPreflightNotices(
+      [
+        {
+          code: 'workflow_profile_unavailable',
+          phase: 'selection',
+          path: '/selector/group_id',
+          message:
+            'Workflow "visibility" omitted unavailable profile "searchapi-chatgpt/surface" (profile_disabled). Enable it with `librarium init --enable searchapi-chatgpt`.',
+        },
+        {
+          code: 'legacy_mixed_mode_migrated',
+          phase: 'migration',
+          path: '/mode',
+          message: 'private query text',
+        },
+      ],
+      (message) => warnings.push(message),
+    );
+
+    expect(warnings).toEqual([
+      '[librarium] preflight: notices=2 notices_codes=legacy_mixed_mode_migrated,workflow_profile_unavailable',
+      '[librarium] warning: Workflow "visibility" omitted unavailable profile "searchapi-chatgpt/surface" (profile_disabled). Enable it with `librarium init --enable searchapi-chatgpt`.',
+    ]);
+    expect(warnings.join()).not.toContain('private query text');
+  });
+
   it('deduplicates diagnostic codes while retaining the occurrence count', () => {
     expect(
       formatRequestDiagnosticCodes('issues', [
