@@ -176,9 +176,22 @@ describe('mcp tool surface', () => {
     expect(
       tools.find((tool) => tool.name === 'research')?.description,
     ).toContain('full provider content');
-    expect(
-      tools.find((tool) => tool.name === 'research')?.description,
-    ).toContain('defaulting to the quick workflow in sync mode');
+    const researchDescription = tools.find(
+      (tool) => tool.name === 'research',
+    )?.description;
+    expect(researchDescription).toContain('the default workflow, sync mode');
+    expect(researchDescription).toContain(
+      'intentional matrix via explicit providers',
+    );
+    expect(researchDescription).toContain(
+      'governed by merged configuration, not this call',
+    );
+    expect(researchDescription).toContain(
+      'no per-call budget or fallback input',
+    );
+    expect(researchDescription).toContain('beyond the authorized scope');
+    expect(researchDescription).toContain('requiring user approval');
+    expect(researchDescription).toContain('there is no MCP plan tool');
     const researchSchema = tools.find((tool) => tool.name === 'research')
       ?.inputSchema as {
       properties?: Record<string, { description?: string }>;
