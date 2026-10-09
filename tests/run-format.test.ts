@@ -105,6 +105,26 @@ describe('formatProviderLine', () => {
     expect(line).toBe('  ◷ openai-deep            deep-research   submitted');
   });
 
+  it('labels a pending submission of unknown outcome instead of "submitted"', () => {
+    const line = formatProviderLine(
+      makeReport({
+        id: 'openai-deep',
+        tier: 'deep-research',
+        status: 'async-pending',
+        durationMs: 0,
+        citationCount: 0,
+        error:
+          'Submission outcome unknown: the provider answered HTTP 500. The provider may have accepted it.',
+      }),
+      widths,
+      false,
+    );
+    expect(line).toContain(
+      '◷ openai-deep            deep-research   Submission outcome unknown: the provider answered HTTP 500.',
+    );
+    expect(line).not.toContain('submitted');
+  });
+
   it('formats errors with the failure reason', () => {
     const line = formatProviderLine(
       makeReport({
@@ -218,6 +238,34 @@ describe('formatRunSummary', () => {
       color: false,
     });
     expect(lines.join('\n')).toContain('librarium status --wait');
+  });
+});
+
+describe('formatRunSummary output base hint', () => {
+  const pending = {
+    succeeded: 0,
+    failed: 0,
+    pending: 1,
+    uniqueSources: 0,
+    totalCitations: 0,
+    outputDir: '/srv/out/run-1',
+    color: false,
+  };
+
+  it('repeats a custom -o base so status scans the same runs', () => {
+    expect(
+      formatRunSummary({ ...pending, outputBase: '/tmp/librarium-runs' }).join(
+        '\n',
+      ),
+    ).toContain('`librarium status --wait -o /tmp/librarium-runs`');
+  });
+
+  it('quotes an output base that the shell would split', () => {
+    expect(
+      formatRunSummary({ ...pending, outputBase: "/tmp/joey's runs" }).join(
+        '\n',
+      ),
+    ).toContain(`\`librarium status --wait -o '/tmp/joey'\\''s runs'\``);
   });
 });
 

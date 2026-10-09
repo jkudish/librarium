@@ -11,7 +11,10 @@ import {
   MAX_AGGREGATE_COST_MICROUSD_DIGITS,
   MAX_REPORTED_COST_MICROUSD_DIGITS,
 } from './budget.js';
-import type { CoordinatorState } from './coordinator.js';
+import {
+  type CoordinatorState,
+  UnresolvedAcceptanceDiagnosticSchema,
+} from './coordinator.js';
 import { profileIdentityKey } from './execution-plan.js';
 
 const NonNegativeDecimalIntegerSchema = z
@@ -150,6 +153,7 @@ const UnresolvedAcceptanceSchema = z.strictObject({
     'infrastructure_failure_while_acceptance_unknown',
   ]),
   adapter_state_ref: OpaqueIdSchema.optional(),
+  diagnostic: UnresolvedAcceptanceDiagnosticSchema.optional(),
 });
 
 /**

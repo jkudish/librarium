@@ -35,6 +35,64 @@ function tierFor(resultKind: string): ProviderTier {
   }
 }
 
+type PresentedAttempt =
+  CanonicalRunManifestV3['coordination_state']['attempts'][number];
+type UnresolvedAcceptanceMarker =
+  CanonicalRunManifestV3['coordination_state']['unresolved_acceptances'][number];
+
+function unresolvedAcceptanceCause(
+  marker: UnresolvedAcceptanceMarker | undefined,
+): string {
+  if (marker?.reason === 'submission_deadline_exceeded') {
+    return 'the attempt deadline expired while the submission was in flight';
+  }
+  const diagnostic = marker?.diagnostic;
+  if (!diagnostic) return 'no provider response confirmed or rejected it';
+  if (diagnostic.http_status !== undefined) {
+    return `the provider answered HTTP ${diagnostic.http_status}`;
+  }
+  switch (diagnostic.kind) {
+    case 'network':
+      return 'a network error interrupted the request';
+    case 'timeout':
+      return 'the provider did not answer before the submission timeout';
+    case 'provider':
+      return 'the provider returned an unrecognized response';
+    default:
+      return `the provider reported ${diagnostic.kind.replace('_', ' ')}`;
+  }
+}
+
+/**
+ * Fixed, actionable text for a submission whose remote acceptance is unknown.
+ * Built only from persisted enums and an HTTP status, never provider text.
+ */
+function unresolvedAcceptanceMessage(
+  manifest: CanonicalRunManifestV3,
+  attempt: PresentedAttempt,
+): string {
+  const state = manifest.coordination_state;
+  const marker = state.unresolved_acceptances.find(
+    (entry) => entry.attempt_id === attempt.attempt_id,
+  );
+  const wait =
+    state.status === 'running'
+      ? ` The run stays pending until its request deadline (${state.request_deadline_at}).`
+      : '';
+  return `Submission outcome unknown: ${unresolvedAcceptanceCause(marker)}. The provider may have accepted and may bill this job, so Librarium will not resubmit it; check the provider dashboard before rerunning.${wait}`;
+}
+
+function attemptErrorMessage(
+  manifest: CanonicalRunManifestV3,
+  attempt: PresentedAttempt | undefined,
+): string | undefined {
+  if (!attempt) return undefined;
+  if (attempt.error) return attempt.error.message;
+  return attempt.status === 'acceptance_unknown'
+    ? unresolvedAcceptanceMessage(manifest, attempt)
+    : undefined;
+}
+
 function numberMetadata(
   result: ResearchResult,
   key: string,
@@ -174,7 +232,8 @@ export function projectCanonicalRunPresentation(
       const earlierStatus: ProviderReport['status'] =
         earlier.status === 'timed_out' ? 'timeout' : 'error';
       const earlierError =
-        earlier.error?.message ?? 'The provider attempt did not succeed.';
+        attemptErrorMessage(manifest, earlier) ??
+        'The provider attempt did not succeed.';
       reports.push({
         id: earlierId,
         tier: tierFor(earlier.profile.result_kind),
@@ -234,7 +293,7 @@ export function projectCanonicalRunPresentation(
           ? 'timeout'
           : 'error';
     const files = providerArtifactFileNames(id);
-    const error = attempt?.error?.message ?? slot.error?.message;
+    const error = attemptErrorMessage(manifest, attempt) ?? slot.error?.message;
     const replaced = attempt?.replaces_attempt_id
       ? manifest.coordination_state.attempts.find(
           (candidate) => candidate.attempt_id === attempt.replaces_attempt_id,

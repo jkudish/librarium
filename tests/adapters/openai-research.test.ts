@@ -119,6 +119,25 @@ describe('OpenAIResearchProvider', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a credential that cannot form an HTTP header before sending (#4045)', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    for (const key of ['openai-key\u200b', 'openai\nkey', 'openai-key\u0000']) {
+      const rejection = new OpenAIResearchProvider({
+        credentials: { env: { OPENAI_API_KEY: key } },
+      }).submit('query', { timeout: 1800 });
+      await expect(rejection).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        // Proven rejection: nothing was sent, so it is not acceptance-unknown.
+        failureDiagnostic: { kind: 'authentication' },
+      });
+      await expect(rejection).rejects.toThrow(
+        'OPENAI_API_KEY contains characters that are not valid in an HTTP header',
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('keeps unrelated providers available when OpenAI options are invalid', async () => {
     await expect(
       initializeProviders({
