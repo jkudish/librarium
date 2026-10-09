@@ -156,7 +156,7 @@ librarium answer <query> [run options] [--verify]
 | `completions` | no explicit option |
 | `ls` | `--json` |
 | `groups` | `--json` |
-| `init` | `--auto` |
+| `init` | `--auto`, `--enable` |
 | `doctor` | `--json`, `--live` |
 | `config` | `--json`, `--global`, `--menu` |
 | `config migrate` | `--from`, `--project`, `--output`, `--force` |

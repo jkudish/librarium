@@ -7,6 +7,7 @@ import {
   INTERNAL_ADAPTER_ID_SET,
   INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS,
 } from '../internal-adapter-ids.js';
+import { decimalUsdFromNumber } from './budget.js';
 import {
   BUILTIN_WORKFLOW_IDS,
   type BuiltinWorkflowId,
@@ -22,14 +23,17 @@ import {
 } from './catalog-fingerprint.js';
 import { type CredentialContext, hasCredential } from './credentials.js';
 import type {
+  ConfiguredRateOption,
   FrozenPlanningCatalog,
   NetworkFreeEstimate,
   PlanningProfile,
+  PlanningProfileGuidance,
 } from './execution-plan.js';
 import {
   budgetEstimateFromQuote,
   type PriceDefinitionInput,
   PricingCatalog,
+  type PricingSnapshotInput,
 } from './pricing.js';
 import { BUILTIN_PRICING_SNAPSHOT } from './pricing-snapshot.js';
 import {
@@ -64,6 +68,8 @@ export interface ResolvedCatalogProfile {
   readonly profile: ExecutionProfile;
   readonly binding?: CatalogProfileBinding;
   readonly estimate?: NetworkFreeEstimate;
+  /** Diagnostic-only remediation facts; never part of selection or digest. */
+  readonly guidance?: PlanningProfileGuidance;
   readonly availability: {
     readonly enabled: boolean;
     readonly reserve_only: boolean;
@@ -140,6 +146,8 @@ export interface ProviderCatalogOptions {
 export interface WorkflowOmission {
   readonly profile_key: string;
   readonly reason: string;
+  /** One actionable sentence saying how to make the profile available. */
+  readonly remedy?: string;
 }
 
 export interface WorkflowResolutionResult {
@@ -162,6 +170,11 @@ export interface ProviderCatalog extends FrozenPlanningCatalog {
     profileId: string,
   ): ResolvedCatalogProfile | undefined;
   workflow(workflowId: BuiltinWorkflowId): WorkflowResolutionResult;
+  /**
+   * Members a built-in workflow or custom group would skip, with reasons.
+   * Undefined for an unknown group. Groups never shrink silently.
+   */
+  groupOmissions(groupId: string): readonly WorkflowOmission[] | undefined;
 }
 
 /**
@@ -192,15 +205,170 @@ function profileKeyOf(profile: ResolvedCatalogProfile): string {
   );
 }
 
+function omissionRemedy(
+  item: ResolvedCatalogProfile,
+  reason: string,
+  envVar: string | undefined,
+): string | undefined {
+  const id = item.guidance?.config_provider_id;
+  switch (reason) {
+    case 'profile_disabled':
+      return id === undefined
+        ? undefined
+        : `Enable it with \`librarium init --enable ${id}\`.`;
+    case 'credential_missing':
+      return envVar === undefined
+        ? 'Configure its API key.'
+        : `Set ${envVar} or configure its API key.`;
+    case 'configuration_invalid':
+      return id === undefined
+        ? undefined
+        : `Fix the options for provider "${id}" in the Librarium config.`;
+    default:
+      return undefined;
+  }
+}
+
+/** The `providers.<id>` key whose config an adapter binding reads. */
+function configProviderId(adapterId: string): string {
+  return (
+    INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS[
+      adapterId as keyof typeof INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS
+    ] ?? adapterId
+  );
+}
+
 function bindingConfig(
   options: ProviderCatalogOptions,
   adapterId: string,
 ): CatalogProviderConfig | undefined {
-  const publicId =
-    INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS[
-      adapterId as keyof typeof INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS
+  return options.providerConfigs?.[configProviderId(adapterId)];
+}
+
+const CONFIGURED_RATE_OPTIONS = {
+  requests: 'perRequestUsd',
+  credits: 'creditUsd',
+} as const satisfies Record<string, ConfiguredRateOption>;
+
+const CONFIGURED_RATE_SOURCE_SLUGS: Readonly<
+  Record<ConfiguredRateOption, string>
+> = {
+  perRequestUsd: 'per-request-usd',
+  creditUsd: 'credit-usd',
+};
+
+interface ConfigurableRate {
+  readonly unit: keyof typeof CONFIGURED_RATE_OPTIONS;
+  readonly option: ConfiguredRateOption;
+  readonly quantity: string;
+  readonly effective_target?: PriceDefinitionInput['effective_target'];
+}
+
+/**
+ * A profile can be bounded by a user's account rate only when the reviewed
+ * snapshot already fixes its sole billable quantity (requests or credits).
+ * Token-, result-, or agent-priced profiles have provider-controlled
+ * quantities, so no single configured rate can bound them.
+ */
+function configurableRate(
+  snapshot: PricingSnapshotInput,
+  providerId: string,
+  profileId: string,
+): ConfigurableRate | undefined {
+  for (const definition of snapshot.definitions) {
+    if (
+      definition.provider_id !== providerId ||
+      definition.profile_id !== profileId ||
+      definition.expected_units.length !== 1
+    ) {
+      continue;
+    }
+    const [unit] = definition.expected_units;
+    if (unit !== 'requests' && unit !== 'credits') continue;
+    const quantity = definition.fixed_quantities?.[unit];
+    if (quantity === undefined) continue;
+    return {
+      unit,
+      option: CONFIGURED_RATE_OPTIONS[unit],
+      quantity,
+      ...(definition.effective_target && {
+        effective_target: definition.effective_target,
+      }),
+    };
+  }
+  return undefined;
+}
+
+const CONFIGURED_SOURCE_ID_PATTERN = /^[a-z0-9.-]+$/;
+
+/**
+ * Turn documented provider options (`perRequestUsd`, `creditUsd`) into explicit
+ * configured account rates for the profiles they can bound. Nothing is
+ * inferred: a definition exists only when the user configured a positive rate
+ * and the reviewed snapshot fixes the billable quantity it multiplies.
+ */
+function configuredAccountRates(
+  snapshot: PricingSnapshotInput,
+  refs: readonly {
+    readonly entry: ProviderCatalogEntry;
+    readonly declaration: ExecutableProfileDeclaration;
+  }[],
+  bindings: ReadonlyMap<string, ProfileBinding>,
+  options: ProviderCatalogOptions,
+): PriceDefinitionInput[] {
+  const explicit = new Set(
+    (options.configuredPricing ?? []).map((definition) =>
+      catalogProfileKey(definition.provider_id, definition.profile_id),
+    ),
+  );
+  const definitions: PriceDefinitionInput[] = [];
+  for (const { entry, declaration } of refs) {
+    const key = catalogProfileKey(entry.provider_id, declaration.profile_id);
+    const binding = bindings.get(key);
+    if (!binding || explicit.has(key)) continue;
+    const rate = configurableRate(
+      snapshot,
+      entry.provider_id,
+      declaration.profile_id,
+    );
+    if (!rate) continue;
+    const value = bindingConfig(options, binding.adapter_id)?.options?.[
+      rate.option
     ];
-  return options.providerConfigs?.[publicId ?? adapterId];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      continue;
+    }
+    const providerConfigId = configProviderId(binding.adapter_id);
+    const sourceId = CONFIGURED_SOURCE_ID_PATTERN.test(providerConfigId)
+      ? `/providers/${providerConfigId}`
+      : '';
+    definitions.push({
+      id: `configured.${entry.provider_id}.${declaration.profile_id}`,
+      provider_id: entry.provider_id,
+      profile_id: declaration.profile_id,
+      ...(rate.effective_target && { effective_target: rate.effective_target }),
+      currency: snapshot.currency,
+      completeness: 'complete',
+      confidence: 'high',
+      expected_units: [rate.unit],
+      fixed_quantities: { [rate.unit]: rate.quantity },
+      missing_units: [],
+      rates: [
+        {
+          unit: rate.unit,
+          amount_decimal: decimalUsdFromNumber(value),
+          per_decimal: '1',
+        },
+      ],
+      provenance: {
+        source_class: 'configured_account_rate',
+        source_reference: `configured:librarium${sourceId}/options/${CONFIGURED_RATE_SOURCE_SLUGS[rate.option]}`,
+        effective_at: snapshot.reviewed_at,
+        retrieved_at: snapshot.reviewed_at,
+      },
+    });
+  }
+  return definitions;
 }
 
 function resolveDeclaration(
@@ -270,6 +438,22 @@ function resolveDeclaration(
   });
   const estimate: NetworkFreeEstimate | undefined =
     budgetEstimateFromQuote(quote);
+  const configurable = estimate
+    ? undefined
+    : configurableRate(
+        pricing.snapshot,
+        entry.provider_id,
+        declaration.profile_id,
+      );
+  const guidance: PlanningProfileGuidance = {
+    config_provider_id: configProviderId(binding.adapter_id),
+    ...(!estimate && {
+      estimate_unavailable_reason:
+        quote.unknown_reason ??
+        'The pricing snapshot does not bound this profile in USD.',
+    }),
+    ...(configurable && { estimate_option: configurable.option }),
+  };
 
   if (!enabled) reasons.push('profile_disabled');
   if (!credentialValid) reasons.push('credential_missing');
@@ -280,6 +464,7 @@ function resolveDeclaration(
     profile: ownFrozen(profile),
     binding,
     ...(estimate && { estimate: ownFrozen(estimate) }),
+    guidance: ownFrozen(guidance),
     availability: ownFrozen({
       enabled,
       reserve_only: reserveOnly,
@@ -337,6 +522,11 @@ function resolveCustomProfile(
     declaration: ownFrozen(customDeclaration(profile, selectionOrder)),
     profile,
     binding,
+    guidance: ownFrozen<PlanningProfileGuidance>({
+      config_provider_id: custom.adapter_id,
+      estimate_unavailable_reason:
+        'Custom providers have no reviewed network-free price.',
+    }),
     availability: ownFrozen({
       enabled,
       reserve_only: reserveOnly,
@@ -355,10 +545,6 @@ function resolveCustomProfile(
 export function buildProviderCatalog(
   options: ProviderCatalogOptions = {},
 ): ProviderCatalog {
-  const pricing = new PricingCatalog(
-    BUILTIN_PRICING_SNAPSHOT,
-    options.configuredPricing,
-  );
   const entries = options.catalog ?? BUILTIN_PROVIDER_CATALOG;
   const refs = catalogProfileRefs(entries);
 
@@ -381,6 +567,15 @@ export function buildProviderCatalog(
       );
     }
   }
+  const pricing = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT, [
+    ...(options.configuredPricing ?? []),
+    ...configuredAccountRates(
+      BUILTIN_PRICING_SNAPSHOT,
+      refs,
+      bindings,
+      options,
+    ),
+  ]);
 
   const declaredCustomProfiles = ownFrozen(
     [...(options.customProfiles ?? [])].sort((left, right) => {
@@ -518,6 +713,30 @@ export function buildProviderCatalog(
   const notices: PreparationNotice[] = [...migration.notices];
   const issues: PreparationIssue[] = [...migration.issues];
 
+  const envVarByProvider = new Map(
+    entries.map((entry) => [entry.provider_id, entry.credential.env_var]),
+  );
+  const customEnvVarByAdapter = new Map(
+    customProfiles.map((custom) => [
+      custom.adapter_id,
+      custom.credential_env_var,
+    ]),
+  );
+  const omissionsOf = (item: ResolvedCatalogProfile): WorkflowOmission[] => {
+    const envVar = item.binding
+      ? (customEnvVarByAdapter.get(item.binding.adapter_id) ??
+        envVarByProvider.get(item.profile.identity.provider_id))
+      : undefined;
+    return item.availability.reasons.map((reason) => {
+      const remedy = omissionRemedy(item, reason, envVar);
+      return {
+        profile_key: profileKeyOf(item),
+        reason,
+        ...(remedy && { remedy }),
+      };
+    });
+  };
+
   const workflowMembers = (
     workflowId: BuiltinWorkflowId,
   ): WorkflowResolutionResult => {
@@ -547,9 +766,7 @@ export function buildProviderCatalog(
         members.push(item.profile.identity);
         continue;
       }
-      for (const reason of item.availability.reasons) {
-        omitted.push({ profile_key: profileKeyOf(item), reason });
-      }
+      omitted.push(...omissionsOf(item));
     }
     return { workflow_id: workflowId, members, omitted };
   };
@@ -642,6 +859,27 @@ export function buildProviderCatalog(
       }
     }
     return identities;
+  };
+
+  const customGroupOmissions = (
+    groupId: string,
+  ): WorkflowOmission[] | undefined => {
+    const group = customGroups.get(groupId);
+    if (!group) return undefined;
+    const omitted: WorkflowOmission[] = [];
+    const seen = new Set<string>();
+    for (const member of group.members) {
+      for (const match of groupMemberMatches(member)) {
+        const key = profileKeyOf(match);
+        if (match.availability.selectable || seen.has(key)) continue;
+        // A bare provider member fans out to every profile; planned profiles
+        // were never selectable through it, so they are not omissions.
+        if (!match.binding) continue;
+        seen.add(key);
+        omitted.push(...omissionsOf(match));
+      }
+    }
+    return omitted;
   };
 
   /**
@@ -781,6 +1019,7 @@ export function buildProviderCatalog(
       reserve_only: item.availability.reserve_only,
       credentialed: item.availability.credential_valid,
       configuration_valid: item.availability.configuration_valid,
+      ...(item.guidance && { guidance: item.guidance }),
     }));
 
   const revision = catalogFingerprint(
@@ -800,7 +1039,10 @@ export function buildProviderCatalog(
       configured_definitions: pricing.configured_definitions,
     },
     custom_profiles: customProfiles,
-    profiles: planningProfiles,
+    // Guidance only words diagnostics; it must never change plan identity.
+    profiles: planningProfiles.map(
+      ({ guidance: _guidance, ...profile }) => profile,
+    ),
     workflows: BUILTIN_WORKFLOW_IDS.map((id) => ({
       workflow_id: id,
       members: workflowMembers(id).members,
@@ -828,6 +1070,12 @@ export function buildProviderCatalog(
     },
     workflow(workflowId) {
       return workflowMembers(workflowId);
+    },
+    groupOmissions(groupId) {
+      if (RESERVED_WORKFLOW_IDS.has(groupId)) {
+        return workflowMembers(groupId as BuiltinWorkflowId).omitted;
+      }
+      return customGroupOmissions(groupId);
     },
     resolveGroup(groupId) {
       if (RESERVED_WORKFLOW_IDS.has(groupId)) {

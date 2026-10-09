@@ -314,6 +314,12 @@ export function emitRequestPreflightNotices(
     onWarn(
       `[librarium] preflight: ${formatRequestDiagnosticCodes('notices', notices)}`,
     );
+    // A group that runs fewer members than it names must say which ones it
+    // skipped and how to restore them, not only a diagnostic code.
+    for (const notice of notices) {
+      if (notice.code !== 'workflow_profile_unavailable') continue;
+      onWarn(`[librarium] warning: ${sanitizeDiagnostic(notice.message)}`);
+    }
   } catch {
     // The request is already admitted. Diagnostics cannot change execution.
   }

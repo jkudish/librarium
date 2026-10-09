@@ -1,6 +1,5 @@
 import type { Config } from '../types.js';
 import {
-  type BuiltinWorkflowId,
   REMOVED_BUILTIN_WORKFLOW_IDS,
   RESERVED_WORKFLOW_IDS,
   resolveWorkflowSelection,
@@ -436,18 +435,18 @@ export function compileRequest(
     rawProviders === undefined && rawGroup === undefined
       ? 'quick'
       : group.group;
+  // A group never shrinks silently: every skipped member is reported with its
+  // reason and, where one exists, the exact way to make it available.
   const workflowNotices: PreparationNotice[] =
-    rawProviders === undefined &&
-    effectiveGroup !== undefined &&
-    RESERVED_WORKFLOW_IDS.has(effectiveGroup)
-      ? mapped.catalog
-          .workflow(effectiveGroup as BuiltinWorkflowId)
-          .omitted.map(({ profile_key, reason }) => ({
+    rawProviders === undefined && effectiveGroup !== undefined
+      ? (mapped.catalog.groupOmissions(effectiveGroup) ?? []).map(
+          ({ profile_key, reason, remedy }) => ({
             code: 'workflow_profile_unavailable',
             phase: 'selection' as const,
             path: '/selector/group_id',
-            message: `Workflow "${effectiveGroup}" omitted unavailable profile "${profile_key}" (${reason}).`,
-          }))
+            message: `${RESERVED_WORKFLOW_IDS.has(effectiveGroup) ? 'Workflow' : 'Group'} "${effectiveGroup}" omitted unavailable profile "${profile_key}" (${reason}).${remedy ? ` ${remedy}` : ''}`,
+          }),
+        )
       : [];
   // Providers own CLI/MCP selector precedence, so a competing group is
   // intentionally ignored rather than independently migrated.
@@ -601,6 +600,7 @@ export function compileRequest(
       notices: sortPreparationDiagnostics([
         ...mapperNotices,
         ...effectiveGroupNotices,
+        ...workflowNotices,
         ...resolved.notices,
         ...normalized.notices,
         ...admitted.notices,

@@ -222,7 +222,18 @@ describe('mcp tool surface', () => {
       payload.groups.find(
         (group: { name: string }) => group.name === 'custom:team',
       ),
-    ).toEqual({ name: 'custom:team', members: ['exa/search'] });
+    ).toEqual({ name: 'custom:team', members: ['exa/search'], skipped: [] });
+    // A group never looks smaller without saying why: disabled visibility
+    // members are listed with the exact command that enables them.
+    const visibility = payload.groups.find(
+      (group: { name: string }) => group.name === 'visibility',
+    );
+    expect(visibility.members).toEqual([]);
+    expect(visibility.skipped).toContainEqual({
+      profile: 'searchapi-chatgpt/surface',
+      reason: 'profile_disabled',
+      remedy: 'Enable it with `librarium init --enable searchapi-chatgpt`.',
+    });
     await server.close();
   });
 

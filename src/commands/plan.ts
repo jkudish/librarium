@@ -325,13 +325,15 @@ function omissions(notices: readonly PreparationDiagnostic[]) {
   return notices
     .filter(({ code }) => code === 'workflow_profile_unavailable')
     .map((notice) => {
-      const match = /omitted unavailable profile "([^"]+)" \(([^)]+)\)\.$/.exec(
-        notice.message,
-      );
+      const match =
+        /omitted unavailable profile "([^"]+)" \(([^)]+)\)\.(?: (.+))?$/.exec(
+          notice.message,
+        );
       return {
         code: notice.code,
         ...(match?.[1] && { profile: match[1] }),
         ...(match?.[2] && { reason: match[2] }),
+        ...(match?.[3] && { remedy: match[3] }),
         message: notice.message,
       };
     });
@@ -626,7 +628,7 @@ function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
     lines.push(
       ...receipt.workflow_omissions.map(
         (item) =>
-          `  ${item.profile ?? 'Profile'} — ${humanReason(item.reason ?? item.message)}`,
+          `  ${item.profile ?? 'Profile'} — ${humanReason(item.reason ?? item.message)}${'remedy' in item && item.remedy ? `. ${item.remedy}` : ''}`,
       ),
     );
   }

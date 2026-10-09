@@ -68,7 +68,12 @@ import {
   type LineWidths,
   shortenHomePath,
 } from './run-format.js';
-import { addRunRequestArguments, prepareRunRequest } from './run-request.js';
+import {
+  addRunRequestArguments,
+  paidStageBudgetIssues,
+  prepareRunRequest,
+  RequestPreflightError,
+} from './run-request.js';
 
 export interface RunOptions {
   providers?: string[];
@@ -225,6 +230,10 @@ export async function executeRun(
       verification: Boolean(hooks?.paidStages?.verification),
     });
     const { config, preflight, stageDeclarations } = preparation;
+    const stageIssues = paidStageBudgetIssues(preparation.stages);
+    if (stageIssues.length > 0) {
+      throw new RequestPreflightError(stageIssues, preflight.notices);
+    }
     emitRequestPreflightNotices(preflight.notices, (message) =>
       process.stderr.write(`${message}\n`),
     );
