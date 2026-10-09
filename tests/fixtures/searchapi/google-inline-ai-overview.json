@@ -1,0 +1,32 @@
+{
+  "search_metadata": { "id": "search_synthetic_inline", "status": "Success" },
+  "search_parameters": { "engine": "google", "q": "what is example brand" },
+  "ai_overview": {
+    "markdown": "Example Brand is a synthetic photo tool. [0](https://www.google.com/goto?url=CAESOFN5bnRoZXRpYy1vcGFxdWUtdG9rZW4tb25l)",
+    "text_blocks": [
+      {
+        "type": "paragraph",
+        "answer": "Example Brand is a synthetic photo tool."
+      }
+    ],
+    "reference_links": [
+      {
+        "index": 0,
+        "title": "Example Brand — Home",
+        "link": "https://www.google.com/goto?url=CAESOFN5bnRoZXRpYy1vcGFxdWUtdG9rZW4tb25l",
+        "snippet": "Synthetic snippet.",
+        "source": "Example Brand",
+        "favicon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://example.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL",
+        "thumbnail": "https://encrypted-tbn2.gstatic.com/images?q=tbn:synthetic"
+      },
+      {
+        "index": 1,
+        "title": "Example review",
+        "link": "https://www.google.com/goto?url=CAESOFN5bnRoZXRpYy1vcGFxdWUtdG9rZW4tdHdv",
+        "snippet": "Synthetic review.",
+        "source": "Example Reviews",
+        "favicon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://reviews.example.org&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL"
+      }
+    ]
+  }
+}
