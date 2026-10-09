@@ -194,6 +194,29 @@ describe('GrokProvider', () => {
     expect(result.citations).toEqual([]);
   });
 
+  it('reads the nested reasoning and cached token counts of live xAI responses', async () => {
+    // Shape observed from api.x.ai/v1/responses on 2026-10-09 (#4767).
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        ...outputResponse(),
+        usage: {
+          input_tokens: 52164,
+          input_tokens_details: { cached_tokens: 32896 },
+          output_tokens: 2410,
+          output_tokens_details: { reasoning_tokens: 2239 },
+          total_tokens: 54574,
+          cost_in_usd_ticks: 944440000,
+        },
+      }),
+    );
+
+    const result = await provider().execute('ground this', { timeout: 10 });
+
+    expect(result.usage?.cacheReadInputTokens).toBe(32896);
+    expect(result.usage?.reasoningTokens).toBe(2239);
+    expect(result.usage?.costUsd).toBeCloseTo(0.094444, 9);
+  });
+
   it('extracts honest token usage and preserves server-side tool usage raw', async () => {
     const usage = {
       input_tokens: 120,

@@ -81,7 +81,7 @@ Match the request, not a fixed ladder — both styles are valid:
 
 Workflows: `quick` = curated low-latency discovery and grounded answers; use
 `deep` for research-report profiles; `visibility` for AI answer-engine
-surfaces (six SearchAPI-collected consumer surfaces vs three first-party API
+surfaces (SearchAPI-collected consumer surfaces vs first-party API
 baselines); `all` for catalog-wide coverage only after reviewing scope/cost;
 `custom:<name>` for a configured custom group. Exact `provider/profile`
 selectors (MCP `providers` / CLI `--providers`) build an intentional matrix:
@@ -156,9 +156,9 @@ before sharing, and keep partial/failed/skipped outcomes visible.
 ## 6. Synthesize
 
 Synthesize from cited source substance and contradictions; preserve profile,
-target, operator, collector, surface, and retrieval provenance. The six
+target, operator, collector, surface, and retrieval provenance. The
 SearchAPI surface observations share one collector: correlated visibility
-evidence, not six independent confirmations or a particular logged-in
+evidence, not independent confirmations or a particular logged-in
 user's experience; API baselines are not consumer-surface snapshots.
 `zeroRetention` is an account capability that fails closed when rejected,
 not a privacy guarantee; SerpBase may log queries for billing, debugging,

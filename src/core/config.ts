@@ -14,6 +14,7 @@ import type { EnvRecord } from './credentials.js';
 import { hasCredential, resolveCredential } from './credentials.js';
 import { safeWriteFile } from './fs-utils.js';
 import {
+  isRetiredUpstreamProviderId,
   migrateRetiredProviderId,
   migrateRetiredProviderToken,
   retiredProviderGuidance,
@@ -53,6 +54,34 @@ function setConfigGroupProvenance(
     project: cloneGroups(provenance.project),
   });
   return config;
+}
+
+/**
+ * Whether the inline attempt deadline was authored (config file, project
+ * config, or CLI flag) rather than filled from DEFAULT_CONFIG. Only an
+ * unauthored deadline may yield to a per-profile default.
+ */
+const inlineDeadlineAuthoredByConfig = new WeakMap<Config, boolean>();
+
+/**
+ * True unless this module loaded or merged the config without an authored
+ * inline timeout. Hand-built Config values count as authored, so library
+ * callers keep exactly the deadline they pass.
+ */
+export function configInlineAttemptDeadlineAuthored(config: Config): boolean {
+  return inlineDeadlineAuthoredByConfig.get(config) ?? true;
+}
+
+function rawInlineDeadlineAuthored(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const record = raw as Record<string, unknown>;
+  const block =
+    record.version === 2 ? record.execution_defaults : record.defaults;
+  if (typeof block !== 'object' || block === null) return false;
+  const defaults = block as Record<string, unknown>;
+  return record.version === 2
+    ? defaults.inline_attempt_deadline_ms !== undefined
+    : defaults.timeout !== undefined;
 }
 
 /**
@@ -235,8 +264,8 @@ export function validateFallbacks(config: Config): string[] {
  */
 export function loadConfig(globalPath?: string): Config {
   const path = globalPath ?? CONFIG_FILE;
-  if (!existsSync(path))
-    return setConfigGroupProvenance(
+  if (!existsSync(path)) {
+    const config = setConfigGroupProvenance(
       {
         ...DEFAULT_CONFIG,
         providers: {},
@@ -246,6 +275,9 @@ export function loadConfig(globalPath?: string): Config {
       },
       { global: {}, project: {} },
     );
+    inlineDeadlineAuthoredByConfig.set(config, false);
+    return config;
+  }
 
   let raw: unknown;
   try {
@@ -296,6 +328,7 @@ export function loadConfig(globalPath?: string): Config {
     console.error(`[librarium] warning: ${warning}`);
   }
 
+  inlineDeadlineAuthoredByConfig.set(config, rawInlineDeadlineAuthored(raw));
   return setConfigGroupProvenance(config, {
     global: explicitGlobalGroups,
     project: {},
@@ -392,6 +425,13 @@ export function mergeConfigs(
   }
 
   migrateLegacyProviderIds(merged);
+
+  inlineDeadlineAuthoredByConfig.set(
+    merged,
+    configInlineAttemptDeadlineAuthored(global) ||
+      project?.defaults?.timeout !== undefined ||
+      cliFlags?.timeout !== undefined,
+  );
 
   const globalGroups = configGroupProvenance(global).global;
   const projectGroups = project?.groups ?? {};
@@ -498,8 +538,46 @@ function normalizeProjectProviderConfigs(
   return layer.providers;
 }
 
-function migrateLegacyProviderIds(config: Config): string[] {
+/**
+ * Remove ids retired upstream from a v1 layer. They have no equivalent
+ * profile, so unlike renamed ids they are dropped (with guidance), never
+ * rewritten to a different provider.
+ */
+function removeRetiredUpstreamProviders(config: Config): string[] {
   const warnings: string[] = [];
+  for (const id of Object.keys(config.providers)) {
+    if (!isRetiredUpstreamProviderId(id)) continue;
+    delete config.providers[id];
+    warnings.push(`Ignoring provider config. ${retiredProviderGuidance(id)}`);
+  }
+  for (const [id, providerConfig] of Object.entries(config.providers)) {
+    const fallback = providerConfig.fallback;
+    if (fallback === undefined || !isRetiredUpstreamProviderId(fallback)) {
+      continue;
+    }
+    const { fallback: _retired, ...rest } = providerConfig;
+    config.providers[id] = rest;
+    warnings.push(
+      `Ignoring provider "${id}" fallback. ${retiredProviderGuidance(fallback)}`,
+    );
+  }
+  for (const [groupName, members] of Object.entries(config.groups)) {
+    const retained = members.filter((member) => {
+      if (!isRetiredUpstreamProviderId(member.split('/')[0] ?? '')) {
+        return true;
+      }
+      warnings.push(
+        `Removing group "${groupName}" member "${member}". ${retiredProviderGuidance(member)}`,
+      );
+      return false;
+    });
+    if (retained.length !== members.length) config.groups[groupName] = retained;
+  }
+  return warnings;
+}
+
+function migrateLegacyProviderIds(config: Config): string[] {
+  const warnings: string[] = removeRetiredUpstreamProviders(config);
   const migratedProviders: Config['providers'] = {};
 
   // Both retired OpenAI deep-research entries map to one canonical provider.
@@ -597,8 +675,9 @@ function migrateLegacyProviderIds(config: Config): string[] {
 }
 
 /**
- * Ordered canonical rosters shipped immediately before the visibility/provider
- * expansion. These are intentionally enumerated rather than inferred from git
+ * Ordered canonical rosters shipped by earlier releases: the roster before the
+ * visibility/provider expansion and the roster before searchapi-perplexity was
+ * retired upstream. These are intentionally enumerated rather than inferred from git
  * history or subset membership: only an exact stored default is safe to move.
  */
 const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
@@ -618,6 +697,32 @@ const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
       'exa',
       'you-research',
       'kagi-fastgpt',
+    ],
+    // Shipped until searchapi-perplexity was retired upstream (#4769).
+    [
+      'parallel-research',
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'openai-research',
+      'gemini-deep',
+      'valyu-research',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'grok-x-only',
+      'grok-combined',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'you-answer',
+      'kagi-fastgpt',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
     ],
   ],
   all: [
@@ -641,6 +746,44 @@ const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
       'searchapi',
       'serpapi',
       'tavily',
+    ],
+    // Shipped until searchapi-perplexity was retired upstream (#4769).
+    [
+      'parallel-research',
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'openai-research',
+      'gemini-deep',
+      'valyu-research',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'grok-x-only',
+      'grok-combined',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'you-answer',
+      'kagi-fastgpt',
+      'jina-search',
+      'firecrawl-search',
+      'perplexity-search',
+      'brave-search',
+      'searchapi',
+      'serpapi',
+      'serpbase-search',
+      'serpbase-news',
+      'tavily',
+      'valyu-search',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+      'parallel-search',
+      'parallel-turbo',
     ],
   ],
 };

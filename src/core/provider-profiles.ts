@@ -715,7 +715,8 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 190,
-        target: providerManagedTarget('agent'),
+        // research_effort selects a priced tier; the adapter defaults to standard.
+        target: configurableTarget('preset', 'standard'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -924,30 +925,6 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
         selection_order: 410,
         operator_id: 'google',
         surface_id: 'gemini',
-      }),
-    ],
-  },
-  {
-    provider_id: 'searchapi-perplexity',
-    order: 203,
-    aliases: [],
-    display: {
-      family: 'SearchAPI',
-      name: 'SearchAPI Perplexity',
-      description: 'SearchAPI-observed Perplexity consumer answer.',
-      best_for: 'Comparing the cited answer visible on the Perplexity surface.',
-      setup_url: SEARCHAPI_SETUP_URL,
-    },
-    credential: {
-      env_var: 'SEARCHAPI_API_KEY',
-      required: true,
-      auto_enable: false,
-    },
-    profiles: [
-      surfaceProfile({
-        selection_order: 420,
-        operator_id: 'perplexity',
-        surface_id: 'perplexity',
       }),
     ],
   },

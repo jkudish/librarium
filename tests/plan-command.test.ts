@@ -14,6 +14,7 @@ import {
   type PlanOptions,
 } from '../src/commands/plan.js';
 import { prepareRunRequest } from '../src/commands/run-request.js';
+import { loadConfig } from '../src/core/config.js';
 import { fingerprint, RunPaidWallet } from '../src/run-paid-wallet.js';
 import type { Config } from '../src/types.js';
 
@@ -93,6 +94,62 @@ afterEach(() => {
 });
 
 describe('plan command', () => {
+  it('shows the xAI per-profile inline deadline unless a timeout is explicit', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'librarium-plan-deadline-'));
+    roots.push(root);
+    const path = join(root, 'config.json');
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        defaults: { outputDir: join(root, 'runs') },
+        providers: { grok: { enabled: true }, exa: { enabled: true } },
+        groups: {},
+      }),
+    );
+    const env = { XAI_API_KEY: 'synthetic', EXA_API_KEY: 'synthetic' };
+    const run = async (options: Partial<PlanOptions>) => {
+      const output = capture();
+      const receipt = await executePlan(
+        'deadline plan',
+        { providers: ['grok', 'exa'], fallback: false, ...options },
+        {
+          ...deps(loadConfig(path), env),
+          cwd: root,
+          stdout: output.stdout,
+          stderr: output.stderr,
+        },
+      );
+      return { receipt, stdout: output.output().stdout };
+    };
+
+    const { receipt } = await run({ json: true });
+    expect(
+      receipt?.primary_profiles.map((profile) => [
+        `${profile.provider_id}/${profile.profile_id}`,
+        'inline_attempt_deadline_ms' in profile
+          ? profile.inline_attempt_deadline_ms
+          : undefined,
+      ]),
+    ).toEqual([
+      ['grok/web', 120_000],
+      ['exa/search', undefined],
+    ]);
+    expect(receipt?.effective_settings.limits.value).toMatchObject({
+      inline_attempt_deadline_ms: 30_000,
+    });
+
+    const human = await run({});
+    expect(human.stdout).toContain(
+      'grok/web (model grok-4.6) · estimate unknown · 2m per call',
+    );
+    expect(human.stdout).not.toMatch(/exa\/search[^\n]*per call/);
+
+    const explicit = await run({ timeout: 45 });
+    expect(explicit.stdout).not.toContain('per call');
+    expect(explicit.stdout).toContain('45s per inline call');
+  });
+
   it('renders a sanitized versioned research plan without network or artifacts', async () => {
     const root = mkdtempSync(join(tmpdir(), 'librarium-plan-'));
     roots.push(root);

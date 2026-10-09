@@ -100,7 +100,6 @@ describe('metering registry: estimates', () => {
     'searchapi',
     'searchapi-chatgpt',
     'searchapi-gemini',
-    'searchapi-perplexity',
     'searchapi-google-ai-mode',
     'searchapi-bing-copilot',
     'serpapi',
@@ -110,6 +109,13 @@ describe('metering registry: estimates', () => {
     'you-answer',
   ])('keeps %s at one logical request unit', (providerId) => {
     expect(estimateMetering(providerId)?.billableUnits).toBe(1);
+  });
+
+  it('has no per-request baseline for X Search profiles but keeps web-only Grok priced', () => {
+    // X Search bills per post and profile fetched with no bounding control.
+    expect(estimateMetering('grok-x-only')).toBeUndefined();
+    expect(estimateMetering('grok-combined')).toBeUndefined();
+    expect(estimateMetering('grok')?.estimatedCostUsd).toBe(0.015);
   });
 
   it('emits units WITHOUT a default USD figure for credit-priced providers', () => {

@@ -114,6 +114,13 @@ function validateConfiguredModel(
       'Valyu research presets must be selected with the mode option.',
     );
   }
+  // You.com research_effort is the priced preset; the adapter sends no model.
+  if (adapterId === 'you-research-background') {
+    throw new TargetSelectionError(
+      'config_model_not_configurable',
+      'You.com research effort must be selected with the researchEffort option.',
+    );
+  }
 
   const target = profile.identity.target;
   const slot =
@@ -396,6 +403,31 @@ function valyuResearchProjection(
   };
 }
 
+/** You.com research_effort is the exact priced tier the adapter sends. */
+function youResearchEffortProjection(
+  profile: ExecutionProfile,
+  options: Record<string, unknown>,
+): ExecutionProfile {
+  const effort =
+    typeof options.researchEffort === 'string'
+      ? options.researchEffort
+      : 'standard';
+  return {
+    ...profile,
+    identity: {
+      ...profile.identity,
+      target: {
+        ...profile.identity.target,
+        primary: {
+          model_selection: 'configurable',
+          kind: 'preset',
+          target_id: effort,
+        },
+      },
+    },
+  };
+}
+
 /**
  * Every implemented declaration appears here exactly once. Missing, duplicate,
  * and orphan bindings all fail deterministically at catalog construction.
@@ -473,6 +505,7 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     provider_id: 'you-research',
     profile_id: 'research',
     adapter_id: 'you-research-background',
+    project: youResearchEffortProjection,
   },
   {
     provider_id: 'you-answer',
@@ -545,11 +578,6 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     provider_id: 'searchapi-gemini',
     profile_id: 'surface',
     adapter_id: 'searchapi-gemini',
-  },
-  {
-    provider_id: 'searchapi-perplexity',
-    profile_id: 'surface',
-    adapter_id: 'searchapi-perplexity',
   },
   {
     provider_id: 'searchapi-google-ai-mode',

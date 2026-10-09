@@ -96,16 +96,29 @@ function snapshot(
 }
 
 describe('pricing snapshot validation', () => {
-  it('covers every implemented built-in profile exactly once', () => {
+  it('covers every implemented built-in profile and no retired profile', () => {
     const bound = BUILTIN_PROFILE_BINDING_SPECS.map(
       ({ provider_id, profile_id }) => `${provider_id}/${profile_id}`,
     ).sort();
-    const priced = BUILTIN_PRICING_SNAPSHOT.definitions
-      .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
-      .sort();
+    const priced = [
+      ...new Set(
+        BUILTIN_PRICING_SNAPSHOT.definitions.map(
+          ({ provider_id, profile_id }) => `${provider_id}/${profile_id}`,
+        ),
+      ),
+    ].sort();
 
     expect(priced).toEqual(bound);
-    expect(new Set(priced).size).toBe(41);
+    expect(priced).toHaveLength(40);
+    expect(priced).not.toContain('searchapi-perplexity/surface');
+    // Only You.com research has more than one definition: one per effort tier.
+    const repeated = BUILTIN_PRICING_SNAPSHOT.definitions
+      .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
+      .filter((key, index, all) => all.indexOf(key) !== index);
+    expect(new Set(repeated)).toEqual(new Set(['you-research/research']));
+    expect(
+      new Set(BUILTIN_PRICING_SNAPSHOT.definitions.map(({ id }) => id)).size,
+    ).toBe(BUILTIN_PRICING_SNAPSHOT.definitions.length);
     expect(
       BUILTIN_PRICING_SNAPSHOT.definitions.every((entry) =>
         ['complete', 'partial', 'unavailable'].includes(entry.completeness),
@@ -113,51 +126,147 @@ describe('pricing snapshot validation', () => {
     ).toBe(true);
   });
 
-  it('pins every shipping Grok identity and exact official rate without drift', () => {
-    const shippingProfiles = [
-      ['grok', 'web'],
-      ['grok-x-only', 'x'],
-      ['grok-combined', 'combined'],
-    ] as const;
-    const expectedRates = [
+  it('pins the web-only Grok identity and exact official rate without drift', () => {
+    const catalog = BUILTIN_PROVIDER_CATALOG.find(
+      ({ provider_id }) => provider_id === 'grok',
+    );
+    const descriptor = BUILTIN_PROVIDER_DESCRIPTORS.find(
+      ({ id }) => id === 'grok',
+    );
+    const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+      (entry) => entry.provider_id === 'grok' && entry.profile_id === 'web',
+    );
+
+    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
+    expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.6');
+    expect(descriptor?.defaultModel).toBe('grok-4.6');
+    expect(pricing).toMatchObject({
+      id: 'grok.web.grok-4.6',
+      completeness: 'complete',
+      effective_target: { kind: 'model', target_id: 'grok-4.6' },
+      provenance: {
+        source_class: 'frozen_official_snapshot',
+        source_reference: 'official:docs.x.ai/developers/pricing',
+        retrieved_at: '2026-10-09T00:00:00.000Z',
+      },
+    });
+    expect(
+      pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
+        unit,
+        amount_decimal,
+        per_decimal,
+      ]),
+    ).toEqual([
       ['uncached_input_tokens', '2', '1000000'],
       ['output_tokens', '6', '1000000'],
       ['reasoning_tokens', '6', '1000000'],
       ['cache_read_tokens', '0.5', '1000000'],
       ['searches', '5', '1000'],
-    ];
+    ]);
+  });
 
-    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
-    for (const [providerId, profileId] of shippingProfiles) {
-      const catalog = BUILTIN_PROVIDER_CATALOG.find(
-        ({ provider_id }) => provider_id === providerId,
-      );
-      const descriptor = BUILTIN_PROVIDER_DESCRIPTORS.find(
-        ({ id }) => id === providerId,
-      );
+  it.each([
+    ['grok-x-only', 'x'],
+    ['grok-combined', 'combined'],
+  ] as const)(
+    'makes %s unpriceable because X Search bills per item fetched',
+    (providerId, profileId) => {
       const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
         (entry) =>
           entry.provider_id === providerId && entry.profile_id === profileId,
       );
-
-      expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.6');
-      expect(descriptor?.defaultModel).toBe('grok-4.6');
       expect(pricing).toMatchObject({
         id: `${providerId}.${profileId}.grok-4.6`,
+        completeness: 'unavailable',
+        confidence: 'unknown',
         effective_target: { kind: 'model', target_id: 'grok-4.6' },
+        rates: [],
         provenance: {
-          source_class: 'frozen_official_snapshot',
           source_reference: 'official:docs.x.ai/developers/pricing',
+          retrieved_at: '2026-10-09T00:00:00.000Z',
         },
       });
-      expect(
-        pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
-          unit,
-          amount_decimal,
-          per_decimal,
-        ]),
-      ).toEqual(expectedRates);
-    }
+      expect(pricing?.missing_units).toEqual(
+        expect.arrayContaining(['xai:x_posts', 'xai:x_profiles']),
+      );
+      expect(pricing?.unknown_reason).toMatch(/per post and profile fetched/);
+
+      const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+        requested_identity: {
+          provider_id: providerId,
+          profile_id: profileId,
+          target: {
+            primary: {
+              model_selection: 'configurable',
+              kind: 'model',
+              target_id: 'grok-4.6',
+            },
+          },
+        },
+      });
+      expect(quote.status).toBe('unavailable');
+      expect(budgetEstimateFromQuote(quote)).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ['lite', '12000'],
+    ['standard', '50000'],
+    ['deep', '100000'],
+    ['exhaustive', '450000'],
+    ['frontier', '1200000'],
+  ])(
+    'prices You.com research effort %s from the official per-tier rate',
+    (effort, microusd) => {
+      const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+        (entry) =>
+          entry.provider_id === 'you-research' &&
+          entry.profile_id === 'research' &&
+          entry.effective_target?.target_id === effort,
+      );
+      expect(pricing).toMatchObject({
+        id: `you-research.research.${effort}`,
+        completeness: 'complete',
+        effective_target: { kind: 'preset', target_id: effort },
+        provenance: {
+          source_reference: 'official:you.com/pricing',
+          retrieved_at: '2026-10-09T00:00:00.000Z',
+        },
+      });
+      const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+        requested_identity: {
+          provider_id: 'you-research',
+          profile_id: 'research',
+          target: {
+            primary: {
+              model_selection: 'configurable',
+              kind: 'preset',
+              target_id: effort,
+            },
+          },
+        },
+      });
+      expect(budgetEstimateFromQuote(quote)?.estimated_cost_microusd).toBe(
+        microusd,
+      );
+    },
+  );
+
+  it('does not invent a You.com research price for an unknown effort tier', () => {
+    const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+      requested_identity: {
+        provider_id: 'you-research',
+        profile_id: 'research',
+        target: {
+          primary: {
+            model_selection: 'configurable',
+            kind: 'preset',
+            target_id: 'ultra',
+          },
+        },
+      },
+    });
+    expect(budgetEstimateFromQuote(quote)).toBeUndefined();
   });
 
   it.each(['-1', 'NaN', 'Infinity', '1e309', '', '1.'.padEnd(130, '0')])(
@@ -377,10 +486,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:81799cecd440f70b2e891b56cb8fa4e0f1014daeb87a750cda6746512df7e5fe',
+      'sha256:b078131a73f2cd0a7dcc3d38e429d2ad5fef996858d8a7726611adeaf514d033',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:81799cecd440f70b2e891b56cb8fa4e0f1014daeb87a750cda6746512df7e5fe',
+      'sha256:b078131a73f2cd0a7dcc3d38e429d2ad5fef996858d8a7726611adeaf514d033',
     );
     expect(
       `sha256:${createHash('sha256')

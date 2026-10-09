@@ -16,7 +16,6 @@ const LLM_PROVIDERS = [
 const NEW_OPT_IN_PROVIDERS = [
   'searchapi-chatgpt',
   'searchapi-gemini',
-  'searchapi-perplexity',
   'searchapi-google-ai-mode',
   'searchapi-bing-copilot',
   'searchapi-google-ai-overview',
