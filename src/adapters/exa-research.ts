@@ -190,7 +190,7 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
         taskId: id.data,
         query,
         submittedAt: Date.now(),
-        status: 'failed',
+        status: 'pending',
         providerStatus: 'invalid_response',
         lastPollError: 'Exa Agent returned a malformed create response',
       };
@@ -210,37 +210,17 @@ export class ExaResearchProvider extends BackgroundBaseProvider {
   async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
     const response = await this.run(handle.taskId, 15_000);
     if (response.status !== 200) {
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      )
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      return {
-        status: 'failed',
-        rawStatus: `http_${response.status}`,
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
     const parsed = ExaRun.safeParse(response.data);
     if (!parsed.success)
-      return {
-        status: 'failed',
-        rawStatus: 'invalid_response',
-        message: 'Exa Agent returned a malformed status response',
-      };
+      throw new Error('Exa Agent returned a malformed status response');
     const status = statuses[parsed.data.status];
-    return status
-      ? {
-          status,
-          rawStatus: parsed.data.status,
-          message: parsed.data.error?.message,
-        }
-      : {
-          status: 'failed',
-          rawStatus: 'invalid_status',
-          message: 'Unknown Exa Agent status',
-        };
+    return {
+      status,
+      rawStatus: parsed.data.status,
+      message: parsed.data.error?.message,
+    };
   }
 
   async retrieve(handle: AsyncTaskHandle): Promise<ProviderResult> {

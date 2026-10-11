@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, readFileSync } from 'node:fs';
-import { arch, platform } from 'node:os';
+import {
+  accessSync,
+  constants,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
+import { arch, platform, tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -62,4 +68,25 @@ if (version !== pkg.version) {
   throw new Error(`Expected SEA version ${pkg.version}, received ${version}`);
 }
 
-console.log(`Verified ${binary}: --help and --version (${version})`);
+const home = mkdtempSync(join(tmpdir(), 'librarium-sea-skill-'));
+try {
+  execFileSync(executable, ['install-skill'], {
+    cwd: home,
+    env: { HOME: home, USERPROFILE: home, PATH: pathWithoutNode },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 15_000,
+  });
+  const installed = readFileSync(
+    join(home, '.claude/skills/librarium/SKILL.md'),
+    'utf8',
+  );
+  if (installed !== readFileSync('SKILL.md', 'utf8')) {
+    throw new Error('SEA installed skill differs from the build source');
+  }
+} finally {
+  rmSync(home, { recursive: true, force: true });
+}
+
+console.log(
+  `Verified ${binary}: --help, --version (${version}), and exact bundled skill install`,
+);

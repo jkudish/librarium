@@ -104,9 +104,11 @@ describe('CLI integration', () => {
       }),
     );
 
-    const migrated = JSON.parse(
+    const receipt = JSON.parse(
       run(`config migrate --from ${source} --output ${destination}`),
     );
+    expect(receipt.version).toBe(2);
+    const migrated = JSON.parse(readFileSync(destination, 'utf8'));
     expect(migrated.version).toBe(2);
     expect(JSON.parse(readFileSync(destination, 'utf8')).version).toBe(2);
     expect(statSync(destination).mode & 0o777).toBe(0o600);
@@ -133,17 +135,13 @@ describe('CLI integration', () => {
     expect(preflight).toContain('profile_disabled');
   });
 
-  it('groups shows default group names', () => {
+  it('groups shows only canonical built-in workflow names by default', () => {
     const output = run('groups');
-    for (const group of [
-      'deep',
-      'quick',
-      'raw',
-      'visibility',
-      'comprehensive',
-      'all',
-    ]) {
-      expect(output).toContain(group);
+    for (const group of ['quick', 'deep', 'visibility', 'all']) {
+      expect(output).toContain(`  ${group}\n`);
+    }
+    for (const removed of ['raw', 'fast', 'llm', 'comprehensive']) {
+      expect(output).not.toContain(`  ${removed}\n`);
     }
   });
 

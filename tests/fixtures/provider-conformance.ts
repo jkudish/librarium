@@ -165,10 +165,6 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     evidence: ['tests/adapters/searchapi-answer-engines.test.ts'],
     lanes: [...grounded, 'options'],
   },
-  'searchapi-perplexity/surface': {
-    evidence: ['tests/adapters/searchapi-answer-engines.test.ts'],
-    lanes: [...grounded, 'options'],
-  },
   'searchapi-google-ai-mode/surface': {
     evidence: ['tests/adapters/searchapi-ai.test.ts'],
     lanes: [...grounded, 'options'],

@@ -186,4 +186,27 @@ describe('upgrade command', () => {
     ]);
     expect(process.exitCode).toBeUndefined();
   });
+
+  it('fails actionably when a standalone binary cannot self-upgrade', async () => {
+    const program = command();
+    const runCommand = vi.fn();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    registerUpgradeCommand(program, {
+      current_version: '2.0.0-rc.1',
+      detect_install_method: () => 'sea-standalone',
+      fetch_latest_version: () => '2.0.0-rc.2',
+      run_command: runCommand,
+    });
+
+    await program.parseAsync(['node', 'test', 'upgrade']);
+
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh',
+      ),
+    );
+    expect(process.exitCode).toBe(1);
+  });
 });

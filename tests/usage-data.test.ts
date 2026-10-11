@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { aggregateUsage } from '../src/commands/usage-data.js';
-import type { ProviderReport, RunManifest } from '../src/types.js';
+import { runCanonicalPreparedExecution } from '../src/node-canonical-run.js';
+import type { Provider, ProviderReport, RunManifest } from '../src/types.js';
+import {
+  canonicalFixtureBridge,
+  canonicalFixtureCoordinator,
+  canonicalFixturePrepared,
+  canonicalFixtureProfile,
+  canonicalFixtureResult,
+} from './fixtures/canonical-run.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -63,13 +71,14 @@ describe('aggregateUsage', () => {
     rmSync(baseDir, { recursive: true, force: true });
   });
 
-  it('returns zeroed totals for a missing or empty base dir', () => {
+  it('returns empty totals with unknown cost for a missing or empty base dir', () => {
     expect(aggregateUsage(join(baseDir, 'nope'))).toEqual({
       runCount: 0,
       runsWithoutUsage: 0,
-      totalCostUsd: 0,
+      totalCostUsd: null,
       runsWithCost: 0,
-      totalEstimatedCostUsd: 0,
+      totalEstimatedCostUsd: null,
+      unknownCostResults: 0,
       providers: [],
       range: null,
     });
@@ -115,6 +124,16 @@ describe('aggregateUsage', () => {
     expect(agg.runCount).toBe(3);
     expect(agg.runsWithoutUsage).toBe(2);
     expect(agg.runsWithCost).toBe(1);
+    // A result without usage still ran: it is listed with unknown cost.
+    expect(agg.unknownCostResults).toBe(2);
+    expect(agg.providers.find((p) => p.provider === 'brave-search')).toEqual(
+      expect.objectContaining({
+        costUsd: null,
+        estimatedCostUsd: null,
+        unknownCostRuns: 2,
+        runCount: 2,
+      }),
+    );
   });
 
   it('filters by --days using the manifest timestamp', () => {
@@ -165,6 +184,55 @@ describe('aggregateUsage', () => {
       provider: 'exa',
       totalTokens: 10,
     });
+  });
+
+  it('discovers canonical v3 usage once and ignores derived sidecars', async () => {
+    const dir = join(baseDir, 'canonical-v3');
+    mkdirSync(dir);
+    const profile = canonicalFixtureProfile('usage');
+    const provider: Provider = {
+      id: 'adapter-usage',
+      displayName: 'Usage fixture',
+      tier: 'ai-grounded',
+      envVar: '',
+      execution: 'inline',
+      execute: async () => ({
+        ...canonicalFixtureResult('adapter-usage'),
+        usage: {
+          costUsd: 0.42,
+          inputTokens: 10,
+          outputTokens: 5,
+        },
+      }),
+    };
+    await runCanonicalPreparedExecution(canonicalFixturePrepared([profile]), {
+      runs_root: baseDir,
+      run_directory: dir,
+      coordinator: canonicalFixtureCoordinator(),
+      attempt_bridge: canonicalFixtureBridge([profile], {
+        'adapter-usage': provider,
+      }),
+    });
+    writeFileSync(
+      join(dir, 'adapter-usage.meta.json'),
+      JSON.stringify({
+        usage: { costUsd: 999, totalTokens: 999_999 },
+      }),
+    );
+
+    const aggregate = aggregateUsage(baseDir);
+    expect(aggregate.runCount).toBe(1);
+    expect(aggregate.totalCostUsd).toBeCloseTo(0.42);
+    expect(aggregate.providers).toEqual([
+      expect.objectContaining({
+        provider: 'adapter-usage',
+        costUsd: 0.42,
+        inputTokens: 10,
+        outputTokens: 5,
+        totalTokens: 15,
+        runCount: 1,
+      }),
+    ]);
   });
 
   it('aggregates estimated cost separately from reported cost', () => {
@@ -231,7 +299,7 @@ describe('aggregateUsage', () => {
     writeManifest(baseDir, nowSec, [report('exa', { costUsd: 0.02 }), skipped]);
 
     const agg = aggregateUsage(baseDir);
-    expect(agg.totalEstimatedCostUsd).toBe(0);
+    expect(agg.totalEstimatedCostUsd).toBeNull();
     expect(agg.providers.find((p) => p.provider === 'serpapi')).toBeUndefined();
   });
 });

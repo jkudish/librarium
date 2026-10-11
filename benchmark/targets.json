@@ -83,17 +83,15 @@
       "id": "grok-x-only",
       "tier": "ai-grounded",
       "envVar": "XAI_API_KEY",
-      "estimatedCostUsd": 0.015,
-      "costConfidence": "estimated",
-      "pricingVersion": "2026-08"
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
     },
     {
       "id": "grok-combined",
       "tier": "ai-grounded",
       "envVar": "XAI_API_KEY",
-      "estimatedCostUsd": 0.025,
-      "costConfidence": "estimated",
-      "pricingVersion": "2026-08"
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
     },
     {
       "id": "openrouter-online",
@@ -187,14 +185,6 @@
     },
     {
       "id": "searchapi-gemini",
-      "tier": "ai-grounded",
-      "envVar": "SEARCHAPI_API_KEY",
-      "estimatedCostUsd": 0.004,
-      "costConfidence": "estimated",
-      "pricingVersion": "2026-08"
-    },
-    {
-      "id": "searchapi-perplexity",
       "tier": "ai-grounded",
       "envVar": "SEARCHAPI_API_KEY",
       "estimatedCostUsd": 0.004,
@@ -338,7 +328,6 @@
     "visibility": [
       "searchapi-chatgpt",
       "searchapi-gemini",
-      "searchapi-perplexity",
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
@@ -366,7 +355,6 @@
       "kagi-fastgpt",
       "searchapi-chatgpt",
       "searchapi-gemini",
-      "searchapi-perplexity",
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview"
@@ -402,7 +390,6 @@
       "valyu-search",
       "searchapi-chatgpt",
       "searchapi-gemini",
-      "searchapi-perplexity",
       "searchapi-google-ai-mode",
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",

@@ -96,12 +96,88 @@ export const ParallelSearchOptionsSchema = ParallelSearchControlsSchema.extend({
 /** Turbo locks Search API `mode` to `turbo`; callers cannot override it. */
 export const ParallelTurboOptionsSchema = ParallelSearchControlsSchema;
 
+/**
+ * Every Task API processor Parallel lists, cheapest first
+ * (https://docs.parallel.ai/task-api/guides/choose-a-processor, accessed
+ * 2026-10-11). The delisted `pro-fast` and `ultra-fast` are not accepted.
+ */
+export const PARALLEL_RESEARCH_PROCESSORS = [
+  'lite',
+  'base',
+  'core',
+  'core2x',
+  'pro',
+  'ultra',
+  'ultra2x',
+  'ultra4x',
+  'ultra8x',
+] as const;
+
+export const DEFAULT_PARALLEL_RESEARCH_PROCESSOR = 'pro';
+
+const pathSegment = /^[^\s/?#:]+$/;
+
+/**
+ * Task API source policies also accept domain/path prefixes such as
+ * `docs.python.org/3`. Hosts are case-insensitive; paths are not.
+ */
+const domainOrPathPrefix = z
+  .string()
+  .trim()
+  .min(2)
+  .max(253)
+  .transform((value) => value.replace(/\/+$/, ''))
+  .refine((value) => {
+    const [host = '', ...segments] = value.split('/');
+    return (
+      (hostname.test(host) || bareExtension.test(host)) &&
+      segments.every(
+        (segment) =>
+          pathSegment.test(segment) && segment !== '.' && segment !== '..',
+      )
+    );
+  }, 'must be a plain domain, domain/path prefix, or bare extension (for example, example.com, docs.python.org/3, or .edu)')
+  .transform((value) => {
+    const slash = value.indexOf('/');
+    return slash < 0
+      ? value.toLowerCase()
+      : `${value.slice(0, slash).toLowerCase()}${value.slice(slash)}`;
+  });
+
+/** A JSON Schema object for structured output; Parallel supports a subset. */
+const jsonSchemaObject = z
+  .record(z.string(), z.unknown())
+  .refine(
+    (schema) => Object.keys(schema).length > 0,
+    'must be a non-empty JSON Schema object',
+  );
+
+const metadata = z
+  .record(
+    z.string().min(1).max(16),
+    z.union([z.string().max(512), z.number().finite(), z.boolean()]),
+  )
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    'must contain at least one key',
+  );
+
 export const ParallelResearchOptionsSchema = z
   .object({
-    processor: z.enum(['pro', 'pro-fast', 'ultra', 'ultra-fast']).optional(),
-    includeDomains: z.array(domain).min(1).max(200).optional(),
-    excludeDomains: z.array(domain).min(1).max(200).optional(),
+    processor: z.enum(PARALLEL_RESEARCH_PROCESSORS).optional(),
+    includeDomains: z.array(domainOrPathPrefix).min(1).max(200).optional(),
+    excludeDomains: z.array(domainOrPathPrefix).min(1).max(200).optional(),
+    afterDate: date.optional(),
     location: location.optional(),
+    /** A text description of the report, or a JSON Schema for JSON output. */
+    outputSchema: z
+      .union([z.string().trim().min(1), jsonSchemaObject])
+      .optional(),
+    metadata: metadata.optional(),
+    memoryScopeKey: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,128}$/, 'must be 1-128 of [A-Za-z0-9_-]')
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

@@ -95,6 +95,13 @@ function citationLabel(report: ProviderReport, color = false): string {
   return `${String(report.citationCount).padStart(3)} ${noun}`;
 }
 
+/** Quote a path for a copy-pasteable POSIX shell hint. */
+function shellQuote(value: string): string {
+  return /^[\w@%+=:,./~-]+$/.test(value)
+    ? value
+    : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function compactError(error: string | undefined, maxLength = 80): string {
   const flat = (error ?? 'unknown error').replace(/\s+/g, ' ').trim();
   return flat.length > maxLength ? `${flat.slice(0, maxLength - 1)}…` : flat;
@@ -136,7 +143,10 @@ export function formatProviderLine(
     }
     case 'async-pending': {
       const glyph = paint('◷', ANSI.yellow, color);
-      return `  ${glyph} ${id}   ${tier}   ${paint('submitted', ANSI.yellow, color)}`;
+      // A pending report with an error is a submission of unknown outcome,
+      // not an accepted task; say so instead of "submitted".
+      const label = report.error ? compactError(report.error) : 'submitted';
+      return `  ${glyph} ${id}   ${tier}   ${paint(label, ANSI.yellow, color)}`;
     }
     case 'skipped': {
       const glyph = paint('-', ANSI.dim, color);
@@ -311,6 +321,11 @@ export interface RunSummaryInput {
   uniqueSources: number;
   totalCitations: number;
   outputDir: string;
+  /**
+   * Output base passed with -o. The pending hint repeats it so `status` scans
+   * the same base instead of the configured default.
+   */
+  outputBase?: string;
   color: boolean;
   home?: string;
   /** Wall-clock duration of the whole dispatch, in milliseconds. */
@@ -400,7 +415,11 @@ export function formatRunSummary(input: RunSummaryInput): string[] {
     lines.push('');
     lines.push(
       paint(
-        '  ◷ async tasks pending: run `librarium status --wait` to poll and retrieve',
+        `  ◷ async tasks pending: run \`librarium status --wait${
+          input.outputBase === undefined
+            ? ''
+            : ` -o ${shellQuote(input.outputBase)}`
+        }\` to poll and retrieve`,
         ANSI.yellow,
         input.color,
       ),

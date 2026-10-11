@@ -19,6 +19,15 @@
       "enforcement": "structural"
     },
     {
+      "id": "php-audit-usage-specialized-corpus",
+      "path": "fixtures/valid/php-audit-usage-specialized-corpus.json",
+      "valid": true,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
       "id": "json-object-success",
       "path": "fixtures/valid/json-object-success.json",
       "valid": true,
@@ -419,6 +428,15 @@
     {
       "id": "usage-negative",
       "path": "fixtures/invalid/usage-negative.json",
+      "valid": false,
+      "area": "interchange",
+      "schema_path": "schema/interchange.schema.json",
+      "schema_ref": "#/$defs/research_response",
+      "enforcement": "structural"
+    },
+    {
+      "id": "usage-negative-tool-use-tokens",
+      "path": "fixtures/invalid/usage-negative-tool-use-tokens.json",
       "valid": false,
       "area": "interchange",
       "schema_path": "schema/interchange.schema.json",

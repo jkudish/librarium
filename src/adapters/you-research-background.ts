@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import {
+  diagnosticForSubmissionError,
+  diagnosticForSubmissionHttpStatus,
+  UnsafeToRetrySubmissionError,
+} from '../core/errors.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -58,6 +62,8 @@ const YouTask = z.object({
     .nullable(),
 });
 const URL = 'https://api.you.com/v1/research';
+const SUBMISSION_FAILED =
+  'You.com submission failed before a valid research handle was returned.';
 const statuses: Record<string, AsyncTaskHandle['status']> = {
   queued: 'pending',
   running: 'running',
@@ -125,7 +131,8 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
       );
     }
     if (
@@ -134,7 +141,8 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
       response.status !== 202
     )
       throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+        SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     const parsed = YouSubmit.safeParse(response.data);
     if (!parsed.success) {
@@ -143,14 +151,15 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
       );
       if (!id.success)
         throw new UnsafeToRetrySubmissionError(
-          'You.com returned an invalid research handle',
+          SUBMISSION_FAILED,
+          diagnosticForSubmissionHttpStatus(response.status),
         );
       return {
         provider: this.id,
         taskId: id.data,
         query,
         submittedAt: Date.now(),
-        status: 'failed',
+        status: 'pending',
         providerStatus: 'invalid_response',
         lastPollError: 'You.com returned a malformed create response',
       };
@@ -167,37 +176,17 @@ export class YouResearchBackgroundProvider extends BackgroundBaseProvider {
   async poll(handle: AsyncTaskHandle): Promise<AsyncPollResult> {
     const response = await this.task(handle.taskId, 15_000);
     if (response.status !== 200) {
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      )
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      return {
-        status: 'failed',
-        rawStatus: `http_${response.status}`,
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
     const parsed = YouTask.safeParse(response.data);
     if (!parsed.success)
-      return {
-        status: 'failed',
-        rawStatus: 'invalid_response',
-        message: 'You.com returned a malformed status response',
-      };
+      throw new Error('You.com returned a malformed status response');
     const status = statuses[parsed.data.status];
-    return status
-      ? {
-          status,
-          rawStatus: parsed.data.status,
-          message: parsed.data.error ?? undefined,
-        }
-      : {
-          status: 'failed',
-          rawStatus: 'invalid_status',
-          message: 'Unknown You.com status',
-        };
+    return {
+      status,
+      rawStatus: parsed.data.status,
+      message: parsed.data.error ?? undefined,
+    };
   }
   async retrieve(handle: AsyncTaskHandle): Promise<ProviderResult> {
     const start = performance.now();

@@ -50,6 +50,8 @@ vi.mock('@clack/prompts', () => ({
 
 vi.mock('../src/core/config.js', () => ({
   configGroupProvenance: () => ({ global: config.groups, project: {} }),
+  configInlineAttemptDeadlineAuthored: () => true,
+  configBackgroundAttemptDeadlineAuthored: () => true,
   loadConfig: () => config,
   loadProjectConfig: () => null,
   mergeConfigs: () => config,

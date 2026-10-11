@@ -3,9 +3,9 @@ import type {
   ProviderOptions,
   ProviderResult,
   ProviderTier,
-  ProviderUsage,
 } from '../types.js';
 import { BaseProvider, type BaseProviderOptions } from './base.js';
+import { type GeminiUsageMetadata, geminiUsage } from './gemini-usage.js';
 
 interface GeminiChatPart {
   text?: string;
@@ -21,6 +21,7 @@ interface GeminiChatCandidate {
 }
 
 interface GeminiGroundingMetadata {
+  webSearchQueries?: unknown;
   groundingChunks?: GeminiGroundingChunk[];
   groundingSupports?: GeminiGroundingSupport[];
 }
@@ -44,16 +45,10 @@ interface GeminiChatPromptFeedback {
   blockReasonMessage?: string;
 }
 
-interface GeminiChatUsageMetadata {
-  promptTokenCount?: number;
-  candidatesTokenCount?: number;
-  totalTokenCount?: number;
-}
-
 interface GeminiChatResponse {
   candidates?: GeminiChatCandidate[];
   promptFeedback?: GeminiChatPromptFeedback;
-  usageMetadata?: GeminiChatUsageMetadata;
+  usageMetadata?: GeminiUsageMetadata;
   modelVersion?: string;
   error?: {
     message?: string;
@@ -66,7 +61,7 @@ export interface GeminiChatProviderOptions extends BaseProviderOptions {
   webSearch?: boolean;
 }
 
-const DEFAULT_GEMINI_CHAT_MODEL = 'gemini-3.6-flash';
+const DEFAULT_GEMINI_CHAT_MODEL = 'gemini-3.8-flash';
 
 /**
  * Gemini LLM provider.
@@ -191,7 +186,10 @@ export class GeminiChatProvider extends BaseProvider {
           input: data.usageMetadata?.promptTokenCount,
           output: data.usageMetadata?.candidatesTokenCount,
         },
-        usage: this.extractUsage(data.usageMetadata),
+        usage: geminiUsage(
+          data.usageMetadata,
+          candidate?.groundingMetadata?.webSearchQueries,
+        ),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -210,18 +208,6 @@ export class GeminiChatProvider extends BaseProvider {
     const result = await this.execute('ping', { timeout: 10 });
     if (!result.error) return { ok: true };
     return { ok: false, error: result.error };
-  }
-
-  private extractUsage(
-    metadata?: GeminiChatUsageMetadata,
-  ): ProviderUsage | undefined {
-    if (!metadata) return undefined;
-    return {
-      inputTokens: metadata.promptTokenCount,
-      outputTokens: metadata.candidatesTokenCount,
-      totalTokens: metadata.totalTokenCount,
-      raw: metadata,
-    };
   }
 
   private extractCitations(candidate?: GeminiChatCandidate): Citation[] {

@@ -1,0 +1,15 @@
+{
+  "search_metadata": { "id": "search_synthetic_none", "status": "Success" },
+  "search_parameters": {
+    "engine": "google",
+    "q": "synthetic query without an overview"
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "Synthetic result",
+      "link": "https://www.example.com/",
+      "snippet": "Organic results are never used as an overview."
+    }
+  ]
+}

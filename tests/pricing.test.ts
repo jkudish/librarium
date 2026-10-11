@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GROK_MODEL } from '../src/adapters/grok-responses.js';
 import { BUILTIN_PROVIDER_DESCRIPTORS } from '../src/adapters/provider-descriptors.js';
 import type { ProviderIdentity } from '../src/contracts/domain/index.js';
@@ -8,8 +8,11 @@ import {
   assertPricingSnapshotFresh,
   budgetEstimateFromQuote,
   type PriceDefinitionInput,
+  type PriceRate,
+  type PriceRateWindow,
   PricingCatalog,
   PricingCatalogError,
+  type PricingLookup,
   type PricingSnapshotInput,
   priceDefinitionFingerprint,
   pricingSnapshotFingerprint,
@@ -96,16 +99,32 @@ function snapshot(
 }
 
 describe('pricing snapshot validation', () => {
-  it('covers every implemented built-in profile exactly once', () => {
+  it('covers every implemented built-in profile and no retired profile', () => {
     const bound = BUILTIN_PROFILE_BINDING_SPECS.map(
       ({ provider_id, profile_id }) => `${provider_id}/${profile_id}`,
     ).sort();
-    const priced = BUILTIN_PRICING_SNAPSHOT.definitions
-      .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
-      .sort();
+    const priced = [
+      ...new Set(
+        BUILTIN_PRICING_SNAPSHOT.definitions.map(
+          ({ provider_id, profile_id }) => `${provider_id}/${profile_id}`,
+        ),
+      ),
+    ].sort();
 
     expect(priced).toEqual(bound);
-    expect(new Set(priced).size).toBe(41);
+    expect(priced).toHaveLength(40);
+    expect(priced).not.toContain('searchapi-perplexity/surface');
+    // Only tiered research profiles have more than one definition: one per
+    // You.com effort, Parallel processor, or Valyu mode.
+    const repeated = BUILTIN_PRICING_SNAPSHOT.definitions
+      .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
+      .filter((key, index, all) => all.indexOf(key) !== index);
+    expect(new Set(repeated)).toEqual(
+      new Set(['you-research/research', 'parallel/research', 'valyu/research']),
+    );
+    expect(
+      new Set(BUILTIN_PRICING_SNAPSHOT.definitions.map(({ id }) => id)).size,
+    ).toBe(BUILTIN_PRICING_SNAPSHOT.definitions.length);
     expect(
       BUILTIN_PRICING_SNAPSHOT.definitions.every((entry) =>
         ['complete', 'partial', 'unavailable'].includes(entry.completeness),
@@ -113,51 +132,311 @@ describe('pricing snapshot validation', () => {
     ).toBe(true);
   });
 
-  it('pins every shipping Grok identity and exact official rate without drift', () => {
-    const shippingProfiles = [
-      ['grok', 'web'],
-      ['grok-x-only', 'x'],
-      ['grok-combined', 'combined'],
-    ] as const;
-    const expectedRates = [
+  it('prices the exact default target of every model-default profile', () => {
+    const defaults = BUILTIN_PROVIDER_CATALOG.flatMap((entry) =>
+      entry.profiles
+        .filter(
+          ({ status, target }) =>
+            status === 'implemented' &&
+            target.primary.model_selection === 'configurable' &&
+            target.primary.kind === 'model',
+        )
+        .map(
+          ({ profile_id, target }) =>
+            `${entry.provider_id}/${profile_id} ${target.primary.target_id}`,
+        ),
+    );
+    const priced = BUILTIN_PRICING_SNAPSHOT.definitions.map(
+      ({ provider_id, profile_id, effective_target }) =>
+        `${provider_id}/${profile_id} ${effective_target?.target_id}`,
+    );
+
+    expect(defaults).toEqual(
+      expect.arrayContaining([
+        'openai-research/research gpt-6.1-sol',
+        'openai-chat/chat gpt-6-luna',
+        'openrouter/grounded openai/gpt-6-luna',
+        'openrouter/chat openai/gpt-6-luna',
+        'gemini-grounded/grounded gemini-3.8-flash',
+        'gemini-chat/chat gemini-3.8-flash',
+        'grok/web grok-4.7',
+        'grok-x-only/x grok-4.7',
+        'grok-combined/combined grok-4.7',
+        'claude/chat claude-sonnet-5-5',
+      ]),
+    );
+    expect(priced).toEqual(expect.arrayContaining(defaults));
+  });
+
+  it.each([
+    [
+      'openai-research.research.gpt-6.1-sol',
+      'official:developers.openai.com/api/docs/models/gpt-6.1-sol',
+      [
+        ['uncached_input_tokens', '2', '1000000'],
+        ['output_tokens', '10', '1000000'],
+        ['reasoning_tokens', '10', '1000000'],
+        ['cache_read_tokens', '0.1', '1000000'],
+        ['cache_write_tokens', '2.5', '1000000'],
+        ['searches', '10', '1000'],
+      ],
+    ],
+    [
+      'openai-chat.chat.gpt-6-luna',
+      'official:developers.openai.com/api/docs/models/gpt-6-luna',
+      [
+        ['uncached_input_tokens', '0.1', '1000000'],
+        ['output_tokens', '0.5', '1000000'],
+        ['reasoning_tokens', '0.5', '1000000'],
+        ['cache_read_tokens', '0.01', '1000000'],
+        ['cache_write_tokens', '0.125', '1000000'],
+        ['searches', '10', '1000'],
+      ],
+    ],
+    ...(['grounded', 'chat'] as const).map(
+      (profileId) =>
+        [
+          `openrouter.${profileId}.openai/gpt-6-luna`,
+          'official:openrouter.ai/openai/gpt-6-luna',
+          [
+            ['uncached_input_tokens', '0.1', '1000000'],
+            ['output_tokens', '0.5', '1000000'],
+            ['reasoning_tokens', '0.5', '1000000'],
+            ['cache_read_tokens', '0.01', '1000000'],
+            ['cache_write_tokens', '0.125', '1000000'],
+            ['searches', '7', '1000'],
+          ],
+        ] as const,
+    ),
+    [
+      'claude.chat.claude-sonnet-5-5',
+      'official:platform.claude.com/docs/en/about-claude/pricing',
+      [
+        ['uncached_input_tokens', '2', '1000000'],
+        ['output_tokens', '10', '1000000'],
+        ['cache_read_tokens', '0.1', '1000000'],
+        ['cache_write_tokens', '2.5', '1000000'],
+      ],
+    ],
+  ] as const)('pins the sourced %s rates', (id, reference, rates) => {
+    const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+      (entry) => entry.id === id,
+    );
+    expect(pricing).toMatchObject({
+      completeness: 'partial',
+      provenance: {
+        source_class: 'frozen_official_snapshot',
+        source_reference: reference,
+        retrieved_at: '2026-10-11T00:00:00.000Z',
+      },
+    });
+    expect(
+      pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
+        unit,
+        amount_decimal,
+        per_decimal,
+      ]),
+    ).toEqual(rates);
+  });
+
+  it('pins the web-only Grok identity and exact official rate without drift', () => {
+    const catalog = BUILTIN_PROVIDER_CATALOG.find(
+      ({ provider_id }) => provider_id === 'grok',
+    );
+    const descriptor = BUILTIN_PROVIDER_DESCRIPTORS.find(
+      ({ id }) => id === 'grok',
+    );
+    const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+      (entry) => entry.provider_id === 'grok' && entry.profile_id === 'web',
+    );
+
+    expect(DEFAULT_GROK_MODEL).toBe('grok-4.7');
+    expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.7');
+    expect(descriptor?.defaultModel).toBe('grok-4.7');
+    expect(pricing).toMatchObject({
+      id: 'grok.web.grok-4.7',
+      completeness: 'complete',
+      effective_target: { kind: 'model', target_id: 'grok-4.7' },
+      provenance: {
+        source_class: 'frozen_official_snapshot',
+        source_reference: 'official:docs.x.ai/developers/pricing',
+        retrieved_at: '2026-10-11T00:00:00.000Z',
+      },
+    });
+    expect(
+      pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
+        unit,
+        amount_decimal,
+        per_decimal,
+      ]),
+    ).toEqual([
       ['uncached_input_tokens', '2', '1000000'],
       ['output_tokens', '6', '1000000'],
       ['reasoning_tokens', '6', '1000000'],
       ['cache_read_tokens', '0.5', '1000000'],
       ['searches', '5', '1000'],
-    ];
+    ]);
+  });
 
-    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
-    for (const [providerId, profileId] of shippingProfiles) {
-      const catalog = BUILTIN_PROVIDER_CATALOG.find(
-        ({ provider_id }) => provider_id === providerId,
-      );
-      const descriptor = BUILTIN_PROVIDER_DESCRIPTORS.find(
-        ({ id }) => id === providerId,
-      );
+  it.each([
+    ['grok-x-only', 'x'],
+    ['grok-combined', 'combined'],
+  ] as const)(
+    'makes %s unpriceable because X Search bills per item fetched',
+    (providerId, profileId) => {
       const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
         (entry) =>
           entry.provider_id === providerId && entry.profile_id === profileId,
       );
-
-      expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.6');
-      expect(descriptor?.defaultModel).toBe('grok-4.6');
       expect(pricing).toMatchObject({
-        id: `${providerId}.${profileId}.grok-4.6`,
-        effective_target: { kind: 'model', target_id: 'grok-4.6' },
+        id: `${providerId}.${profileId}.grok-4.7`,
+        completeness: 'unavailable',
+        confidence: 'unknown',
+        effective_target: { kind: 'model', target_id: 'grok-4.7' },
+        rates: [],
         provenance: {
-          source_class: 'frozen_official_snapshot',
           source_reference: 'official:docs.x.ai/developers/pricing',
+          retrieved_at: '2026-10-11T00:00:00.000Z',
         },
       });
-      expect(
-        pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
-          unit,
-          amount_decimal,
-          per_decimal,
-        ]),
-      ).toEqual(expectedRates);
-    }
+      expect(pricing?.missing_units).toEqual(
+        expect.arrayContaining(['xai:x_posts', 'xai:x_profiles']),
+      );
+      expect(pricing?.unknown_reason).toMatch(/per post and profile fetched/);
+
+      const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+        requested_identity: {
+          provider_id: providerId,
+          profile_id: profileId,
+          target: {
+            primary: {
+              model_selection: 'configurable',
+              kind: 'model',
+              target_id: 'grok-4.7',
+            },
+          },
+        },
+      });
+      expect(quote.status).toBe('unavailable');
+      expect(budgetEstimateFromQuote(quote)).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ['lite', '12000'],
+    ['standard', '50000'],
+    ['deep', '100000'],
+    ['exhaustive', '450000'],
+    ['frontier', '1200000'],
+  ])(
+    'prices You.com research effort %s from the official per-tier rate',
+    (effort, microusd) => {
+      const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+        (entry) =>
+          entry.provider_id === 'you-research' &&
+          entry.profile_id === 'research' &&
+          entry.effective_target?.target_id === effort,
+      );
+      expect(pricing).toMatchObject({
+        id: `you-research.research.${effort}`,
+        completeness: 'complete',
+        effective_target: { kind: 'preset', target_id: effort },
+        provenance: {
+          source_reference: 'official:you.com/pricing',
+          retrieved_at: '2026-10-09T00:00:00.000Z',
+        },
+      });
+      const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+        requested_identity: {
+          provider_id: 'you-research',
+          profile_id: 'research',
+          target: {
+            primary: {
+              model_selection: 'configurable',
+              kind: 'preset',
+              target_id: effort,
+            },
+          },
+        },
+      });
+      expect(budgetEstimateFromQuote(quote)?.estimated_cost_microusd).toBe(
+        microusd,
+      );
+    },
+  );
+
+  it.each([
+    ['parallel', 'lite', '5000'],
+    ['parallel', 'base', '10000'],
+    ['parallel', 'core', '25000'],
+    ['parallel', 'core2x', '50000'],
+    ['parallel', 'pro', '100000'],
+    ['parallel', 'ultra', '300000'],
+    ['parallel', 'ultra2x', '600000'],
+    ['parallel', 'ultra4x', '1200000'],
+    ['parallel', 'ultra8x', '2400000'],
+    ['valyu', 'fast', '100000'],
+    ['valyu', 'standard', '500000'],
+    ['valyu', 'heavy', '2500000'],
+    ['valyu', 'max', '15000000'],
+  ])(
+    'prices %s research tier %s from the official per-run rate (#4856)',
+    (providerId, tier, microusd) => {
+      const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+        requested_identity: {
+          provider_id: providerId,
+          profile_id: 'research',
+          target: {
+            primary: {
+              model_selection: 'configurable',
+              kind: 'preset',
+              target_id: tier,
+            },
+          },
+        },
+      });
+      expect(budgetEstimateFromQuote(quote)?.estimated_cost_microusd).toBe(
+        microusd,
+      );
+    },
+  );
+
+  it.each([
+    ['parallel', 'pro-fast'],
+    ['parallel', 'ultra-fast'],
+    ['valyu', 'lite'],
+  ])('has no price for the unlisted %s tier %s', (providerId, tier) => {
+    const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+      requested_identity: {
+        provider_id: providerId,
+        profile_id: 'research',
+        target: {
+          primary: {
+            model_selection: 'configurable',
+            kind: 'preset',
+            target_id: tier,
+          },
+        },
+      },
+    });
+    expect(budgetEstimateFromQuote(quote)).toBeUndefined();
+  });
+
+  it('does not invent a You.com research price for an unknown effort tier', () => {
+    const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+      requested_identity: {
+        provider_id: 'you-research',
+        profile_id: 'research',
+        target: {
+          primary: {
+            model_selection: 'configurable',
+            kind: 'preset',
+            target_id: 'ultra',
+          },
+        },
+      },
+    });
+    expect(budgetEstimateFromQuote(quote)).toBeUndefined();
   });
 
   it.each(['-1', 'NaN', 'Infinity', '1e309', '', '1.'.padEnd(130, '0')])(
@@ -377,10 +656,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:81799cecd440f70b2e891b56cb8fa4e0f1014daeb87a750cda6746512df7e5fe',
+      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:81799cecd440f70b2e891b56cb8fa4e0f1014daeb87a750cda6746512df7e5fe',
+      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
     );
     expect(
       `sha256:${createHash('sha256')
@@ -699,4 +978,386 @@ describe('exact pricing and quotes', () => {
     expect(Object.isFrozen(catalog.snapshot.definitions[0])).toBe(true);
     expect(canonicalJson(catalog.snapshot)).toBe(canonicalJson(snapshot()));
   });
+});
+
+describe('dated rate windows', () => {
+  const BOUNDARY = '2027-01-01T00:00:00.000Z';
+
+  function perMillion(input: string, output: string): PriceRate[] {
+    return [
+      {
+        unit: 'uncached_input_tokens',
+        amount_decimal: input,
+        per_decimal: '1000000',
+      },
+      { unit: 'output_tokens', amount_decimal: output, per_decimal: '1000000' },
+    ];
+  }
+
+  function windowed(
+    windows: readonly PriceRateWindow[],
+    overrides: Partial<PriceDefinitionInput> = {},
+  ): PriceDefinitionInput {
+    return definition({ rates: [], rate_windows: windows, ...overrides });
+  }
+
+  /** Introductory rates until 2027, doubled from then: Gemini Flash's schedule. */
+  const doubling = windowed([
+    { effective_until: BOUNDARY, rates: perMillion('0.75', '3.75') },
+    { effective_from: BOUNDARY, rates: perMillion('1.5', '7.5') },
+  ]);
+
+  function quoteAt(
+    priced: Partial<Pick<PricingLookup, 'priced_at' | 'priced_until'>>,
+    pricing: PriceDefinitionInput = doubling,
+    quantities: Record<string, string> = {
+      uncached_input_tokens: '1000000',
+      output_tokens: '100000',
+    },
+  ) {
+    return new PricingCatalog(snapshot([pricing])).quote({
+      requested_identity: identity(),
+      quantities,
+      ...priced,
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [
+      'overlap',
+      [
+        {
+          effective_until: '2027-01-02T00:00:00.000Z',
+          rates: perMillion('1', '1'),
+        },
+        { effective_from: BOUNDARY, rates: perMillion('2', '2') },
+      ],
+    ],
+    [
+      'gap',
+      [
+        { effective_until: BOUNDARY, rates: perMillion('1', '1') },
+        {
+          effective_from: '2027-01-02T00:00:00.000Z',
+          rates: perMillion('2', '2'),
+        },
+      ],
+    ],
+    [
+      'out of order',
+      [
+        { effective_from: BOUNDARY, rates: perMillion('2', '2') },
+        { effective_until: BOUNDARY, rates: perMillion('1', '1') },
+      ],
+    ],
+    [
+      'open inner bound',
+      [
+        { rates: perMillion('1', '1') },
+        { effective_from: BOUNDARY, rates: perMillion('2', '2') },
+      ],
+    ],
+    [
+      'different units',
+      [
+        { effective_until: BOUNDARY, rates: perMillion('1', '1') },
+        { effective_from: BOUNDARY, rates: perMillion('2', '2').slice(0, 1) },
+      ],
+    ],
+    [
+      'inverted',
+      [
+        {
+          effective_from: BOUNDARY,
+          effective_until: BOUNDARY,
+          rates: perMillion('1', '1'),
+        },
+      ],
+    ],
+    [
+      'non-UTC bound',
+      [
+        {
+          effective_until: '2027-01-01T00:00:00+00:00',
+          rates: perMillion('1', '1'),
+        },
+      ],
+    ],
+    ['empty', []],
+  ] as const)('rejects %s windows', (_label, windows) => {
+    expect(() =>
+      validatePricingSnapshot(snapshot([windowed(windows)])),
+    ).toThrow(PricingCatalogError);
+  });
+
+  it('rejects rates beside windows and intervals that end before they start', () => {
+    expect(() =>
+      validatePricingSnapshot(
+        snapshot([
+          windowed(doubling.rate_windows ?? [], {
+            rates: perMillion('1', '1'),
+          }),
+        ]),
+      ),
+    ).toThrow('carries its rates in its windows');
+    expect(() =>
+      quoteAt({
+        priced_at: BOUNDARY,
+        priced_until: '2026-12-31T00:00:00.000Z',
+      }),
+    ).toThrow('cannot end before it starts');
+  });
+
+  it('prices an instant at the window in effect, switching exactly at the boundary', () => {
+    const lastMillisecond = quoteAt({ priced_at: '2026-12-31T23:59:59.999Z' });
+    const firstInstant = quoteAt({ priced_at: BOUNDARY });
+
+    expect(lastMillisecond.amount_decimal).toBe('1.125');
+    expect(lastMillisecond.status).toBe('complete');
+    expect(lastMillisecond.provenance?.rate_windows).toEqual([
+      { effective_until: BOUNDARY },
+    ]);
+    expect(firstInstant.amount_decimal).toBe('2.25');
+    expect(firstInstant.provenance?.rate_windows).toEqual([
+      { effective_from: BOUNDARY },
+    ]);
+  });
+
+  it('prices a computed actual cost at the time the request ran, or now', () => {
+    const catalog = new PricingCatalog(snapshot([doubling]));
+    const actual = (priced_at?: string) =>
+      catalog.actual({
+        requested_identity: identity(),
+        provider_reported_units: {
+          uncached_input_tokens: '1000000',
+          output_tokens: '0',
+        },
+        ...(priced_at && { priced_at }),
+      })?.amount_decimal;
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2027-01-01T01:00:00.000Z'));
+
+    expect(actual('2026-12-31T23:00:00.000Z')).toBe('0.75');
+    expect(actual()).toBe('1.5');
+  });
+
+  it('bounds an interval by the highest rate of each unit across every overlapping window', () => {
+    // Input is dearest in the first window and output in the second, so
+    // picking one whole window would understate one of them.
+    const pricing = windowed([
+      { effective_until: BOUNDARY, rates: perMillion('4', '1') },
+      {
+        effective_from: BOUNDARY,
+        effective_until: '2027-02-01T00:00:00.000Z',
+        rates: perMillion('2', '3'),
+      },
+      {
+        effective_from: '2027-02-01T00:00:00.000Z',
+        rates: perMillion('9', '9'),
+      },
+    ]);
+    const quantities = {
+      uncached_input_tokens: '1000000',
+      output_tokens: '1000000',
+    };
+    const estimate = (priced_until: string) =>
+      quoteAt(
+        { priced_at: '2026-12-31T12:00:00.000Z', priced_until },
+        pricing,
+        quantities,
+      );
+
+    const spanning = estimate('2027-01-01T12:00:00.000Z');
+    expect(spanning.amount_decimal).toBe('7');
+    expect(spanning.known_maximum_decimal).toBe('7');
+    expect(spanning.provenance?.rate_windows).toEqual([
+      { effective_until: BOUNDARY },
+      { effective_from: BOUNDARY, effective_until: '2027-02-01T00:00:00.000Z' },
+    ]);
+    expect(estimate(BOUNDARY).amount_decimal).toBe('5');
+    expect(estimate('2027-02-01T00:00:00.001Z').amount_decimal).toBe('18');
+  });
+
+  it('bounds an interval that starts now when only the deadline is known', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-12-31T23:00:00.000Z'));
+
+    expect(
+      quoteAt({ priced_until: '2026-12-31T23:30:00.000Z' }).amount_decimal,
+    ).toBe('1.125');
+    expect(
+      quoteAt({ priced_until: '2027-01-01T00:30:00.000Z' }).amount_decimal,
+    ).toBe('2.25');
+  });
+
+  it('quotes unavailable instead of guessing outside the declared windows', () => {
+    const bounded = windowed([
+      {
+        effective_from: '2026-01-01T00:00:00.000Z',
+        effective_until: BOUNDARY,
+        rates: perMillion('1', '1'),
+      },
+    ]);
+
+    for (const priced of [
+      { priced_at: '2025-12-31T23:59:59.999Z' },
+      { priced_at: BOUNDARY },
+      {
+        priced_at: '2026-12-31T00:00:00.000Z',
+        priced_until: '2027-01-01T00:00:00.001Z',
+      },
+    ]) {
+      const quote = quoteAt(priced, bounded);
+      expect(quote.status).toBe('unavailable');
+      expect(quote.amount_decimal).toBeUndefined();
+      expect(quote.confidence).toBe('unknown');
+      expect(quote.missing_units).toEqual([
+        'output_tokens',
+        'uncached_input_tokens',
+      ]);
+      expect(budgetEstimateFromQuote(quote)).toBeUndefined();
+    }
+    expect(
+      quoteAt(
+        { priced_at: '2026-12-31T00:00:00.000Z', priced_until: BOUNDARY },
+        bounded,
+      ).amount_decimal,
+    ).toBe('1.1');
+  });
+
+  it('resolves definitions without windows exactly as before, at any time', () => {
+    // Pinned from release/v2-candidate before rate windows existed.
+    expect(pricingSnapshotFingerprint(snapshot())).toBe(
+      'sha256:6b198bde9bca55a646f57805e627b12a389da6c33695a071ba24e37fe7d17bf0',
+    );
+    expect(priceDefinitionFingerprint(definition())).toBe(
+      'sha256:b040fb0628ef8f40339b15d29041aa6844006ffa4f108500921930759a6939e8',
+    );
+    const timeless = quoteAt({}, definition());
+    expect(timeless.amount_decimal).toBe('0.55');
+    expect(timeless.provenance).not.toHaveProperty('rate_windows');
+    for (const priced of [
+      { priced_at: '2020-01-01T00:00:00.000Z' },
+      { priced_at: BOUNDARY, priced_until: '2031-01-01T00:00:00.000Z' },
+      { priced_until: '2031-01-01T00:00:00.000Z' },
+    ]) {
+      expect(quoteAt(priced, definition())).toEqual(timeless);
+    }
+  });
+
+  it('fingerprints window rates independently of their order', () => {
+    const reordered = windowed(
+      (doubling.rate_windows ?? []).map((window) => ({
+        ...window,
+        rates: [...window.rates].reverse(),
+      })),
+    );
+    const changed = windowed([
+      { effective_until: BOUNDARY, rates: perMillion('0.75', '3.75') },
+      { effective_from: BOUNDARY, rates: perMillion('1.5', '7.51') },
+    ]);
+
+    expect(priceDefinitionFingerprint(reordered)).toBe(
+      priceDefinitionFingerprint(doubling),
+    );
+    expect(pricingSnapshotFingerprint(snapshot([reordered]))).toBe(
+      pricingSnapshotFingerprint(snapshot([doubling])),
+    );
+    expect(priceDefinitionFingerprint(changed)).not.toBe(
+      priceDefinitionFingerprint(doubling),
+    );
+  });
+
+  it.each([
+    ['gemini-chat', 'chat'],
+    ['gemini-grounded', 'grounded'],
+  ])(
+    "prices %s with Gemini 3.8 Flash at Google's introductory rates until 2027, then double",
+    (providerId, profileId) => {
+      const gemini = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+        ({ id }) => id === `${providerId}.${profileId}.gemini-3.8-flash`,
+      );
+      expect(gemini?.rates).toEqual([]);
+      expect(gemini?.rate_windows).toEqual([
+        {
+          effective_until: BOUNDARY,
+          rates: [
+            {
+              unit: 'uncached_input_tokens',
+              amount_decimal: '0.75',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'output_tokens',
+              amount_decimal: '3.75',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'cache_read_tokens',
+              amount_decimal: '0.075',
+              per_decimal: '1000000',
+            },
+            { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
+          ],
+        },
+        {
+          effective_from: BOUNDARY,
+          rates: [
+            {
+              unit: 'uncached_input_tokens',
+              amount_decimal: '1.5',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'output_tokens',
+              amount_decimal: '7.5',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'cache_read_tokens',
+              amount_decimal: '0.15',
+              per_decimal: '1000000',
+            },
+            { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
+          ],
+        },
+      ]);
+
+      const catalog = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT);
+      const quote = (
+        priced: Partial<Pick<PricingLookup, 'priced_at' | 'priced_until'>>,
+      ) =>
+        catalog.quote({
+          requested_identity: identity(
+            providerId,
+            profileId,
+            'gemini-3.8-flash',
+          ),
+          conditions: { account_plan: 'payg', billing_mode: 'standard' },
+          quantities: {
+            uncached_input_tokens: '2000000',
+            output_tokens: '300000',
+            cache_read_tokens: '50000',
+            searches: '2',
+          },
+          ...priced,
+        });
+
+      expect(
+        quote({ priced_at: '2026-12-31T23:59:59.999Z' }).amount_decimal,
+      ).toBe('2.65675');
+      expect(quote({ priced_at: BOUNDARY }).amount_decimal).toBe('5.2855');
+      const acrossNewYear = quote({
+        priced_at: '2026-12-31T23:00:00.000Z',
+        priced_until: '2027-01-01T01:00:00.000Z',
+      });
+      expect(acrossNewYear.known_maximum_decimal).toBe('5.2855');
+      expect(acrossNewYear.provenance?.rate_windows).toHaveLength(2);
+    },
+  );
 });

@@ -2,19 +2,23 @@ import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { canonicalProviderGroups } from '../commands/groups.js';
 import { VERSION } from '../constants.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext } from '../core/credentials.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
 import type { Config } from '../types.js';
 import { checkAsyncTasks } from './async.js';
-import { discoverProviders } from './provider-discovery.js';
+import {
+  discoverProviders,
+  ProviderDiscoveryError,
+} from './provider-discovery.js';
 import {
   ResearchInputError,
   runResearchSilent,
   type SilentRunDeps,
 } from './research.js';
-import { ResultPageOptionsSchema } from './result-pages.js';
+import { ResultPageError, ResultPageOptionsSchema } from './result-pages.js';
 import {
   type McpArtifactRepository,
   readRunIndex,
@@ -78,7 +82,9 @@ function errorResult(message: string): CallToolResult {
 }
 
 function describeError(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  return e instanceof ResultPageError || e instanceof ProviderDiscoveryError
+    ? e.message
+    : 'Operation failed. Inspect local configuration and saved artifacts.';
 }
 
 export function createMcpServer(deps: McpServerDeps = {}): McpServer {
@@ -100,24 +106,26 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'Run a multi-provider research query',
       description:
-        'Fan out a research query across multiple providers in parallel, defaulting to the quick workflow in sync mode. Saves full provider content locally and returns a bounded result index, never inline evidence. Read evidence with get_results using outputDir as runDir and an optional resultId. Async mode accepts durable profiles only; resume pending work with check_async.',
+        'Fan out a research query across a chosen provider matrix. Select by intent: quick (the default workflow, sync mode) for fast grounded discovery, deep for research-report profiles, visibility for AI answer-engine surfaces, or an intentional matrix via explicit providers. Design a matrix upfront with list_providers/list_groups when the question warrants it; there is no MCP plan tool. Saves full provider content locally and returns a bounded result index, never inline evidence. Read evidence with get_results using outputDir as runDir and an optional resultId. Honor caller-specified providers and modes exactly. Budget and fallback behavior is governed by merged configuration, not this call: there is no per-call budget or fallback input, and discovery alone does not establish affordability — verify the applicable config through authorized CLI/config access or ask before treating a cap or exact-only scope as enforced. Escalating beyond the authorized scope is a new paid decision requiring user approval, and any configured cap limits admission and reported spend, not absolute provider billing. Async mode accepts durable profiles only; resume pending work with check_async.',
       inputSchema: {
         query: z.string().min(1).describe('The research query or question.'),
         group: z
           .string()
           .optional()
           .describe(
-            'A configured provider group (e.g. deep, quick, raw, all). Defaults to quick when neither group nor providers is given. Ignored when providers is given.',
+            'Match a canonical workflow to the intent: quick for low-latency grounded discovery and answers, deep for research-report profiles, visibility for AI answer-engine surfaces, all for catalog-derived coverage review; or a configured custom:<name> group. Defaults to quick when neither group nor providers is given. Ignored when providers is given.',
           ),
         providers: z
           .array(z.string())
           .optional()
-          .describe('Explicit provider ids to run. Overrides group.'),
+          .describe(
+            'Explicit exact provider/profile selectors (from list_providers) for an intentional matrix. Overrides group; explicit unavailable selections fail rather than silently substitute.',
+          ),
         mode: z
           .enum(['sync', 'async', 'mixed'])
           .optional()
           .describe(
-            'Execution mode. sync (default) runs selected providers concurrently and waits for them. async accepts durable profiles only and returns pending work. mixed is retained for legacy compatibility and migrates to async with a notice.',
+            'Execution mode. sync (default) runs selected providers concurrently and waits for them. async accepts durable profiles only and returns pending work. mixed is retained for legacy compatibility and migrates to async with a notice. An explicit mode here overrides configured defaults.',
           ),
         refine: z
           .boolean()
@@ -263,6 +271,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
           polled: result.polled,
           retrieved: result.retrieved,
           ...(result.error && { error: result.error }),
+          ...(result.errorDetail && { errorDetail: result.errorDetail }),
           ...(result.regenerationError && {
             regenerationError: result.regenerationError,
           }),
@@ -280,7 +289,7 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'List configured providers',
       description:
-        'List providers from static configuration and declarations without initializing adapters. With detail="profiles", also returns versioned exact profile selectors, capabilities, workflows, availability reasons, credential presence status, and catalog revision.',
+        'Static capability discovery for matching a question to providers and profiles: reads local configuration only — no provider or network calls, and no adapter initialization or custom-code loading. With detail="profiles", returns versioned exact profile selectors, capabilities (result kind, grounding, observation mode), workflow membership, availability reasons and selectability, credential presence status (never authentication), and catalog revision. Use before designing an intentional research matrix or diagnosing why a selector is unavailable; discovery alone does not establish affordability.',
       inputSchema: {
         provider: z
           .string()
@@ -314,17 +323,14 @@ export function createMcpServer(deps: McpServerDeps = {}): McpServer {
     {
       title: 'List provider groups',
       description:
-        'Return the configured provider groups and their member provider ids.',
+        'Return the four canonical built-in workflows (quick, deep, visibility, all) and configured custom:<name> groups with exact provider/profile members. Use to review matrix membership before research; membership is configuration, not an availability guarantee.',
       inputSchema: {},
     },
     async (): Promise<CallToolResult> => {
       try {
         const config = loadMergedConfig();
         return jsonResult({
-          groups: Object.entries(config.groups).map(([name, members]) => ({
-            name,
-            members,
-          })),
+          groups: canonicalProviderGroups(config),
         });
       } catch (e) {
         return errorResult(`list_groups failed: ${describeError(e)}`);

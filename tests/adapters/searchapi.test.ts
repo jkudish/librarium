@@ -354,7 +354,6 @@ describe('SearchAPI request and privacy contract', () => {
       'src/adapters/searchapi.ts',
       'src/adapters/searchapi-chatgpt.ts',
       'src/adapters/searchapi-gemini.ts',
-      'src/adapters/searchapi-perplexity.ts',
       'src/adapters/searchapi-google-ai-mode.ts',
       'src/adapters/searchapi-bing-copilot.ts',
       'src/adapters/searchapi-google-ai-overview.ts',

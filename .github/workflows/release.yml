@@ -165,6 +165,20 @@ jobs:
       - name: Inspect initial publication state
         run: scripts/release-inventory.sh "$RUNNER_TEMP/promotion" "$RUNNER_TEMP/inventory.json"
 
+      - name: Verify Homebrew credential readiness before publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'HOMEBREW_TAP_TOKEN is required before publishing any channel.' >&2
+            exit 1
+          fi
+          gh api repos/jkudish/homebrew-tap --jq '.permissions.push == true' > "$RUNNER_TEMP/tap-permission.txt"
+          test "$(cat "$RUNNER_TEMP/tap-permission.txt")" = true
+          gh api repos/jkudish/homebrew-tap/git/ref/heads/main --silent
+
       - name: Reconcile npm stage
         id: npm-plan
         run: >-

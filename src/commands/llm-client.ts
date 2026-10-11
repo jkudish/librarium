@@ -44,8 +44,8 @@ export interface LlmClientResolutionOptions {
 
 const CLIENT_DEFAULTS: Record<LlmProvider, { envVar: string; model: string }> =
   {
-    openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
-    gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-2.5-flash' },
+    openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-6-luna' },
+    gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-3.8-flash' },
     perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'low' },
   };
 
@@ -195,6 +195,8 @@ interface CallContext {
 interface LlmHttpResponse {
   text: string;
   usage?: ProviderUsage;
+  /** Provider-reported failure retained alongside any billed usage. */
+  error?: string;
 }
 
 function finiteNonNegative(value: unknown): number | undefined {
@@ -346,16 +348,14 @@ async function callPerplexity(
     );
   }
   const data = parseAgentResponse(await response.json());
-  if (data.status !== 'completed') {
-    throw new Error(
-      redactPerplexityError(
+  return {
+    text: data.messages.join(''),
+    ...(data.status !== 'completed' && {
+      error: redactPerplexityError(
         data.error?.message ??
           `Perplexity Agent response was not completed (status: ${data.status}).`,
       ),
-    );
-  }
-  return {
-    text: data.messages.join(''),
+    }),
     usage: data.usage
       ? {
           ...(data.usage.inputTokens === undefined
@@ -479,6 +479,7 @@ export async function callWithCascade<T = string>(
     let response: LlmHttpResponse | undefined;
     try {
       response = await callClient(client, prompt, ctx);
+      if (response.error !== undefined) throw new Error(response.error);
       const result = mapText(response.text);
       onAttempt?.({
         client,

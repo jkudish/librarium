@@ -1,4 +1,8 @@
+import { normalizeSearchApiAiAnswer } from '../core/searchapi-ai.js';
 import type { Citation } from '../types.js';
+
+/** The canonical source contract caps provider references at 255 characters. */
+const MAX_PROVIDER_REFERENCE_LENGTH = 255;
 
 export interface SearchApiGoogleOrganicResult {
   title?: string;
@@ -12,8 +16,11 @@ export interface SearchApiGoogleReferenceLink {
   title?: string;
   name?: string;
   link?: string;
+  url?: string;
   snippet?: string;
   source?: string;
+  /** Google favicon proxy URL whose `url` parameter names the publisher. */
+  favicon?: string;
 }
 
 export interface SearchApiGoogleTextBlock {
@@ -25,6 +32,8 @@ export interface SearchApiGoogleTextBlock {
 export interface SearchApiGoogleAiOverview {
   /** A short-lived token reserved for the dedicated AI Overview provider. */
   page_token?: string;
+  /** Beside a page_token, SearchAPI may report a misleading "not available". */
+  error?: string;
   markdown?: string;
   text_blocks?: SearchApiGoogleTextBlock[];
   reference_links?: SearchApiGoogleReferenceLink[];
@@ -70,6 +79,137 @@ export function extractSearchApiGoogleAiOverviewPageToken(
 ): string | undefined {
   const token = string(object(overview)?.page_token);
   return token && token.trim() === token ? token : undefined;
+}
+
+/**
+ * Read a Google AI Overview, either inline under a google response's
+ * ai_overview or as a google_ai_overview page loaded by page_token. Content
+ * uses the shared SearchAPI answer normalizer (usable Markdown, else text
+ * blocks); citations resolve Google redirect links without fetching them.
+ */
+export function readSearchApiGoogleAiOverview(
+  overview: unknown,
+  provider: string,
+): SearchApiGoogleSection {
+  const record = object(overview);
+  if (!record) return emptySection();
+  return {
+    content: normalizeSearchApiAiAnswer(
+      { markdown: record.markdown, text_blocks: record.text_blocks },
+      provider,
+    ).content,
+    citations: resolveSearchApiGoogleAiOverviewCitations(
+      record.reference_links,
+      provider,
+    ),
+  };
+}
+
+/**
+ * Whether an overview carries answer material at all, so an overview the
+ * adapter cannot read is distinguished from a SERP without one.
+ */
+export function hasSearchApiGoogleAiOverviewPayload(
+  overview: unknown,
+): boolean {
+  const record = object(overview);
+  if (!record) return false;
+  return (
+    trimmed(record.markdown) !== undefined ||
+    records(record.text_blocks).length > 0 ||
+    records(record.reference_links).length > 0
+  );
+}
+
+/**
+ * AI Overview reference links arrive as Google redirects
+ * (google.com/goto?url=..., google.com/url?q=...). Resolution only parses
+ * URLs and never fetches:
+ *
+ * 1. a non-Google `url` or `link` is the page itself;
+ * 2. a Google redirect whose `url` or `q` parameter is a non-Google http(s)
+ *    URL resolves to that target;
+ * 3. otherwise (most `goto?url=` values are opaque tokens) the publisher
+ *    origin comes from the `favicon` URL's `url` parameter.
+ *
+ * The raw Google link is kept as providerReference when it differs from the
+ * citation URL and fits the 255-character source reference contract.
+ */
+export function resolveSearchApiGoogleAiOverviewCitations(
+  links: unknown,
+  provider: string,
+): Citation[] {
+  const seen = new Set<string>();
+  const citations: Citation[] = [];
+  for (const link of records(links)) {
+    const raw = trimmed(link.link) ?? trimmed(link.url);
+    const url =
+      validEvidenceUrl(string(link.url)) ??
+      validEvidenceUrl(raw) ??
+      redirectTarget(raw) ??
+      faviconOrigin(link.favicon);
+    if (!url) continue;
+
+    const providerReference =
+      raw !== undefined && raw !== url && isProviderReference(raw)
+        ? raw
+        : undefined;
+    const key = `${url}\n${providerReference ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const title = trimmed(link.title);
+    const snippet = trimmed(link.snippet);
+    const publisher = trimmed(link.source);
+    citations.push({
+      url,
+      ...(title && { title }),
+      ...(snippet && { snippet }),
+      provider,
+      ...(providerReference && { providerReference }),
+      ...(publisher && { publisher }),
+    });
+  }
+  return citations;
+}
+
+function redirectTarget(link: string | undefined): string | undefined {
+  const url = parseUrl(link);
+  if (!url || !isProviderOrNavigationHost(url.hostname)) return undefined;
+  for (const key of ['url', 'q']) {
+    const target = validEvidenceUrl(lastQueryValue(url, key));
+    if (target) return target;
+  }
+  return undefined;
+}
+
+function faviconOrigin(favicon: unknown): string | undefined {
+  const faviconUrl = parseUrl(string(favicon));
+  const site = parseUrl(faviconUrl && lastQueryValue(faviconUrl, 'url'));
+  if (!site || !['http:', 'https:'].includes(site.protocol)) return undefined;
+  return validEvidenceUrl(site.origin);
+}
+
+function isProviderReference(value: string): boolean {
+  return (
+    value.length <= MAX_PROVIDER_REFERENCE_LENGTH &&
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: References exclude controls.
+    !/[\s\x00-\x1f\x7f]/.test(value)
+  );
+}
+
+/** Like PHP's parse_str, a repeated query parameter resolves to its last value. */
+function lastQueryValue(url: URL, key: string): string | undefined {
+  return url.searchParams.getAll(key).at(-1);
+}
+
+function parseUrl(value: string | undefined): URL | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
 }
 
 interface SearchApiGoogleLinkItem {
@@ -350,6 +490,10 @@ function object(value: unknown): Record<string, unknown> | undefined {
 
 function string(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function trimmed(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function emptySection(): SearchApiGoogleSection {

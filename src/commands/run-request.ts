@@ -9,6 +9,7 @@ import {
 } from '../cli-parsers.js';
 import { loadConfig, loadProjectConfig, mergeConfigs } from '../core/config.js';
 import type { CredentialContext, EnvRecord } from '../core/credentials.js';
+import type { PreparationIssue } from '../core/research-request.js';
 import {
   type ProductionRequestPreflightResult,
   preflightProductionRequest,
@@ -24,6 +25,8 @@ import {
   preparePaidStages,
 } from '../run-paid-wallet.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
+import type { LlmProvider } from './llm-client.js';
+import { llmAdapterId } from './paid-llm-attempt.js';
 
 export { RequestPreflightError };
 
@@ -217,4 +220,54 @@ export function prepareRunRequest(
     ),
     settingSources: settingSources(options, intent, config),
   };
+}
+
+const LLM_PROVIDERS: ReadonlySet<string> = new Set<LlmProvider>([
+  'openai',
+  'gemini',
+  'perplexity',
+]);
+
+const STAGE_LABELS: Readonly<Record<string, string>> = {
+  refinement: 'query refinement',
+  synthesis: 'answer synthesis',
+  verification: 'claim verification',
+};
+
+/**
+ * A requested paid stage that a hard budget can never admit must stop the run
+ * before research spends anything. Otherwise `answer --max-cost` would pay for
+ * the research and then fail at synthesis. This gates only; it never prices.
+ */
+export function paidStageBudgetIssues(
+  stages: readonly PreparedPaidStage[],
+): PreparationIssue[] {
+  return stages.flatMap((stage): PreparationIssue[] => {
+    if (
+      stage.status !== 'skipped' ||
+      stage.reason_code !== 'unknown_cost_under_hard_budget'
+    ) {
+      return [];
+    }
+    const provider = stage.providers[0];
+    const adapterId =
+      provider && LLM_PROVIDERS.has(provider.provider)
+        ? llmAdapterId(provider.provider as LlmProvider)
+        : undefined;
+    const label = STAGE_LABELS[stage.stage] ?? stage.stage;
+    const call = provider
+      ? ` (${provider.provider}${provider.model ? ` ${provider.model}` : ''})`
+      : '';
+    const remedy = adapterId
+      ? `Set options.perRequestUsd for provider "${adapterId}" to a per-call cap, or drop the budget.`
+      : 'Drop the budget.';
+    return [
+      {
+        code: 'paid_stage_budget_estimate_required',
+        phase: 'validation',
+        path: `/stages/${stage.stage}`,
+        message: `The ${label} call${call} has no bounded price, so a hard budget cannot admit it and nothing was run. ${remedy}`,
+      },
+    ];
+  });
 }

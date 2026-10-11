@@ -78,7 +78,18 @@ export class YouResearchProvider extends BaseProvider {
         };
       }
 
-      const content = data.output?.content ?? '';
+      const content =
+        typeof data.output?.content === 'string' ? data.output.content : '';
+      if (!content.trim()) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs,
+          error: 'You.com response did not include a non-empty answer',
+        };
+      }
       const citations = this.extractCitations(data.output?.sources);
 
       return {

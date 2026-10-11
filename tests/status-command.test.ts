@@ -79,14 +79,30 @@ import {
   createCoordinatorState,
   recordLaunchDispatched,
 } from '../src/core/coordinator.js';
+import { UnsafeToRetrySubmissionError } from '../src/core/errors.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
+import { profileIdentityKey } from '../src/core/execution-plan.js';
 import { loadRunTasks } from '../src/core/run-manifest.js';
+import { projectCanonicalRunPresentation } from '../src/node-canonical-presentation.js';
 import {
+  beginCanonicalRefinement,
+  createRegisteredProviderAttemptBridge,
+  materializeCanonicalPreparedExecution,
   RunJsonCoordinationStateStore,
   readCanonicalRunManifest,
   runCanonicalPreparedExecution,
 } from '../src/node-canonical-run.js';
+import {
+  readPaidRunLedger,
+  withPaidRunLedgerLock,
+  writePaidRunLedger,
+} from '../src/node-paid-attempt-ledger.js';
 import { providerArtifactFileNames } from '../src/node-run-artifacts.js';
+import {
+  canonicalRequestFingerprint,
+  fingerprint,
+  RunPaidWallet,
+} from '../src/run-paid-wallet.js';
 import {
   canonicalFixtureCoordinator,
   canonicalFixturePrepared,
@@ -206,6 +222,137 @@ async function seedCanonicalRun(
   return { runDir, plan, now };
 }
 
+/**
+ * Mirror the CLI async path for #4045: the compiler leaves optional request
+ * fields explicitly undefined, the paid wallet persists its ledger beside
+ * run.json, and one durable submission ends with unknown acceptance while the
+ * other is accepted with a durable handle.
+ */
+async function seedAsyncRunWithUncertainSubmit(
+  runsRoot: string,
+  run: string,
+): Promise<{ runDir: string; plan: PreparedResearchExecution }> {
+  const now = Date.now();
+  const runDir = join(runsRoot, run);
+  mkdirSync(runDir, { recursive: true });
+  const profiles = ['accepted', 'uncertain'].map((id) =>
+    canonicalFixtureProfile(`${run}-${id}`, 'background'),
+  );
+  const base = canonicalFixturePrepared(profiles, {
+    mode: 'async',
+    requestId: run,
+    requestedAtMs: now,
+  });
+  const plan: PreparedResearchExecution = {
+    ...base,
+    request: {
+      ...base.request,
+      slots: base.request.slots.map((slot) => ({
+        ...slot,
+        requirements: { ...slot.requirements, surface_id: undefined },
+      })),
+    },
+    profile_plans_by_identity: Object.fromEntries(
+      Object.entries(base.profile_plans_by_identity).map(([key, value]) => [
+        key,
+        {
+          ...value,
+          binding: {
+            adapter_id: 'status-command-mock',
+            binding_id: `binding-${key}`,
+          },
+        },
+      ]),
+    ),
+  };
+  const wallet = new RunPaidWallet({
+    request_id: plan.request.request_id,
+    request_fingerprint: canonicalRequestFingerprint(plan.request),
+    config_fingerprint: fingerprint('config'),
+    created_at: plan.request.requested_at,
+    deadline_at: new Date(
+      now + plan.policy.limits.request_deadline_ms,
+    ).toISOString(),
+    stages: [
+      ...(['refinement', 'synthesis', 'verification'] as const).map(
+        (stage) => ({
+          stage,
+          requested: false,
+          fallback_authorized: false,
+          prompt_version: `${stage}-v1`,
+          providers: [],
+        }),
+      ),
+      {
+        stage: 'research',
+        requested: true,
+        fallback_authorized: false,
+        prompt_version: 'canonical-request-v3',
+        providers: profiles.map((profile) => ({
+          provider: 'status-command-mock',
+          profile: profileIdentityKey(profile.identity),
+        })),
+      },
+    ],
+    on_change: (ledger) => writePaidRunLedger(runsRoot, runDir, ledger),
+    with_mutation_lock: (action) =>
+      withPaidRunLedgerLock(runsRoot, runDir, action),
+    load_latest: () => readPaidRunLedger(runsRoot, runDir),
+  });
+  state.submit
+    .mockImplementationOnce(async () => {
+      throw new UnsafeToRetrySubmissionError('submission outcome unknown', {
+        kind: 'provider',
+        httpStatus: 503,
+      });
+    })
+    .mockImplementationOnce(async (query: string) => ({
+      provider: 'status-command-mock',
+      taskId: 'accepted-task',
+      query,
+      submittedAt: Date.now(),
+      status: 'pending',
+    }));
+  const { getExactProvider } = await import('../src/adapters/node-registry.js');
+  await runCanonicalPreparedExecution(plan, {
+    runs_root: runsRoot,
+    run_directory: runDir,
+    coordinator: canonicalFixtureCoordinator(now),
+    attempt_bridge: createRegisteredProviderAttemptBridge(
+      plan,
+      getExactProvider,
+      () => now,
+    ),
+    paid_wallet: wallet,
+  });
+  return { runDir, plan };
+}
+
+function presentationReport(
+  manifest: ReturnType<typeof readCanonicalRunManifest>,
+  runDir: string,
+) {
+  return projectCanonicalRunPresentation(manifest, runDir, 'slug').reports;
+}
+
+async function seedPendingCanonicalRefinement(run: string): Promise<string> {
+  const now = Date.now();
+  const runDir = join(state.outputDir, run);
+  mkdirSync(runDir, { recursive: true });
+  const plan = canonicalPlan('sync', run, now);
+  await materializeCanonicalPreparedExecution(plan, {
+    runs_root: state.outputDir,
+    run_directory: runDir,
+    coordinator: canonicalFixtureCoordinator(now),
+    refinement_requested: true,
+  });
+  beginCanonicalRefinement({
+    runs_root: state.outputDir,
+    run_directory: runDir,
+  });
+  return runDir;
+}
+
 describe('status command', () => {
   const dirs: string[] = [];
 
@@ -268,6 +415,40 @@ describe('status command', () => {
     expect(payload.tasks).toEqual([
       expect.objectContaining({ taskId: 'task-1', status: 'completed' }),
     ]);
+  });
+
+  it('explains an in-progress canonical refinement without replaying it', async () => {
+    const runDir = await seedPendingCanonicalRefinement('refining-v3');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    const payload = JSON.parse(String(log.mock.calls[0]?.[0]));
+    expect(payload.canonicalRuns).toEqual([
+      expect.objectContaining({
+        runDir: realpathSync(runDir),
+        state: 'pending',
+        refinementStatus: 'in_progress',
+      }),
+    ]);
+
+    await program().parseAsync(['node', 'test', 'status']);
+
+    const output = stdout.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('Status: pending | Refinement: in_progress');
+    expect(output).toContain(
+      'run may still be active or may have been interrupted; no automatic replay',
+    );
+    expect(
+      readCanonicalRunManifest(state.outputDir, runDir).coordination_state
+        .attempts,
+    ).toEqual([]);
+    expect(state.submit).not.toHaveBeenCalled();
+    expect(state.poll).not.toHaveBeenCalled();
+    expect(state.retrieve).not.toHaveBeenCalled();
   });
 
   it('--retrieve writes the result and removes the completed task', async () => {
@@ -538,5 +719,159 @@ describe('status command', () => {
     });
     expect(repaired.terminal_response?.status).toBe('failed');
     expect(state.submit).not.toHaveBeenCalled();
+  });
+
+  it('resumes and retrieves an async run with a failed-at-submit attempt from an -o base (#4045)', async () => {
+    const customRoot = `${state.outputDir}-custom`;
+    dirs.push(customRoot);
+    mkdirSync(customRoot, { recursive: true });
+    const { runDir, plan } = await seedAsyncRunWithUncertainSubmit(
+      customRoot,
+      'uncertain-submit',
+    );
+    const seeded = readCanonicalRunManifest(customRoot, runDir);
+    const ledger = readPaidRunLedger(customRoot, runDir);
+    // The ledger binds the persisted request, not the in-memory one.
+    expect(ledger?.request_fingerprint).toBe(fingerprint(seeded.request));
+    // main hashed the in-memory request, whose undefined optional fields
+    // run.json drops; both must hash identically.
+    expect(ledger?.request_fingerprint).toBe(fingerprint(plan.request));
+    expect(ledger?.request_fingerprint).toBe(
+      canonicalRequestFingerprint(seeded.request),
+    );
+    expect(ledger?.attempts.map((attempt) => attempt.status).sort()).toEqual([
+      'acceptance_unknown',
+      'accepted',
+    ]);
+    expect(seeded.coordination_state.unresolved_acceptances).toEqual([
+      expect.objectContaining({
+        reason: 'submission_response_uncertain',
+        diagnostic: { kind: 'provider', http_status: 503 },
+      }),
+    ]);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    // The configured default output dir does not contain this run.
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toMatchObject({
+      tasks: [],
+      message: 'No async tasks',
+    });
+    expect(state.poll).not.toHaveBeenCalled();
+
+    await program().parseAsync([
+      'node',
+      'test',
+      'status',
+      '--retrieve',
+      '--json',
+      '-o',
+      customRoot,
+    ]);
+
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(payload.errors).toBeUndefined();
+    expect(payload.canonicalRuns).toEqual([
+      expect.objectContaining({
+        runDir: realpathSync(runDir),
+        state: 'pending',
+        activeTasks: 0,
+        unknownSubmissions: 1,
+        retrieved: 1,
+      }),
+    ]);
+    expect(state.submit).toHaveBeenCalledTimes(2);
+    expect(state.poll).toHaveBeenCalledOnce();
+    expect(state.retrieve).toHaveBeenCalledOnce();
+    const resumed = readCanonicalRunManifest(customRoot, runDir);
+    expect(
+      resumed.coordination_state.attempts
+        .map((attempt) => attempt.status)
+        .sort(),
+    ).toEqual(['acceptance_unknown', 'succeeded']);
+    const retrievedFile = presentationReport(resumed, runDir).find(
+      (report) => report.status === 'success',
+    )?.outputFile;
+    expect(readFileSync(join(runDir, retrievedFile ?? ''), 'utf8')).toContain(
+      'Completed research.',
+    );
+    const summary = readFileSync(join(runDir, 'summary.md'), 'utf8');
+    expect(summary).toContain(
+      'Submission outcome unknown: the provider answered HTTP 503.',
+    );
+    expect(summary).not.toContain('submission outcome unknown');
+  });
+
+  it('reports a safe, actionable reason when the paid ledger no longer matches the run', async () => {
+    const { runDir } = await seedAsyncRunWithUncertainSubmit(
+      state.outputDir,
+      'tampered-ledger',
+    );
+    const ledger = readPaidRunLedger(state.outputDir, runDir);
+    if (!ledger) throw new Error('expected a ledger');
+    writePaidRunLedger(state.outputDir, runDir, {
+      ...ledger,
+      request_fingerprint: 'f'.repeat(64),
+    });
+    state.poll.mockClear();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(payload.errors).toEqual(['artifact.reconciliation_failed']);
+    expect(payload.canonicalRuns).toEqual([
+      {
+        runDir: realpathSync(runDir),
+        state: 'error',
+        error: 'artifact.reconciliation_failed',
+        message: expect.stringContaining(
+          'The paid-attempt ledger does not match the canonical run (request_fingerprint differs).',
+        ),
+      },
+    ]);
+    expect(payload.canonicalRuns[0].message).not.toContain(runDir);
+    expect(state.poll).not.toHaveBeenCalled();
+
+    await program().parseAsync(['node', 'test', 'status']);
+    const output = stdout.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(output).toContain('Status: artifact.reconciliation_failed');
+    expect(output).toContain('request_fingerprint differs');
+
+    // MCP check_async reports the same fixed, path-free reason.
+    const { checkAsyncTasks } = await import('../src/mcp/async.js');
+    const { loadConfig } = await import('../src/core/config.js');
+    const mcp = await checkAsyncTasks(runDir, true, loadConfig());
+    expect(mcp).toMatchObject({
+      error: 'artifact.reconciliation_failed',
+      errorDetail: expect.stringContaining('request_fingerprint differs'),
+    });
+    expect(mcp.errorDetail).not.toContain(state.outputDir);
+  });
+
+  it('never surfaces unexpected error text from reconciliation', async () => {
+    const { runDir } = await seedAsyncRunWithUncertainSubmit(
+      state.outputDir,
+      'corrupt-ledger',
+    );
+    writeFileSync(
+      join(runDir, 'paid-attempt-ledger.json'),
+      '{"secret":"sk-should-not-leak"',
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await program().parseAsync(['node', 'test', 'status', '--json']);
+
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+    expect(payload.canonicalRuns[0]).toMatchObject({
+      state: 'error',
+      message:
+        'The paid-attempt ledger (paid-attempt-ledger.json) is malformed or was written by an incompatible Librarium version.',
+    });
+    expect(JSON.stringify(payload)).not.toContain('sk-should-not-leak');
   });
 });

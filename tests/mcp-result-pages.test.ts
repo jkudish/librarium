@@ -12,6 +12,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRunManifest } from '../src/core/run-manifest.js';
+import { checkAsyncTasks } from '../src/mcp/async.js';
 import {
   CONTENT_DELIMITER_BEGIN,
   CONTENT_DELIMITER_END,
@@ -24,9 +25,13 @@ import {
 import { createMcpServer } from '../src/mcp/server.js';
 import { readRunIndex, readRunResults } from '../src/mcp/shaping.js';
 import { writeCanonicalPresentationArtifacts } from '../src/node-canonical-artifacts.js';
-import { runCanonicalPreparedExecution } from '../src/node-canonical-run.js';
+import {
+  resumeCanonicalPreparedExecution,
+  runCanonicalPreparedExecution,
+} from '../src/node-canonical-run.js';
 import type { Config, Provider } from '../src/types.js';
 import {
+  CANONICAL_FIXTURE_TIME,
   canonicalFixtureBridge,
   canonicalFixtureCoordinator,
   canonicalFixturePrepared,
@@ -227,6 +232,161 @@ describe('bounded evidence pages', () => {
 });
 
 describe('MCP transport and saved artifacts', () => {
+  it('reads committed async successes before terminalization without stale derived files masking evidence', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mcp-partial-pages-'));
+    roots.push(root);
+    const runDir = join(root, 'run');
+    mkdirSync(runDir);
+    const profiles = ['done', 'pending'].map((id) =>
+      canonicalFixtureProfile(id, 'background'),
+    );
+    let finishPending = false;
+    const content = 'Committed evidence 😀\n'.repeat(1000);
+    const providers = Object.fromEntries(
+      profiles.map((profile): [string, Provider] => {
+        const name = profile.identity.provider_id;
+        const id = `adapter-${name}`;
+        return [
+          id,
+          {
+            id,
+            displayName: name,
+            tier: 'ai-grounded',
+            envVar: '',
+            execution: 'background',
+            execute: vi.fn(),
+            submit: vi.fn(async () => ({
+              provider: id,
+              taskId: `private-${name}`,
+              query: 'q',
+              submittedAt: CANONICAL_FIXTURE_TIME,
+              status: 'pending',
+            })),
+            poll: vi.fn(async () => ({
+              status:
+                name === 'done' || finishPending ? 'completed' : 'running',
+            })),
+            retrieve: vi.fn(async () => canonicalFixtureResult(id, content)),
+          },
+        ];
+      }),
+    );
+    const initial = await runCanonicalPreparedExecution(
+      canonicalFixturePrepared(profiles, { mode: 'async' }),
+      {
+        runs_root: root,
+        run_directory: runDir,
+        coordinator: canonicalFixtureCoordinator(),
+        attempt_bridge: canonicalFixtureBridge(profiles, providers),
+      },
+    );
+    const initialPresentation = writeCanonicalPresentationArtifacts(
+      initial.manifest,
+      runDir,
+      'run',
+    );
+    let now = CANONICAL_FIXTURE_TIME + 2000;
+    let sequence = 100;
+    const config: Config = {
+      version: 1,
+      providers: {},
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+      defaults: {
+        outputDir: root,
+        maxParallel: 2,
+        timeout: 30,
+        asyncTimeout: 300,
+        asyncPollInterval: 1,
+        mode: 'async',
+        llmWebSearch: true,
+      },
+    };
+    const resume = () =>
+      checkAsyncTasks(runDir, true, config, {
+        initialize: async () => ({
+          warnings: [],
+          loadedCustomProviders: [],
+          skippedCustomProviders: [],
+        }),
+        resolveExactProvider: (id) => providers[id],
+        resumeCanonical: () =>
+          resumeCanonicalPreparedExecution({
+            runs_root: root,
+            run_directory: runDir,
+            coordinator: {
+              clock: { now: () => now },
+              ids: { next: (scope) => `${scope}-${++sequence}` },
+            },
+            attempt_bridge: canonicalFixtureBridge(profiles, providers, now),
+          }),
+      });
+    expect(await resume()).toMatchObject({ retrieved: 1, state: 'pending' });
+    const manifest = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8'));
+    expect(manifest.terminal_response).toBeUndefined();
+    expect(Object.keys(manifest.provider_outputs_by_attempt)).toHaveLength(1);
+    // Simulate the empty derived output produced by older versions before
+    // completion. It must not override the committed canonical result.
+    writeFileSync(join(runDir, initialPresentation.reports[0].outputFile), '');
+    const before = Object.fromEntries(
+      readdirSync(runDir).map((name) => [
+        name,
+        readFileSync(join(runDir, name)),
+      ]),
+    );
+    const index = readRunIndex(runDir)!;
+    expect(index.tallies).toEqual({
+      succeeded: 1,
+      failed: 0,
+      pending: 1,
+      skipped: 0,
+    });
+    expect(index.providers[0].identity).toEqual(profiles[0].identity);
+    let cursor: string | undefined;
+    let restored = '';
+    do {
+      const page = readRunResults(runDir, undefined, undefined, {
+        resultId: index.providers[0].resultId,
+        cursor,
+      })!;
+      expect(page.results[0]).toMatchObject({
+        available: true,
+        status: 'success',
+        offset: restored.length,
+      });
+      restored += unwrap(page.results[0].content);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(restored).toBe(content);
+    const citations = readRunResults(runDir, 'adapter-done', undefined, {
+      part: 'citations',
+    })!;
+    const savedCitations = JSON.parse(unwrap(citations.results[0].content));
+    expect(savedCitations).toHaveLength(1);
+    expect(readRunResults(runDir, 'adapter-pending')!.results[0]).toMatchObject(
+      { status: 'async-pending', available: false },
+    );
+    expect(
+      Object.fromEntries(
+        readdirSync(runDir).map((name) => [
+          name,
+          readFileSync(join(runDir, name)),
+        ]),
+      ),
+    ).toEqual(before);
+    now += 2000;
+    expect(await resume()).toMatchObject({ retrieved: 0, state: 'pending' });
+    finishPending = true;
+    now += 2000;
+    const terminal = await resume();
+    expect(terminal).toMatchObject({ retrieved: 1, state: 'terminal' });
+    expect(terminal.response!.results[0].citations).toEqual(savedCitations);
+    expect(terminal.response!.results[0].content).toBe(restored);
+    expect(providers['adapter-done'].submit).toHaveBeenCalledOnce();
+    expect(providers['adapter-done'].retrieve).toHaveBeenCalledOnce();
+  });
+
   it('keeps distinct profiles on the same adapter independently addressable', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mcp-profile-pages-'));
     roots.push(root);

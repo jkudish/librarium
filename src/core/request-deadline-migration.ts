@@ -233,14 +233,27 @@ function validateContext(
   }
 }
 
+/** Per-profile attempt deadlines; undefined uses the context's global ones. */
+export interface ProfileAttemptDeadlineResolvers {
+  readonly inline?: (profile: ExecutionProfile) => number | undefined;
+  readonly background?: (profile: ExecutionProfile) => number | undefined;
+}
+
 function allowanceMs(
   profile: ExecutionProfile,
   context: V1RequestDeadlineMigrationContext,
   effectiveBackgroundAttemptDeadlineMs: bigint,
+  resolvers: ProfileAttemptDeadlineResolvers,
 ): bigint {
-  return profile.invocation === 'inline'
-    ? BigInt(context.inline_attempt_deadline_ms)
-    : effectiveBackgroundAttemptDeadlineMs;
+  if (profile.invocation === 'inline') {
+    return BigInt(
+      resolvers.inline?.(profile) ?? context.inline_attempt_deadline_ms,
+    );
+  }
+  const background = resolvers.background?.(profile);
+  return background === undefined
+    ? effectiveBackgroundAttemptDeadlineMs
+    : BigInt(background);
 }
 
 function overflowIssue(path: string): PreparationIssue {
@@ -273,6 +286,7 @@ function contractMaximumIssue(path: string): PreparationIssue {
 export function deriveV1RequestDeadline(
   context: V1RequestDeadlineMigrationContext,
   admission: ResearchExecutionAdmission,
+  resolvers: ProfileAttemptDeadlineResolvers = {},
 ): V1RequestDeadlineDerivationResult {
   if (!isMintedResearchExecutionAdmission(admission)) {
     return {
@@ -355,6 +369,7 @@ export function deriveV1RequestDeadline(
       entry.profile,
       context,
       effectiveBackgroundExact,
+      resolvers,
     );
   }
   let fullPlanExact = workers.reduce(
@@ -371,6 +386,7 @@ export function deriveV1RequestDeadline(
       entry.profile,
       context,
       effectiveBackgroundExact,
+      resolvers,
     );
   }
 

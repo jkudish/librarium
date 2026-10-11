@@ -308,7 +308,7 @@ describe('Brave Answers provider', () => {
     ]);
   });
 
-  it('returns an empty successful result when the stream has no citations', async () => {
+  it('returns a citation-free successful result when the stream has no citations', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(
@@ -321,6 +321,42 @@ describe('Brave Answers provider', () => {
     expect(result.content).toBe('Plain answer.');
     expect(result.citations).toEqual([]);
     expect(result.usage).toBeUndefined();
+  });
+
+  it.each([
+    ['no answer deltas', ['data: [DONE]\n\n']],
+    [
+      'only terminal usage',
+      [
+        `data: ${JSON.stringify({
+          model: 'brave',
+          choices: [{ delta: {}, finish_reason: 'stop' }],
+          usage: { completion_tokens: 0, prompt_tokens: 10 },
+        })}\n\n`,
+        'data: [DONE]\n\n',
+      ],
+    ],
+    [
+      'only inline metadata',
+      [
+        streamEvent(
+          '<citation>{"url":"https://example.com/source"}</citation>',
+        ),
+        'data: [DONE]\n\n',
+      ],
+    ],
+  ])('fails safely when the stream contains %s', async (_label, chunks) => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(sseResponse([...chunks]));
+
+    const result = await provider().execute('empty answer', { timeout: 10 });
+
+    expect(result).toMatchObject({
+      content: '',
+      citations: [],
+      error: 'Brave Answers request failed.',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    expect(result.preventFallback).toBeUndefined();
   });
 
   it('classifies 401 errors without retaining the Brave error envelope', async () => {

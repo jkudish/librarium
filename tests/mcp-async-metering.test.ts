@@ -3,14 +3,25 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  beginCanonicalRefinement,
+  materializeCanonicalPreparedExecution,
+  readCanonicalRunManifest,
+} from '../src/node-canonical-run.js';
 import { providerArtifactFileNames } from '../src/node-run-artifacts.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
+  Config,
   Provider,
   ProviderResult,
   RunManifest,
 } from '../src/types.js';
+import {
+  canonicalFixtureCoordinator,
+  canonicalFixturePrepared,
+  canonicalFixtureProfile,
+} from './fixtures/canonical-run.js';
 import { seedHistoricalV2AsyncTasks } from './fixtures/historical-v2-run.js';
 
 let registerProvider: typeof import('../src/adapters/index.js').registerProvider;
@@ -366,5 +377,90 @@ describe('MCP check_async poll state persistence', () => {
       lastPollError: 'provider.unavailable',
     });
     expect(persisted.providers[0].task.completedAt).toEqual(expect.any(Number));
+  });
+});
+
+describe('MCP check_async canonical refinement status', () => {
+  let root: string;
+  let runDir: string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    checkAsyncTasks = (await import('../src/mcp/async.js')).checkAsyncTasks;
+    root = join(
+      tmpdir(),
+      `librarium-mcp-refinement-${randomUUID().slice(0, 8)}`,
+    );
+    runDir = join(root, 'refining-v3');
+    mkdirSync(runDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('distinguishes pending refinement without dispatching a provider', async () => {
+    const now = Date.now();
+    const profile = canonicalFixtureProfile('refining');
+    const prepared = canonicalFixturePrepared([profile], {
+      mode: 'sync',
+      requestId: 'refining-v3',
+      requestedAtMs: now,
+    });
+    await materializeCanonicalPreparedExecution(prepared, {
+      runs_root: root,
+      run_directory: runDir,
+      coordinator: canonicalFixtureCoordinator(now),
+      refinement_requested: true,
+    });
+    beginCanonicalRefinement({
+      runs_root: root,
+      run_directory: runDir,
+    });
+    const config: Config = {
+      version: 1,
+      defaults: {
+        outputDir: root,
+        maxParallel: 1,
+        timeout: 30,
+        asyncTimeout: 60,
+        asyncPollInterval: 1,
+        mode: 'sync',
+        llmWebSearch: true,
+      },
+      providers: {},
+      customProviders: {},
+      trustedProviderIds: [],
+      groups: {},
+    };
+    const resolveExactProvider = vi.fn(() => {
+      throw new Error('Provider dispatch was not expected.');
+    });
+
+    const result = await checkAsyncTasks(runDir, false, config, {
+      initialize: vi.fn(async () => ({
+        warnings: [],
+        loadedCustomProviders: [],
+        skippedCustomProviders: [],
+      })),
+      resolveExactProvider,
+      coordinator: canonicalFixtureCoordinator(now + 1),
+      onError: (error) => {
+        throw error;
+      },
+    });
+
+    expect(result).toMatchObject({
+      runDir,
+      state: 'pending',
+      refinementStatus: 'in_progress',
+      polled: 0,
+      retrieved: 0,
+      tasks: [],
+    });
+    expect(resolveExactProvider).not.toHaveBeenCalled();
+    expect(
+      readCanonicalRunManifest(root, runDir).coordination_state.attempts,
+    ).toEqual([]);
   });
 });

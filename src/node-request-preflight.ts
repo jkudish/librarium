@@ -1,4 +1,8 @@
-import { configGroupProvenance } from './core/config.js';
+import {
+  configBackgroundAttemptDeadlineAuthored,
+  configGroupProvenance,
+  configInlineAttemptDeadlineAuthored,
+} from './core/config.js';
 import type { CredentialContext } from './core/credentials.js';
 import type {
   PreparationDependencies,
@@ -22,6 +26,7 @@ type ProductionRequestInput = Omit<
   | 'assumeCredentialAvailability'
   | 'structuralOnly'
   | 'preparation'
+  | 'pricedAtMs'
 >;
 
 interface DiagnosticCode {
@@ -31,10 +36,15 @@ interface DiagnosticCode {
 const MAX_CODES_PER_KIND = 12;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,79}$/;
 
-function requestPreparation(): PreparationDependencies {
+/**
+ * One admission instant serves as both the request time the plan records and
+ * the start of the pricing interval its cost estimates cover, so a dated
+ * rate window cannot change between the estimate and the run's deadline.
+ */
+function requestPreparation(nowMs: number): PreparationDependencies {
   const counts = new Map<string, number>();
   return {
-    clock: { now: () => Date.now() },
+    clock: { now: () => nowMs },
     ids: {
       next: (scope) => {
         const count = (counts.get(scope) ?? 0) + 1;
@@ -43,6 +53,14 @@ function requestPreparation(): PreparationDependencies {
       },
     },
   };
+}
+
+function admissionTime(): {
+  readonly pricedAtMs: number;
+  readonly preparation: PreparationDependencies;
+} {
+  const nowMs = Date.now();
+  return { pricedAtMs: nowMs, preparation: requestPreparation(nowMs) };
 }
 
 function boundedCodes(diagnostics: readonly DiagnosticCode[]): {
@@ -220,6 +238,11 @@ export function preflightProductionRequestStructure(
   const common = {
     ...input,
     authoredGroups: configGroupProvenance(input.config),
+    applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
+      input.config,
+    ),
+    applyBackgroundProfileDeadlineDefaults:
+      !configBackgroundAttemptDeadlineAuthored(input.config),
   };
   try {
     const compiled = requireCompiled(
@@ -227,7 +250,7 @@ export function preflightProductionRequestStructure(
         ...common,
         assumeCredentialAvailability: true,
         structuralOnly: true,
-        preparation: requestPreparation(),
+        ...admissionTime(),
       }),
     );
     const { prepared } = compiled;
@@ -267,6 +290,11 @@ export function preflightProductionRequest(
   const common = {
     ...input,
     authoredGroups: configGroupProvenance(input.config),
+    applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
+      input.config,
+    ),
+    applyBackgroundProfileDeadlineDefaults:
+      !configBackgroundAttemptDeadlineAuthored(input.config),
   };
 
   preflightProductionRequestStructure(input);
@@ -277,7 +305,7 @@ export function preflightProductionRequest(
       compileRequest({
         ...common,
         credentials,
-        preparation: requestPreparation(),
+        ...admissionTime(),
       }),
     );
     const { prepared } = compiled;
@@ -314,6 +342,12 @@ export function emitRequestPreflightNotices(
     onWarn(
       `[librarium] preflight: ${formatRequestDiagnosticCodes('notices', notices)}`,
     );
+    // A group that runs fewer members than it names must say which ones it
+    // skipped and how to restore them, not only a diagnostic code.
+    for (const notice of notices) {
+      if (notice.code !== 'workflow_profile_unavailable') continue;
+      onWarn(`[librarium] warning: ${sanitizeDiagnostic(notice.message)}`);
+    }
   } catch {
     // The request is already admitted. Diagnostics cannot change execution.
   }

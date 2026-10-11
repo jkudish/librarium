@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ValyuResearchProvider } from '../../src/adapters/valyu-research.js';
 import { ValyuSearchProvider } from '../../src/adapters/valyu-search.js';
-import { UnsafeToRetrySubmissionError } from '../../src/core/errors.js';
+import { ProviderMetaSchema } from '../../src/contracts/interchange/research-result.js';
 import type { HttpClient } from '../../src/core/http-client.js';
 
 const response = <T>(status: number, data: T) => ({
@@ -179,7 +179,8 @@ describe('Valyu DeepResearch', () => {
         cost: 2.5,
         cost_breakdown: { task: 2.5 },
         progress: { current_step: 3, total_steps: 15 },
-        pdf_url: 'https://storage.valyu.ai/report.pdf?token=ephemeral',
+        pdf_url:
+          'https://storage.valyu.ai/report.pdf?X-Amz-Date=20260812T001000Z&X-Amz-Expires=3600&X-Amz-Signature=pdf-sig',
         sources: [
           {
             title: 'Study',
@@ -249,9 +250,14 @@ describe('Valyu DeepResearch', () => {
     });
     expect(JSON.stringify(result)).not.toContain('s3_key');
     expect(JSON.stringify(result)).not.toContain('secret/internal');
+    // Only the requested PDF report keeps its signed (bearer) link.
     expect(JSON.stringify(result)).not.toContain('token=ephemeral');
     expect(result.providerMeta?.['valyu:artifacts']).toEqual([
-      { kind: 'pdf' },
+      {
+        kind: 'pdf',
+        url: 'https://storage.valyu.ai/report.pdf?X-Amz-Date=20260812T001000Z&X-Amz-Expires=3600&X-Amz-Signature=pdf-sig',
+        expires_at: '2026-08-12T01:10:00.000Z',
+      },
       {
         kind: 'csv',
         provider_asset_id: 'del-1',
@@ -296,29 +302,98 @@ describe('Valyu DeepResearch', () => {
     });
     await expect(
       provider.submit('x'.repeat(25_001), { timeout: 10 }),
-    ).rejects.toThrow('cannot exceed 25000 characters');
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      message: expect.stringContaining('cannot exceed 25000 characters'),
+      failureDiagnostic: { kind: 'invalid_request' },
+    });
     expect(transport.calls).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['non-202', async () => response(400, { error: 'bad request' })],
-    [
-      'transport error',
-      async () => {
-        throw new Error('connection ended after submit');
-      },
-    ],
-  ])('keeps %s submissions unsafe to retry', async (_case, implementation) => {
-    const transport = client(implementation);
+    [400, { kind: 'invalid_request', httpStatus: 400 }],
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'keeps HTTP %s submission diagnostics bounded without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'raw-provider-secret';
+      const transport = client(async () =>
+        response(status, {
+          error: { message: `Bearer ${secret}`, api_key: secret },
+        }),
+      );
+      const provider = new ValyuResearchProvider();
+      provider.configure({
+        credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+        httpClient: transport.httpClient,
+      });
+
+      const submission = provider.submit('unsafe retry', { timeout: 10 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Valyu submission failed before a valid research task handle was returned.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(transport.calls).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps network and malformed accepted submissions ambiguous', async () => {
+    const network = client(async () => {
+      throw new TypeError('fetch failed with Bearer raw-provider-secret');
+    });
+    const provider = new ValyuResearchProvider();
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: network.httpClient,
+    });
+    await expect(
+      provider.submit('unsafe retry', { timeout: 10 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(network.calls).toHaveBeenCalledOnce();
+
+    const malformedTransport = client(async () =>
+      response(202, { status: 'queued' }),
+    );
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: malformedTransport.httpClient,
+    });
+    const malformed = provider.submit('unsafe retry', { timeout: 10 });
+    await expect(malformed).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'provider' },
+    });
+    await expect(malformed).rejects.not.toHaveProperty(
+      'failureDiagnostic.httpStatus',
+    );
+  });
+
+  it('preserves a valid id from a malformed accepted response', async () => {
+    const transport = client(async () =>
+      response(202, { deepresearch_id: 'dr-preserved', status: 'future' }),
+    );
     const provider = new ValyuResearchProvider();
     provider.configure({
       credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
       httpClient: transport.httpClient,
     });
+
     await expect(
-      provider.submit('unsafe retry', { timeout: 10 }),
-    ).rejects.toBeInstanceOf(UnsafeToRetrySubmissionError);
-    expect(transport.calls).toHaveBeenCalledOnce();
+      provider.submit('preserve custody', { timeout: 10 }),
+    ).resolves.toMatchObject({
+      taskId: 'dr-preserved',
+      status: 'pending',
+      providerStatus: 'invalid_response',
+    });
   });
 
   it.each([
@@ -499,6 +574,103 @@ describe('Valyu DeepResearch', () => {
         status: 'failed',
         rawStatus: status,
         message: 'Valyu requested unsupported human-in-the-loop interaction.',
+      });
+    },
+  );
+
+  const handle = {
+    provider: 'valyu-research',
+    taskId: 'dr-pdf',
+    query: 'pdf',
+    submittedAt: 0,
+    status: 'completed' as const,
+  };
+
+  it.each([
+    [
+      'https://storage.valyu.ai/r.pdf?X-Goog-Date=20261011T120000Z&X-Goog-Expires=600&X-Goog-Signature=s',
+      '2026-10-11T12:10:00.000Z',
+    ],
+    [
+      'https://cdn.valyu.ai/r.pdf?Expires=1791806400&Signature=s',
+      '2026-10-12T12:00:00.000Z',
+    ],
+    ['https://storage.valyu.ai/pdfs/a1b2c3d4.pdf', undefined],
+    ['https://storage.valyu.ai/r.pdf?token=opaque', undefined],
+  ])(
+    'exposes the signed PDF link %s with its derivable expiry',
+    async (pdfUrl, expiresAt) => {
+      const transport = client(async () =>
+        response(200, {
+          deepresearch_id: 'dr-pdf',
+          status: 'completed',
+          output_type: 'markdown',
+          output: '# Report',
+          pdf_url: pdfUrl,
+        }),
+      );
+      const provider = new ValyuResearchProvider({
+        outputFormats: ['markdown', 'pdf'],
+      });
+      provider.configure({
+        credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+        httpClient: transport.httpClient,
+      });
+      const result = await provider.retrieve(handle);
+      const meta = ProviderMetaSchema.parse(result.providerMeta);
+      expect(meta['valyu:artifacts']).toEqual([
+        {
+          kind: 'pdf',
+          url: pdfUrl,
+          ...(expiresAt && { expires_at: expiresAt }),
+        },
+      ]);
+    },
+  );
+
+  it('keeps the signed PDF link out of status and error messages', async () => {
+    const pdfUrl = 'https://storage.valyu.ai/r.pdf?token=bearer-secret';
+    const transport = client(async () =>
+      response(200, {
+        deepresearch_id: 'dr-pdf',
+        status: 'failed',
+        pdf_url: pdfUrl,
+        error: `Report rendered at ${pdfUrl} but verification failed`,
+      }),
+    );
+    const provider = new ValyuResearchProvider();
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: transport.httpClient,
+    });
+    const polled = await provider.poll({ ...handle, status: 'running' });
+    expect(polled).toMatchObject({ status: 'failed' });
+    expect(JSON.stringify(polled)).not.toContain('bearer-secret');
+    const retrieved = await provider.retrieve(handle);
+    expect(retrieved.error).toBeDefined();
+    expect(JSON.stringify(retrieved)).not.toContain('bearer-secret');
+  });
+
+  it.each([
+    [undefined, ['markdown', 'pdf']],
+    [['markdown'] as ['markdown'], ['markdown']],
+  ])(
+    'requests the PDF report by default unless markdown-only is configured (%o)',
+    async (outputFormats, expected) => {
+      const transport = client(async () =>
+        response(202, { deepresearch_id: 'dr-default', status: 'queued' }),
+      );
+      const provider = new ValyuResearchProvider(
+        outputFormats ? { outputFormats } : {},
+      );
+      provider.configure({
+        credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+        httpClient: transport.httpClient,
+      });
+      await provider.submit('default mode', { timeout: 10 });
+      expect(transport.calls.mock.calls[0]?.[1]?.body).toMatchObject({
+        mode: 'standard',
+        output_formats: expected,
       });
     },
   );

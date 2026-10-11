@@ -1,5 +1,115 @@
 import type { MeteringEstimate, ProviderUsage } from '../types.js';
 
+/** Every finite JavaScript number converted to microusd fits in this bound. */
+export const MAX_REPORTED_COST_MICROUSD_DIGITS = 315;
+/** A coordinator persists at most 256 reported attempt costs. */
+export const MAX_AGGREGATE_COST_MICROUSD_DIGITS = 318;
+
+function expandedNonNegativeDecimal(value: number): string {
+  const [coefficient, exponentText] = value.toString().toLowerCase().split('e');
+  const exponent = exponentText === undefined ? 0 : Number(exponentText);
+  const [integer = '0', fraction = ''] = coefficient.split('.');
+  const digits = `${integer}${fraction}`;
+  const decimalPosition = integer.length + exponent;
+  let whole: string;
+  let remainder: string;
+  if (decimalPosition <= 0) {
+    whole = '0';
+    remainder = `${'0'.repeat(-decimalPosition)}${digits}`;
+  } else if (decimalPosition >= digits.length) {
+    whole = `${digits}${'0'.repeat(decimalPosition - digits.length)}`;
+    remainder = '';
+  } else {
+    whole = digits.slice(0, decimalPosition);
+    remainder = digits.slice(decimalPosition);
+  }
+  whole = whole.replace(/^0+(?=\d)/, '');
+  remainder = remainder.replace(/0+$/, '');
+  return remainder ? `${whole}.${remainder}` : whole;
+}
+
+const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+
+/**
+ * Round a non-negative decimal string up to at most `scale` fractional digits
+ * with exact string arithmetic. Trailing zeros are dropped.
+ */
+export function roundUpDecimal(decimal: string, scale: number): string {
+  if (!DECIMAL_PATTERN.test(decimal)) {
+    throw new Error('Expected a non-negative decimal string.');
+  }
+  const [whole = '0', fraction = ''] = decimal.split('.');
+  let kept = fraction.slice(0, scale);
+  let integer = whole;
+  if (/[1-9]/.test(fraction.slice(scale))) {
+    const bumped = (BigInt(`${whole}${kept.padEnd(scale, '0')}`) + 1n)
+      .toString()
+      .padStart(scale + 1, '0');
+    integer = scale === 0 ? bumped : bumped.slice(0, -scale);
+    kept = scale === 0 ? '' : bumped.slice(-scale);
+  }
+  kept = kept.replace(/0+$/, '');
+  return kept ? `${integer}.${kept}` : integer;
+}
+
+/**
+ * Canonical non-exponent USD decimal accepted by the terminal usage schema.
+ * Uses the number's shortest round-trip decimal (the value a provider wrote in
+ * its JSON), never its binary expansion: 0.74184 stays "0.74184". More than
+ * 18 fractional digits round up, so a cost is never understated.
+ */
+export function decimalUsdFromNumber(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Usage costs must be finite non-negative numbers.');
+  }
+  return roundUpDecimal(expandedNonNegativeDecimal(value), 18);
+}
+
+/** Exact microusd for a decimal USD string, rounded up. */
+export function costMicrousdFromDecimal(decimal: string): string {
+  const rounded = roundUpDecimal(decimal, 6);
+  const [whole = '0', fraction = ''] = rounded.split('.');
+  return (
+    BigInt(whole) * 1_000_000n +
+    BigInt(fraction.padEnd(6, '0'))
+  ).toString();
+}
+
+export function costMicrousdFromUsd(
+  value: number | undefined,
+): string | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return costMicrousdFromDecimal(expandedNonNegativeDecimal(value));
+}
+
+/**
+ * A provider-reported cost as an exact USD decimal: the provider's own exact
+ * representation when the adapter kept one, else the reported number.
+ */
+export function reportedCostDecimal(
+  usage: Pick<ProviderUsage, 'costUsd' | 'costUsdDecimal'> | undefined,
+): string | undefined {
+  if (usage?.costUsdDecimal !== undefined) {
+    return roundUpDecimal(usage.costUsdDecimal, 18);
+  }
+  return typeof usage?.costUsd === 'number' &&
+    Number.isFinite(usage.costUsd) &&
+    usage.costUsd >= 0
+    ? decimalUsdFromNumber(usage.costUsd)
+    : undefined;
+}
+
+/** Microusd for a provider-reported cost, preferring its exact decimal. */
+export function reportedCostMicrousd(
+  usage: Pick<ProviderUsage, 'costUsd' | 'costUsdDecimal'> | undefined,
+): string | undefined {
+  return usage?.costUsdDecimal !== undefined
+    ? costMicrousdFromDecimal(usage.costUsdDecimal)
+    : costMicrousdFromUsd(usage?.costUsd);
+}
+
 /**
  * Runtime spend circuit breaker for a dispatch.
  *

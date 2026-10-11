@@ -68,7 +68,6 @@ import { SearchApiChatGptProvider } from './searchapi-chatgpt.js';
 import { SearchApiGeminiProvider } from './searchapi-gemini.js';
 import { SearchApiGoogleAiModeProvider } from './searchapi-google-ai-mode.js';
 import { SearchApiGoogleAiOverviewProvider } from './searchapi-google-ai-overview.js';
-import { SearchApiPerplexityProvider } from './searchapi-perplexity.js';
 import { SerpApiProvider } from './serpapi.js';
 import { SerpBaseProvider } from './serpbase.js';
 import {
@@ -153,6 +152,7 @@ function openRouterOptions(
   >,
 ): Pick<
   OpenRouterProviderOptions,
+  | 'webSearchEngine'
   | 'providerOrder'
   | 'allowFallbacks'
   | 'requireParameters'
@@ -164,6 +164,9 @@ function openRouterOptions(
 > {
   const options = context.options;
   return {
+    ...(options.webSearchEngine !== undefined && {
+      webSearchEngine: options.webSearchEngine,
+    }),
     ...(options.providerOrder !== undefined && {
       providerOrder: options.providerOrder,
     }),
@@ -359,13 +362,6 @@ const factories: Record<string, ProviderFactory> = {
     searchApiOptionsSchema,
     (context) =>
       new SearchApiGeminiProvider({
-        zeroRetention: searchApiZeroRetention(context.options),
-      }),
-  ),
-  'searchapi-perplexity': typedFactory(
-    searchApiOptionsSchema,
-    (context) =>
-      new SearchApiPerplexityProvider({
         zeroRetention: searchApiZeroRetention(context.options),
       }),
   ),

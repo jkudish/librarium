@@ -78,6 +78,18 @@ async function runCleanup(opts: CleanupOptions): Promise<void> {
       return;
     }
 
+    // JSON output cannot carry an interactive confirmation prompt without
+    // corrupting the machine-readable response. Destructive all-run cleanup
+    // therefore requires explicit authorization in every JSON invocation.
+    if (opts.json && opts.all && !opts.dryRun && !opts.yes) {
+      printError(
+        opts,
+        'Refusing to delete all runs without confirmation. Re-run with --yes (or use --dry-run to preview).',
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     const all = !!opts.all || !!opts.interactive;
     const candidates = discoverCandidates(baseDir, { all, days: opts.days });
 
@@ -99,12 +111,12 @@ async function runCleanup(opts: CleanupOptions): Promise<void> {
       return;
     }
 
+    const summary = summarizeCandidates(candidates);
+
     if (opts.json) {
       handleJson(baseDir, candidates, opts);
       return;
     }
-
-    const summary = summarizeCandidates(candidates);
 
     if (opts.dryRun) {
       console.log(

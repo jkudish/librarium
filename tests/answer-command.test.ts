@@ -177,7 +177,7 @@ describe('synthesizeAnswer', () => {
     const out = await synthesizeAnswer(context);
     expect(out?.manifestExtra?.answer).toEqual({
       provider: 'openai',
-      model: 'gpt-5-mini',
+      model: 'gpt-6-luna',
     });
     const answerPath = join(dir, 'answer.md');
     expect(existsSync(answerPath)).toBe(true);
@@ -349,7 +349,7 @@ describe('synthesizeAnswer', () => {
           requested: true,
           fallback_authorized: false,
           prompt_version: 'synthesis-v1',
-          providers: [{ provider: 'openai', model: 'gpt-5-mini' }],
+          providers: [{ provider: 'openai', model: 'gpt-6-luna' }],
           reserve_first_attempt: true,
         },
         {
@@ -358,7 +358,7 @@ describe('synthesizeAnswer', () => {
           fallback_authorized: false,
           prompt_version: 'verification-v1',
           providers: [
-            { provider: 'openai', model: 'gpt-5-mini' },
+            { provider: 'openai', model: 'gpt-6-luna' },
             { provider: 'primary' },
           ],
         },
@@ -440,7 +440,7 @@ describe('synthesizeAnswer', () => {
           providers: [
             {
               provider: 'openai',
-              model: 'gpt-5-mini',
+              model: 'gpt-6-luna',
               estimated_cost_microusd: '5000',
             },
           ],
@@ -451,7 +451,7 @@ describe('synthesizeAnswer', () => {
           requested: true,
           fallback_authorized: false,
           prompt_version: 'verification-v1',
-          providers: [{ provider: 'openai', model: 'gpt-5-mini' }],
+          providers: [{ provider: 'openai', model: 'gpt-6-luna' }],
         },
       ],
       now: () => Date.parse('2026-09-05T12:00:01.000Z'),
@@ -518,7 +518,7 @@ describe('synthesizeAnswer', () => {
           requested: true,
           fallback_authorized: false,
           prompt_version: 'synthesis-v1',
-          providers: [{ provider: 'openai', model: 'gpt-5-mini' }],
+          providers: [{ provider: 'openai', model: 'gpt-6-luna' }],
         },
         {
           stage: 'verification',
@@ -555,7 +555,7 @@ describe('synthesizeAnswer', () => {
     const out = await synthesizeAndVerifyAnswer(context);
 
     expect(out?.manifestExtra).toEqual({
-      answer: { provider: 'openai', model: 'gpt-5-mini' },
+      answer: { provider: 'openai', model: 'gpt-6-luna' },
     });
     expect(readFileSync(join(dir, 'answer.md'), 'utf8')).toContain(
       'Original grounded answer [1].',

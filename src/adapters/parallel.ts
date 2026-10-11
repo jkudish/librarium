@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { OpaqueIdSchema } from '../contracts/common.js';
-import { UnsafeToRetrySubmissionError } from '../core/errors.js';
+import {
+  diagnosticForSubmissionError,
+  diagnosticForSubmissionHttpStatus,
+  UnsafeToRetrySubmissionError,
+} from '../core/errors.js';
 import { normalizeUrl } from '../core/normalizer.js';
 import type {
   AsyncPollResult,
@@ -17,6 +21,9 @@ import {
   type BaseProviderOptions,
 } from './base.js';
 import {
+  DEFAULT_PARALLEL_RESEARCH_PROCESSOR,
+  PARALLEL_RESEARCH_PROCESSORS,
+  type ParallelResearchOptions,
   ParallelResearchOptionsSchema,
   type ParallelSearchOptions,
   ParallelSearchOptionsSchema,
@@ -25,7 +32,13 @@ import {
 } from './parallel-options.js';
 
 const API = 'https://api.parallel.ai';
-const RESEARCH_PROCESSORS = new Set(['pro', 'pro-fast', 'ultra', 'ultra-fast']);
+const RESEARCH_SUBMISSION_FAILED =
+  'Parallel submission failed before a valid task handle was returned.';
+const RESEARCH_PROCESSORS: ReadonlySet<string> = new Set(
+  PARALLEL_RESEARCH_PROCESSORS,
+);
+const DEFAULT_REPORT_DESCRIPTION =
+  'A thorough cited research report that directly answers the request.';
 const STATUS: Record<string, AsyncTaskStatus> = {
   queued: 'pending',
   action_required: 'running',
@@ -135,6 +148,21 @@ const textTaskOutputSchema = z
     basis: z.array(fieldBasisSchema).optional(),
   })
   .passthrough();
+
+const jsonTaskOutputSchema = z
+  .object({
+    type: z.literal('json'),
+    content: z.record(z.string(), z.unknown()),
+    basis: z.array(fieldBasisSchema).optional(),
+  })
+  .passthrough();
+
+/** Task spec for the configured output: a text report or a JSON schema. */
+function outputSchema(value: ParallelResearchOptions['outputSchema']) {
+  return value !== undefined && typeof value !== 'string'
+    ? { type: 'json', json_schema: value }
+    : { type: 'text', description: value ?? DEFAULT_REPORT_DESCRIPTION };
+}
 
 const taskRunSchema = z
   .object({
@@ -417,7 +445,8 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
     } = {},
   ) {
     super(options);
-    this.processor = options.model?.trim() || 'pro';
+    this.processor =
+      options.model?.trim() || DEFAULT_PARALLEL_RESEARCH_PROCESSOR;
     this.options = options.configuredOptions ?? {};
   }
   async submit(
@@ -426,50 +455,56 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
   ): Promise<AsyncTaskHandle> {
     const parsed = ParallelResearchOptionsSchema.safeParse(this.options);
     if (!parsed.success)
-      throw new Error(`parallel-research options: ${parsed.error.message}`);
+      throw new UnsafeToRetrySubmissionError(
+        `parallel-research options: ${parsed.error.message}`,
+        { kind: 'invalid_request' },
+      );
     if (!RESEARCH_PROCESSORS.has(this.processor))
-      throw new Error(
-        'parallel-research processor must be one of: pro, pro-fast, ultra, ultra-fast',
+      throw new UnsafeToRetrySubmissionError(
+        `parallel-research processor must be one of: ${PARALLEL_RESEARCH_PROCESSORS.join(', ')}`,
+        { kind: 'invalid_request' },
       );
     let response;
     try {
       response = await this.request<TaskRun>(`${API}/v1/tasks/runs`, {
         method: 'POST',
         headers: { 'x-api-key': this.getApiKey() },
-        body: {
-          input: query,
-          processor: this.processor,
-          task_spec: {
-            output_schema: {
-              type: 'text',
-              description:
-                'A thorough cited research report that directly answers the request.',
-            },
-          },
-          ...(sourcePolicy(parsed.data) && {
-            source_policy: sourcePolicy(parsed.data),
-          }),
-          ...(parsed.data.location && {
-            advanced_settings: { location: parsed.data.location },
-          }),
-        },
+        body: this.researchBody(query, parsed.data),
         timeout: 30_000,
         signal: options.signal,
       });
     } catch (error) {
       throw new UnsafeToRetrySubmissionError(
-        error instanceof Error ? error.message : String(error),
+        RESEARCH_SUBMISSION_FAILED,
+        diagnosticForSubmissionError(error, options.signal),
       );
     }
     if (response.status !== 202 && response.status !== 200)
       throw new UnsafeToRetrySubmissionError(
-        this.formatError(response.status, response.data),
+        RESEARCH_SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
       );
     const parsedResponse = taskRunSchema.safeParse(response.data);
-    if (!parsedResponse.success)
-      throw new UnsafeToRetrySubmissionError(
-        'Parallel accepted an invalid task response',
+    if (!parsedResponse.success) {
+      const id = OpaqueIdSchema.safeParse(
+        (response.data as { run_id?: unknown })?.run_id,
       );
+      if (id.success) {
+        return {
+          provider: this.id,
+          taskId: id.data,
+          query,
+          submittedAt: Date.now(),
+          status: 'pending',
+          providerStatus: 'invalid_response',
+          lastPollError: 'Parallel returned an invalid task response',
+        };
+      }
+      throw new UnsafeToRetrySubmissionError(
+        RESEARCH_SUBMISSION_FAILED,
+        diagnosticForSubmissionHttpStatus(response.status),
+      );
+    }
     const id = parsedResponse.data.run_id;
     // Creation establishes the remote identity used for every later request.
     // The returned handle therefore derives only from the validated response.
@@ -496,31 +531,13 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
       },
     );
     if (response.status !== 200) {
-      if (
-        response.status === 408 ||
-        response.status === 429 ||
-        response.status >= 500
-      )
-        throw new Error(`Poll returned HTTP ${response.status}`);
-      return {
-        status: 'failed',
-        rawStatus: `http_${response.status}`,
-        message: `Poll returned HTTP ${response.status}`,
-      };
+      throw new Error(`Poll returned HTTP ${response.status}`);
     }
     const parsedResponse = taskRunSchema.safeParse(response.data);
     if (!parsedResponse.success)
-      return {
-        status: 'failed',
-        rawStatus: 'invalid_response',
-        message: 'Parallel returned an invalid task status response',
-      };
+      throw new Error('Parallel returned an invalid task status response');
     if (parsedResponse.data.run_id !== handle.taskId)
-      return {
-        status: 'failed',
-        rawStatus: 'identity_mismatch',
-        message: 'Parallel returned task status for a different run_id',
-      };
+      throw new Error('Parallel returned task status for a different run_id');
     const rawStatus = parsedResponse.data.status;
     const status = STATUS[rawStatus];
     return status
@@ -565,20 +582,28 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
           parsedResponse.data.run.error?.message ??
             `Task is not complete: status=${parsedResponse.data.run.status}`,
         );
-      // This adapter requests a fixed text schema. Do not stringify unknown or
-      // structured output into a fabricated successful report.
-      const output = textTaskOutputSchema.safeParse(parsedResponse.data.output);
+      // Accept only the output type this adapter requested. Never stringify
+      // unknown output into a fabricated successful report.
+      const output = this.requestsJson()
+        ? jsonTaskOutputSchema.safeParse(parsedResponse.data.output)
+        : textTaskOutputSchema.safeParse(parsedResponse.data.output);
       if (!output.success)
         return this.errorResult(
           durationMs,
-          'Parallel returned a completed Task without text output',
+          this.requestsJson()
+            ? 'Parallel returned a completed Task without JSON output'
+            : 'Parallel returned a completed Task without text output',
         );
-      const content = output.data.content;
+      const json = typeof output.data.content !== 'string';
+      const content = json
+        ? JSON.stringify(output.data.content, null, 2)
+        : (output.data.content as string);
       const basis = basisMeta(output.data.basis);
       return {
         provider: this.id,
         tier: this.tier,
         content,
+        ...(json && { contentFormat: 'json' as const }),
         citations: citationsFromBasis(output.data.basis, this.id),
         durationMs,
         model: text(parsedResponse.data.run.processor) ?? this.processor,
@@ -633,6 +658,32 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
         this.formatCatchError(error),
       );
     }
+  }
+  /**
+   * Create Task Run body. Every documented parameter that fits a research
+   * result is mapped here; docs/research-options.md lists the omissions.
+   */
+  private researchBody(query: string, value: ParallelResearchOptions) {
+    const policy = sourcePolicy(value);
+    return {
+      input: query,
+      processor: this.processor,
+      task_spec: { output_schema: outputSchema(value.outputSchema) },
+      ...(policy && { source_policy: policy }),
+      ...(value.location && {
+        advanced_settings: { location: value.location },
+      }),
+      ...(value.metadata && { metadata: value.metadata }),
+      ...(value.memoryScopeKey && { memory_scope_key: value.memoryScopeKey }),
+    };
+  }
+  private requestsJson(): boolean {
+    const parsed = ParallelResearchOptionsSchema.safeParse(this.options);
+    return (
+      parsed.success &&
+      parsed.data.outputSchema !== undefined &&
+      typeof parsed.data.outputSchema !== 'string'
+    );
   }
   private errorResult(durationMs: number, error: string): ProviderResult {
     return {

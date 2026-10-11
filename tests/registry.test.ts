@@ -172,7 +172,7 @@ describe('registry', () => {
   it('initializeProviders registers all active providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(39);
+    expect(all).toHaveLength(38);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -207,7 +207,7 @@ describe('registry', () => {
     expect(ids).toContain('openrouter-chat');
     expect(ids).toContain('searchapi-chatgpt');
     expect(ids).toContain('searchapi-gemini');
-    expect(ids).toContain('searchapi-perplexity');
+    expect(ids).not.toContain('searchapi-perplexity');
     expect(ids).toContain('searchapi-google-ai-mode');
     expect(ids).toContain('searchapi-bing-copilot');
     expect(ids).toContain('searchapi-google-ai-overview');
@@ -236,7 +236,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(33);
+    ).toHaveLength(32);
   });
 
   it('injects credentials into every background built-in', async () => {
@@ -293,16 +293,16 @@ describe('registry', () => {
       expect(getProvider(id)?.tier).toBe('llm');
     }
     expect(getProvider('gemini-chat')).toMatchObject({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.8-flash',
     });
     expect(getProvider('claude')).toMatchObject({
-      model: 'claude-sonnet-5',
-      maxTokens: 16000,
+      model: 'claude-sonnet-5-5',
+      maxTokens: 64000,
       thinking: 'adaptive',
-      effort: 'medium',
+      effort: 'high',
     });
     expect(getProvider('openrouter-chat')).toMatchObject({
-      model: 'openai/gpt-5.6-terra',
+      model: 'openai/gpt-6-luna',
     });
   });
 
@@ -337,7 +337,7 @@ describe('registry', () => {
         claude: {
           options: {
             maxTokens: 24000,
-            thinking: 'disabled',
+            thinking: 'between_tools',
             effort: 'low',
           },
         },
@@ -345,7 +345,7 @@ describe('registry', () => {
     });
     expect(getProvider('claude')).toMatchObject({
       maxTokens: 24000,
-      thinking: 'disabled',
+      thinking: 'between_tools',
       effort: 'low',
     });
   });

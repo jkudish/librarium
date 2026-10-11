@@ -29,7 +29,7 @@ describe('llm providers', () => {
   it('calls the Anthropic Messages API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'claude-sonnet-5',
+        model: 'claude-sonnet-5-5',
         content: [
           {
             type: 'text',
@@ -58,7 +58,7 @@ describe('llm providers', () => {
     expect(result.error).toBeUndefined();
     expect(result.provider).toBe('claude');
     expect(result.tier).toBe('llm');
-    expect(result.content).toBe('Direct answer.\nSecond block.');
+    expect(result.content).toBe('Direct answer.Second block.');
     expect(result.citations).toEqual([
       {
         url: 'https://example.com/claude',
@@ -67,7 +67,7 @@ describe('llm providers', () => {
         provider: 'claude',
       },
     ]);
-    expect(result.model).toBe('claude-sonnet-5');
+    expect(result.model).toBe('claude-sonnet-5-5');
     expect(result.usage).toMatchObject({
       inputTokens: 5,
       outputTokens: 9,
@@ -80,11 +80,11 @@ describe('llm providers', () => {
     expect(headers['x-api-key']).toBe('anthropic-key');
     expect(headers['anthropic-version']).toBe('2023-06-01');
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'claude-sonnet-5',
-      max_tokens: 16000,
+      model: 'claude-sonnet-5-5',
+      max_tokens: 64000,
       messages: [{ role: 'user', content: 'what is rust?' }],
       thinking: { type: 'adaptive' },
-      output_config: { effort: 'medium' },
+      output_config: { effort: 'high' },
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
     });
   });
@@ -108,13 +108,41 @@ describe('llm providers', () => {
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'claude-opus-4-8',
-      max_tokens: 16000,
+      max_tokens: 64000,
       messages: [{ role: 'user', content: 'hi' }],
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
     });
   });
 
   it('applies explicit Claude thinking, effort, and output options', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'claude-sonnet-5-5',
+        content: [{ type: 'text', text: 'ok' }],
+      }),
+    );
+    globalThis.fetch = fetchMock;
+
+    const provider = new ClaudeProvider({
+      maxTokens: 32000,
+      thinking: 'between_tools',
+      effort: 'low',
+      webSearch: false,
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    });
+    await provider.execute('hi', { timeout: 10 });
+
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      model: 'claude-sonnet-5-5',
+      max_tokens: 32000,
+      messages: [{ role: 'user', content: 'hi' }],
+      thinking: { type: 'between_tools' },
+      output_config: { effort: 'low' },
+    });
+  });
+
+  it('still sends thinking "disabled" for an earlier pinned Claude model', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
         model: 'claude-sonnet-5',
@@ -124,9 +152,8 @@ describe('llm providers', () => {
     globalThis.fetch = fetchMock;
 
     const provider = new ClaudeProvider({
-      maxTokens: 32000,
+      model: 'claude-sonnet-5',
       thinking: 'disabled',
-      effort: 'low',
       webSearch: false,
       credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
     });
@@ -135,11 +162,167 @@ describe('llm providers', () => {
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'claude-sonnet-5',
-      max_tokens: 32000,
+      max_tokens: 64000,
       messages: [{ role: 'user', content: 'hi' }],
       thinking: { type: 'disabled' },
-      output_config: { effort: 'low' },
     });
+  });
+
+  it('answers with the Sonnet 5.5 text after its last search, not thinking or between-search text', async () => {
+    // Shape from the Sonnet 5.5 web search and progress-update docs: an empty
+    // up-front reasoning block, a short remark kept as text, a progress update
+    // returned as a thinking block, then the cited answer split at citations.
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'claude-sonnet-5-5',
+        content: [
+          { type: 'thinking', thinking: '', signature: 'EqMBsig1' },
+          { type: 'text', text: "I'll search for that." },
+          {
+            type: 'server_tool_use',
+            id: 'srvtoolu_1',
+            name: 'web_search',
+            input: { query: 'claude shannon birth date' },
+          },
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'srvtoolu_1',
+            content: [
+              {
+                type: 'web_search_result',
+                url: 'https://example.com/early',
+                title: 'Early',
+              },
+            ],
+          },
+          {
+            type: 'thinking',
+            thinking:
+              'Found a birth date; checking a second source before answering.',
+            signature: 'Es8Csig2',
+          },
+          {
+            type: 'server_tool_use',
+            id: 'srvtoolu_2',
+            name: 'web_search',
+            input: { query: 'claude shannon petoskey' },
+          },
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'srvtoolu_2',
+            content: [],
+          },
+          { type: 'thinking', thinking: '', signature: 'EqMBsig3' },
+          { type: 'text', text: 'Based on the search results, ' },
+          {
+            type: 'text',
+            text: 'Claude Shannon was born on April 30, 1916.',
+            citations: [
+              {
+                type: 'web_search_result_location',
+                url: 'https://example.com/shannon',
+                title: 'Claude Shannon',
+                cited_text: 'Claude Elwood Shannon (April 30, 1916 –',
+              },
+            ],
+          },
+        ],
+        stop_reason: 'end_turn',
+        stop_details: null,
+        usage: {
+          input_tokens: 6039,
+          output_tokens: 931,
+          cache_read_input_tokens: 7,
+          cache_creation_input_tokens: 3,
+          server_tool_use: { web_search_requests: 2 },
+        },
+      }),
+    );
+
+    const result = await new ClaudeProvider({
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    }).execute('when was claude shannon born?', { timeout: 10 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.content).toBe(
+      'Based on the search results, Claude Shannon was born on April 30, 1916.',
+    );
+    expect(result.citations).toEqual([
+      {
+        url: 'https://example.com/shannon',
+        title: 'Claude Shannon',
+        snippet: 'Claude Elwood Shannon (April 30, 1916 –',
+        provider: 'claude',
+      },
+    ]);
+    expect(result.usage).toMatchObject({
+      inputTokens: 6039,
+      outputTokens: 931,
+      cacheReadInputTokens: 7,
+      cacheWriteInputTokens: 3,
+    });
+  });
+
+  it('fails a Sonnet 5.5 turn that stopped on a progress update, keeping its usage', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        model: 'claude-sonnet-5-5',
+        content: [
+          { type: 'text', text: 'Let me check.' },
+          {
+            type: 'server_tool_use',
+            id: 'srvtoolu_1',
+            name: 'web_search',
+            input: { query: 'q' },
+          },
+          {
+            type: 'web_search_tool_result',
+            tool_use_id: 'srvtoolu_1',
+            content: [],
+          },
+          { type: 'thinking', thinking: '', signature: 'EqMBsig' },
+        ],
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 10, output_tokens: 64000 },
+      }),
+    );
+
+    const result = await new ClaudeProvider({
+      credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+    }).execute('hi', { timeout: 10 });
+
+    expect(result.content).toBe('');
+    expect(result.error).toBe(
+      'Claude returned an empty response (stop_reason: max_tokens)',
+    );
+    expect(result.usage).toMatchObject({ outputTokens: 64000 });
+  });
+
+  it('fails a Claude refusal with its category, even after partial text', async () => {
+    for (const content of [[], [{ type: 'text', text: 'Partial answer' }]]) {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse(200, {
+          model: 'claude-sonnet-5-5',
+          content,
+          stop_reason: 'refusal',
+          stop_details: {
+            type: 'refusal',
+            category: 'cyber',
+            explanation: 'Declined.',
+          },
+          usage: { input_tokens: 412, output_tokens: 0 },
+        }),
+      );
+
+      const result = await new ClaudeProvider({
+        credentials: { env: { ANTHROPIC_API_KEY: 'anthropic-key' } },
+      }).execute('hi', { timeout: 10 });
+
+      expect(result.content).toBe('');
+      expect(result.error).toBe(
+        'Claude declined the request (stop_reason: refusal (cyber))',
+      );
+    }
   });
 
   it('rejects invalid Claude options before making a paid request', async () => {
@@ -150,6 +333,9 @@ describe('llm providers', () => {
       { maxTokens: 0 },
       { thinking: 'enabled' },
       { effort: 'adaptive' },
+      // Sonnet 5.5 rejects "disabled" and "between_tools" above high effort.
+      { thinking: 'disabled' },
+      { thinking: 'between_tools', effort: 'xhigh' },
     ]) {
       const provider = new ClaudeProvider({
         ...options,
@@ -244,7 +430,7 @@ describe('llm providers', () => {
       'Bearer openai-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'gpt-5-mini',
+      model: 'gpt-6-luna',
       input: 'hello',
       tools: [{ type: 'web_search' }],
       tool_choice: 'auto',
@@ -272,7 +458,7 @@ describe('llm providers', () => {
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.openai.com/v1/chat/completions');
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'gpt-5-mini',
+      model: 'gpt-6-luna',
       messages: [{ role: 'user', content: 'hello' }],
     });
   });
@@ -325,7 +511,7 @@ describe('llm providers', () => {
           candidatesTokenCount: 7,
           totalTokenCount: 10,
         },
-        modelVersion: 'gemini-3.6-flash',
+        modelVersion: 'gemini-3.8-flash',
       }),
     );
     globalThis.fetch = fetchMock;
@@ -354,7 +540,7 @@ describe('llm providers', () => {
     });
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('models/gemini-3.6-flash:generateContent');
+    expect(url).toContain('models/gemini-3.8-flash:generateContent');
     // The API key travels in the x-goog-api-key header, never the URL.
     expect(url).not.toContain('key=');
     expect(url).not.toContain('gemini-key');
@@ -388,7 +574,7 @@ describe('llm providers', () => {
   it('calls OpenRouter chat with documented web search and citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-5.6-terra',
+        model: 'openai/gpt-6-luna',
         choices: [
           {
             message: {
@@ -446,9 +632,10 @@ describe('llm providers', () => {
       'Bearer openrouter-key',
     );
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'openai/gpt-5.6-terra',
+      model: 'openai/gpt-6-luna',
       messages: [{ role: 'user', content: 'hello' }],
-      plugins: [{ id: 'web' }],
+      tools: [{ type: 'openrouter:web_search', parameters: { engine: 'exa' } }],
+      provider: { allow_fallbacks: false, require_parameters: true },
     });
   });
 
@@ -473,13 +660,14 @@ describe('llm providers', () => {
     expect(JSON.parse(options.body as string)).toEqual({
       model: 'anthropic/claude-sonnet-5',
       messages: [{ role: 'user', content: 'hello' }],
+      provider: { allow_fallbacks: false, require_parameters: true },
     });
   });
 
   it('sends only documented OpenRouter routing, privacy, and reasoning fields', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-5.6-terra',
+        model: 'openai/gpt-6-luna',
         choices: [{ message: { content: 'Configured answer.' } }],
         usage: {
           prompt_tokens: 4,
@@ -496,9 +684,10 @@ describe('llm providers', () => {
 
     const provider = new OpenRouterChatProvider({
       credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+      webSearchEngine: 'native',
       providerOrder: ['openai', 'azure'],
-      allowFallbacks: false,
-      requireParameters: true,
+      allowFallbacks: true,
+      requireParameters: false,
       dataCollection: 'deny',
       reasoningEffort: 'high',
       reasoningExclude: true,
@@ -506,13 +695,15 @@ describe('llm providers', () => {
     const result = await provider.execute('hello', { timeout: 10 });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({
-      model: 'openai/gpt-5.6-terra',
+      model: 'openai/gpt-6-luna',
       messages: [{ role: 'user', content: 'hello' }],
-      plugins: [{ id: 'web' }],
+      tools: [
+        { type: 'openrouter:web_search', parameters: { engine: 'native' } },
+      ],
       provider: {
         order: ['openai', 'azure'],
-        allow_fallbacks: false,
-        require_parameters: true,
+        allow_fallbacks: true,
+        require_parameters: false,
         data_collection: 'deny',
       },
       reasoning: { effort: 'high', exclude: true },
@@ -524,11 +715,11 @@ describe('llm providers', () => {
     });
     expect(result.providerMeta).toEqual({
       'openrouter:profile': 'chat',
-      'openrouter:search': { enabled: true, requests: 1 },
+      'openrouter:search': { enabled: true, engine: 'native', requests: 1 },
       'openrouter:routing': {
         order: ['openai', 'azure'],
-        allow_fallbacks: false,
-        require_parameters: true,
+        allow_fallbacks: true,
+        require_parameters: false,
         data_collection: 'deny',
       },
       'openrouter:reasoning': { effort: 'high', exclude: true, tokens: 3 },
@@ -550,6 +741,17 @@ describe('llm providers', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects an OpenRouter search engine when web search is off', () => {
+    expect(
+      () =>
+        new OpenRouterChatProvider({
+          webSearch: false,
+          webSearchEngine: 'exa',
+          credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+        }),
+    ).toThrow('webSearchEngine requires web search');
+  });
+
   it('allows OpenRouter ZDR only when optional web search is disabled', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
@@ -566,9 +768,9 @@ describe('llm providers', () => {
     await provider.execute('hello', { timeout: 10 });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body as string)).toEqual({
-      model: 'openai/gpt-5.6-terra',
+      model: 'openai/gpt-6-luna',
       messages: [{ role: 'user', content: 'hello' }],
-      provider: { zdr: true },
+      provider: { allow_fallbacks: false, require_parameters: true, zdr: true },
     });
   });
 

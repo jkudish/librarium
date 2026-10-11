@@ -2,9 +2,10 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as p from '@clack/prompts';
 import type { Command } from 'commander';
-import { parseConfigAction } from '../cli-parsers.js';
+import { CLI_LIMITS, parseConfigAction } from '../cli-parsers.js';
 import {
   CONFIG_FILE,
+  configToPersist,
   loadConfig,
   loadProjectConfig,
   mergeConfigs,
@@ -14,6 +15,7 @@ import type {
   PreparationIssue,
   PreparationNotice,
 } from '../core/research-request.js';
+import { RESEARCH_REQUEST_LIMITS } from '../core/research-request.js';
 import {
   ConfigV2FileError,
   loadConfigV2,
@@ -195,6 +197,18 @@ function runConfigMigration(opts: ConfigMigrationCommandOptions): void {
       }
       return;
     }
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          written: true,
+          outputPath,
+          version: result.config.version,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return;
   }
 
   process.stdout.write(`${JSON.stringify(result.config, null, 2)}\n`);
@@ -328,7 +342,7 @@ async function promptLlmWebSearch(config: Config): Promise<Config | null> {
       llmWebSearch: choice === 'on',
     },
   };
-  saveConfig(next);
+  saveConfig(configToPersist(config, next));
   p.log.success(
     `LLM web search ${next.defaults.llmWebSearch ? 'enabled' : 'disabled'}.`,
   );
@@ -363,7 +377,7 @@ async function promptMode(config: Config): Promise<Config | null> {
     ...config,
     defaults: { ...config.defaults, mode },
   };
-  saveConfig(next);
+  saveConfig(configToPersist(config, next));
   p.log.success(`Default mode set to ${mode}.`);
   return next;
 }
@@ -381,7 +395,7 @@ async function promptOutputDir(config: Config): Promise<Config | null> {
     ...config,
     defaults: { ...config.defaults, outputDir: outputDir.trim() },
   };
-  saveConfig(next);
+  saveConfig(configToPersist(config, next));
   p.log.success(`Output directory set to ${next.defaults.outputDir}.`);
   return next;
 }
@@ -390,24 +404,28 @@ async function promptLimits(config: Config): Promise<Config | null> {
   const maxParallel = await promptPositiveInteger(
     'Max parallel providers',
     config.defaults.maxParallel,
+    CONFIG_LIMIT_BOUNDS.maxParallel,
   );
   if (maxParallel === null) return null;
 
   const timeout = await promptPositiveInteger(
     'Sync provider timeout in seconds',
     config.defaults.timeout,
+    CONFIG_LIMIT_BOUNDS.timeout,
   );
   if (timeout === null) return null;
 
   const asyncTimeout = await promptPositiveInteger(
     'Async research timeout in seconds',
     config.defaults.asyncTimeout,
+    CONFIG_LIMIT_BOUNDS.asyncTimeout,
   );
   if (asyncTimeout === null) return null;
 
   const asyncPollInterval = await promptPositiveInteger(
     'Async poll interval in seconds',
     config.defaults.asyncPollInterval,
+    CONFIG_LIMIT_BOUNDS.asyncPollInterval,
   );
   if (asyncPollInterval === null) return null;
 
@@ -426,26 +444,55 @@ async function promptLimits(config: Config): Promise<Config | null> {
   return next;
 }
 
+interface IntegerBounds {
+  readonly min: number;
+  readonly max: number;
+}
+
+const CONFIG_LIMIT_BOUNDS = {
+  maxParallel: CLI_LIMITS.parallel,
+  timeout: CLI_LIMITS.timeoutSeconds,
+  asyncTimeout: CLI_LIMITS.timeoutSeconds,
+  asyncPollInterval: {
+    min: Math.ceil(RESEARCH_REQUEST_LIMITS.minPollIntervalMs / 1_000),
+    max: Math.floor(RESEARCH_REQUEST_LIMITS.maxPollIntervalMs / 1_000),
+  },
+} as const satisfies Record<string, IntegerBounds>;
+
+function validateBoundedIntegerInput(
+  input: string | undefined,
+  currentValue: number,
+  bounds: IntegerBounds,
+): string | undefined {
+  const trimmed = input?.trim() ?? '';
+  const candidate = trimmed ? Number(trimmed) : currentValue;
+  return Number.isInteger(candidate) &&
+    candidate >= bounds.min &&
+    candidate <= bounds.max
+    ? undefined
+    : `Enter an integer from ${bounds.min} through ${bounds.max}`;
+}
+
 async function promptPositiveInteger(
   label: string,
   currentValue: number,
+  bounds: IntegerBounds,
 ): Promise<number | null> {
   const value = await p.text({
     message: `${label} (${currentValue})`,
     placeholder: String(currentValue),
-    validate: (input) => {
-      const trimmed = input?.trim() ?? '';
-      if (!trimmed) return undefined;
-      const parsed = Number(trimmed);
-      return Number.isInteger(parsed) && parsed > 0
-        ? undefined
-        : 'Enter a positive integer';
-    },
+    validate: (input) =>
+      validateBoundedIntegerInput(input, currentValue, bounds),
   });
   if (p.isCancel(value)) return null;
   const trimmed = value.trim();
   return trimmed ? Number(trimmed) : currentValue;
 }
+
+export const configCommandInternals = {
+  limitBounds: CONFIG_LIMIT_BOUNDS,
+  validateBoundedIntegerInput,
+};
 
 function printConfig(config: Record<string, unknown>, title: string): void {
   console.log(`\n${title}:\n`);

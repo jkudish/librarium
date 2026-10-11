@@ -412,7 +412,7 @@ function verifyRcInstalledMatrix(value: unknown): void {
     'RC installed-package matrix',
   );
   if (
-    matrix.target_count !== 41 ||
+    matrix.target_count !== 40 ||
     typeof matrix.catalog_digest !== 'string' ||
     !/^fnv1a64\.1:[0-9a-f]{16}$/.test(matrix.catalog_digest) ||
     typeof matrix.pricing_snapshot_fingerprint !== 'string' ||
@@ -420,7 +420,7 @@ function verifyRcInstalledMatrix(value: unknown): void {
     typeof matrix.matrix_fingerprint !== 'string' ||
     !/^sha256:[0-9a-f]{64}$/.test(matrix.matrix_fingerprint) ||
     !Array.isArray(matrix.targets) ||
-    matrix.targets.length !== 41
+    matrix.targets.length !== 40
   ) {
     throw new CanonicalLiveValidationError(
       'RC installed-package matrix identity is invalid.',
@@ -470,7 +470,7 @@ function verifyRcInstalledMatrix(value: unknown): void {
     return target.key;
   });
   if (
-    new Set(keys).size !== 41 ||
+    new Set(keys).size !== 40 ||
     JSON.stringify(keys) !== JSON.stringify([...keys].sort(rcCompareText)) ||
     sha256Bytes(
       rcCanonicalJson({

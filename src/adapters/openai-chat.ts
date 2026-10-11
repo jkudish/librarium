@@ -71,7 +71,7 @@ export interface OpenAIChatProviderOptions extends BaseProviderOptions {
   webSearch?: boolean;
 }
 
-const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-5-mini';
+const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-6-luna';
 
 /**
  * OpenAI LLM provider.

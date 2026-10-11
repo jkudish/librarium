@@ -632,7 +632,6 @@ describe('v1 total request-deadline migration', () => {
       'valyu-research',
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
@@ -644,7 +643,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(41);
+    expect(new Set(expectedAdapterIds).size).toBe(40);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

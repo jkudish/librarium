@@ -1168,9 +1168,9 @@ export function deterministicReceiptSensibility(input: {
     input.provenance?.result_kind === profile.result_kind &&
     input.provenance?.retrieval_methods?.includes(profile.retrieval_method) ===
       true &&
-    // Specialized Valyu categories survive on citation metadata; the public
-    // ResearchResponse provenance schema intentionally cannot claim them as a
-    // universal corpus.
+    // `specialized` joined the public corpus vocabulary after earlier
+    // validation receipts were recorded, so it is not required here; Valyu's
+    // specialized categories also survive on citation metadata.
     profile.corpora
       .filter((corpus) => corpus !== 'specialized')
       .every((corpus) => input.provenance?.corpora?.includes(corpus));

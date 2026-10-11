@@ -2,22 +2,63 @@
 
 The release-candidate workflow certifies exact bytes but has no publication authority. The release workflow promotes those bytes without changing source, package metadata, tags, artifacts, or provenance. It is owner-only and uses the `release` environment.
 
+This is an operator procedure for the workflows committed in this repository,
+not a record of any certified or published release. A source version alone
+does not establish an npm dist-tag, GitHub release, standalone download, or
+Homebrew version. Verify each channel read-only before directing users to it.
+Certification dispatch and publication each require explicit authorization;
+documentation review grants neither. Historical release records remain
+history, not evidence that the current source is distributed.
+
 ## Required repository setup
 
 Before publication, a repository administrator must create the `release` environment in **Settings → Environments** and configure:
 
 - at least one required reviewer; and
 - deployment restricted to protected branches; and
-- an environment secret named `NPM_TOKEN`, containing a granular npm token with write access to `librarium` and bypass-2FA enabled.
+- an environment secret named `NPM_TOKEN`, containing a granular npm token with write access to `librarium` and bypass-2FA enabled; and
+- an environment secret named `HOMEBREW_TAP_TOKEN`, containing a GitHub credential scoped to `jkudish/homebrew-tap` with repository Contents read/write permission and permission under that repository's branch rules to push the one forward-only formula commit directly to `main`.
 
-The token is exposed only to the recovery step that restores an expected npm dist-tag. npm trusted-publishing OIDC authenticates `npm publish`, but not `npm dist-tag add`; the latter therefore requires traditional authentication. The workflow performs a read-only GitHub API preflight and fails before candidate checkout when either environment-protection rule is absent. Merely writing `environment: release` in workflow YAML does not protect it: GitHub can auto-create an unprotected environment. Repository settings and secrets are therefore required publication boundaries and are not configured by this repository.
+`NPM_TOKEN` is exposed only to the recovery step that restores an expected npm dist-tag. npm trusted-publishing OIDC authenticates `npm publish`, but not `npm dist-tag add`; the latter therefore requires traditional authentication. `HOMEBREW_TAP_TOKEN` is exposed to a read-only readiness check before publication and to the final Homebrew publication step. The workflow performs a read-only GitHub API preflight and fails before candidate checkout when either environment-protection rule is absent. Merely writing `environment: release` in workflow YAML does not protect it: GitHub can auto-create an unprotected environment. Repository settings and secrets are therefore required publication boundaries and are not configured by this repository.
+
+## Read-only readiness before dispatch
+
+Complete these checks before approving promotion. npm publication is the first
+irreversible write. The workflow checks that the Homebrew credential is present,
+can read the tap's main ref, and reports repository-level push permission before
+that write. This cannot guarantee a later write succeeds or bypass branch rules.
+
+1. Confirm the protected `release` environment lists both required secret
+   names. GitHub never returns their values:
+
+   ```bash
+   gh api repos/jkudish/librarium/environments/release/secrets \
+     --jq '[.secrets[].name] | contains(["NPM_TOKEN", "HOMEBREW_TAP_TOKEN"])'
+   ```
+
+   Continue only when the command prints `true`.
+2. From a secure operator shell where the candidate Homebrew token is already
+   available, make a read-only repository request with that credential:
+
+   ```bash
+   GH_TOKEN="$HOMEBREW_TAP_TOKEN" \
+     gh api repos/jkudish/homebrew-tap --jq '.permissions.push == true'
+   ```
+
+   Continue only when it prints `true`, and separately confirm the current
+   `main` branch rules permit that token's principal to push directly. The API
+   check proves repository-level push permission but does not bypass branch
+   rules and does not mutate the tap.
+3. Inspect npm, the Git tag, the GitHub release and assets, and the Homebrew
+   formula read-only. Resolve every mismatch or unavailable lookup before
+   dispatch; do not use a publication run as a credential or channel probe.
 
 ## Certification and version identity
 
 Certification requires an explicit, default-free `release_kind`:
 
-- `rc` requires the committed package and lock identity `X.Y.Z-rc.N` and publishes npm with dist-tag `rc` plus a prerelease GitHub release;
-- `stable` requires the separately committed package and lock identity `X.Y.Z` and publishes npm with dist-tag `latest` plus a non-prerelease GitHub release.
+- `rc` requires the committed package and lock identity `X.Y.Z-rc.N`; subsequent authorized promotion uses npm dist-tag `rc` plus a prerelease GitHub release;
+- `stable` requires the separately committed package and lock identity `X.Y.Z`; subsequent authorized promotion uses npm dist-tag `latest` plus a non-prerelease GitHub release.
 
 Both modes run the same package, SEA, installer, Homebrew, and distribution proofs and produce the same immutable candidate archive shape. Promotion derives behavior from the certified version and rejects a mismatched kind or dist-tag. It never renames an RC tarball to stable: npm package identity is inside the bytes, so stable publication requires a newly reviewed stable-version commit and successful stable certification run.
 
@@ -36,7 +77,7 @@ The workflow repeatedly inventories providers and fails closed unless:
 - the GitHub release is absent or targets the candidate SHA, with no unexpected, duplicate, or mismatched asset;
 - a Homebrew formula for this exact version is absent or byte-identical to the derived formula.
 
-The GitHub release publishes the npm tarball, five SEA binaries, `candidate.json`, provenance, and `SHA256SUMS`. The checksum manifest records candidate SHA, fingerprint, and version plus every asset digest. The standalone installer verifies those identity headers and the selected SEA digest before replacement, then verifies the binary-reported version. Homebrew records the same candidate SHA, fingerprint, version, and SEA digests.
+The GitHub release publishes the npm tarball, five SEA binaries, `candidate.json`, provenance, and `SHA256SUMS`. The checksum manifest records candidate SHA, fingerprint, and version plus every asset digest. For a GitHub release download, the standalone installer validates the manifest's identity-header shapes and selected SEA digest; when the caller supplies `LIBRARIUM_CANDIDATE_SHA` or `LIBRARIUM_CANDIDATE_FINGERPRINT`, it also requires an exact match. It then verifies the binary-reported version. Local `LIBRARIUM_CANDIDATE` mode requires the binary's SHA-256 and version, but does not validate those optional provenance values against a local manifest; establish local candidate provenance through the certification evidence instead. Homebrew records the same candidate SHA, fingerprint, version, and SEA digests.
 
 ## Forward-only order
 

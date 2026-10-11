@@ -6,6 +6,10 @@ import {
   redactSearchApiErrorText,
   searchApiOptionsSchema,
 } from '../core/searchapi.js';
+import {
+  searchApiErrorFailureDiagnostic,
+  searchApiHttpFailureDiagnostic,
+} from '../core/searchapi-diagnostics.js';
 import type {
   ProviderOptions,
   ProviderResult,
@@ -85,6 +89,7 @@ export class SearchApiProvider extends BaseProvider {
             zeroRetention: this.zeroRetention,
             credentialEnvVar: this.envVar,
           }),
+          failureDiagnostic: searchApiHttpFailureDiagnostic(response.status),
         };
       }
 
@@ -121,6 +126,7 @@ export class SearchApiProvider extends BaseProvider {
         durationMs,
         ...(this.zeroRetention ? { preventFallback: true as const } : {}),
         error: redactSearchApiErrorText(this.formatCatchError(err), apiKey),
+        failureDiagnostic: searchApiErrorFailureDiagnostic(err, options.signal),
       };
     }
   }
