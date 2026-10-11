@@ -600,6 +600,36 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
 ];
 
 /**
+ * Billing conditions Librarium's own adapter always meets, by `provider/profile`.
+ * A lookup without configured conditions uses these, so a conditional
+ * definition still prices the adapter's own requests. They are not part of the
+ * snapshot or its fingerprint.
+ *
+ * Gemini: the adapters send standard (non-Batch) generateContent requests,
+ * and Gemini 3 grounding requires a billing-enabled (pay-as-you-go) project.
+ * The monthly free search allowance is not modelled, so a quote is an upper
+ * bound for an account still inside it.
+ */
+const ADAPTER_PRICING_CONDITIONS: Readonly<
+  Record<string, PriceDefinitionInput['conditions']>
+> = {
+  'gemini-grounded/grounded': {
+    account_plan: 'payg',
+    billing_mode: 'standard',
+  },
+  'gemini-chat/chat': { account_plan: 'payg', billing_mode: 'standard' },
+};
+
+export function adapterPricingConditions(identity: {
+  readonly provider_id: string;
+  readonly profile_id: string;
+}): PriceDefinitionInput['conditions'] {
+  return ADAPTER_PRICING_CONDITIONS[
+    `${identity.provider_id}/${identity.profile_id}`
+  ];
+}
+
+/**
  * The only runtime pricing source. It is reviewed, immutable, and network-free.
  * Update it only through the explicit local sync/review/freeze workflow.
  */

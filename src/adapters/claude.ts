@@ -125,6 +125,28 @@ function answerBlocks(
   return blocks.slice(lastTool + 1).filter((block) => block.type === 'text');
 }
 
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Anthropic bills `input_tokens` (which already excludes cache reads and
+ * writes), `output_tokens` (thinking included), the two cache counts, and
+ * each web search. Only counts the response reports are included.
+ */
+function billableQuantities(usage: AnthropicUsage): Record<string, number> {
+  const quantities: Record<string, number> = {};
+  const add = (unit: string, value: unknown): void => {
+    if (isCount(value)) quantities[unit] = value;
+  };
+  add('uncached_input_tokens', usage.input_tokens);
+  add('output_tokens', usage.output_tokens);
+  add('cache_read_tokens', usage.cache_read_input_tokens);
+  add('cache_write_tokens', usage.cache_creation_input_tokens);
+  add('searches', usage.server_tool_use?.web_search_requests);
+  return quantities;
+}
+
 /**
  * Claude LLM provider.
  * Uses Anthropic web search by default for current answers and citations.
@@ -280,6 +302,9 @@ export class ClaudeProvider extends BaseProvider {
           output: data.usage?.output_tokens,
         },
         usage: this.extractUsage(data.usage),
+        ...(typeof data.stop_reason === 'string' && {
+          providerMeta: { 'anthropic:stop_reason': data.stop_reason },
+        }),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -305,6 +330,7 @@ export class ClaudeProvider extends BaseProvider {
     const input = usage.input_tokens;
     const output = usage.output_tokens;
     if (input === undefined && output === undefined) return undefined;
+    const searches = usage.server_tool_use?.web_search_requests;
     return {
       inputTokens: input,
       outputTokens: output,
@@ -314,6 +340,8 @@ export class ClaudeProvider extends BaseProvider {
           : undefined,
       cacheReadInputTokens: usage.cache_read_input_tokens,
       cacheWriteInputTokens: usage.cache_creation_input_tokens,
+      ...(isCount(searches) && { searchRequests: searches }),
+      billableQuantities: billableQuantities(usage),
       raw: usage,
     };
   }

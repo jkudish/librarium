@@ -423,6 +423,11 @@ async function retrieveCompletedTask(
   runSignal?: AbortSignal,
   completedUsage: ProviderUsage | undefined = task.usage,
 ): Promise<AttemptExecutionResult> {
+  // A custody-only pass may have observed completion before this retrieval.
+  const completionObservedAt =
+    handle.status === 'succeeded' && handle.last_observed_at
+      ? Date.parse(handle.last_observed_at)
+      : now();
   const completedHandle = observedHandle(handle, 'succeeded', now);
   const retrieved = await beforeDeadline(
     () => provider.retrieve(task),
@@ -457,10 +462,21 @@ async function retrieveCompletedTask(
     };
   }
   const result = retrieved.value;
+  // The adapter times only its retrieval request. The result's duration is
+  // the task's: submission until completion was observed.
+  const elapsed = completionObservedAt - Date.parse(handle.submitted_at);
   return resultOutcome(
     launch,
     {
       ...result,
+      ...(Number.isFinite(elapsed) &&
+        elapsed >= 0 && {
+          durationMs: Math.round(elapsed),
+          providerMeta: {
+            ...result.providerMeta,
+            'librarium:retrieval_duration_ms': result.durationMs,
+          },
+        }),
       ...(completedUsage && {
         usage: {
           ...completedUsage,

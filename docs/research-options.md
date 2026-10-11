@@ -72,7 +72,7 @@ Select the processor with `options.processor` or the provider `model` field.
 | `excludeDomains` | `source_policy.exclude_domains` | Same forms. Parallel ignores it when `includeDomains` is set. At most 200 entries across both lists. |
 | `afterDate` | `source_policy.after_date` | `YYYY-MM-DD`. Limits sources to content published on or after the date. |
 | `location` | `advanced_settings.location` | ISO 3166-1 alpha-2 country code. |
-| `outputSchema` | `task_spec.output_schema` | A string replaces the text report description. A JSON Schema object requests JSON output, and the result content is that JSON. The default is a cited text report. |
+| `outputSchema` | `task_spec.output_schema` | A string replaces the text report description. A JSON Schema object requests JSON output: the result has `content_format: "json"` and its content is that JSON object. The default is a cited text report. |
 | `metadata` | `metadata` | Flat object stored with the run. Keys are at most 16 characters; values are strings (at most 512 characters), numbers, or booleans. |
 | `memoryScopeKey` | `memory_scope_key` | 1–128 characters of `A-Z a-z 0-9 _ -`. Omit it to use personal memory. |
 

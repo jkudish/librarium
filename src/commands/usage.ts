@@ -49,7 +49,7 @@ export function registerUsageCommand(program: Command): void {
 
 /**
  * Render the usage aggregate as a simple aligned table. Pure string output so
- * it stays testable. Only API-reported costs appear here (honest data).
+ * it stays testable. Reported cost, estimates, and unknown cost stay apart.
  */
 export function formatUsageReport(
   aggregate: UsageAggregate,
@@ -73,13 +73,15 @@ export function formatUsageReport(
   lines.push(`Usage (${scope}):`);
   lines.push('');
 
-  // Provider table. "est. cost" is a separate, pre-dispatch estimate lane —
-  // a guess, never mixed with reported cost.
-  const header = ['provider', 'cost', 'est. cost', 'tokens', 'runs'];
+  // Provider table. "est. cost" is a separate lane: a pricing-snapshot
+  // estimate for results whose provider reported no cost, never mixed with
+  // reported cost. "unknown" counts results with neither.
+  const header = ['provider', 'cost', 'est. cost', 'unknown', 'tokens', 'runs'];
   const rows = aggregate.providers.map((p) => [
     p.provider,
-    p.reportedCost ? formatCost(p.costUsd) : '-',
-    p.hasEstimate ? `~${formatCost(p.estimatedCostUsd)}` : '-',
+    p.costUsd === null ? '-' : formatCost(p.costUsd),
+    p.estimatedCostUsd === null ? '-' : `~${formatCost(p.estimatedCostUsd)}`,
+    p.unknownCostRuns > 0 ? String(p.unknownCostRuns) : '-',
     p.totalTokens > 0 ? formatTokens(p.totalTokens) : '-',
     String(p.runCount),
   ]);
@@ -96,12 +98,41 @@ export function formatUsageReport(
     lines.push(`  ${row.map((value, col) => pad(value, col)).join('  ')}`);
   }
 
+  const tools = aggregate.providers.flatMap((p) => {
+    const counts = Object.entries(p.serverToolUsage ?? {}).filter(
+      ([, count]) => count > 0,
+    );
+    return counts.length === 0
+      ? []
+      : [
+          `  ${p.provider}: ${counts
+            .map(([tool, count]) => `${tool.replaceAll('_', ' ')} ${count}`)
+            .join(', ')}`,
+        ];
+  });
+  if (tools.length > 0) {
+    lines.push('');
+    lines.push('Server-side tool usage:');
+    lines.push(...tools);
+  }
+
   lines.push('');
   lines.push(`  runs: ${aggregate.runCount}`);
-  lines.push(`  total reported cost: ${formatCost(aggregate.totalCostUsd)}`);
-  if (aggregate.totalEstimatedCostUsd > 0) {
+  lines.push(
+    `  total reported cost: ${
+      aggregate.totalCostUsd === null
+        ? 'unknown (no provider reported a cost)'
+        : formatCost(aggregate.totalCostUsd)
+    }`,
+  );
+  if (aggregate.totalEstimatedCostUsd !== null) {
     lines.push(
-      `  total estimated cost: ~${formatCost(aggregate.totalEstimatedCostUsd)} (pre-dispatch estimate, not billed)`,
+      `  total estimated cost: ~${formatCost(aggregate.totalEstimatedCostUsd)} (pricing-snapshot estimate, not billed)`,
+    );
+  }
+  if (aggregate.unknownCostResults > 0) {
+    lines.push(
+      `  ${aggregate.unknownCostResults} provider ${aggregate.unknownCostResults === 1 ? 'result has' : 'results have'} unknown cost (not $0)`,
     );
   }
   if (aggregate.range) {

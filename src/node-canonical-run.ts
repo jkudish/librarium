@@ -1224,6 +1224,7 @@ export class RunJsonCoordinationStateStore implements CoordinationStateStore {
           input.finished.result_id,
           input.output,
           completedAt,
+          attempt.started_at ? { priced_at: attempt.started_at } : {},
         );
         nextState = recordAttemptFinished(
           current.coordination_state as CoordinatorState,

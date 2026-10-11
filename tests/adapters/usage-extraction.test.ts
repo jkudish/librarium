@@ -215,15 +215,22 @@ describe('usage extraction', () => {
     expect(result.usage?.costUsd).toBeUndefined();
   });
 
-  it('extracts Gemini grounded usage metadata', async () => {
+  it('extracts Gemini grounded usage metadata and billable quantities', async () => {
     const usageMetadata = {
-      promptTokenCount: 4,
+      promptTokenCount: 400,
+      cachedContentTokenCount: 100,
       candidatesTokenCount: 16,
-      totalTokenCount: 20,
+      thoughtsTokenCount: 30,
+      totalTokenCount: 446,
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        candidates: [{ content: { parts: [{ text: 'Grounded answer.' }] } }],
+        candidates: [
+          {
+            content: { parts: [{ text: 'Grounded answer.' }] },
+            groundingMetadata: { webSearchQueries: ['a', 'b', 'a', ''] },
+          },
+        ],
         usageMetadata,
       }),
     );
@@ -235,9 +242,20 @@ describe('usage extraction', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.usage).toEqual({
-      inputTokens: 4,
+      inputTokens: 400,
       outputTokens: 16,
-      totalTokens: 20,
+      totalTokens: 446,
+      cacheReadInputTokens: 100,
+      reasoningTokens: 30,
+      searchRequests: 2,
+      // The prompt count includes cached tokens; thinking bills as output;
+      // grounding bills unique non-empty queries.
+      billableQuantities: {
+        uncached_input_tokens: 300,
+        cache_read_tokens: 100,
+        output_tokens: 46,
+        searches: 2,
+      },
       raw: usageMetadata,
     });
   });

@@ -784,6 +784,11 @@ describe('acceptance, deadlines, cancellation, and budgets', () => {
         deps,
       ),
     ).toThrow();
+    // No provider has reported a cost yet: the run cost is unknown, not zero.
+    expect(state.budget).not.toHaveProperty('actual_cost_microusd');
+    expect(
+      recordAttemptFinished(state, attemptId, receipt, deps).budget,
+    ).not.toHaveProperty('actual_cost_microusd');
     const free = recordAttemptFinished(
       state,
       attemptId,

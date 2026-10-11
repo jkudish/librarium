@@ -198,7 +198,15 @@ must leave safe `poll` and `retrieve` available for existing durable work.
 CLI/MCP paid calls use the run-wide wallet: refinement, research, synthesis,
 verification, and admitted fallbacks share limits and one original deadline.
 Report actual usage when known, including for a failed attempt if available;
-do not substitute an estimate for provider-reported cost. An unknown estimate
+do not substitute an estimate for provider-reported cost. A missing cost stays
+unknown, never zero. When the provider reports no cost, a built-in adapter can
+report `usage.billableQuantities` in pricing-snapshot units (tokens, cache
+reads, searches). Librarium prices them with the dated snapshot: a complete
+quote becomes the result's `estimated_cost`, and every quote, complete or
+partial, is kept with its snapshot version in
+`provider_meta["librarium:cost_estimate"]`. Report search and
+other server-side tool counts as `usage.searchRequests` and
+`usage.serverToolUsage`. An unknown estimate
 cannot admit a new call under a hard budget. The paid-attempt ledger is a
 private run sidecar, not part of the terminal TypeScript/PHP interchange
 contract. See [pricing and recovery](../README.md#pricing-and-privacy).

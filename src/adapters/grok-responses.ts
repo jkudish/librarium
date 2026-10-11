@@ -62,6 +62,10 @@ interface GrokUsage {
   input_tokens_details?: { cached_tokens?: number };
   output_tokens_details?: { reasoning_tokens?: number };
   cost_in_usd_ticks?: number;
+  /** Per-tool call counts, e.g. `{ SERVER_SIDE_TOOL_X_SEARCH: 3 }`. */
+  server_side_tool_usage?: unknown;
+  /** Billable tool counts, e.g. `x_search_calls` and `x_posts_fetched`. */
+  server_side_tool_usage_details?: unknown;
   [key: string]: unknown;
 }
 
@@ -71,6 +75,39 @@ interface GrokResponse {
   usage?: GrokUsage;
   server_side_tool_usage?: unknown;
   error?: unknown;
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Normalize xAI server-side tool usage into snake_case counts. The detailed
+ * block (`web_search_calls`, `x_search_calls`, `x_posts_fetched`,
+ * `x_users_fetched`, ...) is authoritative; the per-tool summary
+ * (`SERVER_SIDE_TOOL_WEB_SEARCH: 2`) only fills calls the details omit.
+ * X Search bills per post and profile fetched, so those counts are what an
+ * audit of X spend needs.
+ */
+function serverToolUsage(
+  details: unknown,
+  summary: unknown,
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (summary && typeof summary === 'object' && !Array.isArray(summary)) {
+    for (const [key, value] of Object.entries(summary)) {
+      const tool = /^server_side_tool_([a-z0-9_]+)$/i.exec(key)?.[1];
+      if (tool && isCount(value)) counts[`${tool.toLowerCase()}_calls`] = value;
+    }
+  }
+  if (details && typeof details === 'object' && !Array.isArray(details)) {
+    for (const [key, value] of Object.entries(details)) {
+      if (/^[a-z][a-z0-9_]{0,63}$/.test(key) && isCount(value)) {
+        counts[key] = value;
+      }
+    }
+  }
+  return counts;
 }
 
 /**
@@ -447,6 +484,20 @@ export class GrokResponsesProvider extends BaseProvider {
       ),
       raw,
     };
+    const tools = serverToolUsage(
+      usage?.server_side_tool_usage_details,
+      usage?.server_side_tool_usage ?? serverSideToolUsage,
+    );
+    if (Object.keys(tools).length > 0) {
+      result.serverToolUsage = tools;
+      if (
+        tools.web_search_calls !== undefined ||
+        tools.x_search_calls !== undefined
+      ) {
+        result.searchRequests =
+          (tools.web_search_calls ?? 0) + (tools.x_search_calls ?? 0);
+      }
+    }
     if (
       typeof usage?.cost_in_usd_ticks === 'number' &&
       Number.isFinite(usage.cost_in_usd_ticks) &&
