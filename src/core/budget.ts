@@ -28,15 +28,51 @@ function expandedNonNegativeDecimal(value: number): string {
   return remainder ? `${whole}.${remainder}` : whole;
 }
 
-/** Canonical non-exponent USD decimal accepted by the terminal usage schema. */
+const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+
+/**
+ * Round a non-negative decimal string up to at most `scale` fractional digits
+ * with exact string arithmetic. Trailing zeros are dropped.
+ */
+export function roundUpDecimal(decimal: string, scale: number): string {
+  if (!DECIMAL_PATTERN.test(decimal)) {
+    throw new Error('Expected a non-negative decimal string.');
+  }
+  const [whole = '0', fraction = ''] = decimal.split('.');
+  let kept = fraction.slice(0, scale);
+  let integer = whole;
+  if (/[1-9]/.test(fraction.slice(scale))) {
+    const bumped = (BigInt(`${whole}${kept.padEnd(scale, '0')}`) + 1n)
+      .toString()
+      .padStart(scale + 1, '0');
+    integer = scale === 0 ? bumped : bumped.slice(0, -scale);
+    kept = scale === 0 ? '' : bumped.slice(-scale);
+  }
+  kept = kept.replace(/0+$/, '');
+  return kept ? `${integer}.${kept}` : integer;
+}
+
+/**
+ * Canonical non-exponent USD decimal accepted by the terminal usage schema.
+ * Uses the number's shortest round-trip decimal (the value a provider wrote in
+ * its JSON), never its binary expansion: 0.74184 stays "0.74184". More than
+ * 18 fractional digits round up, so a cost is never understated.
+ */
 export function decimalUsdFromNumber(value: number): string {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error('Usage costs must be finite non-negative numbers.');
   }
-  const fixed = value.toFixed(18).replace(/0+$/, '').replace(/\.$/, '');
-  return /^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(fixed)
-    ? fixed
-    : expandedNonNegativeDecimal(value);
+  return roundUpDecimal(expandedNonNegativeDecimal(value), 18);
+}
+
+/** Exact microusd for a decimal USD string, rounded up. */
+export function costMicrousdFromDecimal(decimal: string): string {
+  const rounded = roundUpDecimal(decimal, 6);
+  const [whole = '0', fraction = ''] = rounded.split('.');
+  return (
+    BigInt(whole) * 1_000_000n +
+    BigInt(fraction.padEnd(6, '0'))
+  ).toString();
 }
 
 export function costMicrousdFromUsd(
@@ -45,14 +81,33 @@ export function costMicrousdFromUsd(
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     return undefined;
   }
-  const [whole, fraction = ''] = expandedNonNegativeDecimal(value).split('.');
-  const microusdFraction = fraction.slice(0, 6).padEnd(6, '0');
-  const roundsUp = /[1-9]/.test(fraction.slice(6));
-  return (
-    BigInt(whole) * 1_000_000n +
-    BigInt(microusdFraction) +
-    (roundsUp ? 1n : 0n)
-  ).toString();
+  return costMicrousdFromDecimal(expandedNonNegativeDecimal(value));
+}
+
+/**
+ * A provider-reported cost as an exact USD decimal: the provider's own exact
+ * representation when the adapter kept one, else the reported number.
+ */
+export function reportedCostDecimal(
+  usage: Pick<ProviderUsage, 'costUsd' | 'costUsdDecimal'> | undefined,
+): string | undefined {
+  if (usage?.costUsdDecimal !== undefined) {
+    return roundUpDecimal(usage.costUsdDecimal, 18);
+  }
+  return typeof usage?.costUsd === 'number' &&
+    Number.isFinite(usage.costUsd) &&
+    usage.costUsd >= 0
+    ? decimalUsdFromNumber(usage.costUsd)
+    : undefined;
+}
+
+/** Microusd for a provider-reported cost, preferring its exact decimal. */
+export function reportedCostMicrousd(
+  usage: Pick<ProviderUsage, 'costUsd' | 'costUsdDecimal'> | undefined,
+): string | undefined {
+  return usage?.costUsdDecimal !== undefined
+    ? costMicrousdFromDecimal(usage.costUsdDecimal)
+    : costMicrousdFromUsd(usage?.costUsd);
 }
 
 /**

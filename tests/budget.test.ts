@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { BUDGET_SKIP_REASON, createBudgetTracker } from '../src/core/budget.js';
+import {
+  BUDGET_SKIP_REASON,
+  costMicrousdFromUsd,
+  createBudgetTracker,
+  decimalUsdFromNumber,
+  reportedCostMicrousd,
+} from '../src/core/budget.js';
+
+describe('reported cost decimals', () => {
+  it.each([
+    // toFixed(18) expanded this to 0.741840000000000055.
+    [0.74184, '0.74184'],
+    [0.07675503499999999, '0.07675503499999999'],
+    [12345.6789012345, '12345.6789012345'],
+    [1e-7, '0.0000001'],
+    [12, '12'],
+    // Beyond 18 fractional digits rounds up, never down to zero.
+    [5e-324, '0.000000000000000001'],
+  ])('writes %d as %s', (value, decimal) => {
+    expect(decimalUsdFromNumber(value)).toBe(decimal);
+  });
+
+  it('rounds microusd up and prefers the exact provider decimal', () => {
+    expect(costMicrousdFromUsd(0.74184)).toBe('741840');
+    expect(costMicrousdFromUsd(0.0000011)).toBe('2');
+    expect(
+      reportedCostMicrousd({ costUsd: 0.1, costUsdDecimal: '0.1000001' }),
+    ).toBe('100001');
+  });
+});
 
 describe('createBudgetTracker', () => {
   it('never trips when no limit is set', () => {

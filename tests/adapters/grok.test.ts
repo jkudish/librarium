@@ -288,6 +288,33 @@ describe('GrokProvider', () => {
     expect(result.usage?.raw).toMatchObject({ strategy: 'web', usage });
   });
 
+  it.each([
+    // The canary's grok-combined bill, once persisted as 0.741840000000000055.
+    [7_418_400_000, '0.74184'],
+    // Its binary expansion is 12345.678901234499790007.
+    [123_456_789_012_345, '12345.6789012345'],
+    [7, '0.0000000007'],
+  ])('persists %i cost ticks as the exact decimal %s', async (ticks, usd) => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        ...outputResponse(),
+        usage: { input_tokens: 1, output_tokens: 1, cost_in_usd_ticks: ticks },
+      }),
+    );
+
+    const result = await provider().execute('ground this', { timeout: 10 });
+
+    expect(result.usage?.costUsdDecimal).toBe(usd);
+    expect(
+      normalizeProviderAttemptOutput(
+        grokLaunch(),
+        'result-grok',
+        result,
+        '2026-09-08T12:00:01.000Z',
+      ).usage?.actual_cost,
+    ).toBe(usd);
+  });
+
   it('sends the exact shipping model and only the Responses API web_search tool', async () => {
     const fetchMock = vi
       .fn()

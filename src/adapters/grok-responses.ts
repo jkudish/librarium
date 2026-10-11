@@ -31,8 +31,16 @@ export const DEFAULT_GROK_MODEL = 'grok-4.7';
 export const GROK_RESPONSES_URL = 'https://api.x.ai/v1/responses';
 export const GROK_MODELS_URL = 'https://api.x.ai/v1/models';
 
-/** xAI reports actual request cost in ticks of 10^-10 USD. */
-const USD_PER_COST_TICK = 1e-10;
+/** xAI reports actual request cost in integer ticks of 10^-10 USD. */
+const COST_TICK_DECIMALS = 10;
+
+/** Exact USD decimal for an integer tick count: 7418400000 -> "0.74184". */
+function usdFromCostTicks(ticks: number): string {
+  const digits = String(ticks).padStart(COST_TICK_DECIMALS + 1, '0');
+  const whole = digits.slice(0, -COST_TICK_DECIMALS);
+  const fraction = digits.slice(-COST_TICK_DECIMALS).replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole;
+}
 
 interface GrokCitationAnnotation {
   type?: string;
@@ -503,7 +511,12 @@ export class GrokResponsesProvider extends BaseProvider {
       Number.isFinite(usage.cost_in_usd_ticks) &&
       usage.cost_in_usd_ticks >= 0
     ) {
-      result.costUsd = usage.cost_in_usd_ticks * USD_PER_COST_TICK;
+      // Division by a power of ten rounds once to the nearest double; the
+      // exact decimal is kept alongside it for persistence.
+      result.costUsd = usage.cost_in_usd_ticks / 10 ** COST_TICK_DECIMALS;
+      if (Number.isSafeInteger(usage.cost_in_usd_ticks)) {
+        result.costUsdDecimal = usdFromCostTicks(usage.cost_in_usd_ticks);
+      }
     }
     return result;
   }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { costMicrousdFromUsd } from './core/budget.js';
+import { reportedCostMicrousd } from './core/budget.js';
 import type { ProviderUsage } from './types.js';
 
 export { costMicrousdFromUsd } from './core/budget.js';
@@ -546,7 +546,7 @@ export class RunPaidWallet {
     );
     const prior = this.#attempts[index];
     if (prior?.status !== 'running') return;
-    const reported = costMicrousdFromUsd(completion.usage?.costUsd);
+    const reported = reportedCostMicrousd(completion.usage);
     this.#attempts[index] = {
       ...prior,
       status:
@@ -588,7 +588,7 @@ export class RunPaidWallet {
     );
     if (!attempt) return;
     const index = this.#attempts.indexOf(attempt);
-    const reported = costMicrousdFromUsd(completion.usage?.costUsd);
+    const reported = reportedCostMicrousd(completion.usage);
     if (['succeeded', 'failed', 'cancelled'].includes(attempt.status)) {
       // Local termination does not imply that a remote task was free. Retain
       // later reported billing without rewriting the local terminal receipt.

@@ -329,10 +329,8 @@ describe('live canary cost, usage, and metadata regressions (#4866)', () => {
     );
     expect(results.claude?.usage).not.toHaveProperty('actual_cost');
     expect(results['gemini-grounded']?.usage).not.toHaveProperty('actual_cost');
-    expect(Number(results['grok-combined']?.usage?.actual_cost)).toBeCloseTo(
-      0.74184,
-      12,
-    );
+    // Persisted from xAI's integer ticks, not a float expansion.
+    expect(results['grok-combined']?.usage?.actual_cost).toBe('0.74184');
 
     // 7. Gemini is priced from the dated snapshot at the 2027 rates:
     // 2677 x $1.50/M + 2461 x $7.50/M + 3 searches x $14/1k.

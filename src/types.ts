@@ -47,6 +47,12 @@ export interface ProviderUsage {
   cacheReadInputTokens?: number;
   reasoningTokens?: number;
   costUsd?: number;
+  /**
+   * The same reported cost as an exact decimal USD string, taken from the
+   * provider's own representation (for example xAI's integer cost ticks).
+   * Persisted in preference to `costUsd`, whose binary value can't be exact.
+   */
+  costUsdDecimal?: string;
   /** Provider-reported billable units, such as credits. Never estimated. */
   billableUnits?: number;
   /** Unit for billableUnits, such as 'credit', 'request', or 'token'. */

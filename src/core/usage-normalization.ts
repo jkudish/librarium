@@ -1,5 +1,6 @@
 import type { ProviderIdentity } from '../contracts/domain/index.js';
 import type { ProviderResult, ProviderUsage } from '../types.js';
+import { roundUpDecimal } from './budget.js';
 import {
   PricingCatalog,
   PricingCatalogError,
@@ -96,23 +97,11 @@ export function quoteProviderReportedUsage(
   return {
     status: quote.status,
     ...(quote.status === 'complete' && {
-      amount_usd: contractDecimal(quote.known_minimum_decimal),
+      amount_usd: roundUpDecimal(quote.known_minimum_decimal, 18),
     }),
-    known_minimum_usd: contractDecimal(quote.known_minimum_decimal),
+    known_minimum_usd: roundUpDecimal(quote.known_minimum_decimal, 18),
     missing_units: [...quote.missing_units],
     snapshot_version: quote.snapshot_version,
     priced_at: pricedAt,
   };
-}
-
-/** The terminal contract allows 18 fractional digits; round up beyond that. */
-function contractDecimal(value: string): string {
-  const [whole = '0', fraction = ''] = value.split('.');
-  if (fraction.length <= 18) return value;
-  const scaled =
-    BigInt(whole + fraction.slice(0, 18)) +
-    (/[1-9]/.test(fraction.slice(18)) ? 1n : 0n);
-  const digits = scaled.toString().padStart(19, '0');
-  const rounded = `${digits.slice(0, -18)}.${digits.slice(-18)}`;
-  return rounded.replace(/0+$/, '').replace(/\.$/, '');
 }

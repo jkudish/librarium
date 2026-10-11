@@ -15,7 +15,7 @@ import type {
   ProviderResult,
   ProviderUsage,
 } from '../types.js';
-import { costMicrousdFromUsd } from './budget.js';
+import { reportedCostMicrousd } from './budget.js';
 import type { AttemptLaunch } from './coordinator.js';
 import type {
   AdapterBindingIdentity,
@@ -327,7 +327,7 @@ function resultOutcome(
 function reportedCost(usage: ProviderUsage | undefined): {
   readonly actual_cost_microusd?: string;
 } {
-  const cost = costMicrousdFromUsd(usage?.costUsd);
+  const cost = reportedCostMicrousd(usage);
   return cost === undefined ? {} : { actual_cost_microusd: cost };
 }
 
@@ -483,10 +483,14 @@ async function retrieveCompletedTask(
           ...result.usage,
           // A terminal observation remains a known bill until retrieval reports
           // a replacement cost; missing usage (or token-only usage) is not zero.
+          // The amount and its exact decimal come from the same report.
           ...(result.usage?.costUsd === undefined &&
-            completedUsage.costUsd !== undefined && {
-              costUsd: completedUsage.costUsd,
-            }),
+          completedUsage.costUsd !== undefined
+            ? {
+                costUsd: completedUsage.costUsd,
+                costUsdDecimal: completedUsage.costUsdDecimal,
+              }
+            : { costUsdDecimal: result.usage?.costUsdDecimal }),
         },
       }),
     },

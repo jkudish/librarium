@@ -18,7 +18,7 @@ import {
   ResearchResultSchema,
   UsageSchema,
 } from '../contracts/interchange/research-result.js';
-import { decimalUsdFromNumber } from './budget.js';
+import { decimalUsdFromNumber, reportedCostDecimal } from './budget.js';
 import type {
   AttemptLaunch,
   CoordinatorAttemptState,
@@ -153,6 +153,10 @@ const LegacyProviderResultSchema = z.strictObject({
       cacheReadInputTokens: z.number().int().safe().nonnegative().optional(),
       reasoningTokens: z.number().int().safe().nonnegative().optional(),
       costUsd: z.number().finite().nonnegative().optional(),
+      costUsdDecimal: z
+        .string()
+        .regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/)
+        .optional(),
       billableUnits: z.number().finite().nonnegative().optional(),
       unit: z.string().min(1).optional(),
       searchRequests: z.number().int().safe().nonnegative().optional(),
@@ -223,10 +227,14 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** The provider-reported cost as an exact decimal, never a float expansion. */
 function legacyActualCost(
   result: z.infer<typeof LegacyProviderResultSchema>,
-): number | undefined {
-  return result.usage?.costUsd ?? result.metering?.actual?.costUsd;
+): string | undefined {
+  return (
+    reportedCostDecimal(result.usage) ??
+    reportedCostDecimal({ costUsd: result.metering?.actual?.costUsd })
+  );
 }
 
 function legacyUsage(
@@ -261,9 +269,7 @@ function legacyUsage(
     ...(result.usage?.searchRequests !== undefined && {
       server_tool_search_requests: result.usage.searchRequests,
     }),
-    ...(actualCost !== undefined && {
-      actual_cost: decimalUsdFromNumber(actualCost),
-    }),
+    ...(actualCost !== undefined && { actual_cost: actualCost }),
     ...(estimatedCost !== undefined && { estimated_cost: estimatedCost }),
     ...((actualCost !== undefined || estimatedCost !== undefined) && {
       currency: 'USD',
