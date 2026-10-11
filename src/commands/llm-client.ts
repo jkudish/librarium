@@ -44,8 +44,8 @@ export interface LlmClientResolutionOptions {
 
 const CLIENT_DEFAULTS: Record<LlmProvider, { envVar: string; model: string }> =
   {
-    openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-5-mini' },
-    gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-2.5-flash' },
+    openai: { envVar: 'OPENAI_API_KEY', model: 'gpt-6-luna' },
+    gemini: { envVar: 'GEMINI_API_KEY', model: 'gemini-3.8-flash' },
     perplexity: { envVar: 'PERPLEXITY_API_KEY', model: 'low' },
   };
 

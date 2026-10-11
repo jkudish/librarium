@@ -393,14 +393,14 @@ describe('claim verification boundaries', () => {
     expect(result.metadata.llm[0]).toMatchObject({
       stage: 'claims',
       provider: 'openai',
-      model: 'gpt-5-mini',
+      model: 'gpt-6-luna',
       status: 'success',
     });
     expect(result.metadata.status).toBe('complete');
     expect(result.revisedAnswer).toBe('Revised answer [1].');
     expect(result.revision).toEqual({
       provider: 'openai',
-      model: 'gpt-5-mini',
+      model: 'gpt-6-luna',
     });
   });
 

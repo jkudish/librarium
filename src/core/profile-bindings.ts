@@ -72,9 +72,18 @@ export class TargetSelectionError extends ProfileBindingError {
  */
 const MODEL_OVERRIDE_ALLOWLISTS: Readonly<Record<string, ReadonlySet<string>>> =
   {
-    'gemini-grounded': new Set(['gemini-2.5-flash', 'gemini-2.5-pro']),
-    'openrouter-online': new Set(['openai/gpt-4o-mini', 'openai/gpt-4o']),
-    'parallel-research': new Set(['pro', 'pro-fast', 'ultra', 'ultra-fast']),
+    'gemini-grounded': new Set([
+      'gemini-3.8-flash',
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+    ]),
+    'openrouter-online': new Set([
+      'openai/gpt-6-luna',
+      'openai/gpt-4o-mini',
+      'openai/gpt-4o',
+    ]),
+    // Parallel delisted the -fast processors.
+    'parallel-research': new Set(['pro', 'ultra']),
   };
 
 function normalizedConfiguredModel(

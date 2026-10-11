@@ -71,7 +71,7 @@ describe('grounded providers', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.provider).toBe('gemini-grounded');
-    expect(result.model).toBe('gemini-2.5-flash');
+    expect(result.model).toBe('gemini-3.8-flash');
     expect(result.content).toBe('Grounded answer.');
     expect(result.citations).toEqual([
       {
@@ -87,7 +87,7 @@ describe('grounded providers', () => {
     ]);
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('models/gemini-2.5-flash:generateContent');
+    expect(url).toContain('models/gemini-3.8-flash:generateContent');
     expect(url).not.toContain('gemini-key');
     expect(new URL(url).searchParams.has('key')).toBe(false);
     expect(options.headers).toMatchObject({
@@ -236,7 +236,7 @@ describe('grounded providers', () => {
   it('calls OpenRouter online search and extracts URL annotations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'openai/gpt-4o-mini',
+        model: 'openai/gpt-6-luna',
         choices: [
           {
             message: {
@@ -299,10 +299,13 @@ describe('grounded providers', () => {
     expect((options.headers as Record<string, string>).Authorization).toBe(
       'Bearer openrouter-key',
     );
+    // The deprecated `web` plugin is gone; Exa is pinned so OpenAI models do
+    // not switch to OpenAI native search.
     expect(JSON.parse(options.body as string)).toEqual({
-      model: 'openai/gpt-4o-mini',
+      model: 'openai/gpt-6-luna',
       messages: [{ role: 'user', content: 'search online' }],
-      plugins: [{ id: 'web' }],
+      tools: [{ type: 'openrouter:web_search', parameters: { engine: 'exa' } }],
+      provider: { allow_fallbacks: false, require_parameters: true },
     });
   });
 
@@ -347,7 +350,7 @@ describe('grounded providers', () => {
           zdr: true,
           credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
         }),
-    ).toThrow('ZDR does not apply to the web plugin');
+    ).toThrow('ZDR does not apply to web search');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

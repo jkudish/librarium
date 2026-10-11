@@ -152,6 +152,7 @@ function openRouterOptions(
   >,
 ): Pick<
   OpenRouterProviderOptions,
+  | 'webSearchEngine'
   | 'providerOrder'
   | 'allowFallbacks'
   | 'requireParameters'
@@ -163,6 +164,9 @@ function openRouterOptions(
 > {
   const options = context.options;
   return {
+    ...(options.webSearchEngine !== undefined && {
+      webSearchEngine: options.webSearchEngine,
+    }),
     ...(options.providerOrder !== undefined && {
       providerOrder: options.providerOrder,
     }),

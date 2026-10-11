@@ -2178,7 +2178,7 @@ describe('provider catalog -- legacy tier boundary', () => {
 
 /** Every profile whose adapter factory threads top-level `ProviderConfig.model`. */
 const CONFIGURABLE_TARGET_MATRIX = [
-  ['openai-research', 'research', 'openai-research', 'model', 'gpt-5.6-sol'],
+  ['openai-research', 'research', 'openai-research', 'model', 'gpt-6.1-sol'],
   [
     'gemini-deep',
     'research',
@@ -2186,13 +2186,13 @@ const CONFIGURABLE_TARGET_MATRIX = [
     'agent',
     'deep-research-preview-04-2026',
   ],
-  ['grok', 'web', 'grok', 'model', 'grok-4.6'],
-  ['grok-x-only', 'x', 'grok-x-only', 'model', 'grok-4.6'],
-  ['grok-combined', 'combined', 'grok-combined', 'model', 'grok-4.6'],
-  ['claude', 'chat', 'claude', 'model', 'claude-sonnet-5'],
-  ['openai-chat', 'chat', 'openai-chat', 'model', 'gpt-5-mini'],
-  ['gemini-chat', 'chat', 'gemini-chat', 'model', 'gemini-3.6-flash'],
-  ['openrouter', 'chat', 'openrouter-chat', 'model', 'openai/gpt-5.6-terra'],
+  ['grok', 'web', 'grok', 'model', 'grok-4.7'],
+  ['grok-x-only', 'x', 'grok-x-only', 'model', 'grok-4.7'],
+  ['grok-combined', 'combined', 'grok-combined', 'model', 'grok-4.7'],
+  ['claude', 'chat', 'claude', 'model', 'claude-sonnet-5-5'],
+  ['openai-chat', 'chat', 'openai-chat', 'model', 'gpt-6-luna'],
+  ['gemini-chat', 'chat', 'gemini-chat', 'model', 'gemini-3.8-flash'],
+  ['openrouter', 'chat', 'openrouter-chat', 'model', 'openai/gpt-6-luna'],
 ] as const;
 
 describe('provider catalog -- configured target fidelity', () => {
@@ -2308,7 +2308,7 @@ describe('provider catalog -- configured target fidelity', () => {
       });
       expect(
         built.get('claude', 'chat')?.profile.identity.target.primary.target_id,
-      ).toBe('claude-sonnet-5');
+      ).toBe('claude-sonnet-5-5');
     }
   });
 
@@ -2382,6 +2382,41 @@ describe('provider catalog -- configured target fidelity', () => {
         target_id: model,
       });
       expect(resolved?.availability.configuration_valid).toBe(true);
+    }
+  });
+
+  it('accepts every declared default model as an explicit model override', () => {
+    const modelDefaults = catalog().resolved.filter(
+      (item) =>
+        item.binding &&
+        item.declaration.target.primary.model_selection === 'configurable' &&
+        item.declaration.target.primary.kind === 'model',
+    );
+    expect(
+      modelDefaults.map(
+        (item) =>
+          `${item.declaration.target.primary.target_id} ${item.binding?.adapter_id}`,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        'gemini-3.8-flash gemini-grounded',
+        'openai/gpt-6-luna openrouter-online',
+      ]),
+    );
+    for (const item of modelDefaults) {
+      expect(() =>
+        item.binding?.validateModel(item.declaration.target.primary.target_id),
+      ).not.toThrow();
+    }
+  });
+
+  it('rejects the delisted Parallel -fast processors as model overrides', () => {
+    for (const model of ['pro-fast', 'ultra-fast']) {
+      const resolved = buildProviderCatalog({
+        providerConfigs: enabledConfigs({ 'parallel-research': { model } }),
+        credentials: allCredentials(),
+      }).get('parallel', 'research');
+      expect(resolved?.availability.configuration_valid).toBe(false);
     }
   });
 
