@@ -293,16 +293,16 @@ describe('registry', () => {
       expect(getProvider(id)?.tier).toBe('llm');
     }
     expect(getProvider('gemini-chat')).toMatchObject({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.8-flash',
     });
     expect(getProvider('claude')).toMatchObject({
-      model: 'claude-sonnet-5',
-      maxTokens: 16000,
+      model: 'claude-sonnet-5-5',
+      maxTokens: 64000,
       thinking: 'adaptive',
-      effort: 'medium',
+      effort: 'high',
     });
     expect(getProvider('openrouter-chat')).toMatchObject({
-      model: 'openai/gpt-5.6-terra',
+      model: 'openai/gpt-6-luna',
     });
   });
 
@@ -337,7 +337,7 @@ describe('registry', () => {
         claude: {
           options: {
             maxTokens: 24000,
-            thinking: 'disabled',
+            thinking: 'between_tools',
             effort: 'low',
           },
         },
@@ -345,7 +345,7 @@ describe('registry', () => {
     });
     expect(getProvider('claude')).toMatchObject({
       maxTokens: 24000,
-      thinking: 'disabled',
+      thinking: 'between_tools',
       effort: 'low',
     });
   });

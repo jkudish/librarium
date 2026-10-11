@@ -6,10 +6,11 @@ import type { ExecutionProfile } from '../contracts/domain/index.js';
  * author the matching deadline; an explicit CLI flag or config value always
  * wins.
  *
- * xAI: grok-4.6 defaults to high reasoning effort and runs a multi-turn
- * server-side search loop before its non-streaming response. A live recheck on
- * 2026-10-09 (#4767) took 44.7 s for a one-line factual query, and every 30 s
- * attempt timed out for web, X-only, and combined search.
+ * xAI: grok-4.6 and grok-4.7 default to high reasoning effort and run a
+ * multi-turn server-side search loop before their non-streaming response. A
+ * grok-4.6 live recheck on 2026-10-09 (#4767) took 44.7 s for a one-line
+ * factual query, and every 30 s attempt timed out for web, X-only, and
+ * combined search.
  */
 const XAI_INLINE_ATTEMPT_DEADLINE_MS = 120_000;
 

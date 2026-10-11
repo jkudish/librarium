@@ -132,6 +132,113 @@ describe('pricing snapshot validation', () => {
     ).toBe(true);
   });
 
+  it('prices the exact default target of every model-default profile', () => {
+    const defaults = BUILTIN_PROVIDER_CATALOG.flatMap((entry) =>
+      entry.profiles
+        .filter(
+          ({ status, target }) =>
+            status === 'implemented' &&
+            target.primary.model_selection === 'configurable' &&
+            target.primary.kind === 'model',
+        )
+        .map(
+          ({ profile_id, target }) =>
+            `${entry.provider_id}/${profile_id} ${target.primary.target_id}`,
+        ),
+    );
+    const priced = BUILTIN_PRICING_SNAPSHOT.definitions.map(
+      ({ provider_id, profile_id, effective_target }) =>
+        `${provider_id}/${profile_id} ${effective_target?.target_id}`,
+    );
+
+    expect(defaults).toEqual(
+      expect.arrayContaining([
+        'openai-research/research gpt-6.1-sol',
+        'openai-chat/chat gpt-6-luna',
+        'openrouter/grounded openai/gpt-6-luna',
+        'openrouter/chat openai/gpt-6-luna',
+        'gemini-grounded/grounded gemini-3.8-flash',
+        'gemini-chat/chat gemini-3.8-flash',
+        'grok/web grok-4.7',
+        'grok-x-only/x grok-4.7',
+        'grok-combined/combined grok-4.7',
+        'claude/chat claude-sonnet-5-5',
+      ]),
+    );
+    expect(priced).toEqual(expect.arrayContaining(defaults));
+  });
+
+  it.each([
+    [
+      'openai-research.research.gpt-6.1-sol',
+      'official:developers.openai.com/api/docs/models/gpt-6.1-sol',
+      [
+        ['uncached_input_tokens', '2', '1000000'],
+        ['output_tokens', '10', '1000000'],
+        ['reasoning_tokens', '10', '1000000'],
+        ['cache_read_tokens', '0.1', '1000000'],
+        ['cache_write_tokens', '2.5', '1000000'],
+        ['searches', '10', '1000'],
+      ],
+    ],
+    [
+      'openai-chat.chat.gpt-6-luna',
+      'official:developers.openai.com/api/docs/models/gpt-6-luna',
+      [
+        ['uncached_input_tokens', '0.1', '1000000'],
+        ['output_tokens', '0.5', '1000000'],
+        ['reasoning_tokens', '0.5', '1000000'],
+        ['cache_read_tokens', '0.01', '1000000'],
+        ['cache_write_tokens', '0.125', '1000000'],
+        ['searches', '10', '1000'],
+      ],
+    ],
+    ...(['grounded', 'chat'] as const).map(
+      (profileId) =>
+        [
+          `openrouter.${profileId}.openai/gpt-6-luna`,
+          'official:openrouter.ai/openai/gpt-6-luna',
+          [
+            ['uncached_input_tokens', '0.1', '1000000'],
+            ['output_tokens', '0.5', '1000000'],
+            ['reasoning_tokens', '0.5', '1000000'],
+            ['cache_read_tokens', '0.01', '1000000'],
+            ['cache_write_tokens', '0.125', '1000000'],
+            ['searches', '7', '1000'],
+          ],
+        ] as const,
+    ),
+    [
+      'claude.chat.claude-sonnet-5-5',
+      'official:platform.claude.com/docs/en/about-claude/pricing',
+      [
+        ['uncached_input_tokens', '2', '1000000'],
+        ['output_tokens', '10', '1000000'],
+        ['cache_read_tokens', '0.1', '1000000'],
+        ['cache_write_tokens', '2.5', '1000000'],
+      ],
+    ],
+  ] as const)('pins the sourced %s rates', (id, reference, rates) => {
+    const pricing = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+      (entry) => entry.id === id,
+    );
+    expect(pricing).toMatchObject({
+      completeness: 'partial',
+      provenance: {
+        source_class: 'frozen_official_snapshot',
+        source_reference: reference,
+        retrieved_at: '2026-10-11T00:00:00.000Z',
+      },
+    });
+    expect(
+      pricing?.rates.map(({ unit, amount_decimal, per_decimal }) => [
+        unit,
+        amount_decimal,
+        per_decimal,
+      ]),
+    ).toEqual(rates);
+  });
+
   it('pins the web-only Grok identity and exact official rate without drift', () => {
     const catalog = BUILTIN_PROVIDER_CATALOG.find(
       ({ provider_id }) => provider_id === 'grok',
@@ -143,17 +250,17 @@ describe('pricing snapshot validation', () => {
       (entry) => entry.provider_id === 'grok' && entry.profile_id === 'web',
     );
 
-    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
-    expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.6');
-    expect(descriptor?.defaultModel).toBe('grok-4.6');
+    expect(DEFAULT_GROK_MODEL).toBe('grok-4.7');
+    expect(catalog?.profiles[0]?.target.primary.target_id).toBe('grok-4.7');
+    expect(descriptor?.defaultModel).toBe('grok-4.7');
     expect(pricing).toMatchObject({
-      id: 'grok.web.grok-4.6',
+      id: 'grok.web.grok-4.7',
       completeness: 'complete',
-      effective_target: { kind: 'model', target_id: 'grok-4.6' },
+      effective_target: { kind: 'model', target_id: 'grok-4.7' },
       provenance: {
         source_class: 'frozen_official_snapshot',
         source_reference: 'official:docs.x.ai/developers/pricing',
-        retrieved_at: '2026-10-09T00:00:00.000Z',
+        retrieved_at: '2026-10-11T00:00:00.000Z',
       },
     });
     expect(
@@ -182,14 +289,14 @@ describe('pricing snapshot validation', () => {
           entry.provider_id === providerId && entry.profile_id === profileId,
       );
       expect(pricing).toMatchObject({
-        id: `${providerId}.${profileId}.grok-4.6`,
+        id: `${providerId}.${profileId}.grok-4.7`,
         completeness: 'unavailable',
         confidence: 'unknown',
-        effective_target: { kind: 'model', target_id: 'grok-4.6' },
+        effective_target: { kind: 'model', target_id: 'grok-4.7' },
         rates: [],
         provenance: {
           source_reference: 'official:docs.x.ai/developers/pricing',
-          retrieved_at: '2026-10-09T00:00:00.000Z',
+          retrieved_at: '2026-10-11T00:00:00.000Z',
         },
       });
       expect(pricing?.missing_units).toEqual(
@@ -205,7 +312,7 @@ describe('pricing snapshot validation', () => {
             primary: {
               model_selection: 'configurable',
               kind: 'model',
-              target_id: 'grok-4.6',
+              target_id: 'grok-4.7',
             },
           },
         },
@@ -549,10 +656,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:10d273a0e72b7c83b3afbee84e37a9bfa1554ab618adda7079549fccef94c930',
+      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:10d273a0e72b7c83b3afbee84e37a9bfa1554ab618adda7079549fccef94c930',
+      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
     );
     expect(
       `sha256:${createHash('sha256')
@@ -1166,81 +1273,91 @@ describe('dated rate windows', () => {
     );
   });
 
-  it("prices built-in Gemini 3.6 Flash at Google's introductory rates until 2027, then double", () => {
-    const geminiChat = BUILTIN_PRICING_SNAPSHOT.definitions.find(
-      ({ id }) => id === 'gemini-chat.chat.gemini-3.6-flash',
-    );
-    expect(geminiChat?.rates).toEqual([]);
-    expect(geminiChat?.rate_windows).toEqual([
-      {
-        effective_until: BOUNDARY,
-        rates: [
-          {
-            unit: 'uncached_input_tokens',
-            amount_decimal: '0.75',
-            per_decimal: '1000000',
-          },
-          {
-            unit: 'output_tokens',
-            amount_decimal: '3.75',
-            per_decimal: '1000000',
-          },
-          {
-            unit: 'cache_read_tokens',
-            amount_decimal: '0.075',
-            per_decimal: '1000000',
-          },
-          { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
-        ],
-      },
-      {
-        effective_from: BOUNDARY,
-        rates: [
-          {
-            unit: 'uncached_input_tokens',
-            amount_decimal: '1.5',
-            per_decimal: '1000000',
-          },
-          {
-            unit: 'output_tokens',
-            amount_decimal: '7.5',
-            per_decimal: '1000000',
-          },
-          {
-            unit: 'cache_read_tokens',
-            amount_decimal: '0.15',
-            per_decimal: '1000000',
-          },
-          { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
-        ],
-      },
-    ]);
-
-    const catalog = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT);
-    const quote = (
-      priced: Partial<Pick<PricingLookup, 'priced_at' | 'priced_until'>>,
-    ) =>
-      catalog.quote({
-        requested_identity: identity('gemini-chat', 'chat', 'gemini-3.6-flash'),
-        conditions: { account_plan: 'payg', billing_mode: 'standard' },
-        quantities: {
-          uncached_input_tokens: '2000000',
-          output_tokens: '300000',
-          cache_read_tokens: '50000',
-          searches: '2',
+  it.each([
+    ['gemini-chat', 'chat'],
+    ['gemini-grounded', 'grounded'],
+  ])(
+    "prices %s with Gemini 3.8 Flash at Google's introductory rates until 2027, then double",
+    (providerId, profileId) => {
+      const gemini = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+        ({ id }) => id === `${providerId}.${profileId}.gemini-3.8-flash`,
+      );
+      expect(gemini?.rates).toEqual([]);
+      expect(gemini?.rate_windows).toEqual([
+        {
+          effective_until: BOUNDARY,
+          rates: [
+            {
+              unit: 'uncached_input_tokens',
+              amount_decimal: '0.75',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'output_tokens',
+              amount_decimal: '3.75',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'cache_read_tokens',
+              amount_decimal: '0.075',
+              per_decimal: '1000000',
+            },
+            { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
+          ],
         },
-        ...priced,
-      });
+        {
+          effective_from: BOUNDARY,
+          rates: [
+            {
+              unit: 'uncached_input_tokens',
+              amount_decimal: '1.5',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'output_tokens',
+              amount_decimal: '7.5',
+              per_decimal: '1000000',
+            },
+            {
+              unit: 'cache_read_tokens',
+              amount_decimal: '0.15',
+              per_decimal: '1000000',
+            },
+            { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
+          ],
+        },
+      ]);
 
-    expect(
-      quote({ priced_at: '2026-12-31T23:59:59.999Z' }).amount_decimal,
-    ).toBe('2.65675');
-    expect(quote({ priced_at: BOUNDARY }).amount_decimal).toBe('5.2855');
-    const acrossNewYear = quote({
-      priced_at: '2026-12-31T23:00:00.000Z',
-      priced_until: '2027-01-01T01:00:00.000Z',
-    });
-    expect(acrossNewYear.known_maximum_decimal).toBe('5.2855');
-    expect(acrossNewYear.provenance?.rate_windows).toHaveLength(2);
-  });
+      const catalog = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT);
+      const quote = (
+        priced: Partial<Pick<PricingLookup, 'priced_at' | 'priced_until'>>,
+      ) =>
+        catalog.quote({
+          requested_identity: identity(
+            providerId,
+            profileId,
+            'gemini-3.8-flash',
+          ),
+          conditions: { account_plan: 'payg', billing_mode: 'standard' },
+          quantities: {
+            uncached_input_tokens: '2000000',
+            output_tokens: '300000',
+            cache_read_tokens: '50000',
+            searches: '2',
+          },
+          ...priced,
+        });
+
+      expect(
+        quote({ priced_at: '2026-12-31T23:59:59.999Z' }).amount_decimal,
+      ).toBe('2.65675');
+      expect(quote({ priced_at: BOUNDARY }).amount_decimal).toBe('5.2855');
+      const acrossNewYear = quote({
+        priced_at: '2026-12-31T23:00:00.000Z',
+        priced_until: '2027-01-01T01:00:00.000Z',
+      });
+      expect(acrossNewYear.known_maximum_decimal).toBe('5.2855');
+      expect(acrossNewYear.provenance?.rate_windows).toHaveLength(2);
+    },
+  );
 });

@@ -119,10 +119,10 @@ describe('resolveRefineClient', () => {
   it('uses default models per provider', () => {
     expect(
       resolveRefineClient(makeConfig(), { OPENAI_API_KEY: 'a' })?.model,
-    ).toBe('gpt-5-mini');
+    ).toBe('gpt-6-luna');
     expect(
       resolveRefineClient(makeConfig(), { GEMINI_API_KEY: 'b' })?.model,
-    ).toBe('gemini-2.5-flash');
+    ).toBe('gemini-3.8-flash');
     expect(
       resolveRefineClient(makeConfig(), { PERPLEXITY_API_KEY: 'c' })?.model,
     ).toBe('low');
@@ -298,7 +298,7 @@ describe('refine cascade', () => {
       },
     );
     expect(clients[0]?.model).toBe('custom-model');
-    expect(clients[1]?.model).toBe('gemini-2.5-flash');
+    expect(clients[1]?.model).toBe('gemini-3.8-flash');
   });
 
   it('succeeds on the first provider without warnings', async () => {

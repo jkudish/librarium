@@ -61,7 +61,7 @@ describe('resolveLlmClients', () => {
       { OPENAI_API_KEY: 'a', GEMINI_API_KEY: 'b' },
     );
     expect(clients[0]?.model).toBe('custom');
-    expect(clients[1]?.model).toBe('gemini-2.5-flash');
+    expect(clients[1]?.model).toBe('gemini-3.8-flash');
   });
 
   it('resolves configured provider credentials when env vars are absent', () => {
@@ -79,7 +79,7 @@ describe('resolveLlmClients', () => {
     expect(clients).toEqual([
       {
         provider: 'openai',
-        model: 'gpt-5-mini',
+        model: 'gpt-6-luna',
         apiKey: 'literal-openai-key',
       },
     ]);
@@ -107,7 +107,7 @@ describe('resolveLlmClients', () => {
     expect(clients).toEqual([
       {
         provider: 'gemini',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.8-flash',
         apiKey: 'gemini-keychain-key',
       },
     ]);
@@ -185,12 +185,12 @@ describe('callWithCascade', () => {
   const clients: LlmClient[] = [
     {
       provider: 'openai',
-      model: 'gpt-5-mini',
+      model: 'gpt-6-luna',
       apiKey: 'fake-openai-credential',
     },
     {
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       apiKey: 'fake-gemini-credential',
     },
   ];
@@ -260,8 +260,8 @@ describe('callWithCascade', () => {
 
     const call = callWithCascade({
       clients: [
-        { provider: 'openai', model: 'gpt-5-mini', apiKey: openAiKey },
-        { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: geminiKey },
+        { provider: 'openai', model: 'gpt-6-luna', apiKey: openAiKey },
+        { provider: 'gemini', model: 'gemini-3.8-flash', apiKey: geminiKey },
       ],
       prompt: 'p',
       action: 'synthesis',
@@ -313,8 +313,8 @@ describe('callWithCascade', () => {
 
     const call = callWithCascade({
       clients: [
-        { provider: 'openai', model: 'gpt-5-mini', apiKey: openAiKey },
-        { provider: 'gemini', model: 'gemini-2.5-flash', apiKey: geminiKey },
+        { provider: 'openai', model: 'gpt-6-luna', apiKey: openAiKey },
+        { provider: 'gemini', model: 'gemini-3.8-flash', apiKey: geminiKey },
       ],
       prompt: 'p',
       action: 'refine',
@@ -344,7 +344,7 @@ describe('callWithCascade', () => {
     await expect(
       callWithCascade({
         clients: [
-          { provider: 'openai', model: 'gpt-5-mini', apiKey: shortKey },
+          { provider: 'openai', model: 'gpt-6-luna', apiKey: shortKey },
         ],
         prompt: 'p',
         action: 'refine',

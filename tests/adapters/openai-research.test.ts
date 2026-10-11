@@ -73,7 +73,7 @@ describe('OpenAIResearchProvider', () => {
     expect(url).toBe('https://api.openai.com/v1/responses');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       input: [{ role: 'user', content: 'What changed?' }],
       tools: [{ type: 'web_search', return_token_budget: 'unlimited' }],
       reasoning: { effort: 'medium' },
@@ -320,7 +320,7 @@ describe('OpenAIResearchProvider', () => {
       jsonResponse(200, {
         id: 'resp_123',
         status: 'completed',
-        model: 'gpt-5.6-sol',
+        model: 'gpt-6.1-sol',
         output: [
           {
             type: 'message',
@@ -348,7 +348,7 @@ describe('OpenAIResearchProvider', () => {
     ).resolves.toMatchObject({
       provider: 'openai-research',
       content: 'Answer text',
-      model: 'gpt-5.6-sol',
+      model: 'gpt-6.1-sol',
       citations: [
         {
           url: 'https://example.com/source',
