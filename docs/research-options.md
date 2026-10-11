@@ -17,7 +17,7 @@ example:
     },
     "valyu-research": {
       "enabled": true,
-      "options": { "mode": "heavy", "outputFormats": ["markdown", "pdf"] }
+      "options": { "mode": "heavy", "outputFormats": ["markdown"] }
     }
   }
 }
@@ -31,7 +31,11 @@ The PHP package uses the same names in snake_case (`after_date`,
 When you have not set a background deadline, each processor or mode below gets
 its own attempt deadline. A background deadline you set yourself
 (`defaults.asyncTimeout` in v1 config, `execution_defaults.background_attempt_deadline_ms`
-in v2, or a project config) applies to every background profile instead. The
+in v2, or a project config) applies to every background profile instead. A
+configured value equal to the shipped default (`asyncTimeout` 1800, or
+`timeout` 30 for inline calls) counts as unset, because earlier `init` runs and
+v1 migrations wrote those values without asking; set any other value to
+override the per-profile defaults. The
 request deadline grows to cover the longest planned attempt, and an explicit
 request deadline still caps every attempt. `librarium plan` shows each
 profile's deadline. `--timeout` sets the inline deadline only.
@@ -112,8 +116,10 @@ The other Valyu options are `researchStrategy`, `reportFormat`, `search`
 
 ### PDF report link
 
-Set `outputFormats` to `["markdown", "pdf"]` to ask Valyu for a PDF report. The
-default is `["markdown"]`. When Valyu returns a PDF, the result's
+Librarium asks Valyu for a PDF report by default (`outputFormats` defaults to
+`["markdown", "pdf"]`). Valyu documents no surcharge or extra runtime for PDF
+output. Set `outputFormats` to `["markdown"]` to skip it. When Valyu returns a
+PDF, the result's
 `provider_meta["valyu:artifacts"]` contains
 `{ "kind": "pdf", "url": "...", "expires_at": "..." }`.
 

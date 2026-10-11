@@ -109,6 +109,26 @@ export function configToPersist(source: Config, next: Config = source): Config {
   };
 }
 
+/**
+ * The shipped defaults, in seconds. Earlier `init` runs and v1-to-v2
+ * migrations copied them into config files without the user choosing them, so
+ * a configured value equal to one of them is treated as unauthored and lets
+ * per-profile defaults apply. Any other configured value is authored.
+ */
+const LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS = 30;
+const LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS = 1800;
+
+function configuredSeconds(value: unknown, legacyDefault: number): boolean {
+  return value !== undefined && value !== legacyDefault;
+}
+
+function configuredMilliseconds(
+  value: unknown,
+  legacyDefault: number,
+): boolean {
+  return value !== undefined && value !== legacyDefault * 1_000;
+}
+
 function rawDeadlineAuthorship(raw: unknown): DeadlineAuthorship {
   if (typeof raw !== 'object' || raw === null) {
     return { inline: false, background: false };
@@ -122,12 +142,24 @@ function rawDeadlineAuthorship(raw: unknown): DeadlineAuthorship {
   const defaults = block as Record<string, unknown>;
   return record.version === 2
     ? {
-        inline: defaults.inline_attempt_deadline_ms !== undefined,
-        background: defaults.background_attempt_deadline_ms !== undefined,
+        inline: configuredMilliseconds(
+          defaults.inline_attempt_deadline_ms,
+          LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+        ),
+        background: configuredMilliseconds(
+          defaults.background_attempt_deadline_ms,
+          LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+        ),
       }
     : {
-        inline: defaults.timeout !== undefined,
-        background: defaults.asyncTimeout !== undefined,
+        inline: configuredSeconds(
+          defaults.timeout,
+          LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+        ),
+        background: configuredSeconds(
+          defaults.asyncTimeout,
+          LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+        ),
       };
 }
 
@@ -509,13 +541,20 @@ export function mergeConfigs(
   migrateLegacyProviderIds(merged);
 
   deadlineAuthorshipByConfig.set(merged, {
+    // A CLI flag is always an explicit choice, even at the shipped default.
     inline:
       configInlineAttemptDeadlineAuthored(global) ||
-      project?.defaults?.timeout !== undefined ||
+      configuredSeconds(
+        project?.defaults?.timeout,
+        LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+      ) ||
       cliFlags?.timeout !== undefined,
     background:
       configBackgroundAttemptDeadlineAuthored(global) ||
-      project?.defaults?.asyncTimeout !== undefined ||
+      configuredSeconds(
+        project?.defaults?.asyncTimeout,
+        LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+      ) ||
       cliFlags?.asyncTimeout !== undefined,
   });
 

@@ -11,6 +11,7 @@ import {
   mergeConfigs,
   saveConfig,
 } from '../src/core/config.js';
+import { migrateConfig } from '../src/core/config-v2.js';
 import { profileDefaultInlineAttemptDeadlineMs } from '../src/core/profile-deadlines.js';
 import { preflightProductionRequest } from '../src/node-request-preflight.js';
 import type { Config } from '../src/types.js';
@@ -144,10 +145,66 @@ describe('per-profile inline deadlines (#4769)', () => {
     );
   });
 
-  it('lets an authored v1 timeout win, even when it equals the built-in default', () => {
-    const config = v1({ timeout: 30 });
+  it('lets an authored v1 timeout win over every per-profile default', () => {
+    const config = v1({ timeout: 45 });
     expect(configInlineAttemptDeadlineAuthored(config)).toBe(true);
     expect(Object.values(plannedDeadlines(prepare(config)))).toEqual(
+      Array(4).fill(undefined),
+    );
+  });
+
+  // #4769 counted any configured timeout as authored, including 30. Earlier
+  // `init` runs and v1-to-v2 migrations wrote the shipped defaults (timeout 30,
+  // asyncTimeout 1800) into config files without the user choosing them, which
+  // switched every per-profile default off. A configured value equal to the
+  // shipped default is therefore unauthored (#4856); any other value wins.
+  it('treats a configured timeout equal to the shipped 30s default as unauthored', () => {
+    const config = v1({ timeout: 30, asyncTimeout: 1800 });
+    expect(configInlineAttemptDeadlineAuthored(config)).toBe(false);
+    expect(configBackgroundAttemptDeadlineAuthored(config)).toBe(false);
+    expect(plannedDeadlines(prepare(config))).toEqual({
+      'grok/web': 120_000,
+      'grok-x-only/x': 120_000,
+      'grok-combined/combined': 120_000,
+      'exa/search': undefined,
+    });
+  });
+
+  it('gives grok 120s in a migrated v1 config that carries timeout 30', () => {
+    const migrated = migrateConfig({
+      global: {
+        version: 1,
+        defaults: {
+          outputDir: join(dir, 'runs'),
+          timeout: 30,
+          asyncTimeout: 1800,
+        },
+        providers: {
+          grok: { enabled: true },
+          'grok-x-only': { enabled: true },
+          'grok-combined': { enabled: true },
+          exa: { enabled: true },
+        },
+        groups: {},
+      },
+    });
+    if (!migrated.ok) throw new Error(JSON.stringify(migrated.issues));
+    expect(migrated.config.execution_defaults).toMatchObject({
+      inline_attempt_deadline_ms: 30_000,
+      background_attempt_deadline_ms: 1_800_000,
+    });
+    const config = loadConfig(configFile(migrated.config));
+    expect(configInlineAttemptDeadlineAuthored(config)).toBe(false);
+    expect(plannedDeadlines(prepare(config))['grok/web']).toBe(120_000);
+  });
+
+  it('keeps an explicit CLI --timeout 30 authored', () => {
+    expect(
+      configInlineAttemptDeadlineAuthored(
+        mergeConfigs(v1(), null, { timeout: 30 }),
+      ),
+    ).toBe(true);
+    expect(Object.values(plannedDeadlines(prepare(v1(), 30)))).toEqual(
       Array(4).fill(undefined),
     );
   });
@@ -181,7 +238,7 @@ describe('per-profile inline deadlines (#4769)', () => {
         execution_defaults: {
           mode: 'sync',
           max_concurrency: 4,
-          inline_attempt_deadline_ms: 30_000,
+          inline_attempt_deadline_ms: 45_000,
           background_attempt_deadline_ms: 1_800_000,
           poll_interval_ms: 10_000,
         },
@@ -320,7 +377,7 @@ describe('per-target background deadlines (#4856)', () => {
   it('lets an authored asyncTimeout win over every per-target default', () => {
     const config = research(
       { processor: 'ultra8x', mode: 'max' },
-      { asyncTimeout: 1800 },
+      { asyncTimeout: 2400 },
     );
     expect(configBackgroundAttemptDeadlineAuthored(config)).toBe(true);
     // The inline timeout is independent: it stays unauthored.
@@ -330,7 +387,15 @@ describe('per-target background deadlines (#4856)', () => {
       Object.values(plans(prepared)).map(({ deadline }) => deadline),
     ).toEqual([undefined, undefined]);
     expect(prepared.policy.limits.background_attempt_deadline_ms).toBe(
-      30 * MINUTE,
+      40 * MINUTE,
+    );
+  });
+
+  it('treats a configured asyncTimeout equal to the shipped 1800s default as unauthored', () => {
+    const config = research({ mode: 'max' }, { asyncTimeout: 1800 });
+    expect(configBackgroundAttemptDeadlineAuthored(config)).toBe(false);
+    expect(plans(prepareResearch(config))['valyu/research/max']?.deadline).toBe(
+      180 * MINUTE,
     );
   });
 
@@ -354,7 +419,7 @@ describe('per-target background deadlines (#4856)', () => {
           mode: 'sync',
           max_concurrency: 4,
           inline_attempt_deadline_ms: 30_000,
-          background_attempt_deadline_ms: 1_800_000,
+          background_attempt_deadline_ms: 2_400_000,
           poll_interval_ms: 10_000,
         },
         providers: {},
@@ -365,6 +430,8 @@ describe('per-target background deadlines (#4856)', () => {
       }),
     );
     expect(configBackgroundAttemptDeadlineAuthored(native)).toBe(true);
+    // The v2 inline deadline equals the shipped 30s default: unauthored.
+    expect(configInlineAttemptDeadlineAuthored(native)).toBe(false);
   });
 });
 
@@ -463,7 +530,22 @@ describe('config writers keep built-in deadlines unauthored (#4856)', () => {
     ).toBe(180 * 60_000);
   });
 
-  it('keeps deadlines a user wrote, even when they equal the built-in default', () => {
+  it('keeps deadlines a user wrote', () => {
+    const path = configFile({
+      version: 1,
+      defaults: {
+        outputDir: join(dir, 'runs'),
+        timeout: 45,
+        asyncTimeout: 2400,
+      },
+      providers: {},
+      groups: {},
+    });
+    const saved = initAuto(path, env);
+    expect(saved.defaults).toMatchObject({ timeout: 45, asyncTimeout: 2400 });
+  });
+
+  it('drops the shipped defaults an earlier init wrote', () => {
     const path = configFile({
       version: 1,
       defaults: {
@@ -475,6 +557,7 @@ describe('config writers keep built-in deadlines unauthored (#4856)', () => {
       groups: {},
     });
     const saved = initAuto(path, env);
-    expect(saved.defaults).toMatchObject({ timeout: 30, asyncTimeout: 1800 });
+    expect(saved.defaults).not.toHaveProperty('timeout');
+    expect(saved.defaults).not.toHaveProperty('asyncTimeout');
   });
 });

@@ -651,19 +651,27 @@ describe('Valyu DeepResearch', () => {
     expect(JSON.stringify(retrieved)).not.toContain('bearer-secret');
   });
 
-  it('requests markdown only unless PDF output is configured', async () => {
-    const transport = client(async () =>
-      response(202, { deepresearch_id: 'dr-default', status: 'queued' }),
-    );
-    const provider = new ValyuResearchProvider();
-    provider.configure({
-      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
-      httpClient: transport.httpClient,
-    });
-    await provider.submit('default mode', { timeout: 10 });
-    expect(transport.calls.mock.calls[0]?.[1]?.body).toMatchObject({
-      mode: 'standard',
-      output_formats: ['markdown'],
-    });
-  });
+  it.each([
+    [undefined, ['markdown', 'pdf']],
+    [['markdown'] as ['markdown'], ['markdown']],
+  ])(
+    'requests the PDF report by default unless markdown-only is configured (%o)',
+    async (outputFormats, expected) => {
+      const transport = client(async () =>
+        response(202, { deepresearch_id: 'dr-default', status: 'queued' }),
+      );
+      const provider = new ValyuResearchProvider(
+        outputFormats ? { outputFormats } : {},
+      );
+      provider.configure({
+        credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+        httpClient: transport.httpClient,
+      });
+      await provider.submit('default mode', { timeout: 10 });
+      expect(transport.calls.mock.calls[0]?.[1]?.body).toMatchObject({
+        mode: 'standard',
+        output_formats: expected,
+      });
+    },
+  );
 });

@@ -511,7 +511,9 @@ export class ValyuResearchProvider extends BackgroundBaseProvider {
         },
       }),
       ...(value.urls && { urls: value.urls }),
-      output_formats: value.outputFormats || ['markdown'],
+      // The signed PDF link is exposed by default (#3807 decision 7). Valyu
+      // documents no surcharge for PDF output: it is not a deliverable.
+      output_formats: value.outputFormats || ['markdown', 'pdf'],
     };
   }
 
