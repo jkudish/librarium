@@ -7,6 +7,8 @@ import { OpenRouterOnlineProvider } from '../../src/adapters/openrouter-online.j
 import { PerplexityDeepResearchProvider } from '../../src/adapters/perplexity-deep-research.js';
 import { PerplexitySonarProProvider } from '../../src/adapters/perplexity-sonar-pro.js';
 import { TavilyProvider } from '../../src/adapters/tavily.js';
+import type { AttemptLaunch } from '../../src/core/coordinator.js';
+import { normalizeProviderAttemptOutput } from '../../src/core/research-response-projector.js';
 
 function jsonResponse(status: number, data: unknown): Response {
   return {
@@ -215,15 +217,22 @@ describe('usage extraction', () => {
     expect(result.usage?.costUsd).toBeUndefined();
   });
 
-  it('extracts Gemini grounded usage metadata', async () => {
+  it('extracts Gemini grounded usage metadata and billable quantities', async () => {
     const usageMetadata = {
-      promptTokenCount: 4,
+      promptTokenCount: 400,
+      cachedContentTokenCount: 100,
       candidatesTokenCount: 16,
-      totalTokenCount: 20,
+      thoughtsTokenCount: 30,
+      totalTokenCount: 446,
     };
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        candidates: [{ content: { parts: [{ text: 'Grounded answer.' }] } }],
+        candidates: [
+          {
+            content: { parts: [{ text: 'Grounded answer.' }] },
+            groundingMetadata: { webSearchQueries: ['a', 'b', 'a', ''] },
+          },
+        ],
         usageMetadata,
       }),
     );
@@ -235,9 +244,20 @@ describe('usage extraction', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.usage).toEqual({
-      inputTokens: 4,
+      inputTokens: 400,
       outputTokens: 16,
-      totalTokens: 20,
+      totalTokens: 446,
+      cacheReadInputTokens: 100,
+      reasoningTokens: 30,
+      searchRequests: 2,
+      // The prompt count includes cached tokens; thinking bills as output;
+      // grounding bills unique non-empty queries.
+      billableQuantities: {
+        uncached_input_tokens: 300,
+        cache_read_tokens: 100,
+        output_tokens: 46,
+        searches: 2,
+      },
       raw: usageMetadata,
     });
   });
@@ -281,7 +301,45 @@ describe('usage extraction', () => {
       outputTokens: 13,
       totalTokens: 20,
       costUsd: 0.00045,
+      costUsdDecimal: '0.00045',
     });
+  });
+
+  it('keeps the OpenRouter cost decimal exactly as written in the JSON body', async () => {
+    // 18 fractional digits: a double cannot hold this value.
+    const body = `{"model":"openai/gpt-6-luna","choices":[{"message":{"content":"Answer.","annotations":[{"type":"url_citation","url_citation":{"url":"https://source.example/one"}}]}}],"usage":{"prompt_tokens":7,"completion_tokens":13,"total_tokens":20,"cost":0.123456789012345678,"cost_details":{"upstream_inference_cost":0.5}}}`;
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({}),
+      text: async () => body,
+    } as Response);
+
+    const provider = new OpenRouterOnlineProvider({
+      credentials: { env: { OPENROUTER_API_KEY: 'openrouter-key' } },
+    });
+    const result = await provider.execute('question', { timeout: 10 });
+
+    expect(result.usage?.costUsd).toBe(0.12345678901234568);
+    expect(result.usage?.costUsdDecimal).toBe('0.123456789012345678');
+    const launch = {
+      profile: {
+        identity: {
+          provider_id: 'openrouter',
+          profile_id: 'grounded',
+          target: {},
+        },
+      },
+      binding: { adapter_id: result.provider, binding_id: 'b' },
+    } as unknown as AttemptLaunch;
+    expect(
+      normalizeProviderAttemptOutput(
+        launch,
+        'result-1',
+        result,
+        '2026-10-11T00:00:00.000Z',
+      ).usage?.actual_cost,
+    ).toBe('0.123456789012345678');
   });
 
   it('extracts Exa reported dollar cost', async () => {

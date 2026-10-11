@@ -8,34 +8,45 @@ import { discoverRuns } from './browse-data.js';
  * unit-testable.
  *
  * Honest data only: cost figures come straight from each manifest's reported
- * usage. Manifests with no reported usage are counted but contribute 0.
+ * usage. A provider result without a reported cost is unknown, never $0; a
+ * pricing-snapshot estimate is kept in its own lane.
  */
 
 export interface ProviderUsageTotals {
   provider: string;
-  costUsd: number;
+  /** Summed provider-reported cost; null when no run reported one. */
+  costUsd: number | null;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-  /** Number of runs this provider appeared in (with a success/usage entry). */
+  /** Number of runs this provider appeared in (any launched result). */
   runCount: number;
   /** Whether any run reported a cost for this provider. */
   reportedCost: boolean;
-  /** Summed pre-dispatch estimated cost (a guess, kept separate from costUsd). */
-  estimatedCostUsd: number;
+  /** Summed estimated cost (a guess, kept separate from costUsd); null when none. */
+  estimatedCostUsd: number | null;
   /** Whether any run carried a USD estimate for this provider. */
   hasEstimate: boolean;
+  /** Runs with neither a reported cost nor an estimate: cost unknown. */
+  unknownCostRuns: number;
+  /** Provider-reported server-side search requests, when any were reported. */
+  searchRequests?: number;
+  /** Provider-reported server-side tool counts (for example X posts fetched). */
+  serverToolUsage?: Record<string, number>;
 }
 
 export interface UsageAggregate {
   runCount: number;
   /** Runs that had no reported usage on any provider. */
   runsWithoutUsage: number;
-  totalCostUsd: number;
+  /** Summed provider-reported cost; null when no run reported one. */
+  totalCostUsd: number | null;
   /** Number of runs that reported at least one cost figure. */
   runsWithCost: number;
-  /** Summed pre-dispatch estimated cost across all runs (separate lane). */
-  totalEstimatedCostUsd: number;
+  /** Summed estimated cost across all runs (separate lane); null when none. */
+  totalEstimatedCostUsd: number | null;
+  /** Provider results with neither a reported cost nor an estimate. */
+  unknownCostResults: number;
   providers: ProviderUsageTotals[];
   /** Earliest and latest manifest timestamps (unix seconds), or null when empty. */
   range: { fromSeconds: number; toSeconds: number } | null;
@@ -50,8 +61,8 @@ export interface UsageScanOptions {
 
 /**
  * Aggregate usage across all run manifests under `baseDir`. Manifests are
- * matched by timestamp when `days` is supplied. Returns zeroed totals when the
- * directory is missing or empty.
+ * matched by timestamp when `days` is supplied. Returns empty totals (no
+ * runs, unknown cost) when the directory is missing or empty.
  */
 export function aggregateUsage(
   baseDir: string,
@@ -67,9 +78,10 @@ export function aggregateUsage(
   const byProvider = new Map<string, ProviderUsageTotals>();
   let runCount = 0;
   let runsWithoutUsage = 0;
-  let totalCostUsd = 0;
+  let totalCostUsd: number | null = null;
   let runsWithCost = 0;
-  let totalEstimatedCostUsd = 0;
+  let totalEstimatedCostUsd: number | null = null;
+  let unknownCostResults = 0;
   let fromSeconds = Number.POSITIVE_INFINITY;
   let toSeconds = Number.NEGATIVE_INFINITY;
 
@@ -101,6 +113,8 @@ export function aggregateUsage(
     let runHadCost = false;
 
     for (const report of manifest.providers) {
+      // Skipped providers never launched, so they neither bill nor count.
+      if (report.status === 'skipped') continue;
       const usage = report.usage;
       const hasCost = typeof usage?.costUsd === 'number';
       const hasTokens =
@@ -108,41 +122,40 @@ export function aggregateUsage(
         (usage.inputTokens !== undefined ||
           usage.outputTokens !== undefined ||
           usage.totalTokens !== undefined);
-      // Pre-dispatch estimate (a guess) — a separate lane from reported usage.
-      // Skipped providers never launched, so their estimate is not counted.
+      // An estimate (a guess) is a separate lane from reported usage.
       const estimateUsd = report.metering?.estimate?.estimatedCostUsd;
       const hasEstimate =
-        report.status !== 'skipped' &&
-        typeof estimateUsd === 'number' &&
-        Number.isFinite(estimateUsd);
-      if (!hasCost && !hasTokens && !hasEstimate) continue;
+        typeof estimateUsd === 'number' && Number.isFinite(estimateUsd);
 
       // "Usage" here means actual reported usage; an estimate alone does not
       // count a run as having usage (it never made a measured call).
       if (hasCost || hasTokens) runHadUsage = true;
       const totals = byProvider.get(report.id) ?? {
         provider: report.id,
-        costUsd: 0,
+        costUsd: null,
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
         runCount: 0,
         reportedCost: false,
-        estimatedCostUsd: 0,
+        estimatedCostUsd: null,
         hasEstimate: false,
+        unknownCostRuns: 0,
       };
       totals.runCount += 1;
       if (hasCost) {
         const cost = usage?.costUsd ?? 0;
-        totals.costUsd += cost;
+        totals.costUsd = (totals.costUsd ?? 0) + cost;
         totals.reportedCost = true;
-        totalCostUsd += cost;
+        totalCostUsd = (totalCostUsd ?? 0) + cost;
         runHadCost = true;
-      }
-      if (hasEstimate) {
-        totals.estimatedCostUsd += estimateUsd;
+      } else if (hasEstimate) {
+        totals.estimatedCostUsd = (totals.estimatedCostUsd ?? 0) + estimateUsd;
         totals.hasEstimate = true;
-        totalEstimatedCostUsd += estimateUsd;
+        totalEstimatedCostUsd = (totalEstimatedCostUsd ?? 0) + estimateUsd;
+      } else {
+        totals.unknownCostRuns += 1;
+        unknownCostResults += 1;
       }
       const input = usage?.inputTokens ?? 0;
       const output = usage?.outputTokens ?? 0;
@@ -150,6 +163,17 @@ export function aggregateUsage(
       totals.outputTokens += output;
       // Prefer a reported total; otherwise sum input+output.
       totals.totalTokens += usage?.totalTokens ?? input + output;
+      if (usage?.searchRequests !== undefined) {
+        totals.searchRequests =
+          (totals.searchRequests ?? 0) + usage.searchRequests;
+      }
+      for (const [tool, count] of Object.entries(
+        usage?.serverToolUsage ?? {},
+      )) {
+        totals.serverToolUsage ??= {};
+        totals.serverToolUsage[tool] =
+          (totals.serverToolUsage[tool] ?? 0) + count;
+      }
       byProvider.set(report.id, totals);
     }
 
@@ -158,7 +182,10 @@ export function aggregateUsage(
   }
 
   const providers = [...byProvider.values()].sort(
-    (a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens,
+    (a, b) =>
+      (b.costUsd ?? 0) - (a.costUsd ?? 0) ||
+      (b.estimatedCostUsd ?? 0) - (a.estimatedCostUsd ?? 0) ||
+      b.totalTokens - a.totalTokens,
   );
 
   return {
@@ -167,6 +194,7 @@ export function aggregateUsage(
     totalCostUsd,
     runsWithCost,
     totalEstimatedCostUsd,
+    unknownCostResults,
     providers,
     range: runCount > 0 ? { fromSeconds, toSeconds } : null,
   };

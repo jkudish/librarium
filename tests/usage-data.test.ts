@@ -71,13 +71,14 @@ describe('aggregateUsage', () => {
     rmSync(baseDir, { recursive: true, force: true });
   });
 
-  it('returns zeroed totals for a missing or empty base dir', () => {
+  it('returns empty totals with unknown cost for a missing or empty base dir', () => {
     expect(aggregateUsage(join(baseDir, 'nope'))).toEqual({
       runCount: 0,
       runsWithoutUsage: 0,
-      totalCostUsd: 0,
+      totalCostUsd: null,
       runsWithCost: 0,
-      totalEstimatedCostUsd: 0,
+      totalEstimatedCostUsd: null,
+      unknownCostResults: 0,
       providers: [],
       range: null,
     });
@@ -123,6 +124,16 @@ describe('aggregateUsage', () => {
     expect(agg.runCount).toBe(3);
     expect(agg.runsWithoutUsage).toBe(2);
     expect(agg.runsWithCost).toBe(1);
+    // A result without usage still ran: it is listed with unknown cost.
+    expect(agg.unknownCostResults).toBe(2);
+    expect(agg.providers.find((p) => p.provider === 'brave-search')).toEqual(
+      expect.objectContaining({
+        costUsd: null,
+        estimatedCostUsd: null,
+        unknownCostRuns: 2,
+        runCount: 2,
+      }),
+    );
   });
 
   it('filters by --days using the manifest timestamp', () => {
@@ -288,7 +299,7 @@ describe('aggregateUsage', () => {
     writeManifest(baseDir, nowSec, [report('exa', { costUsd: 0.02 }), skipped]);
 
     const agg = aggregateUsage(baseDir);
-    expect(agg.totalEstimatedCostUsd).toBe(0);
+    expect(agg.totalEstimatedCostUsd).toBeNull();
     expect(agg.providers.find((p) => p.provider === 'serpapi')).toBeUndefined();
   });
 });

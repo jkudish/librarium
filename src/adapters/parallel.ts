@@ -594,15 +594,16 @@ export class ParallelResearchProvider extends BackgroundBaseProvider {
             ? 'Parallel returned a completed Task without JSON output'
             : 'Parallel returned a completed Task without text output',
         );
-      const content =
-        typeof output.data.content === 'string'
-          ? output.data.content
-          : JSON.stringify(output.data.content, null, 2);
+      const json = typeof output.data.content !== 'string';
+      const content = json
+        ? JSON.stringify(output.data.content, null, 2)
+        : (output.data.content as string);
       const basis = basisMeta(output.data.basis);
       return {
         provider: this.id,
         tier: this.tier,
         content,
+        ...(json && { contentFormat: 'json' as const }),
         citations: citationsFromBasis(output.data.basis, this.id),
         durationMs,
         model: text(parsedResponse.data.run.processor) ?? this.processor,

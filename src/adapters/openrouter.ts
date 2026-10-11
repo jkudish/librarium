@@ -87,6 +87,52 @@ const DEFAULT_WEB_SEARCH_ENGINE: OpenRouterWebSearchEngine = 'exa';
 const DEFAULT_ALLOW_FALLBACKS = false;
 const DEFAULT_REQUIRE_PARAMETERS = true;
 
+const PLAIN_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+
+/**
+ * `usage.cost` exactly as OpenRouter wrote it in the JSON body, so the persisted
+ * cost is the provider's decimal rather than a binary expansion of the parsed
+ * number. Undefined without a body, in exponent form, or where the parser does
+ * not expose number source text; the parsed number is used then.
+ */
+function reportedCostSource(body: string | undefined): string | undefined {
+  if (body === undefined) return undefined;
+  const sources = new WeakMap<object, string>();
+  let root: unknown;
+  try {
+    root = JSON.parse(body, function (
+      this: unknown,
+      key: string,
+      value: unknown,
+      context?: { source?: string },
+    ) {
+      if (
+        key === 'cost' &&
+        typeof value === 'number' &&
+        typeof context?.source === 'string' &&
+        this !== null &&
+        typeof this === 'object'
+      ) {
+        sources.set(this, context.source);
+      }
+      return value;
+    } as (this: unknown, key: string, value: unknown) => unknown);
+  } catch {
+    return undefined;
+  }
+  const usage =
+    root !== null && typeof root === 'object'
+      ? (root as { usage?: unknown }).usage
+      : undefined;
+  const source =
+    usage !== null && typeof usage === 'object'
+      ? sources.get(usage)
+      : undefined;
+  return source !== undefined && PLAIN_DECIMAL.test(source)
+    ? source
+    : undefined;
+}
+
 /**
  * OpenRouter's single v2 provider implementation. Legacy adapter ids retain
  * their exact binding so v1 configuration can migrate without guessing a
@@ -188,7 +234,7 @@ export class OpenRouterProvider extends BaseProvider {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
         },
-        usage: this.extractUsage(data.usage),
+        usage: this.extractUsage(data.usage, reportedCostSource(response.text)),
         providerMeta: this.metadata(data),
       };
     } catch (error) {
@@ -299,9 +345,14 @@ export class OpenRouterProvider extends BaseProvider {
     };
   }
 
-  private extractUsage(usage?: OpenRouterUsage): ProviderUsage | undefined {
+  private extractUsage(
+    usage?: OpenRouterUsage,
+    costSource?: string,
+  ): ProviderUsage | undefined {
     if (!usage) return undefined;
     return {
+      ...(usage.cost !== undefined &&
+        costSource !== undefined && { costUsdDecimal: costSource }),
       inputTokens: usage.prompt_tokens,
       outputTokens: usage.completion_tokens,
       totalTokens: usage.total_tokens,

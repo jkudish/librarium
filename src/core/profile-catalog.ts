@@ -36,7 +36,10 @@ import {
   type PricingLookup,
   type PricingSnapshotInput,
 } from './pricing.js';
-import { BUILTIN_PRICING_SNAPSHOT } from './pricing-snapshot.js';
+import {
+  adapterPricingConditions,
+  BUILTIN_PRICING_SNAPSHOT,
+} from './pricing-snapshot.js';
 import {
   buildProfileBindings,
   type ProfileBinding,
@@ -455,11 +458,12 @@ function resolveDeclaration(
     configurationValid = false;
   }
 
+  const conditions =
+    providerConfig?.pricingConditions ??
+    adapterPricingConditions(profile.identity);
   const quote = pricing.quote({
     requested_identity: profile.identity,
-    ...(providerConfig?.pricingConditions && {
-      conditions: providerConfig.pricingConditions,
-    }),
+    ...(conditions && { conditions }),
     ...pricingInterval,
   });
   const estimate: NetworkFreeEstimate | undefined =

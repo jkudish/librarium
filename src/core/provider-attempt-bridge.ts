@@ -15,7 +15,7 @@ import type {
   ProviderResult,
   ProviderUsage,
 } from '../types.js';
-import { costMicrousdFromUsd } from './budget.js';
+import { reportedCostMicrousd } from './budget.js';
 import type { AttemptLaunch } from './coordinator.js';
 import type {
   AdapterBindingIdentity,
@@ -327,7 +327,7 @@ function resultOutcome(
 function reportedCost(usage: ProviderUsage | undefined): {
   readonly actual_cost_microusd?: string;
 } {
-  const cost = costMicrousdFromUsd(usage?.costUsd);
+  const cost = reportedCostMicrousd(usage);
   return cost === undefined ? {} : { actual_cost_microusd: cost };
 }
 
@@ -423,6 +423,11 @@ async function retrieveCompletedTask(
   runSignal?: AbortSignal,
   completedUsage: ProviderUsage | undefined = task.usage,
 ): Promise<AttemptExecutionResult> {
+  // A custody-only pass may have observed completion before this retrieval.
+  const completionObservedAt =
+    handle.status === 'succeeded' && handle.last_observed_at
+      ? Date.parse(handle.last_observed_at)
+      : now();
   const completedHandle = observedHandle(handle, 'succeeded', now);
   const retrieved = await beforeDeadline(
     () => provider.retrieve(task),
@@ -457,20 +462,35 @@ async function retrieveCompletedTask(
     };
   }
   const result = retrieved.value;
+  // The adapter times only its retrieval request. The result's duration is
+  // the task's: submission until completion was observed.
+  const elapsed = completionObservedAt - Date.parse(handle.submitted_at);
   return resultOutcome(
     launch,
     {
       ...result,
+      ...(Number.isFinite(elapsed) &&
+        elapsed >= 0 && {
+          durationMs: Math.round(elapsed),
+          providerMeta: {
+            ...result.providerMeta,
+            'librarium:retrieval_duration_ms': result.durationMs,
+          },
+        }),
       ...(completedUsage && {
         usage: {
           ...completedUsage,
           ...result.usage,
           // A terminal observation remains a known bill until retrieval reports
           // a replacement cost; missing usage (or token-only usage) is not zero.
+          // The amount and its exact decimal come from the same report.
           ...(result.usage?.costUsd === undefined &&
-            completedUsage.costUsd !== undefined && {
-              costUsd: completedUsage.costUsd,
-            }),
+          completedUsage.costUsd !== undefined
+            ? {
+                costUsd: completedUsage.costUsd,
+                costUsdDecimal: completedUsage.costUsdDecimal,
+              }
+            : { costUsdDecimal: result.usage?.costUsdDecimal }),
         },
       }),
     },

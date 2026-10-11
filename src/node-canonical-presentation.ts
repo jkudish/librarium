@@ -8,6 +8,7 @@ import {
 } from './contracts/domain/index.js';
 import type { ResearchResult } from './contracts/interchange/research-result.js';
 import type { CoordinatorState } from './core/coordinator.js';
+import { getMeteringKind } from './core/metering.js';
 import { deduplicateSources } from './core/normalizer.js';
 import { projectSucceededResearchResults } from './core/research-response-projector.js';
 import type { CanonicalRunManifestV3 } from './node-canonical-run.js';
@@ -16,6 +17,7 @@ import type {
   Citation,
   DeduplicatedSource,
   ProviderDispatchResult,
+  ProviderMetering,
   ProviderReport,
   ProviderTier,
   ProviderUsage,
@@ -103,22 +105,70 @@ function numberMetadata(
     : undefined;
 }
 
-function legacyUsage(
-  usage: ResearchResult['usage'],
-): ProviderUsage | undefined {
-  if (!usage) return undefined;
+function serverToolUsage(
+  result: ResearchResult,
+): Record<string, number> | undefined {
+  const value = result.provider_meta?.['librarium:server_tool_usage'];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const counts = Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, number] =>
+        typeof entry[1] === 'number' &&
+        Number.isSafeInteger(entry[1]) &&
+        entry[1] >= 0,
+    ),
+  );
+  return Object.keys(counts).length === 0 ? undefined : counts;
+}
+
+function legacyUsage(result: ResearchResult): ProviderUsage | undefined {
+  const usage = result.usage;
+  const tools = serverToolUsage(result);
+  if (!usage && !tools) return undefined;
   const cost =
-    usage.actual_cost === undefined ? undefined : Number(usage.actual_cost);
+    usage?.actual_cost === undefined ? undefined : Number(usage.actual_cost);
   const projected: ProviderUsage = {
-    ...(usage.prompt_tokens !== undefined && {
+    ...(usage?.prompt_tokens !== undefined && {
       inputTokens: usage.prompt_tokens,
     }),
-    ...(usage.completion_tokens !== undefined && {
+    ...(usage?.completion_tokens !== undefined && {
       outputTokens: usage.completion_tokens,
     }),
     ...(Number.isFinite(cost) && cost !== undefined && { costUsd: cost }),
+    ...(usage?.server_tool_search_requests !== undefined && {
+      searchRequests: usage.server_tool_search_requests,
+    }),
+    ...(tools && { serverToolUsage: tools }),
   };
   return Object.keys(projected).length === 0 ? undefined : projected;
+}
+
+/**
+ * The estimate lane: a snapshot estimate of the reported usage, kept apart
+ * from provider-reported cost. Undefined when there is no estimate.
+ */
+function estimateMetering(
+  result: ResearchResult,
+  adapterId: string,
+): ProviderMetering | undefined {
+  const estimated = Number(result.usage?.estimated_cost);
+  if (result.usage?.estimated_cost === undefined || !Number.isFinite(estimated))
+    return undefined;
+  const quote = result.provider_meta?.['librarium:cost_estimate'];
+  const version =
+    quote && typeof quote === 'object' && !Array.isArray(quote)
+      ? quote.snapshot_version
+      : undefined;
+  return {
+    kind: getMeteringKind(adapterId),
+    estimate: {
+      estimatedCostUsd: estimated,
+      costConfidence: 'estimated',
+      ...(typeof version === 'string' && { pricingVersion: version }),
+    },
+  };
 }
 
 function markdown(result: ResearchResult): string {
@@ -329,7 +379,14 @@ export function projectCanonicalRunPresentation(
       citationCount: citations.length,
       outputFile: files.outputFile,
       metaFile: files.metaFile,
-      ...(projected?.usage && { usage: legacyUsage(projected.usage) }),
+      ...(projected &&
+        legacyUsage(projected) && {
+          usage: legacyUsage(projected),
+        }),
+      ...(projected &&
+        estimateMetering(projected, adapterId) && {
+          metering: estimateMetering(projected, adapterId),
+        }),
       ...(error && { error }),
       ...(fallbackFor && { fallbackFor }),
     };
@@ -345,6 +402,7 @@ export function projectCanonicalRunPresentation(
       durationMs,
       ...(projected?.model && { model: projected.model }),
       ...(report.usage && { usage: report.usage }),
+      ...(report.metering && { metering: report.metering }),
       ...(error && { error }),
       ...(fallbackFor && { fallbackFor }),
     });

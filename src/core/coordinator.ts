@@ -51,7 +51,12 @@ export interface CoordinatorBudgetState {
   max_estimated_cost_microusd?: string;
   max_actual_cost_microusd?: string;
   reserved_estimated_cost_microusd: string;
-  actual_cost_microusd: string;
+  /**
+   * Sum of provider-reported attempt costs. Absent until a provider reports
+   * one: an attempt without a reported cost is unknown, never zero. Each
+   * attempt's own `actual_cost_microusd` says which costs are known.
+   */
+  actual_cost_microusd?: string;
 }
 
 export interface CoordinatorSlotState {
@@ -707,7 +712,6 @@ export function createCoordinatorState(
       max_actual_cost_microusd:
         prepared.policy.budgets?.max_actual_cost_microusd,
       reserved_estimated_cost_microusd: '0',
-      actual_cost_microusd: '0',
     },
     lifecycle_sequence: 0,
     lifecycle: [],
@@ -1285,7 +1289,7 @@ function finishAttemptUnchecked(
   attempt.actual_cost_microusd = input.actual_cost_microusd;
   if (input.actual_cost_microusd !== undefined) {
     next.budget.actual_cost_microusd = exactAdd(
-      next.budget.actual_cost_microusd,
+      next.budget.actual_cost_microusd ?? '0',
       input.actual_cost_microusd,
     );
   }
@@ -1332,7 +1336,7 @@ export function recordAttemptFinished(
     attemptFor(next, attemptId).actual_cost_microusd =
       finished.actual_cost_microusd;
     next.budget.actual_cost_microusd = exactAdd(
-      next.budget.actual_cost_microusd,
+      next.budget.actual_cost_microusd ?? '0',
       finished.actual_cost_microusd,
     );
     return next;

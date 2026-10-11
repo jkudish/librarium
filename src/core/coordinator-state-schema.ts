@@ -201,7 +201,7 @@ export const CoordinatorStateSchema = z
       max_estimated_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
       max_actual_cost_microusd: NonNegativeDecimalIntegerSchema.optional(),
       reserved_estimated_cost_microusd: NonNegativeDecimalIntegerSchema,
-      actual_cost_microusd: AggregateCostMicrousdSchema,
+      actual_cost_microusd: AggregateCostMicrousdSchema.optional(),
     }),
     cancellation: z
       .strictObject({
