@@ -18,8 +18,10 @@ import {
 import {
   buildProviderCatalog,
   type CustomCatalogProfile,
+  type PricingInterval,
   type ProviderCatalog,
   type ProviderCatalogOptions,
+  pricingIntervalFrom,
 } from '../src/core/profile-catalog.js';
 import {
   BUILTIN_PROVIDER_CATALOG,
@@ -1554,6 +1556,70 @@ describe('provider catalog -- explicit and capability selection', () => {
       estimated_cost_microusd: '8000',
       billable_units: [{ unit: 'requests', quantity: '2' }],
     });
+  });
+
+  it('reserves the highest windowed rate between admission and the request deadline', () => {
+    // An account rate that rises from 0.004 to 0.006 per request at 2027.
+    const windowed = (pricingInterval?: PricingInterval) =>
+      catalog({
+        ...(pricingInterval && { pricingInterval }),
+        configuredPricing: [
+          {
+            id: 'searchapi-google-ai-overview.account',
+            provider_id: 'searchapi-google-ai-overview',
+            profile_id: 'surface',
+            currency: 'USD',
+            completeness: 'complete',
+            confidence: 'confirmed',
+            expected_units: ['requests'],
+            fixed_quantities: { requests: '2' },
+            missing_units: [],
+            rates: [],
+            rate_windows: [
+              {
+                effective_until: '2027-01-01T00:00:00.000Z',
+                rates: [
+                  {
+                    unit: 'requests',
+                    amount_decimal: '0.004',
+                    per_decimal: '1',
+                  },
+                ],
+              },
+              {
+                effective_from: '2027-01-01T00:00:00.000Z',
+                rates: [
+                  {
+                    unit: 'requests',
+                    amount_decimal: '0.006',
+                    per_decimal: '1',
+                  },
+                ],
+              },
+            ],
+            provenance: {
+              source_class: 'configured_account_rate',
+              source_reference: 'configured:searchapi/account-rate',
+              effective_at: '2026-08-13T00:00:00.000Z',
+              retrieved_at: '2026-08-13T00:00:00.000Z',
+            },
+          },
+        ],
+      }).get('searchapi-google-ai-overview', 'surface')?.estimate
+        ?.estimated_cost_microusd;
+    const admittedAt = Date.parse('2026-12-31T23:00:00.000Z');
+
+    expect(windowed(pricingIntervalFrom(admittedAt, 30 * 60_000))).toBe('8000');
+    expect(windowed(pricingIntervalFrom(admittedAt, 2 * 60 * 60_000))).toBe(
+      '12000',
+    );
+    // Without a known deadline, the longest one any request may have applies.
+    expect(
+      windowed(pricingIntervalFrom(Date.parse('2026-12-20T00:00:00.000Z'))),
+    ).toBe('8000');
+    expect(
+      windowed(pricingIntervalFrom(Date.parse('2026-12-28T00:00:00.000Z'))),
+    ).toBe('12000');
   });
 
   it('returns every matching authenticated profile in deterministic order', () => {

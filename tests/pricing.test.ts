@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GROK_MODEL } from '../src/adapters/grok-responses.js';
 import { BUILTIN_PROVIDER_DESCRIPTORS } from '../src/adapters/provider-descriptors.js';
 import type { ProviderIdentity } from '../src/contracts/domain/index.js';
@@ -8,8 +8,11 @@ import {
   assertPricingSnapshotFresh,
   budgetEstimateFromQuote,
   type PriceDefinitionInput,
+  type PriceRate,
+  type PriceRateWindow,
   PricingCatalog,
   PricingCatalogError,
+  type PricingLookup,
   type PricingSnapshotInput,
   priceDefinitionFingerprint,
   pricingSnapshotFingerprint,
@@ -486,10 +489,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:b078131a73f2cd0a7dcc3d38e429d2ad5fef996858d8a7726611adeaf514d033',
+      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:b078131a73f2cd0a7dcc3d38e429d2ad5fef996858d8a7726611adeaf514d033',
+      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
     );
     expect(
       `sha256:${createHash('sha256')
@@ -807,5 +810,377 @@ describe('exact pricing and quotes', () => {
     expect(Object.isFrozen(catalog.snapshot)).toBe(true);
     expect(Object.isFrozen(catalog.snapshot.definitions[0])).toBe(true);
     expect(canonicalJson(catalog.snapshot)).toBe(canonicalJson(snapshot()));
+  });
+});
+
+describe('dated rate windows', () => {
+  const BOUNDARY = '2027-01-01T00:00:00.000Z';
+
+  function perMillion(input: string, output: string): PriceRate[] {
+    return [
+      {
+        unit: 'uncached_input_tokens',
+        amount_decimal: input,
+        per_decimal: '1000000',
+      },
+      { unit: 'output_tokens', amount_decimal: output, per_decimal: '1000000' },
+    ];
+  }
+
+  function windowed(
+    windows: readonly PriceRateWindow[],
+    overrides: Partial<PriceDefinitionInput> = {},
+  ): PriceDefinitionInput {
+    return definition({ rates: [], rate_windows: windows, ...overrides });
+  }
+
+  /** Introductory rates until 2027, doubled from then: Gemini Flash's schedule. */
+  const doubling = windowed([
+    { effective_until: BOUNDARY, rates: perMillion('0.75', '3.75') },
+    { effective_from: BOUNDARY, rates: perMillion('1.5', '7.5') },
+  ]);
+
+  function quoteAt(
+    priced: Partial<Pick<PricingLookup, 'priced_at' | 'priced_until'>>,
+    pricing: PriceDefinitionInput = doubling,
+    quantities: Record<string, string> = {
+      uncached_input_tokens: '1000000',
+      output_tokens: '100000',
+    },
+  ) {
+    return new PricingCatalog(snapshot([pricing])).quote({
+      requested_identity: identity(),
+      quantities,
+      ...priced,
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [
+      'overlap',
+      [
+        {
+          effective_until: '2027-01-02T00:00:00.000Z',
+          rates: perMillion('1', '1'),
+        },
+        { effective_from: BOUNDARY, rates: perMillion('2', '2') },
+      ],
+    ],
+    [
+      'gap',
+      [
+        { effective_until: BOUNDARY, rates: perMillion('1', '1') },
+        {
+          effective_from: '2027-01-02T00:00:00.000Z',
+          rates: perMillion('2', '2'),
+        },
+      ],
+    ],
+    [
+      'out of order',
+      [
+        { effective_from: BOUNDARY, rates: perMillion('2', '2') },
+        { effective_until: BOUNDARY, rates: perMillion('1', '1') },
+      ],
+    ],
+    [
+      'open inner bound',
+      [
+        { rates: perMillion('1', '1') },
+        { effective_from: BOUNDARY, rates: perMillion('2', '2') },
+      ],
+    ],
+    [
+      'different units',
+      [
+        { effective_until: BOUNDARY, rates: perMillion('1', '1') },
+        { effective_from: BOUNDARY, rates: perMillion('2', '2').slice(0, 1) },
+      ],
+    ],
+    [
+      'inverted',
+      [
+        {
+          effective_from: BOUNDARY,
+          effective_until: BOUNDARY,
+          rates: perMillion('1', '1'),
+        },
+      ],
+    ],
+    [
+      'non-UTC bound',
+      [
+        {
+          effective_until: '2027-01-01T00:00:00+00:00',
+          rates: perMillion('1', '1'),
+        },
+      ],
+    ],
+    ['empty', []],
+  ] as const)('rejects %s windows', (_label, windows) => {
+    expect(() =>
+      validatePricingSnapshot(snapshot([windowed(windows)])),
+    ).toThrow(PricingCatalogError);
+  });
+
+  it('rejects rates beside windows and intervals that end before they start', () => {
+    expect(() =>
+      validatePricingSnapshot(
+        snapshot([
+          windowed(doubling.rate_windows ?? [], {
+            rates: perMillion('1', '1'),
+          }),
+        ]),
+      ),
+    ).toThrow('carries its rates in its windows');
+    expect(() =>
+      quoteAt({
+        priced_at: BOUNDARY,
+        priced_until: '2026-12-31T00:00:00.000Z',
+      }),
+    ).toThrow('cannot end before it starts');
+  });
+
+  it('prices an instant at the window in effect, switching exactly at the boundary', () => {
+    const lastMillisecond = quoteAt({ priced_at: '2026-12-31T23:59:59.999Z' });
+    const firstInstant = quoteAt({ priced_at: BOUNDARY });
+
+    expect(lastMillisecond.amount_decimal).toBe('1.125');
+    expect(lastMillisecond.status).toBe('complete');
+    expect(lastMillisecond.provenance?.rate_windows).toEqual([
+      { effective_until: BOUNDARY },
+    ]);
+    expect(firstInstant.amount_decimal).toBe('2.25');
+    expect(firstInstant.provenance?.rate_windows).toEqual([
+      { effective_from: BOUNDARY },
+    ]);
+  });
+
+  it('prices a computed actual cost at the time the request ran, or now', () => {
+    const catalog = new PricingCatalog(snapshot([doubling]));
+    const actual = (priced_at?: string) =>
+      catalog.actual({
+        requested_identity: identity(),
+        provider_reported_units: {
+          uncached_input_tokens: '1000000',
+          output_tokens: '0',
+        },
+        ...(priced_at && { priced_at }),
+      })?.amount_decimal;
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2027-01-01T01:00:00.000Z'));
+
+    expect(actual('2026-12-31T23:00:00.000Z')).toBe('0.75');
+    expect(actual()).toBe('1.5');
+  });
+
+  it('bounds an interval by the highest rate of each unit across every overlapping window', () => {
+    // Input is dearest in the first window and output in the second, so
+    // picking one whole window would understate one of them.
+    const pricing = windowed([
+      { effective_until: BOUNDARY, rates: perMillion('4', '1') },
+      {
+        effective_from: BOUNDARY,
+        effective_until: '2027-02-01T00:00:00.000Z',
+        rates: perMillion('2', '3'),
+      },
+      {
+        effective_from: '2027-02-01T00:00:00.000Z',
+        rates: perMillion('9', '9'),
+      },
+    ]);
+    const quantities = {
+      uncached_input_tokens: '1000000',
+      output_tokens: '1000000',
+    };
+    const estimate = (priced_until: string) =>
+      quoteAt(
+        { priced_at: '2026-12-31T12:00:00.000Z', priced_until },
+        pricing,
+        quantities,
+      );
+
+    const spanning = estimate('2027-01-01T12:00:00.000Z');
+    expect(spanning.amount_decimal).toBe('7');
+    expect(spanning.known_maximum_decimal).toBe('7');
+    expect(spanning.provenance?.rate_windows).toEqual([
+      { effective_until: BOUNDARY },
+      { effective_from: BOUNDARY, effective_until: '2027-02-01T00:00:00.000Z' },
+    ]);
+    expect(estimate(BOUNDARY).amount_decimal).toBe('5');
+    expect(estimate('2027-02-01T00:00:00.001Z').amount_decimal).toBe('18');
+  });
+
+  it('bounds an interval that starts now when only the deadline is known', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-12-31T23:00:00.000Z'));
+
+    expect(
+      quoteAt({ priced_until: '2026-12-31T23:30:00.000Z' }).amount_decimal,
+    ).toBe('1.125');
+    expect(
+      quoteAt({ priced_until: '2027-01-01T00:30:00.000Z' }).amount_decimal,
+    ).toBe('2.25');
+  });
+
+  it('quotes unavailable instead of guessing outside the declared windows', () => {
+    const bounded = windowed([
+      {
+        effective_from: '2026-01-01T00:00:00.000Z',
+        effective_until: BOUNDARY,
+        rates: perMillion('1', '1'),
+      },
+    ]);
+
+    for (const priced of [
+      { priced_at: '2025-12-31T23:59:59.999Z' },
+      { priced_at: BOUNDARY },
+      {
+        priced_at: '2026-12-31T00:00:00.000Z',
+        priced_until: '2027-01-01T00:00:00.001Z',
+      },
+    ]) {
+      const quote = quoteAt(priced, bounded);
+      expect(quote.status).toBe('unavailable');
+      expect(quote.amount_decimal).toBeUndefined();
+      expect(quote.confidence).toBe('unknown');
+      expect(quote.missing_units).toEqual([
+        'output_tokens',
+        'uncached_input_tokens',
+      ]);
+      expect(budgetEstimateFromQuote(quote)).toBeUndefined();
+    }
+    expect(
+      quoteAt(
+        { priced_at: '2026-12-31T00:00:00.000Z', priced_until: BOUNDARY },
+        bounded,
+      ).amount_decimal,
+    ).toBe('1.1');
+  });
+
+  it('resolves definitions without windows exactly as before, at any time', () => {
+    // Pinned from release/v2-candidate before rate windows existed.
+    expect(pricingSnapshotFingerprint(snapshot())).toBe(
+      'sha256:6b198bde9bca55a646f57805e627b12a389da6c33695a071ba24e37fe7d17bf0',
+    );
+    expect(priceDefinitionFingerprint(definition())).toBe(
+      'sha256:b040fb0628ef8f40339b15d29041aa6844006ffa4f108500921930759a6939e8',
+    );
+    const timeless = quoteAt({}, definition());
+    expect(timeless.amount_decimal).toBe('0.55');
+    expect(timeless.provenance).not.toHaveProperty('rate_windows');
+    for (const priced of [
+      { priced_at: '2020-01-01T00:00:00.000Z' },
+      { priced_at: BOUNDARY, priced_until: '2031-01-01T00:00:00.000Z' },
+      { priced_until: '2031-01-01T00:00:00.000Z' },
+    ]) {
+      expect(quoteAt(priced, definition())).toEqual(timeless);
+    }
+  });
+
+  it('fingerprints window rates independently of their order', () => {
+    const reordered = windowed(
+      (doubling.rate_windows ?? []).map((window) => ({
+        ...window,
+        rates: [...window.rates].reverse(),
+      })),
+    );
+    const changed = windowed([
+      { effective_until: BOUNDARY, rates: perMillion('0.75', '3.75') },
+      { effective_from: BOUNDARY, rates: perMillion('1.5', '7.51') },
+    ]);
+
+    expect(priceDefinitionFingerprint(reordered)).toBe(
+      priceDefinitionFingerprint(doubling),
+    );
+    expect(pricingSnapshotFingerprint(snapshot([reordered]))).toBe(
+      pricingSnapshotFingerprint(snapshot([doubling])),
+    );
+    expect(priceDefinitionFingerprint(changed)).not.toBe(
+      priceDefinitionFingerprint(doubling),
+    );
+  });
+
+  it("prices built-in Gemini 3.6 Flash at Google's introductory rates until 2027, then double", () => {
+    const geminiChat = BUILTIN_PRICING_SNAPSHOT.definitions.find(
+      ({ id }) => id === 'gemini-chat.chat.gemini-3.6-flash',
+    );
+    expect(geminiChat?.rates).toEqual([]);
+    expect(geminiChat?.rate_windows).toEqual([
+      {
+        effective_until: BOUNDARY,
+        rates: [
+          {
+            unit: 'uncached_input_tokens',
+            amount_decimal: '0.75',
+            per_decimal: '1000000',
+          },
+          {
+            unit: 'output_tokens',
+            amount_decimal: '3.75',
+            per_decimal: '1000000',
+          },
+          {
+            unit: 'cache_read_tokens',
+            amount_decimal: '0.075',
+            per_decimal: '1000000',
+          },
+          { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
+        ],
+      },
+      {
+        effective_from: BOUNDARY,
+        rates: [
+          {
+            unit: 'uncached_input_tokens',
+            amount_decimal: '1.5',
+            per_decimal: '1000000',
+          },
+          {
+            unit: 'output_tokens',
+            amount_decimal: '7.5',
+            per_decimal: '1000000',
+          },
+          {
+            unit: 'cache_read_tokens',
+            amount_decimal: '0.15',
+            per_decimal: '1000000',
+          },
+          { unit: 'searches', amount_decimal: '14', per_decimal: '1000' },
+        ],
+      },
+    ]);
+
+    const catalog = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT);
+    const quote = (
+      priced: Partial<Pick<PricingLookup, 'priced_at' | 'priced_until'>>,
+    ) =>
+      catalog.quote({
+        requested_identity: identity('gemini-chat', 'chat', 'gemini-3.6-flash'),
+        conditions: { account_plan: 'payg', billing_mode: 'standard' },
+        quantities: {
+          uncached_input_tokens: '2000000',
+          output_tokens: '300000',
+          cache_read_tokens: '50000',
+          searches: '2',
+        },
+        ...priced,
+      });
+
+    expect(
+      quote({ priced_at: '2026-12-31T23:59:59.999Z' }).amount_decimal,
+    ).toBe('2.65675');
+    expect(quote({ priced_at: BOUNDARY }).amount_decimal).toBe('5.2855');
+    const acrossNewYear = quote({
+      priced_at: '2026-12-31T23:00:00.000Z',
+      priced_until: '2027-01-01T01:00:00.000Z',
+    });
+    expect(acrossNewYear.known_maximum_decimal).toBe('5.2855');
+    expect(acrossNewYear.provenance?.rate_windows).toHaveLength(2);
   });
 });

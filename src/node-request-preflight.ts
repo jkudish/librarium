@@ -25,6 +25,7 @@ type ProductionRequestInput = Omit<
   | 'assumeCredentialAvailability'
   | 'structuralOnly'
   | 'preparation'
+  | 'pricedAtMs'
 >;
 
 interface DiagnosticCode {
@@ -34,10 +35,15 @@ interface DiagnosticCode {
 const MAX_CODES_PER_KIND = 12;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,79}$/;
 
-function requestPreparation(): PreparationDependencies {
+/**
+ * One admission instant serves as both the request time the plan records and
+ * the start of the pricing interval its cost estimates cover, so a dated
+ * rate window cannot change between the estimate and the run's deadline.
+ */
+function requestPreparation(nowMs: number): PreparationDependencies {
   const counts = new Map<string, number>();
   return {
-    clock: { now: () => Date.now() },
+    clock: { now: () => nowMs },
     ids: {
       next: (scope) => {
         const count = (counts.get(scope) ?? 0) + 1;
@@ -46,6 +52,14 @@ function requestPreparation(): PreparationDependencies {
       },
     },
   };
+}
+
+function admissionTime(): {
+  readonly pricedAtMs: number;
+  readonly preparation: PreparationDependencies;
+} {
+  const nowMs = Date.now();
+  return { pricedAtMs: nowMs, preparation: requestPreparation(nowMs) };
 }
 
 function boundedCodes(diagnostics: readonly DiagnosticCode[]): {
@@ -233,7 +247,7 @@ export function preflightProductionRequestStructure(
         ...common,
         assumeCredentialAvailability: true,
         structuralOnly: true,
-        preparation: requestPreparation(),
+        ...admissionTime(),
       }),
     );
     const { prepared } = compiled;
@@ -286,7 +300,7 @@ export function preflightProductionRequest(
       compileRequest({
         ...common,
         credentials,
-        preparation: requestPreparation(),
+        ...admissionTime(),
       }),
     );
     const { prepared } = compiled;

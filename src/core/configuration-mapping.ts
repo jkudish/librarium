@@ -21,6 +21,7 @@ import {
   buildProviderCatalog,
   type CatalogProfileTarget,
   type CustomCatalogProfile,
+  type PricingInterval,
   type ProviderCatalog,
 } from './profile-catalog.js';
 import {
@@ -75,6 +76,8 @@ export interface ConfigurationMappingOptions {
   readonly catalog?: readonly ProviderCatalogEntry[];
   /** Retain disabled trusted declarations for static discovery only. */
   readonly includeDisabledCustomProfiles?: boolean;
+  /** See ProviderCatalogOptions.pricingInterval. */
+  readonly pricingInterval?: PricingInterval;
 }
 
 export interface AuthoredGroupProvenance {
@@ -1272,6 +1275,9 @@ export function mapConfiguration(
     customProfiles,
     ...(options.includeDisabledCustomProfiles && {
       includeDisabledCustomProfiles: true,
+    }),
+    ...(options.pricingInterval && {
+      pricingInterval: options.pricingInterval,
     }),
   });
   const notices = [
