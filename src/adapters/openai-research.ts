@@ -55,7 +55,7 @@ export interface OpenAIResearchProviderOptions extends BaseProviderOptions {
   returnTokenBudget?: unknown;
 }
 
-const DEFAULT_MODEL = 'gpt-5.6-sol';
+const DEFAULT_MODEL = 'gpt-6.1-sol';
 const SUBMISSION_FAILED =
   'OpenAI submission failed before a valid handle was returned.';
 const REASONING_EFFORTS = [

@@ -38,7 +38,7 @@ function provider(model?: string): GrokProvider {
 
 function outputResponse(text = 'Grounded answer.'): Record<string, unknown> {
   return {
-    model: 'grok-4.6',
+    model: 'grok-4.7',
     output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
   };
 }
@@ -52,7 +52,7 @@ function grokLaunch(): AttemptLaunch {
         primary: {
           model_selection: 'configurable',
           kind: 'model',
-          target_id: 'grok-4.6',
+          target_id: 'grok-4.7',
         },
       },
     },
@@ -93,7 +93,7 @@ describe('GrokProvider', () => {
   it('treats a null error field on a successful response as success', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'grok-4.6',
+        model: 'grok-4.7',
         error: null,
         output: [
           {
@@ -123,7 +123,7 @@ describe('GrokProvider', () => {
     const secondMarker = answer.indexOf('[[2]]');
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'grok-4.6',
+        model: 'grok-4.7',
         output: [
           {
             type: 'message',
@@ -303,7 +303,7 @@ describe('GrokProvider', () => {
       'Bearer xai-test-key',
     );
     expect(body).toEqual({
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       input: [{ role: 'user', content: 'ground this' }],
       tools: [{ type: 'web_search' }],
     });
@@ -378,7 +378,7 @@ describe('GrokProvider', () => {
       timeout: 10,
     });
 
-    expect(result.model).toBe('grok-4.6');
+    expect(result.model).toBe('grok-4.7');
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(options.body as string).model).toBe('grok-4.3');
   });
@@ -460,7 +460,7 @@ describe('GrokProvider — live-verified edge cases', () => {
   it('drops url_citation annotations that lack a url', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'grok-4.6',
+        model: 'grok-4.7',
         output: [
           {
             type: 'message',
@@ -509,14 +509,14 @@ describe('Grok search strategies', () => {
     vi.restoreAllMocks();
   });
 
-  it('binds every shipping adapter to the exact grok-4.6 default', () => {
+  it('binds every shipping adapter to the exact grok-4.7 default', () => {
     const credentials = { env: { XAI_API_KEY: 'xai-test-key' } };
-    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
+    expect(DEFAULT_GROK_MODEL).toBe('grok-4.7');
     expect([
       new GrokProvider({ credentials }).model,
       new GrokXOnlyProvider({ credentials }).model,
       new GrokCombinedProvider({ credentials }).model,
-    ]).toEqual(['grok-4.6', 'grok-4.6', 'grok-4.6']);
+    ]).toEqual(['grok-4.7', 'grok-4.7', 'grok-4.7']);
   });
 
   it('classifies citation source kinds from URL identity only', () => {
@@ -603,26 +603,26 @@ describe('Grok search strategies', () => {
 
   it('builds X-only and combined tool arrays from immutable strategies', () => {
     expect(
-      buildGrokRequestBody('grok-4.6', 'q', 'x', {
+      buildGrokRequestBody('grok-4.7', 'q', 'x', {
         allowedXHandles: ['elonmusk'],
         maxTurns: 3,
       }),
     ).toEqual({
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       input: [{ role: 'user', content: 'q' }],
       tools: [{ type: 'x_search', allowed_x_handles: ['elonmusk'] }],
       max_turns: 3,
     });
 
     expect(
-      buildGrokRequestBody('grok-4.6', 'q', 'combined', {
+      buildGrokRequestBody('grok-4.7', 'q', 'combined', {
         allowedDomains: ['x.ai'],
         enableImageUnderstanding: true,
         enableVideoUnderstanding: true,
         maxOutputTokens: 2048,
       }),
     ).toEqual({
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       input: [{ role: 'user', content: 'q' }],
       tools: [
         {

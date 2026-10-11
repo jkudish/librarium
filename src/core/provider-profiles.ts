@@ -352,7 +352,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 130,
-        target: configurableTarget('model', 'gpt-5.6-sol'),
+        target: configurableTarget('model', 'gpt-6.1-sol'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -385,7 +385,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'grounded',
         selection_order: 220,
-        target: configurableTarget('model', 'gemini-2.5-flash'),
+        target: configurableTarget('model', 'gemini-3.8-flash'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -580,7 +580,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'grounded',
         selection_order: 260,
-        target: configurableTarget('model', 'openai/gpt-4o-mini'),
+        target: configurableTarget('model', 'openai/gpt-6-luna'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -593,7 +593,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 530,
-        target: configurableTarget('model', 'openai/gpt-5.6-terra'),
+        target: configurableTarget('model', 'openai/gpt-6-luna'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],
@@ -620,7 +620,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'web',
         selection_order: 230,
-        target: configurableTarget('model', 'grok-4.6'),
+        target: configurableTarget('model', 'grok-4.7'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -647,7 +647,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'x',
         selection_order: 240,
-        target: configurableTarget('model', 'grok-4.6'),
+        target: configurableTarget('model', 'grok-4.7'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['x'],
@@ -672,7 +672,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'combined',
         selection_order: 250,
-        target: configurableTarget('model', 'grok-4.6'),
+        target: configurableTarget('model', 'grok-4.7'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         // One attempt, one result, one metering record, two corpora. This is
@@ -1089,7 +1089,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 500,
-        target: configurableTarget('model', 'claude-sonnet-5'),
+        target: configurableTarget('model', 'claude-sonnet-5-5'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],
@@ -1119,7 +1119,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 510,
-        target: configurableTarget('model', 'gpt-5-mini'),
+        target: configurableTarget('model', 'gpt-6-luna'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],
@@ -1149,7 +1149,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 520,
-        target: configurableTarget('model', 'gemini-3.6-flash'),
+        target: configurableTarget('model', 'gemini-3.8-flash'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],

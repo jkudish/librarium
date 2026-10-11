@@ -324,7 +324,7 @@ describe('built-in provider descriptors', () => {
       'https://openrouter.ai/api/v1/chat/completions',
       expect.objectContaining({
         body: {
-          model: 'openai/gpt-5.6-terra',
+          model: 'openai/gpt-6-luna',
           messages: [{ role: 'user', content: 'factory policy check' }],
           provider: {
             order: ['openai', 'azure'],

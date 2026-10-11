@@ -27,7 +27,7 @@ export {
   validateGrokOptions,
 } from './grok-options.js';
 
-export const DEFAULT_GROK_MODEL = 'grok-4.6';
+export const DEFAULT_GROK_MODEL = 'grok-4.7';
 export const GROK_RESPONSES_URL = 'https://api.x.ai/v1/responses';
 export const GROK_MODELS_URL = 'https://api.x.ai/v1/models';
 

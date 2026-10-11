@@ -14,8 +14,10 @@ const INITIAL_REVIEW_AT = '2026-08-27T00:00:00.000Z';
 const RECHECKED_AT = '2026-10-09T00:00:00.000Z';
 /** Gemini Flash dated rate windows (#4851). */
 const GEMINI_WINDOWS_AT = '2026-10-11T00:00:00.000Z';
+/** New model defaults (#4855). */
+const MODEL_DEFAULTS_AT = '2026-10-11T00:00:00.000Z';
 /** The snapshot review time covers its most recently retrieved definition. */
-const REVIEWED_AT = GEMINI_WINDOWS_AT;
+const REVIEWED_AT = MODEL_DEFAULTS_AT;
 
 interface DefinitionOptions {
   readonly target?: PriceDefinitionInput['effective_target'];
@@ -110,6 +112,32 @@ const accountReason =
 const quantitiesReason =
   'The provider controls one or more billable quantities before completion.';
 
+// Source: https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-10-11).
+// Gemini 3.8 Flash, paid standard tier, per 1M tokens: introductory rates
+// through 2026-12-31, doubled from 2027-01-01. Google states no timezone, so
+// the boundary is 2027-01-01T00:00Z. Grounding with Google Search is $14 per 1k
+// queries after a monthly free allowance, which is not modelled.
+const GEMINI_FLASH_RATE_WINDOWS: readonly PriceRateWindow[] = [
+  {
+    effective_until: '2027-01-01T00:00:00.000Z',
+    rates: [
+      rate('uncached_input_tokens', '0.75', '1000000'),
+      rate('output_tokens', '3.75', '1000000'),
+      rate('cache_read_tokens', '0.075', '1000000'),
+      rate('searches', '14', '1000'),
+    ],
+  },
+  {
+    effective_from: '2027-01-01T00:00:00.000Z',
+    rates: [
+      rate('uncached_input_tokens', '1.5', '1000000'),
+      rate('output_tokens', '7.5', '1000000'),
+      rate('cache_read_tokens', '0.15', '1000000'),
+      rate('searches', '14', '1000'),
+    ],
+  },
+];
+
 const DEFINITIONS: readonly PriceDefinitionInput[] = [
   // Parallel
   definition('parallel', 'research', {
@@ -166,8 +194,13 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
   }),
 
   // OpenAI
+  // Source: https://developers.openai.com/api/docs/models/gpt-6.1-sol and
+  // https://developers.openai.com/api/docs/pricing (accessed 2026-10-11).
+  // Standard, per 1M tokens: $2 input, $0.10 cached, $2.50 cache writes, $10
+  // output (reasoning bills as output). Web search is $10 per 1k calls. Prompts
+  // over 272K input tokens bill at 2x input and 1.5x output.
   definition('openai-research', 'research', {
-    target: { kind: 'model', target_id: 'gpt-5.6-sol' },
+    target: { kind: 'model', target_id: 'gpt-6.1-sol' },
     completeness: 'partial',
     expected: [
       ...tokenUnits,
@@ -178,38 +211,58 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
       'openai:long_context_surcharge',
     ],
     rates: [
-      rate('uncached_input_tokens', '5', '1000000'),
-      rate('output_tokens', '30', '1000000'),
-      rate('reasoning_tokens', '30', '1000000'),
-      rate('cache_read_tokens', '0.5', '1000000'),
-      rate('cache_write_tokens', '6.25', '1000000'),
+      rate('uncached_input_tokens', '2', '1000000'),
+      rate('output_tokens', '10', '1000000'),
+      rate('reasoning_tokens', '10', '1000000'),
+      rate('cache_read_tokens', '0.1', '1000000'),
+      rate('cache_write_tokens', '2.5', '1000000'),
       rate('searches', '10', '1000'),
     ],
     missing: ['openai:long_context_surcharge'],
     reason:
       'Long-context, processing-mode, and background lifecycle conditions are not bounded before completion.',
-    reference: 'official:developers.openai.com/api/docs/models/gpt-5.6-sol',
+    reference: 'official:developers.openai.com/api/docs/models/gpt-6.1-sol',
+    reviewedAt: MODEL_DEFAULTS_AT,
   }),
-  unavailable(
-    'openai-chat',
-    'chat',
-    [...tokenUnits, 'searches'],
-    'The reviewed evidence did not freeze the exact current gpt-5-mini rate and tool conditions.',
-    'official:openai.com/api/pricing',
-  ),
+  // Source: https://developers.openai.com/api/docs/models/gpt-6-luna and
+  // https://developers.openai.com/api/docs/pricing (accessed 2026-10-11).
+  // Standard, per 1M tokens: $0.10 input, $0.01 cached, $0.125 cache writes,
+  // $0.50 output (reasoning bills as output). Web search is $10 per 1k calls.
+  // Prompts over 272K input tokens bill at 2x input and 1.5x output.
+  definition('openai-chat', 'chat', {
+    target: { kind: 'model', target_id: 'gpt-6-luna' },
+    completeness: 'partial',
+    expected: [
+      ...tokenUnits,
+      'cache_read_tokens',
+      'cache_write_tokens',
+      'reasoning_tokens',
+      'searches',
+      'openai:long_context_surcharge',
+    ],
+    rates: [
+      rate('uncached_input_tokens', '0.1', '1000000'),
+      rate('output_tokens', '0.5', '1000000'),
+      rate('reasoning_tokens', '0.5', '1000000'),
+      rate('cache_read_tokens', '0.01', '1000000'),
+      rate('cache_write_tokens', '0.125', '1000000'),
+      rate('searches', '10', '1000'),
+    ],
+    missing: ['openai:long_context_surcharge'],
+    reason:
+      'The long-context surcharge for prompts over 272K input tokens is not bounded before completion.',
+    reference: 'official:developers.openai.com/api/docs/models/gpt-6-luna',
+    reviewedAt: MODEL_DEFAULTS_AT,
+  }),
 
   // Gemini
   definition('gemini-grounded', 'grounded', {
-    target: { kind: 'model', target_id: 'gemini-2.5-flash' },
+    target: { kind: 'model', target_id: 'gemini-3.8-flash' },
     conditions: { account_plan: 'payg', billing_mode: 'standard' },
     expected: [...tokenUnits, 'cache_read_tokens', 'searches'],
-    rates: [
-      rate('uncached_input_tokens', '0.3', '1000000'),
-      rate('output_tokens', '2.5', '1000000'),
-      rate('cache_read_tokens', '0.03', '1000000'),
-      rate('searches', '35', '1000'),
-    ],
+    rateWindows: GEMINI_FLASH_RATE_WINDOWS,
     reference: 'official:ai.google.dev/gemini-api/docs/pricing',
+    reviewedAt: MODEL_DEFAULTS_AT,
   }),
   unavailable(
     'gemini-deep',
@@ -218,43 +271,22 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     quantitiesReason,
     'official:ai.google.dev/gemini-api/docs/deep-research',
   ),
-  // Source: https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-10-11).
-  // Paid standard tier, per 1M tokens: introductory rates through 2026-12-31,
-  // doubled from 2027-01-01. Google states no timezone, so the boundary is
-  // 2027-01-01T00:00Z. Grounding with Google Search stays $14 per 1k queries.
   definition('gemini-chat', 'chat', {
-    target: { kind: 'model', target_id: 'gemini-3.6-flash' },
+    target: { kind: 'model', target_id: 'gemini-3.8-flash' },
     conditions: { account_plan: 'payg', billing_mode: 'standard' },
     expected: [...tokenUnits, 'cache_read_tokens', 'searches'],
-    rateWindows: [
-      {
-        effective_until: '2027-01-01T00:00:00.000Z',
-        rates: [
-          rate('uncached_input_tokens', '0.75', '1000000'),
-          rate('output_tokens', '3.75', '1000000'),
-          rate('cache_read_tokens', '0.075', '1000000'),
-          rate('searches', '14', '1000'),
-        ],
-      },
-      {
-        effective_from: '2027-01-01T00:00:00.000Z',
-        rates: [
-          rate('uncached_input_tokens', '1.5', '1000000'),
-          rate('output_tokens', '7.5', '1000000'),
-          rate('cache_read_tokens', '0.15', '1000000'),
-          rate('searches', '14', '1000'),
-        ],
-      },
-    ],
+    rateWindows: GEMINI_FLASH_RATE_WINDOWS,
     reference: 'official:ai.google.dev/gemini-api/docs/pricing',
     reviewedAt: GEMINI_WINDOWS_AT,
   }),
 
   // xAI
-  // Source: https://docs.x.ai/developers/pricing (accessed 2026-10-09).
-  // Web search is $5 per 1k calls, so the web-only profile stays priced.
+  // Source: https://docs.x.ai/developers/pricing and
+  // https://docs.x.ai/developers/models/grok-4.7 (accessed 2026-10-11).
+  // grok-4.7 below 200K context, per 1M tokens: $2 input, $0.50 cached, $6
+  // output. Web search is $5 per 1k calls, so the web-only profile stays priced.
   definition('grok', 'web', {
-    target: { kind: 'model', target_id: 'grok-4.6' },
+    target: { kind: 'model', target_id: 'grok-4.7' },
     expected: [
       ...tokenUnits,
       'cache_read_tokens',
@@ -269,9 +301,9 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
       rate('searches', '5', '1000'),
     ],
     reference: 'official:docs.x.ai/developers/pricing',
-    reviewedAt: RECHECKED_AT,
+    reviewedAt: MODEL_DEFAULTS_AT,
   }),
-  // Source: https://docs.x.ai/developers/pricing (accessed 2026-10-09).
+  // Source: https://docs.x.ai/developers/pricing (accessed 2026-10-11).
   // Since 2026-09-21 X Search bills per item fetched ($5 per 1k posts, $10 per
   // 1k profiles), including parent and quoted posts, and no request control
   // bounds that count. Any profile using x_search therefore has no bounded
@@ -281,7 +313,7 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     ['grok-combined', 'combined'],
   ].map(([providerId, profileId]) =>
     definition(providerId, profileId, {
-      target: { kind: 'model', target_id: 'grok-4.6' },
+      target: { kind: 'model', target_id: 'grok-4.7' },
       completeness: 'unavailable',
       expected: [
         ...tokenUnits,
@@ -300,24 +332,43 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
       reason:
         'X Search bills per post and profile fetched, and no request control bounds that count.',
       reference: 'official:docs.x.ai/developers/pricing',
-      reviewedAt: RECHECKED_AT,
+      reviewedAt: MODEL_DEFAULTS_AT,
     }),
   ),
 
   // OpenRouter
-  unavailable(
-    'openrouter',
-    'grounded',
-    [...tokenUnits, 'tool_calls'],
-    routedReason,
-    'official:openrouter.ai/docs/guides/routing/provider-selection',
-  ),
-  unavailable(
-    'openrouter',
-    'chat',
-    [...tokenUnits, 'tool_calls'],
-    routedReason,
-    'official:openrouter.ai/docs/guides/routing/provider-selection',
+  // Source: https://openrouter.ai/openai/gpt-6-luna (model listing via
+  // https://openrouter.ai/api/v1/models) and
+  // https://openrouter.ai/docs/guides/features/server-tools/web-search
+  // (accessed 2026-10-11). openai/gpt-6-luna, per 1M tokens: $0.10 input,
+  // $0.01 cache reads, $0.125 cache writes, $0.50 output; $0.20/$0.75 from
+  // 272K prompt tokens. Both profiles pin the Exa engine by default: $7 per 1k
+  // searches with up to 10 results each.
+  ...(['grounded', 'chat'] as const).map((profileId) =>
+    definition('openrouter', profileId, {
+      target: { kind: 'model', target_id: 'openai/gpt-6-luna' },
+      completeness: 'partial',
+      expected: [
+        ...tokenUnits,
+        'cache_read_tokens',
+        'cache_write_tokens',
+        'reasoning_tokens',
+        'searches',
+        'openrouter:long_context_surcharge',
+      ],
+      rates: [
+        rate('uncached_input_tokens', '0.1', '1000000'),
+        rate('output_tokens', '0.5', '1000000'),
+        rate('reasoning_tokens', '0.5', '1000000'),
+        rate('cache_read_tokens', '0.01', '1000000'),
+        rate('cache_write_tokens', '0.125', '1000000'),
+        rate('searches', '7', '1000'),
+      ],
+      missing: ['openrouter:long_context_surcharge'],
+      reason: `${routedReason} Rates are the listed price for the default model and Exa engine; prompts over 272K tokens bill higher.`,
+      reference: 'official:openrouter.ai/openai/gpt-6-luna',
+      reviewedAt: MODEL_DEFAULTS_AT,
+    }),
   ),
 
   // Brave
@@ -487,8 +538,13 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
   }),
 
   // Anthropic
+  // Source: https://platform.claude.com/docs/en/about-claude/pricing and
+  // https://platform.claude.com/docs/en/models/sonnet-5-5/overview (accessed
+  // 2026-10-11). Sonnet 5.5, per 1M tokens: $2 input, $10 output (thinking
+  // bills as output), $2.50 5-minute cache writes, $0.10 cache reads. Web
+  // search is $10 per 1k searches.
   definition('claude', 'chat', {
-    target: { kind: 'model', target_id: 'claude-sonnet-5' },
+    target: { kind: 'model', target_id: 'claude-sonnet-5-5' },
     completeness: 'partial',
     expected: [
       ...tokenUnits,
@@ -499,13 +555,14 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     rates: [
       rate('uncached_input_tokens', '2', '1000000'),
       rate('output_tokens', '10', '1000000'),
-      rate('cache_read_tokens', '0.2', '1000000'),
+      rate('cache_read_tokens', '0.1', '1000000'),
       rate('cache_write_tokens', '2.5', '1000000'),
     ],
     missing: ['searches'],
     reason:
       'Web search tool billing and cache lifetime must be observed explicitly.',
     reference: 'official:platform.claude.com/docs/en/about-claude/pricing',
+    reviewedAt: MODEL_DEFAULTS_AT,
   }),
 ];
 
@@ -516,10 +573,10 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
 export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
   validatePricingSnapshot({
     schema_version: 1,
-    version: '2026-10-11.v1',
+    version: '2026-10-11.v2',
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
+      'sha256:86f179bf2741cb0c3a544827362ae6c68dd9fb54bb902b1e1658d63cbbf3fe59',
     definitions: DEFINITIONS,
   });

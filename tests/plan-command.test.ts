@@ -141,7 +141,7 @@ describe('plan command', () => {
 
     const human = await run({});
     expect(human.stdout).toContain(
-      'grok/web (model grok-4.6) · estimate unknown · 2m per call',
+      'grok/web (model grok-4.7) · estimate unknown · 2m per call',
     );
     expect(human.stdout).not.toMatch(/exa\/search[^\n]*per call/);
 

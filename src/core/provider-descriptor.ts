@@ -86,6 +86,9 @@ export const webSearchOptions = commonOptions.extend({
 });
 export const openRouterOptions = webSearchOptions
   .extend({
+    webSearchEngine: z
+      .enum(['auto', 'native', 'exa', 'firecrawl', 'parallel', 'perplexity'])
+      .optional(),
     providerOrder: z.array(z.string().trim().min(1)).nonempty().optional(),
     allowFallbacks: z.boolean().optional(),
     requireParameters: z.boolean().optional(),
@@ -109,12 +112,19 @@ export const openRouterOptions = webSearchOptions
           'reasoningEffort and reasoningMaxTokens are mutually exclusive',
       });
     }
+    if (options.webSearchEngine !== undefined && options.webSearch === false) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['webSearchEngine'],
+        message: 'webSearchEngine requires web search',
+      });
+    }
     if (options.zdr === true && options.webSearch !== false) {
       ctx.addIssue({
         code: 'custom',
         path: ['zdr'],
         message:
-          'zdr requires webSearch: false because OpenRouter ZDR does not apply to the web plugin',
+          'zdr requires webSearch: false because OpenRouter ZDR does not apply to web search',
       });
     }
   })
@@ -129,11 +139,20 @@ export const openAiResearchOptions = commonOptions.extend({
     .optional(),
   returnTokenBudget: z.enum(['default', 'unlimited']).optional(),
 });
-export const claudeOptions = webSearchOptions.extend({
-  maxTokens: z.number().int().positive().optional(),
-  thinking: z.enum(['adaptive', 'disabled']).optional(),
-  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
-});
+export const claudeOptions = webSearchOptions
+  .extend({
+    maxTokens: z.number().int().positive().optional(),
+    thinking: z.enum(['adaptive', 'between_tools', 'disabled']).optional(),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  })
+  .refine(
+    ({ thinking, effort }) =>
+      thinking !== 'between_tools' || (effort !== 'xhigh' && effort !== 'max'),
+    {
+      path: ['effort'],
+      message: 'thinking "between_tools" requires effort high or below',
+    },
+  );
 export const firecrawlSearchOptions = commonOptions
   .extend({
     sources: z
@@ -586,7 +605,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     aliases: [],
     tier: 'deep-research',
     envVar: 'OPENAI_API_KEY',
-    defaultModel: 'gpt-5.6-sol',
+    defaultModel: 'gpt-6.1-sol',
     optionsSchema: openAiResearchOptions,
     display: {
       family: 'OpenAI',
@@ -605,7 +624,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 7,
     tier: 'ai-grounded',
     envVar: 'GEMINI_API_KEY',
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'gemini-3.8-flash',
     display: {
       family: 'Gemini',
       name: 'Gemini Grounded Search',
@@ -712,7 +731,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 9,
     tier: 'ai-grounded',
     envVar: 'OPENROUTER_API_KEY',
-    defaultModel: 'openai/gpt-4o-mini',
+    defaultModel: 'openai/gpt-6-luna',
     display: {
       family: 'OpenRouter',
       name: 'OpenRouter Online Search',
@@ -730,7 +749,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 8,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
-    defaultModel: 'grok-4.6',
+    defaultModel: 'grok-4.7',
     optionsSchema: grokWebOptionsSchema,
     display: {
       family: 'xAI',
@@ -752,7 +771,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 32,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
-    defaultModel: 'grok-4.6',
+    defaultModel: 'grok-4.7',
     autoEnable: false,
     optionsSchema: grokXOnlyOptionsSchema,
     display: {
@@ -773,7 +792,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 33,
     tier: 'ai-grounded',
     envVar: 'XAI_API_KEY',
-    defaultModel: 'grok-4.6',
+    defaultModel: 'grok-4.7',
     autoEnable: false,
     optionsSchema: grokCombinedOptionsSchema,
     display: {
@@ -1120,7 +1139,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 21,
     tier: 'llm',
     envVar: 'ANTHROPIC_API_KEY',
-    defaultModel: 'claude-sonnet-5',
+    defaultModel: 'claude-sonnet-5-5',
     optionsSchema: claudeOptions,
     display: {
       family: 'Anthropic',
@@ -1138,7 +1157,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 22,
     tier: 'llm',
     envVar: 'OPENAI_API_KEY',
-    defaultModel: 'gpt-5-mini',
+    defaultModel: 'gpt-6-luna',
     optionsSchema: webSearchOptions,
     display: {
       family: 'OpenAI',
@@ -1156,7 +1175,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 23,
     tier: 'llm',
     envVar: 'GEMINI_API_KEY',
-    defaultModel: 'gemini-3.6-flash',
+    defaultModel: 'gemini-3.8-flash',
     optionsSchema: webSearchOptions,
     display: {
       family: 'Gemini',
@@ -1174,7 +1193,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 24,
     tier: 'llm',
     envVar: 'OPENROUTER_API_KEY',
-    defaultModel: 'openai/gpt-5.6-terra',
+    defaultModel: 'openai/gpt-6-luna',
     optionsSchema: openRouterOptions,
     display: {
       family: 'OpenRouter',
