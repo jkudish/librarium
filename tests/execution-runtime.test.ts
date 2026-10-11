@@ -2194,6 +2194,66 @@ describe('execution runtime -- per-profile inline deadlines and causes (#4769)',
     expect(() => CoordinatorStateSchema.parse(result.state)).not.toThrow();
   });
 
+  it('gives a background attempt its planned per-target deadline (#4856)', async () => {
+    const durable = (id: string): Provider => ({
+      id: `adapter-${id}`,
+      displayName: id,
+      tier: 'deep-research',
+      envVar: '',
+      execution: 'background',
+      execute: vi.fn(),
+      submit: vi.fn(async () => ({
+        provider: `adapter-${id}`,
+        taskId: `${id}-task`,
+        query: 'runtime query',
+        submittedAt: start,
+        status: 'pending' as const,
+      })),
+      poll: vi.fn(async () => ({ status: 'completed' as const })),
+      retrieve: vi.fn(async () => successfulResult(`adapter-${id}`)),
+    });
+    const long = profile('long', 'background');
+    const normal = profile('normal', 'background');
+    const plan = prepared([long, normal], [], 'sync', {
+      request_deadline_ms: 200_000,
+    });
+    const longKey = profileIdentityKey(long.identity);
+    const withDeadline: PreparedResearchExecution = {
+      ...plan,
+      profile_plans_by_identity: {
+        ...plan.profile_plans_by_identity,
+        [longKey]: {
+          ...plan.profile_plans_by_identity[longKey]!,
+          background_attempt_deadline_ms: 120_000,
+        },
+      },
+    };
+    const providers = { long: durable('long'), normal: durable('normal') };
+
+    const result = await runPreparedExecution(withDeadline, {
+      store: new InMemoryCoordinationStateStore(),
+      coordinator: coordinatorDependencies(),
+      attempts: createProviderAttemptBridge({
+        resolveExactBinding: (binding) => {
+          const id = binding.adapter_id.replace('adapter-', '');
+          return id === 'long' || id === 'normal'
+            ? resolvedBinding(id, providers[id])
+            : undefined;
+        },
+        now: () => start,
+      }),
+    });
+
+    const deadlineFor = (providerId: string) =>
+      result.state.attempts.find(
+        (attempt) => attempt.profile.identity.provider_id === providerId,
+      )?.deadline_at;
+    expect(deadlineFor('long')).toBe(new Date(start + 120_000).toISOString());
+    expect(deadlineFor('normal')).toBe(new Date(start + 20_000).toISOString());
+    expect(result.state.background_attempt_deadline_ms).toBe(20_000);
+    expect(() => CoordinatorStateSchema.parse(result.state)).not.toThrow();
+  });
+
   it('keeps a SearchAPI HTTP 503 cause as provider_code in the canonical error', async () => {
     const { SearchApiChatGptProvider } = await import(
       '../src/adapters/searchapi-chatgpt.js'

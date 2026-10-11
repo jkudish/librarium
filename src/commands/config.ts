@@ -5,6 +5,7 @@ import type { Command } from 'commander';
 import { CLI_LIMITS, parseConfigAction } from '../cli-parsers.js';
 import {
   CONFIG_FILE,
+  configToPersist,
   loadConfig,
   loadProjectConfig,
   mergeConfigs,
@@ -341,7 +342,7 @@ async function promptLlmWebSearch(config: Config): Promise<Config | null> {
       llmWebSearch: choice === 'on',
     },
   };
-  saveConfig(next);
+  saveConfig(configToPersist(config, next));
   p.log.success(
     `LLM web search ${next.defaults.llmWebSearch ? 'enabled' : 'disabled'}.`,
   );
@@ -376,7 +377,7 @@ async function promptMode(config: Config): Promise<Config | null> {
     ...config,
     defaults: { ...config.defaults, mode },
   };
-  saveConfig(next);
+  saveConfig(configToPersist(config, next));
   p.log.success(`Default mode set to ${mode}.`);
   return next;
 }
@@ -394,7 +395,7 @@ async function promptOutputDir(config: Config): Promise<Config | null> {
     ...config,
     defaults: { ...config.defaults, outputDir: outputDir.trim() },
   };
-  saveConfig(next);
+  saveConfig(configToPersist(config, next));
   p.log.success(`Output directory set to ${next.defaults.outputDir}.`);
   return next;
 }

@@ -114,11 +114,14 @@ describe('pricing snapshot validation', () => {
     expect(priced).toEqual(bound);
     expect(priced).toHaveLength(40);
     expect(priced).not.toContain('searchapi-perplexity/surface');
-    // Only You.com research has more than one definition: one per effort tier.
+    // Only tiered research profiles have more than one definition: one per
+    // You.com effort, Parallel processor, or Valyu mode.
     const repeated = BUILTIN_PRICING_SNAPSHOT.definitions
       .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
       .filter((key, index, all) => all.indexOf(key) !== index);
-    expect(new Set(repeated)).toEqual(new Set(['you-research/research']));
+    expect(new Set(repeated)).toEqual(
+      new Set(['you-research/research', 'parallel/research', 'valyu/research']),
+    );
     expect(
       new Set(BUILTIN_PRICING_SNAPSHOT.definitions.map(({ id }) => id)).size,
     ).toBe(BUILTIN_PRICING_SNAPSHOT.definitions.length);
@@ -254,6 +257,63 @@ describe('pricing snapshot validation', () => {
       );
     },
   );
+
+  it.each([
+    ['parallel', 'lite', '5000'],
+    ['parallel', 'base', '10000'],
+    ['parallel', 'core', '25000'],
+    ['parallel', 'core2x', '50000'],
+    ['parallel', 'pro', '100000'],
+    ['parallel', 'ultra', '300000'],
+    ['parallel', 'ultra2x', '600000'],
+    ['parallel', 'ultra4x', '1200000'],
+    ['parallel', 'ultra8x', '2400000'],
+    ['valyu', 'fast', '100000'],
+    ['valyu', 'standard', '500000'],
+    ['valyu', 'heavy', '2500000'],
+    ['valyu', 'max', '15000000'],
+  ])(
+    'prices %s research tier %s from the official per-run rate (#4856)',
+    (providerId, tier, microusd) => {
+      const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+        requested_identity: {
+          provider_id: providerId,
+          profile_id: 'research',
+          target: {
+            primary: {
+              model_selection: 'configurable',
+              kind: 'preset',
+              target_id: tier,
+            },
+          },
+        },
+      });
+      expect(budgetEstimateFromQuote(quote)?.estimated_cost_microusd).toBe(
+        microusd,
+      );
+    },
+  );
+
+  it.each([
+    ['parallel', 'pro-fast'],
+    ['parallel', 'ultra-fast'],
+    ['valyu', 'lite'],
+  ])('has no price for the unlisted %s tier %s', (providerId, tier) => {
+    const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
+      requested_identity: {
+        provider_id: providerId,
+        profile_id: 'research',
+        target: {
+          primary: {
+            model_selection: 'configurable',
+            kind: 'preset',
+            target_id: tier,
+          },
+        },
+      },
+    });
+    expect(budgetEstimateFromQuote(quote)).toBeUndefined();
+  });
 
   it('does not invent a You.com research price for an unknown effort tier', () => {
     const quote = new PricingCatalog(BUILTIN_PRICING_SNAPSHOT).quote({
@@ -489,10 +549,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
+      'sha256:10d273a0e72b7c83b3afbee84e37a9bfa1554ab618adda7079549fccef94c930',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
+      'sha256:10d273a0e72b7c83b3afbee84e37a9bfa1554ab618adda7079549fccef94c930',
     );
     expect(
       `sha256:${createHash('sha256')

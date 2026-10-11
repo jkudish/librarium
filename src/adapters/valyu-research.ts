@@ -114,12 +114,63 @@ function safeArtifactUrl(value: string | undefined): string | undefined {
   return parsed.search || parsed.hash ? undefined : parsed.toString();
 }
 
+const SIGNED_DATE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/;
+
+/**
+ * Expiry of a signed URL, when its signature parameters carry one: AWS SigV4
+ * (`X-Amz-Date` + `X-Amz-Expires`), Google V4 (`X-Goog-Date` +
+ * `X-Goog-Expires`), or an `Expires` epoch (S3 SigV2, CloudFront). Valyu does
+ * not document an expiry field, so none is read from the response body.
+ */
+function signedUrlExpiry(value: string): string | undefined {
+  const params = new Map(
+    [...new URL(value).searchParams].map(([key, param]) => [
+      key.toLowerCase(),
+      param,
+    ]),
+  );
+  for (const prefix of ['x-amz', 'x-goog']) {
+    const date = SIGNED_DATE.exec(params.get(`${prefix}-date`) ?? '');
+    const seconds = Number(params.get(`${prefix}-expires`));
+    if (date && Number.isSafeInteger(seconds) && seconds > 0) {
+      const [, year, month, day, hour, minute, second] = date.map(Number);
+      const signedAt = Date.UTC(year, month - 1, day, hour, minute, second);
+      const expiresAt = signedAt + seconds * 1_000;
+      return Number.isFinite(expiresAt)
+        ? new Date(expiresAt).toISOString()
+        : undefined;
+    }
+  }
+  const epoch = Number(params.get('expires'));
+  return Number.isSafeInteger(epoch) && epoch > 0
+    ? new Date(epoch * 1_000).toISOString()
+    : undefined;
+}
+
+/**
+ * The signed PDF report link. It is a bearer credential that expires: it is
+ * returned on the result only, and never placed in errors or diagnostics.
+ */
+function pdfArtifact(pdfUrl: string): Record<string, unknown> {
+  const url = safeHttpUrl(pdfUrl);
+  if (!url) return { kind: 'pdf' };
+  const expiresAt = signedUrlExpiry(url);
+  return { kind: 'pdf', url, ...(expiresAt && { expires_at: expiresAt }) };
+}
+
+/** Remove the signed PDF link from provider text that may echo it. */
+function withoutPdfUrl(
+  message: string | undefined,
+  pdfUrl: string | undefined,
+): string | undefined {
+  return message && pdfUrl
+    ? message.split(pdfUrl).join('[pdf url omitted]')
+    : message;
+}
+
 function safeArtifacts(data: ValyuResearchStatus): Record<string, unknown>[] {
   const artifacts: Record<string, unknown>[] = [];
-  const pdfUrl = safeArtifactUrl(data.pdf_url);
-  if (data.pdf_url) {
-    artifacts.push({ kind: 'pdf', ...(pdfUrl && { url: pdfUrl }) });
-  }
+  if (data.pdf_url) artifacts.push(pdfArtifact(data.pdf_url));
   for (const image of data.images ?? []) {
     const imageUrl = safeArtifactUrl(image.image_url);
     artifacts.push({
@@ -316,7 +367,12 @@ export class ValyuResearchProvider extends BackgroundBaseProvider {
       rawStatus: response.status,
       ...(progress !== undefined && { progress }),
       ...(response.error || response.message
-        ? { message: response.error || response.message }
+        ? {
+            message: withoutPdfUrl(
+              response.error || response.message,
+              response.pdf_url,
+            ),
+          }
         : {}),
     };
   }

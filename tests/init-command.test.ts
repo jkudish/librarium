@@ -4,10 +4,18 @@ import { computeInitProviderChoices } from '../src/constants.js';
 import type { Config } from '../src/types.js';
 
 const SEARCHAPI_ENV = { SEARCHAPI_API_KEY: 'searchapi-test' };
+const SURFACES = [
+  'searchapi-chatgpt',
+  'searchapi-gemini',
+  'searchapi-google-ai-mode',
+  'searchapi-bing-copilot',
+  'searchapi-google-ai-overview',
+];
 
-/** Opt-in providers that share SEARCHAPI_API_KEY, derived from descriptors. */
-const searchApiOptIn = computeInitProviderChoices(SEARCHAPI_ENV)
-  .filter(({ envVar, isOptIn }) => envVar === 'SEARCHAPI_API_KEY' && isOptIn)
+/** Opt-in providers that share PARALLEL_API_KEY, derived from descriptors. */
+const PARALLEL_ENV = { PARALLEL_API_KEY: 'parallel-test' };
+const parallelOptIn = computeInitProviderChoices(PARALLEL_ENV)
+  .filter(({ envVar, isOptIn }) => envVar === 'PARALLEL_API_KEY' && isOptIn)
   .map(({ id }) => id);
 
 function plan(input: Partial<Parameters<typeof planInitProviders>[0]> = {}) {
@@ -22,14 +30,26 @@ function plan(input: Partial<Parameters<typeof planInitProviders>[0]> = {}) {
 }
 
 describe('init --auto and --enable', () => {
-  it('keeps opt-in providers disabled under --auto and names the enable command', () => {
-    expect(searchApiOptIn).toContain('searchapi-chatgpt');
+  it('enables SearchAPI search and every surface when SEARCHAPI_API_KEY is set (#4856)', () => {
     const result = plan({ auto: true });
-    expect(result.providers.searchapi).toEqual({
-      apiKey: '$SEARCHAPI_API_KEY',
-      enabled: true,
-    });
-    for (const id of searchApiOptIn) {
+    for (const id of ['searchapi', ...SURFACES]) {
+      expect(result.providers[id]).toEqual({
+        apiKey: '$SEARCHAPI_API_KEY',
+        enabled: true,
+      });
+    }
+    expect(result.lines).not.toContainEqual(expect.stringContaining('opt-in'));
+    // Without the key, --auto enables none of them.
+    const withoutKey = plan({ auto: true, env: {} });
+    for (const id of ['searchapi', ...SURFACES]) {
+      expect(withoutKey.providers[id]).toBeUndefined();
+    }
+  });
+
+  it('keeps opt-in providers disabled under --auto and names the enable command', () => {
+    expect(parallelOptIn).toContain('parallel-research');
+    const result = plan({ auto: true, env: PARALLEL_ENV });
+    for (const id of parallelOptIn) {
       expect(result.providers[id]).toBeUndefined();
       expect(result.lines).toContainEqual(
         expect.stringContaining(
@@ -41,16 +61,17 @@ describe('init --auto and --enable', () => {
 
   it('enables explicitly requested opt-in providers and keeps their settings', () => {
     const result = plan({
+      env: PARALLEL_ENV,
       providers: {
-        'searchapi-chatgpt': { options: { perRequestUsd: 0.004 } },
+        'parallel-research': { options: { processor: 'ultra' } },
       },
-      enable: searchApiOptIn,
+      enable: parallelOptIn,
     });
     expect(result.unknown).toEqual([]);
-    expect(result.enabledCount).toBe(searchApiOptIn.length);
-    expect(result.providers['searchapi-chatgpt']).toEqual({
-      options: { perRequestUsd: 0.004 },
-      apiKey: '$SEARCHAPI_API_KEY',
+    expect(result.enabledCount).toBe(parallelOptIn.length);
+    expect(result.providers['parallel-research']).toEqual({
+      options: { processor: 'ultra' },
+      apiKey: '$PARALLEL_API_KEY',
       enabled: true,
     });
     // --enable alone does not auto-discover anything else.

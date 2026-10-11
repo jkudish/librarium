@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ValyuResearchProvider } from '../../src/adapters/valyu-research.js';
 import { ValyuSearchProvider } from '../../src/adapters/valyu-search.js';
+import { ProviderMetaSchema } from '../../src/contracts/interchange/research-result.js';
 import type { HttpClient } from '../../src/core/http-client.js';
 
 const response = <T>(status: number, data: T) => ({
@@ -178,7 +179,8 @@ describe('Valyu DeepResearch', () => {
         cost: 2.5,
         cost_breakdown: { task: 2.5 },
         progress: { current_step: 3, total_steps: 15 },
-        pdf_url: 'https://storage.valyu.ai/report.pdf?token=ephemeral',
+        pdf_url:
+          'https://storage.valyu.ai/report.pdf?X-Amz-Date=20260812T001000Z&X-Amz-Expires=3600&X-Amz-Signature=pdf-sig',
         sources: [
           {
             title: 'Study',
@@ -248,9 +250,14 @@ describe('Valyu DeepResearch', () => {
     });
     expect(JSON.stringify(result)).not.toContain('s3_key');
     expect(JSON.stringify(result)).not.toContain('secret/internal');
+    // Only the requested PDF report keeps its signed (bearer) link.
     expect(JSON.stringify(result)).not.toContain('token=ephemeral');
     expect(result.providerMeta?.['valyu:artifacts']).toEqual([
-      { kind: 'pdf' },
+      {
+        kind: 'pdf',
+        url: 'https://storage.valyu.ai/report.pdf?X-Amz-Date=20260812T001000Z&X-Amz-Expires=3600&X-Amz-Signature=pdf-sig',
+        expires_at: '2026-08-12T01:10:00.000Z',
+      },
       {
         kind: 'csv',
         provider_asset_id: 'del-1',
@@ -570,4 +577,93 @@ describe('Valyu DeepResearch', () => {
       });
     },
   );
+
+  const handle = {
+    provider: 'valyu-research',
+    taskId: 'dr-pdf',
+    query: 'pdf',
+    submittedAt: 0,
+    status: 'completed' as const,
+  };
+
+  it.each([
+    [
+      'https://storage.valyu.ai/r.pdf?X-Goog-Date=20261011T120000Z&X-Goog-Expires=600&X-Goog-Signature=s',
+      '2026-10-11T12:10:00.000Z',
+    ],
+    [
+      'https://cdn.valyu.ai/r.pdf?Expires=1791806400&Signature=s',
+      '2026-10-12T12:00:00.000Z',
+    ],
+    ['https://storage.valyu.ai/pdfs/a1b2c3d4.pdf', undefined],
+    ['https://storage.valyu.ai/r.pdf?token=opaque', undefined],
+  ])(
+    'exposes the signed PDF link %s with its derivable expiry',
+    async (pdfUrl, expiresAt) => {
+      const transport = client(async () =>
+        response(200, {
+          deepresearch_id: 'dr-pdf',
+          status: 'completed',
+          output_type: 'markdown',
+          output: '# Report',
+          pdf_url: pdfUrl,
+        }),
+      );
+      const provider = new ValyuResearchProvider({
+        outputFormats: ['markdown', 'pdf'],
+      });
+      provider.configure({
+        credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+        httpClient: transport.httpClient,
+      });
+      const result = await provider.retrieve(handle);
+      const meta = ProviderMetaSchema.parse(result.providerMeta);
+      expect(meta['valyu:artifacts']).toEqual([
+        {
+          kind: 'pdf',
+          url: pdfUrl,
+          ...(expiresAt && { expires_at: expiresAt }),
+        },
+      ]);
+    },
+  );
+
+  it('keeps the signed PDF link out of status and error messages', async () => {
+    const pdfUrl = 'https://storage.valyu.ai/r.pdf?token=bearer-secret';
+    const transport = client(async () =>
+      response(200, {
+        deepresearch_id: 'dr-pdf',
+        status: 'failed',
+        pdf_url: pdfUrl,
+        error: `Report rendered at ${pdfUrl} but verification failed`,
+      }),
+    );
+    const provider = new ValyuResearchProvider();
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: transport.httpClient,
+    });
+    const polled = await provider.poll({ ...handle, status: 'running' });
+    expect(polled).toMatchObject({ status: 'failed' });
+    expect(JSON.stringify(polled)).not.toContain('bearer-secret');
+    const retrieved = await provider.retrieve(handle);
+    expect(retrieved.error).toBeDefined();
+    expect(JSON.stringify(retrieved)).not.toContain('bearer-secret');
+  });
+
+  it('requests markdown only unless PDF output is configured', async () => {
+    const transport = client(async () =>
+      response(202, { deepresearch_id: 'dr-default', status: 'queued' }),
+    );
+    const provider = new ValyuResearchProvider();
+    provider.configure({
+      credentials: { env: { VALYU_API_KEY: 'synthetic-key' } },
+      httpClient: transport.httpClient,
+    });
+    await provider.submit('default mode', { timeout: 10 });
+    expect(transport.calls.mock.calls[0]?.[1]?.body).toMatchObject({
+      mode: 'standard',
+      output_formats: ['markdown'],
+    });
+  });
 });

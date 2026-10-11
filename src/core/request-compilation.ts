@@ -23,8 +23,14 @@ import {
   type CustomCatalogProfile,
   pricingIntervalFrom,
 } from './profile-catalog.js';
-import { profileDefaultInlineAttemptDeadlineMs } from './profile-deadlines.js';
-import { deriveV1RequestDeadline } from './request-deadline-migration.js';
+import {
+  profileDefaultBackgroundAttemptDeadlineMs,
+  profileDefaultInlineAttemptDeadlineMs,
+} from './profile-deadlines.js';
+import {
+  deriveV1RequestDeadline,
+  v1BackgroundTransportOverheadMs,
+} from './request-deadline-migration.js';
 import type {
   PreparationIssue,
   PreparationNotice,
@@ -96,6 +102,13 @@ export interface RequestCompilationInput {
    * passes an explicit timeout.
    */
   readonly applyProfileDeadlineDefaults?: boolean;
+  /**
+   * Let background targets with a documented longer or shorter runtime (see
+   * profile-deadlines.ts) use it in place of the global background deadline.
+   * Production transports set this only when no background deadline
+   * (`asyncTimeout` or v2 `background_attempt_deadline_ms`) was authored.
+   */
+  readonly applyBackgroundProfileDeadlineDefaults?: boolean;
   readonly transport: RequestCompilationTransport;
   readonly preparation: PreparationDependencies;
 }
@@ -408,6 +421,18 @@ function profileInlineDeadlineResolver(
     : undefined;
 }
 
+function profileBackgroundDeadlineResolver(
+  input: RequestCompilationInput,
+): ((profile: ExecutionProfile) => number | undefined) | undefined {
+  if (!input.applyBackgroundProfileDeadlineDefaults) return undefined;
+  return (profile) => {
+    const deadline = profileDefaultBackgroundAttemptDeadlineMs(profile);
+    return deadline === undefined
+      ? undefined
+      : deadline + v1BackgroundTransportOverheadMs(profile);
+  };
+}
+
 /**
  * Compile a v1 configuration plus one transport-shaped input without touching
  * runtime execution, stores, bridges, files, imports, registries, credentials,
@@ -418,6 +443,7 @@ export function compileRequest(
 ): RequestCompilationResult {
   const rawGroup = input.transport.input.group?.trim();
   const inlineAttemptDeadlineMs = profileInlineDeadlineResolver(input);
+  const backgroundAttemptDeadlineMs = profileBackgroundDeadlineResolver(input);
   const explicitDeadlineMs =
     input.requestDeadlineMs ?? input.config.defaults.requestDeadlineMs;
   const mapped = mapConfiguration(input.config, {
@@ -611,7 +637,7 @@ export function compileRequest(
         poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
       },
       input.preparation,
-      { inlineAttemptDeadlineMs },
+      { inlineAttemptDeadlineMs, backgroundAttemptDeadlineMs },
     );
     const notices = sortPreparationDiagnostics([
       ...mapperNotices,
@@ -642,7 +668,10 @@ export function compileRequest(
         unresolvedMode === 'mixed' ? 'mixed' : admitted.admission.request.mode,
     },
     admitted.admission,
-    inlineAttemptDeadlineMs,
+    {
+      inline: inlineAttemptDeadlineMs,
+      background: backgroundAttemptDeadlineMs,
+    },
   );
   if (!derived.ok) {
     return {
@@ -672,7 +701,7 @@ export function compileRequest(
       poll_interval_ms: admitted.unresolved_limits.poll_interval_ms,
     },
     input.preparation,
-    { inlineAttemptDeadlineMs },
+    { inlineAttemptDeadlineMs, backgroundAttemptDeadlineMs },
   );
   const notices = sortPreparationDiagnostics([
     ...mapperNotices,

@@ -123,8 +123,14 @@ const VISIBILITY_ENV = {
   XAI_API_KEY: 'xai-test',
 };
 
+/** SEARCHAPI_API_KEY exported only after init ran, so no surface is enabled. */
+const {
+  SEARCHAPI_API_KEY: _searchApiKey,
+  ...VISIBILITY_ENV_WITHOUT_SEARCHAPI
+} = VISIBILITY_ENV;
+
 describe('#4766 visibility after init --auto', () => {
-  it('names every skipped member and how to enable it instead of silently shrinking', () => {
+  it('runs every visibility member straight after init --auto (#4856)', () => {
     // Simulate a config written by an earlier init, which persisted every
     // injected default roster.
     const path = configPath({ groups: DEFAULT_GROUPS });
@@ -140,13 +146,27 @@ describe('#4766 visibility after init --auto', () => {
     expect(prepared.preflight.notices.map(({ code }) => code)).not.toContain(
       'configuration_group_alias_migrated',
     );
-    const planned = plannedKeys(prepared);
+    expect(plannedKeys(prepared)).toEqual(visibilityKeys);
+    expect(omissionNotices(prepared.preflight.notices)).toEqual([]);
+  });
+
+  it('keeps the SearchAPI surfaces out of the default quick workflow', () => {
+    const path = configPath();
+    init(path, VISIBILITY_ENV, { auto: true });
+    const planned = plannedKeys(prepare(path, VISIBILITY_ENV, {}));
+    expect(planned.some((key) => key.startsWith('searchapi-'))).toBe(false);
+  });
+
+  it('names every skipped member and how to enable it instead of silently shrinking', () => {
+    const path = configPath();
+    init(path, VISIBILITY_ENV_WITHOUT_SEARCHAPI, { auto: true });
+    const before = prepare(path, VISIBILITY_ENV, { group: 'visibility' });
+    const planned = plannedKeys(before);
     const skipped = visibilityKeys.filter((key) => !planned.includes(key));
-    // SearchAPI surfaces remain opt-in at setup (a deliberate cost boundary).
     expect(skipped.length).toBeGreaterThan(0);
     expect(skipped.every((key) => key.startsWith('searchapi-'))).toBe(true);
 
-    const notices = omissionNotices(prepared.preflight.notices);
+    const notices = omissionNotices(before.preflight.notices);
     for (const key of skipped) {
       const provider = key.split('/')[0];
       expect(notices).toContainEqual(
@@ -155,26 +175,25 @@ describe('#4766 visibility after init --auto', () => {
         }),
       );
     }
-  });
 
-  it('runs every visibility member once the named providers are enabled', () => {
-    const path = configPath();
-    init(path, VISIBILITY_ENV, { auto: true });
-    const before = prepare(path, VISIBILITY_ENV, { group: 'visibility' });
-    const enable = omissionNotices(before.preflight.notices).map(
+    // Either named remedy restores the full roster: the --enable command, or
+    // rerunning init --auto now that the key is exported.
+    const enable = notices.map(
       ({ message }) => /`librarium init --enable (\S+)`/.exec(message)?.[1],
     );
-    expect(enable.length).toBeGreaterThan(0);
-
-    init(path, VISIBILITY_ENV, { enable: enable as string[] });
-    const after = prepare(path, VISIBILITY_ENV, { group: 'visibility' });
-    expect(plannedKeys(after)).toEqual(visibilityKeys);
-    expect(omissionNotices(after.preflight.notices)).toEqual([]);
+    const enabledPath = configPath(JSON.parse(readFileSync(path, 'utf8')));
+    init(enabledPath, VISIBILITY_ENV, { enable: enable as string[] });
+    init(path, VISIBILITY_ENV, { auto: true });
+    for (const restored of [enabledPath, path]) {
+      const after = prepare(restored, VISIBILITY_ENV, { group: 'visibility' });
+      expect(plannedKeys(after)).toEqual(visibilityKeys);
+      expect(omissionNotices(after.preflight.notices)).toEqual([]);
+    }
   });
 
   it('says how to enable an explicitly selected disabled profile', () => {
     const path = configPath();
-    init(path, VISIBILITY_ENV, { auto: true });
+    init(path, VISIBILITY_ENV_WITHOUT_SEARCHAPI, { auto: true });
     const error = rejection(() =>
       prepare(path, VISIBILITY_ENV, { providers: ['searchapi-chatgpt'] }),
     );
@@ -193,7 +212,7 @@ describe('#4766 visibility after init --auto', () => {
       groups: { 'custom:mine': ['searchapi-chatgpt/surface', 'exa/search'] },
     });
     const env = { SEARCHAPI_API_KEY: 'searchapi-test', EXA_API_KEY: 'exa' };
-    init(path, env, { auto: true });
+    init(path, { EXA_API_KEY: 'exa' }, { auto: true });
     const prepared = prepare(path, env, { group: 'custom:mine' });
     expect(plannedKeys(prepared)).toEqual(['exa/search']);
     expect(omissionNotices(prepared.preflight.notices)).toContainEqual(

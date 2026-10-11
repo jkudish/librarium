@@ -819,12 +819,16 @@ function claimDispatchPendingAttempts(
       continue;
     }
     const deliveryLeaseId = dependencies.ids.next('delivery_lease');
+    const profilePlan =
+      state.profile_plans_by_identity[
+        profileIdentityKey(attempt.profile.identity)
+      ];
     const attemptDeadlineMs =
       attempt.profile.invocation === 'inline'
-        ? (state.profile_plans_by_identity[
-            profileIdentityKey(attempt.profile.identity)
-          ]?.inline_attempt_deadline_ms ?? state.inline_attempt_deadline_ms)
-        : state.background_attempt_deadline_ms;
+        ? (profilePlan?.inline_attempt_deadline_ms ??
+          state.inline_attempt_deadline_ms)
+        : (profilePlan?.background_attempt_deadline_ms ??
+          state.background_attempt_deadline_ms);
     attempt.deadline_at = iso(
       Math.min(nowMs + attemptDeadlineMs, requestDeadlineMs),
     );

@@ -14,6 +14,8 @@ const INITIAL_REVIEW_AT = '2026-08-27T00:00:00.000Z';
 const RECHECKED_AT = '2026-10-09T00:00:00.000Z';
 /** Gemini Flash dated rate windows (#4851). */
 const GEMINI_WINDOWS_AT = '2026-10-11T00:00:00.000Z';
+/** Parallel processor and Valyu mode tiers (#4856). */
+const RESEARCH_TIERS_AT = '2026-10-11T00:00:00.000Z';
 /** The snapshot review time covers its most recently retrieved definition. */
 const REVIEWED_AT = GEMINI_WINDOWS_AT;
 
@@ -112,13 +114,31 @@ const quantitiesReason =
 
 const DEFINITIONS: readonly PriceDefinitionInput[] = [
   // Parallel
-  definition('parallel', 'research', {
-    target: { kind: 'preset', target_id: 'pro' },
-    expected: ['processor_requests'],
-    fixed: { processor_requests: '1' },
-    rates: [rate('processor_requests', '0.1')],
-    reference: 'official:docs.parallel.ai/getting-started/pricing',
-  }),
+  // Source: https://docs.parallel.ai/getting-started/pricing (accessed
+  // 2026-10-11). Task API price per 1k successful runs by processor; failed
+  // runs are not billed. pro-fast and ultra-fast are no longer listed.
+  ...(
+    [
+      ['lite', '5'],
+      ['base', '10'],
+      ['core', '25'],
+      ['core2x', '50'],
+      ['pro', '100'],
+      ['ultra', '300'],
+      ['ultra2x', '600'],
+      ['ultra4x', '1200'],
+      ['ultra8x', '2400'],
+    ] as const
+  ).map(([processor, perThousandUsd]) =>
+    definition('parallel', 'research', {
+      target: { kind: 'preset', target_id: processor },
+      expected: ['processor_requests'],
+      fixed: { processor_requests: '1' },
+      rates: [rate('processor_requests', perThousandUsd, '1000')],
+      reference: 'official:docs.parallel.ai/getting-started/pricing',
+      reviewedAt: RESEARCH_TIERS_AT,
+    }),
+  ),
   unavailable(
     'parallel',
     'search',
@@ -478,13 +498,26 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     'Each returned result can have a different source-class price.',
     'official:docs.valyu.ai/pricing',
   ),
-  definition('valyu', 'research', {
-    target: { kind: 'preset', target_id: 'standard' },
-    expected: ['research_requests'],
-    fixed: { research_requests: '1' },
-    rates: [rate('research_requests', '0.5')],
-    reference: 'official:docs.valyu.ai/pricing',
-  }),
+  // Source: https://docs.valyu.ai/pricing (accessed 2026-10-11). DeepResearch
+  // is a fixed price per task by mode. Optional tools add surcharges, but
+  // Librarium never enables them, and PDF output is not a deliverable.
+  ...(
+    [
+      ['fast', '0.1'],
+      ['standard', '0.5'],
+      ['heavy', '2.5'],
+      ['max', '15'],
+    ] as const
+  ).map(([mode, usd]) =>
+    definition('valyu', 'research', {
+      target: { kind: 'preset', target_id: mode },
+      expected: ['research_requests'],
+      fixed: { research_requests: '1' },
+      rates: [rate('research_requests', usd)],
+      reference: 'official:docs.valyu.ai/pricing',
+      reviewedAt: RESEARCH_TIERS_AT,
+    }),
+  ),
 
   // Anthropic
   definition('claude', 'chat', {
@@ -516,10 +549,10 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
 export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
   validatePricingSnapshot({
     schema_version: 1,
-    version: '2026-10-11.v1',
+    version: '2026-10-11.v2',
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
+      'sha256:10d273a0e72b7c83b3afbee84e37a9bfa1554ab618adda7079549fccef94c930',
     definitions: DEFINITIONS,
   });

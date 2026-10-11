@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { PARALLEL_RESEARCH_PROCESSORS } from '../adapters/parallel-options.js';
 import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Corpus, ExecutionProfile } from '../contracts/domain/index.js';
 import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
@@ -74,7 +75,7 @@ const MODEL_OVERRIDE_ALLOWLISTS: Readonly<Record<string, ReadonlySet<string>>> =
   {
     'gemini-grounded': new Set(['gemini-2.5-flash', 'gemini-2.5-pro']),
     'openrouter-online': new Set(['openai/gpt-4o-mini', 'openai/gpt-4o']),
-    'parallel-research': new Set(['pro', 'pro-fast', 'ultra', 'ultra-fast']),
+    'parallel-research': new Set(PARALLEL_RESEARCH_PROCESSORS),
   };
 
 function normalizedConfiguredModel(
