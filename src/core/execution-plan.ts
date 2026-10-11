@@ -141,12 +141,18 @@ export interface PreparedProfilePlan {
    * policy limit. Resolved once at preparation so resumed runs reuse it.
    */
   readonly inline_attempt_deadline_ms?: number;
+  /** Background attempt deadline for this profile, resolved the same way. */
+  readonly background_attempt_deadline_ms?: number;
 }
 
 /** Optional per-profile policy resolved by the request compiler. */
 export interface MaterializationOptions {
   /** Inline deadline for a profile, or undefined to use the global limit. */
   readonly inlineAttemptDeadlineMs?: (
+    profile: ExecutionProfile,
+  ) => number | undefined;
+  /** Background deadline for a profile, or undefined to use the global limit. */
+  readonly backgroundAttemptDeadlineMs?: (
     profile: ExecutionProfile,
   ) => number | undefined;
 }
@@ -1048,6 +1054,9 @@ function profilePlan(
   const inlineAttemptDeadlineMs = options.inlineAttemptDeadlineMs?.(
     entry.profile,
   );
+  const backgroundAttemptDeadlineMs = options.backgroundAttemptDeadlineMs?.(
+    entry.profile,
+  );
   return {
     profile_key: profileIdentityKey(entry.profile.identity),
     identity: { ...entry.profile.identity },
@@ -1067,6 +1076,9 @@ function profilePlan(
       : undefined,
     ...(inlineAttemptDeadlineMs !== undefined && {
       inline_attempt_deadline_ms: inlineAttemptDeadlineMs,
+    }),
+    ...(backgroundAttemptDeadlineMs !== undefined && {
+      background_attempt_deadline_ms: backgroundAttemptDeadlineMs,
     }),
   };
 }

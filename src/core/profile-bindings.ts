@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { PARALLEL_RESEARCH_PROCESSORS } from '../adapters/parallel-options.js';
 import { OpaqueIdSchema } from '../contracts/common.js';
 import type { Corpus, ExecutionProfile } from '../contracts/domain/index.js';
 import { INTERNAL_ADAPTER_ID_SET } from '../internal-adapter-ids.js';
@@ -82,8 +83,8 @@ const MODEL_OVERRIDE_ALLOWLISTS: Readonly<Record<string, ReadonlySet<string>>> =
       'openai/gpt-4o-mini',
       'openai/gpt-4o',
     ]),
-    // Parallel delisted the -fast processors.
-    'parallel-research': new Set(['pro', 'ultra']),
+    // Every processor Parallel lists; it delisted the -fast processors.
+    'parallel-research': new Set(PARALLEL_RESEARCH_PROCESSORS),
   };
 
 function normalizedConfiguredModel(

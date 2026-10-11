@@ -47,9 +47,10 @@ not independent factual confirmations.
 Setup, when the user has authorized installing software: `npm install -g
 librarium` (Node.js 22.12 or newer) or `brew install jkudish/tap/librarium`,
 then check `librarium --version` reports 2.x. `librarium init --auto` enables
-providers whose keys are already exported; opt-in providers such as the
-SearchAPI visibility surfaces also need `--enable <ids>` (for example
-`librarium init --auto --enable searchapi-chatgpt,searchapi-gemini`). Run
+providers whose keys are already exported, including the SearchAPI visibility
+surfaces when `SEARCHAPI_API_KEY` is set; opt-in providers such as the
+LLM-tier and Parallel providers also need `--enable <ids>` (for example
+`librarium init --auto --enable parallel-research`). Run
 `librarium doctor` to check configuration offline. Never print secret values.
 To connect MCP, a user registers `librarium mcp` as a stdio server in their
 host (for example `claude mcp add --scope user librarium -- librarium mcp`).

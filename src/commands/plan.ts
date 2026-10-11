@@ -247,6 +247,9 @@ function planProfile(
     ...(plan.inline_attempt_deadline_ms !== undefined && {
       inline_attempt_deadline_ms: plan.inline_attempt_deadline_ms,
     }),
+    ...(plan.background_attempt_deadline_ms !== undefined && {
+      background_attempt_deadline_ms: plan.background_attempt_deadline_ms,
+    }),
   };
 }
 
@@ -585,11 +588,14 @@ function humanPlan(receipt: ReturnType<typeof buildPlanReceipt>): string {
   const profileLine = (profile: (typeof receipt.primary_profiles)[number]) => {
     const target = humanTarget(profile.target);
     const cost = profile.estimate.cost_microusd;
+    const perCall =
+      'inline_attempt_deadline_ms' in profile
+        ? profile.inline_attempt_deadline_ms
+        : 'background_attempt_deadline_ms' in profile
+          ? profile.background_attempt_deadline_ms
+          : undefined;
     const deadline =
-      'inline_attempt_deadline_ms' in profile &&
-      profile.inline_attempt_deadline_ms !== undefined
-        ? ` · ${humanDuration(profile.inline_attempt_deadline_ms)} per call`
-        : '';
+      perCall !== undefined ? ` · ${humanDuration(perCall)} per call` : '';
     return `${profile.provider_id}/${profile.profile_id}${target ? ` (${target})` : ''} · ${cost === undefined ? 'estimate unknown' : `est. ${humanCost(cost)}`}${deadline}`;
   };
   const budgetLabels = [

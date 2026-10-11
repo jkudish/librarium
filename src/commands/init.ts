@@ -9,6 +9,7 @@ import {
 } from '../constants.js';
 import {
   authoredGlobalGroups,
+  configToPersist,
   loadConfig,
   saveConfig,
 } from '../core/config.js';
@@ -116,11 +117,11 @@ export function initConfigToSave(
   existing: Config,
   plan: Pick<InitProviderPlan, 'providers'>,
 ): Config {
-  return {
+  return configToPersist(existing, {
     ...existing,
     providers: plan.providers,
     groups: authoredGlobalGroups(existing),
-  };
+  });
 }
 
 export function registerInitCommand(program: Command): void {
@@ -129,7 +130,7 @@ export function registerInitCommand(program: Command): void {
     .description('Initialize librarium configuration')
     .option(
       '--auto',
-      'Auto-discover environment variables and enable matching providers',
+      'Enable every provider whose API key is set, including the SearchAPI visibility surfaces; opt-in providers need --enable',
     )
     .option(
       '--enable <ids>',

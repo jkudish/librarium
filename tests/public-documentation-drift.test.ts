@@ -61,10 +61,15 @@ describe('public v2 documentation drift', () => {
       BUILTIN_PRICING_SNAPSHOT.definitions,
     ]) {
       expect(
-        definitions
-          .filter(({ provider_id }) => provider_id === 'parallel')
-          .map(({ provider_id, profile_id }) => `${provider_id}/${profile_id}`)
-          .sort(),
+        [
+          ...new Set(
+            definitions
+              .filter(({ provider_id }) => provider_id === 'parallel')
+              .map(
+                ({ provider_id, profile_id }) => `${provider_id}/${profile_id}`,
+              ),
+          ),
+        ].sort(),
       ).toEqual(retained);
     }
     expect(

@@ -57,12 +57,17 @@ function setConfigGroupProvenance(
   return config;
 }
 
+interface DeadlineAuthorship {
+  readonly inline: boolean;
+  readonly background: boolean;
+}
+
 /**
- * Whether the inline attempt deadline was authored (config file, project
- * config, or CLI flag) rather than filled from DEFAULT_CONFIG. Only an
- * unauthored deadline may yield to a per-profile default.
+ * Whether the inline and background attempt deadlines were authored (config
+ * file, project config, or CLI flag) rather than filled from DEFAULT_CONFIG.
+ * Only an unauthored deadline may yield to a per-profile default.
  */
-const inlineDeadlineAuthoredByConfig = new WeakMap<Config, boolean>();
+const deadlineAuthorshipByConfig = new WeakMap<Config, DeadlineAuthorship>();
 
 /**
  * True unless this module loaded or merged the config without an authored
@@ -70,19 +75,92 @@ const inlineDeadlineAuthoredByConfig = new WeakMap<Config, boolean>();
  * callers keep exactly the deadline they pass.
  */
 export function configInlineAttemptDeadlineAuthored(config: Config): boolean {
-  return inlineDeadlineAuthoredByConfig.get(config) ?? true;
+  return deadlineAuthorshipByConfig.get(config)?.inline ?? true;
 }
 
-function rawInlineDeadlineAuthored(raw: unknown): boolean {
-  if (typeof raw !== 'object' || raw === null) return false;
+/** The background (`asyncTimeout`) counterpart of the inline check above. */
+export function configBackgroundAttemptDeadlineAuthored(
+  config: Config,
+): boolean {
+  return deadlineAuthorshipByConfig.get(config)?.background ?? true;
+}
+
+/**
+ * The config to write: `next` without the attempt deadlines that `source`
+ * filled from DEFAULT_CONFIG, so saving a config never turns a built-in
+ * deadline into an authored one that hides per-profile defaults. `next`
+ * inherits `source`'s deadline authorship for later saves.
+ */
+export function configToPersist(source: Config, next: Config = source): Config {
+  const authorship: DeadlineAuthorship = {
+    inline: configInlineAttemptDeadlineAuthored(source),
+    background: configBackgroundAttemptDeadlineAuthored(source),
+  };
+  if (next !== source) deadlineAuthorshipByConfig.set(next, authorship);
+  const { timeout, asyncTimeout, ...defaults } = next.defaults;
+  return {
+    ...next,
+    // Omitted deadlines are filled from DEFAULT_CONFIG again on load.
+    defaults: {
+      ...defaults,
+      ...(authorship.inline && { timeout }),
+      ...(authorship.background && { asyncTimeout }),
+    } as Config['defaults'],
+  };
+}
+
+/**
+ * The shipped defaults, in seconds. Earlier `init` runs and v1-to-v2
+ * migrations copied them into config files without the user choosing them, so
+ * a configured value equal to one of them is treated as unauthored and lets
+ * per-profile defaults apply. Any other configured value is authored.
+ */
+const LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS = 30;
+const LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS = 1800;
+
+function configuredSeconds(value: unknown, legacyDefault: number): boolean {
+  return value !== undefined && value !== legacyDefault;
+}
+
+function configuredMilliseconds(
+  value: unknown,
+  legacyDefault: number,
+): boolean {
+  return value !== undefined && value !== legacyDefault * 1_000;
+}
+
+function rawDeadlineAuthorship(raw: unknown): DeadlineAuthorship {
+  if (typeof raw !== 'object' || raw === null) {
+    return { inline: false, background: false };
+  }
   const record = raw as Record<string, unknown>;
   const block =
     record.version === 2 ? record.execution_defaults : record.defaults;
-  if (typeof block !== 'object' || block === null) return false;
+  if (typeof block !== 'object' || block === null) {
+    return { inline: false, background: false };
+  }
   const defaults = block as Record<string, unknown>;
   return record.version === 2
-    ? defaults.inline_attempt_deadline_ms !== undefined
-    : defaults.timeout !== undefined;
+    ? {
+        inline: configuredMilliseconds(
+          defaults.inline_attempt_deadline_ms,
+          LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+        ),
+        background: configuredMilliseconds(
+          defaults.background_attempt_deadline_ms,
+          LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+        ),
+      }
+    : {
+        inline: configuredSeconds(
+          defaults.timeout,
+          LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+        ),
+        background: configuredSeconds(
+          defaults.asyncTimeout,
+          LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+        ),
+      };
 }
 
 /**
@@ -302,7 +380,10 @@ export function loadConfig(globalPath?: string): Config {
       },
       { global: {}, project: {} },
     );
-    inlineDeadlineAuthoredByConfig.set(config, false);
+    deadlineAuthorshipByConfig.set(config, {
+      inline: false,
+      background: false,
+    });
     return config;
   }
 
@@ -361,7 +442,7 @@ export function loadConfig(globalPath?: string): Config {
     console.error(`[librarium] warning: ${warning}`);
   }
 
-  inlineDeadlineAuthoredByConfig.set(config, rawInlineDeadlineAuthored(raw));
+  deadlineAuthorshipByConfig.set(config, rawDeadlineAuthorship(raw));
   return setConfigGroupProvenance(config, {
     global: explicitGlobalGroups,
     project: {},
@@ -459,12 +540,23 @@ export function mergeConfigs(
 
   migrateLegacyProviderIds(merged);
 
-  inlineDeadlineAuthoredByConfig.set(
-    merged,
-    configInlineAttemptDeadlineAuthored(global) ||
-      project?.defaults?.timeout !== undefined ||
+  deadlineAuthorshipByConfig.set(merged, {
+    // A CLI flag is always an explicit choice, even at the shipped default.
+    inline:
+      configInlineAttemptDeadlineAuthored(global) ||
+      configuredSeconds(
+        project?.defaults?.timeout,
+        LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+      ) ||
       cliFlags?.timeout !== undefined,
-  );
+    background:
+      configBackgroundAttemptDeadlineAuthored(global) ||
+      configuredSeconds(
+        project?.defaults?.asyncTimeout,
+        LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+      ) ||
+      cliFlags?.asyncTimeout !== undefined,
+  });
 
   const globalGroups = configGroupProvenance(global).global;
   const projectGroups = project?.groups ?? {};

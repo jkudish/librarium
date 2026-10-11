@@ -1,4 +1,5 @@
 import {
+  configBackgroundAttemptDeadlineAuthored,
   configGroupProvenance,
   configInlineAttemptDeadlineAuthored,
 } from './core/config.js';
@@ -240,6 +241,8 @@ export function preflightProductionRequestStructure(
     applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
       input.config,
     ),
+    applyBackgroundProfileDeadlineDefaults:
+      !configBackgroundAttemptDeadlineAuthored(input.config),
   };
   try {
     const compiled = requireCompiled(
@@ -290,6 +293,8 @@ export function preflightProductionRequest(
     applyProfileDeadlineDefaults: !configInlineAttemptDeadlineAuthored(
       input.config,
     ),
+    applyBackgroundProfileDeadlineDefaults:
+      !configBackgroundAttemptDeadlineAuthored(input.config),
   };
 
   preflightProductionRequestStructure(input);

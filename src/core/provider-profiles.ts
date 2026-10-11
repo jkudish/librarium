@@ -894,7 +894,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -918,7 +918,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -942,7 +942,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -966,7 +966,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -991,7 +991,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({

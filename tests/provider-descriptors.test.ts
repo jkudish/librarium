@@ -121,11 +121,6 @@ describe('built-in provider descriptors', () => {
 
     expect(optIn).toEqual(
       expect.arrayContaining([
-        'searchapi-chatgpt',
-        'searchapi-gemini',
-        'searchapi-google-ai-mode',
-        'searchapi-bing-copilot',
-        'searchapi-google-ai-overview',
         'claude',
         'openai-chat',
         'gemini-chat',
@@ -136,10 +131,20 @@ describe('built-in provider descriptors', () => {
         'you-answer',
       ]),
     );
-    expect(
-      BUILTIN_PROVIDER_DESCRIPTORS.find(({ id }) => id === 'searchapi')
-        ?.credential.autoEnable,
-    ).toBe(true);
+    // init --auto enables SearchAPI search and its surfaces together (#4856).
+    for (const id of [
+      'searchapi',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+    ]) {
+      expect(
+        BUILTIN_PROVIDER_DESCRIPTORS.find((descriptor) => descriptor.id === id)
+          ?.credential.autoEnable,
+      ).toBe(true);
+    }
     expect(
       BUILTIN_PROVIDER_DESCRIPTORS.find(
         ({ id }) => id === 'perplexity-sonar-pro',

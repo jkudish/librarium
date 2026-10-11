@@ -74,17 +74,15 @@ librarium run "What changed in PostgreSQL 17?" --group quick
 OS keychain (macOS), a shell environment variable, or the config file. If your
 provider keys are already exported as environment variables, run
 `librarium init --auto` instead. It enables every provider whose key it finds,
-except opt-in providers.
+except opt-in providers such as the LLM-tier and Parallel providers, which
+`init --enable <ids>` turns on.
 
-The SearchAPI consumer surfaces in the `visibility` workflow are opt-in. With
-`SEARCHAPI_API_KEY` exported, enable them in the same step:
+With `SEARCHAPI_API_KEY` exported, `init --auto` also enables the SearchAPI
+consumer surfaces, so `--group visibility` works without further setup. They
+run only when you select `visibility`, `all`, a custom group that names them, or
+a surface profile; the default `quick` workflow never includes them.
 
-```bash
-librarium init --auto --enable searchapi-chatgpt,searchapi-gemini,searchapi-google-ai-mode,searchapi-bing-copilot,searchapi-google-ai-overview
-```
-
-A `visibility` run names each member it skips and the `init --enable` command
-that enables it.
+A run names each group member it skips and how to enable it.
 
 `doctor` checks configuration and credential presence offline. Only
 `doctor --live` loads trusted custom code, makes provider requests, and may
@@ -134,6 +132,10 @@ Built-in workflows:
 | `deep` | Derived from implemented research-report profiles |
 | `visibility` | Five collected consumer surfaces and three API baselines |
 | `all` | Derived from every selectable profile allowed by workflow policy |
+
+Processors, modes, prices, default deadlines, and request options for
+`parallel/research` and `valyu/research` are listed in
+[research options](docs/research-options.md).
 
 Custom groups must be stored and selected as `custom:<name>`. `quick` includes
 raw `exa/search`. Explicit provider selection takes precedence over a group and

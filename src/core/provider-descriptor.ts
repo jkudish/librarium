@@ -1022,7 +1022,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 25,
     tier: 'ai-grounded',
     envVar: 'SEARCHAPI_API_KEY',
-    autoEnable: false,
     optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
@@ -1046,7 +1045,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 26,
     tier: 'ai-grounded',
     envVar: 'SEARCHAPI_API_KEY',
-    autoEnable: false,
     optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
@@ -1069,7 +1067,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 28,
     tier: 'ai-grounded',
     envVar: 'SEARCHAPI_API_KEY',
-    autoEnable: false,
     optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
@@ -1092,7 +1089,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 29,
     tier: 'ai-grounded',
     envVar: 'SEARCHAPI_API_KEY',
-    autoEnable: false,
     optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
@@ -1115,7 +1111,6 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     registrationOrder: 30,
     tier: 'ai-grounded',
     envVar: 'SEARCHAPI_API_KEY',
-    autoEnable: false,
     optionsSchema: searchApiOptionsSchema,
     display: {
       family: 'SearchAPI',
