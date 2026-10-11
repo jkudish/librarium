@@ -19,7 +19,10 @@ import {
   admitUnresolvedV1ResearchExecution,
   materializeResearchExecution,
 } from './execution-plan.js';
-import type { CustomCatalogProfile } from './profile-catalog.js';
+import {
+  type CustomCatalogProfile,
+  pricingIntervalFrom,
+} from './profile-catalog.js';
 import { profileDefaultInlineAttemptDeadlineMs } from './profile-deadlines.js';
 import { deriveV1RequestDeadline } from './request-deadline-migration.js';
 import type {
@@ -76,6 +79,16 @@ export interface RequestCompilationInput {
   readonly structuralOnly?: boolean;
   /** Optional explicit total; otherwise the exact selected plan derives it. */
   readonly requestDeadlineMs?: number;
+  /**
+   * The admission instant (epoch ms) that pre-run cost estimates start from.
+   * Estimates for prices with dated rate windows cover this instant through
+   * the request deadline: the explicit deadline when one is configured,
+   * otherwise the longest deadline any request may have, which bounds the
+   * deadline the selected plan derives. Pass the same instant the
+   * preparation clock reports so the run's deadline ends the interval
+   * exactly. Omit it to let the catalog start the interval at now.
+   */
+  readonly pricedAtMs?: number;
   /**
    * Let profiles with a known slower default (see profile-deadlines.ts) use
    * it in place of the global inline deadline. Production transports set this
@@ -405,8 +418,23 @@ export function compileRequest(
 ): RequestCompilationResult {
   const rawGroup = input.transport.input.group?.trim();
   const inlineAttemptDeadlineMs = profileInlineDeadlineResolver(input);
+  const explicitDeadlineMs =
+    input.requestDeadlineMs ?? input.config.defaults.requestDeadlineMs;
   const mapped = mapConfiguration(input.config, {
     authoredGroups: input.authoredGroups,
+    ...(input.pricedAtMs !== undefined && {
+      pricingInterval: pricingIntervalFrom(
+        input.pricedAtMs,
+        // An invalid explicit deadline is rejected by mapping below; the
+        // estimate interval only needs a safe upper bound meanwhile.
+        explicitDeadlineMs !== undefined &&
+          Number.isSafeInteger(explicitDeadlineMs) &&
+          explicitDeadlineMs > 0 &&
+          explicitDeadlineMs <= RESEARCH_REQUEST_LIMITS.maxDeadlineMs
+          ? explicitDeadlineMs
+          : RESEARCH_REQUEST_LIMITS.maxDeadlineMs,
+      ),
+    }),
     ...(input.credentials && { credentials: input.credentials }),
     ...(input.assumeCredentialAvailability && {
       assumeCredentialAvailability: true,

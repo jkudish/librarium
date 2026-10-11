@@ -33,6 +33,7 @@ import {
   budgetEstimateFromQuote,
   type PriceDefinitionInput,
   PricingCatalog,
+  type PricingLookup,
   type PricingSnapshotInput,
 } from './pricing.js';
 import { BUILTIN_PRICING_SNAPSHOT } from './pricing-snapshot.js';
@@ -52,6 +53,7 @@ import type {
   PreparationIssue,
   PreparationNotice,
 } from './research-request.js';
+import { RESEARCH_REQUEST_LIMITS } from './research-request.js';
 import { RESERVED_BUILTIN_PROVIDER_IDS } from './reserved-provider-ids.js';
 
 export class ProviderCatalogError extends Error {}
@@ -141,6 +143,28 @@ export interface ProviderCatalogOptions {
   readonly customProfiles?: readonly CustomCatalogProfile[];
   /** Retain disabled trusted declarations for static discovery only. */
   readonly includeDisabledCustomProfiles?: boolean;
+  /**
+   * The interval a run can bill in: from admission through its request
+   * deadline. Prices with dated rate windows bound each estimate by the
+   * highest rate in effect anywhere in it. Defaults to now through the
+   * longest request deadline any request may have.
+   */
+  readonly pricingInterval?: PricingInterval;
+}
+
+export type PricingInterval = Required<
+  Pick<PricingLookup, 'priced_at' | 'priced_until'>
+>;
+
+/** A run admitted at `startMs` can bill until `startMs + deadlineMs`. */
+export function pricingIntervalFrom(
+  startMs: number,
+  deadlineMs: number = RESEARCH_REQUEST_LIMITS.maxDeadlineMs,
+): PricingInterval {
+  return {
+    priced_at: new Date(startMs).toISOString(),
+    priced_until: new Date(startMs + deadlineMs).toISOString(),
+  };
 }
 
 export interface WorkflowOmission {
@@ -377,6 +401,7 @@ function resolveDeclaration(
   binding: ProfileBinding | undefined,
   options: ProviderCatalogOptions,
   pricing: PricingCatalog,
+  pricingInterval: PricingInterval,
 ): ResolvedCatalogProfile {
   const declared = declaredExecutionProfile(entry.provider_id, declaration);
   const reasons: string[] = [];
@@ -435,6 +460,7 @@ function resolveDeclaration(
     ...(providerConfig?.pricingConditions && {
       conditions: providerConfig.pricingConditions,
     }),
+    ...pricingInterval,
   });
   const estimate: NetworkFreeEstimate | undefined =
     budgetEstimateFromQuote(quote);
@@ -682,6 +708,10 @@ export function buildProviderCatalog(
     adapterBindingKeys.add(bindingKey);
   }
 
+  // Only prices with dated rate windows read this interval, and therefore
+  // the clock; every other estimate is independent of time.
+  const pricingInterval =
+    options.pricingInterval ?? pricingIntervalFrom(Date.now());
   const resolved: ResolvedCatalogProfile[] = [
     ...refs.map(({ entry, declaration }) =>
       resolveDeclaration(
@@ -692,6 +722,7 @@ export function buildProviderCatalog(
         ),
         options,
         pricing,
+        pricingInterval,
       ),
     ),
     ...customProfiles.map((custom, index) =>

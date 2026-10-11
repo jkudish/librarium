@@ -20,6 +20,7 @@ const UTC_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
 const MAX_PRICE_DEFINITIONS = 4096;
 const MAX_DEFINITION_UNITS = 64;
+const MAX_RATE_WINDOWS = 16;
 const COMPLETENESS_VALUES = new Set(['complete', 'partial', 'unavailable']);
 const CONFIDENCE_VALUES = new Set(['confirmed', 'high', 'medium', 'unknown']);
 const SOURCE_CLASS_VALUES = new Set([
@@ -84,6 +85,21 @@ export interface PriceRate {
   readonly per_decimal: string;
 }
 
+/**
+ * Rates in effect during one half-open period [effective_from,
+ * effective_until), in UTC. An omitted bound leaves that side open.
+ */
+export interface PriceRateWindow {
+  readonly effective_from?: string;
+  readonly effective_until?: string;
+  readonly rates: readonly PriceRate[];
+}
+
+export interface PricingRateWindowBounds {
+  readonly effective_from?: string;
+  readonly effective_until?: string;
+}
+
 export interface PricingProvenanceInput {
   readonly source_class:
     | 'configured_account_rate'
@@ -112,7 +128,14 @@ export interface PriceDefinitionInput {
     Partial<Record<NormalizedBillableUnit, string>>
   >;
   readonly missing_units: readonly NormalizedBillableUnit[];
+  /** Empty when the definition carries dated `rate_windows` instead. */
   readonly rates: readonly PriceRate[];
+  /**
+   * Ordered, contiguous, non-overlapping windows. Only the first may be open
+   * at its start and only the last at its end; every window prices the same
+   * units. Definitions without windows behave exactly as before.
+   */
+  readonly rate_windows?: readonly PriceRateWindow[];
   readonly unknown_reason?: string;
   readonly provenance: PricingProvenanceInput;
 }
@@ -132,6 +155,12 @@ export interface PricingProvenance extends PricingProvenanceInput {
   readonly snapshot_version: string;
   readonly snapshot_fingerprint: string;
   readonly conditions: PricingConditions;
+  /**
+   * The dated windows whose rates priced the quote: the one in effect for an
+   * instant, or every window an estimate interval overlapped. Absent for
+   * definitions without windows.
+   */
+  readonly rate_windows?: readonly PricingRateWindowBounds[];
 }
 
 export interface PricingQuote {
@@ -163,6 +192,18 @@ export interface PricingLookup {
   >;
   /** Provider evidence may replace a fixed preflight quantity after execution. */
   readonly quantity_source?: 'estimate' | 'provider_reported';
+  /**
+   * Only definitions with dated rate windows read time. For an actual cost,
+   * when the request ran; for an estimate, the start of its interval.
+   * Defaults to now. RFC 3339 UTC.
+   */
+  readonly priced_at?: string;
+  /**
+   * When set, the quote bounds a run that can bill until this instant (its
+   * deadline): each rate is the highest rate of every window overlapping
+   * [priced_at, priced_until). RFC 3339 UTC.
+   */
+  readonly priced_until?: string;
 }
 
 export interface ProviderReportedActual {
@@ -260,6 +301,25 @@ function boundedArray(
   return value;
 }
 
+function assertRateShapes(value: unknown, field: string): void {
+  const rates = boundedArray(value, field);
+  for (const [index, value_] of rates.entries()) {
+    const rate = jsonRecord(value_, `${field}[${index}]`);
+    exactObjectKeys(
+      rate,
+      ['unit', 'amount_decimal', 'per_decimal'],
+      `${field}[${index}]`,
+    );
+    boundedString(rate.unit, `${field}[${index}].unit`, 128);
+    boundedString(
+      rate.amount_decimal,
+      `${field}[${index}].amount_decimal`,
+      128,
+    );
+    boundedString(rate.per_decimal, `${field}[${index}].per_decimal`, 128);
+  }
+}
+
 function assertPriceDefinitionShape(
   value: unknown,
 ): asserts value is PriceDefinitionInput {
@@ -279,6 +339,7 @@ function assertPriceDefinitionShape(
       'fixed_quantities',
       'missing_units',
       'rates',
+      'rate_windows',
       'unknown_reason',
       'provenance',
     ],
@@ -303,17 +364,28 @@ function assertPriceDefinitionShape(
   for (const [index, unit] of [...expected, ...missing].entries()) {
     boundedString(unit, `definition unit ${index}`, 128);
   }
-  const rates = boundedArray(definition.rates, 'rates');
-  for (const [index, value_] of rates.entries()) {
-    const rate = jsonRecord(value_, `rates[${index}]`);
-    exactObjectKeys(
-      rate,
-      ['unit', 'amount_decimal', 'per_decimal'],
-      `rates[${index}]`,
+  assertRateShapes(definition.rates, 'rates');
+  if (definition.rate_windows !== undefined) {
+    const windows = boundedArray(
+      definition.rate_windows,
+      'rate_windows',
+      MAX_RATE_WINDOWS,
     );
-    boundedString(rate.unit, `rates[${index}].unit`, 128);
-    boundedString(rate.amount_decimal, `rates[${index}].amount_decimal`, 128);
-    boundedString(rate.per_decimal, `rates[${index}].per_decimal`, 128);
+    for (const [index, value_] of windows.entries()) {
+      const field = `rate_windows[${index}]`;
+      const window = jsonRecord(value_, field);
+      exactObjectKeys(
+        window,
+        ['effective_from', 'effective_until', 'rates'],
+        field,
+      );
+      for (const bound of ['effective_from', 'effective_until'] as const) {
+        if (window[bound] !== undefined) {
+          boundedString(window[bound], `${field}.${bound}`, 64);
+        }
+      }
+      assertRateShapes(window.rates, `${field}.rates`);
+    }
   }
   const fixed = jsonRecord(
     definition.fixed_quantities ?? {},
@@ -665,6 +737,90 @@ function definitionKey(definition: PriceDefinitionInput): string {
   });
 }
 
+function validateRates(
+  rates: readonly PriceRate[],
+  expected: readonly NormalizedBillableUnit[],
+  field: string,
+): Set<NormalizedBillableUnit> {
+  const units = new Set<NormalizedBillableUnit>();
+  for (const [index, rate] of rates.entries()) {
+    const unit = canonicalUnit(rate.unit, `${field}[${index}].unit`);
+    if (units.has(unit)) {
+      throw new PricingCatalogError(`Duplicate rate unit: ${unit}`);
+    }
+    units.add(unit);
+    const amount = positiveDecimal(
+      rate.amount_decimal,
+      `${field}[${index}].amount_decimal`,
+    );
+    const per = positiveDecimal(
+      rate.per_decimal,
+      `${field}[${index}].per_decimal`,
+    );
+    exactRateCost({ coefficient: 1n, scale: 0 }, amount, per);
+    if (!expected.includes(unit)) {
+      throw new PricingCatalogError('Rate units must also be expected units.');
+    }
+  }
+  return units;
+}
+
+/** Windows must be ordered, contiguous, non-overlapping, and price one unit set. */
+function validateRateWindows(
+  windows: readonly PriceRateWindow[],
+  expected: readonly NormalizedBillableUnit[],
+): void {
+  if (windows.length === 0) {
+    throw new PricingCatalogError('rate_windows cannot be empty.');
+  }
+  let units: string | undefined;
+  for (const [index, window] of windows.entries()) {
+    const field = `rate_windows[${index}]`;
+    const from =
+      window.effective_from === undefined
+        ? undefined
+        : Date.parse(
+            canonicalTimestamp(
+              window.effective_from,
+              `${field}.effective_from`,
+            ),
+          );
+    const until =
+      window.effective_until === undefined
+        ? undefined
+        : Date.parse(
+            canonicalTimestamp(
+              window.effective_until,
+              `${field}.effective_until`,
+            ),
+          );
+    if (from !== undefined && until !== undefined && from >= until) {
+      throw new PricingCatalogError(`${field} must start before it ends.`);
+    }
+    const previous = windows[index - 1];
+    if (
+      (index > 0 &&
+        (previous?.effective_until === undefined ||
+          from === undefined ||
+          Date.parse(previous.effective_until) !== from)) ||
+      (index < windows.length - 1 && until === undefined)
+    ) {
+      throw new PricingCatalogError(
+        'Rate windows must be ordered, contiguous, and non-overlapping.',
+      );
+    }
+    const windowUnits = canonicalJson(
+      [...validateRates(window.rates, expected, `${field}.rates`)].sort(),
+    );
+    if (window.rates.length === 0 || (units ?? windowUnits) !== windowUnits) {
+      throw new PricingCatalogError(
+        'Every rate window must price the same non-empty set of units.',
+      );
+    }
+    units = windowUnits;
+  }
+}
+
 function validateDefinition(
   input: PriceDefinitionInput,
   snapshotCurrency: string,
@@ -706,26 +862,18 @@ function validateDefinition(
     throw new PricingCatalogError('Missing units must also be expected units.');
   }
 
-  const rateUnits = new Set<NormalizedBillableUnit>();
-  for (const [index, rate] of input.rates.entries()) {
-    const unit = canonicalUnit(rate.unit, `rates[${index}].unit`);
-    if (rateUnits.has(unit)) {
-      throw new PricingCatalogError(`Duplicate rate unit: ${unit}`);
+  const windows = input.rate_windows;
+  if (windows !== undefined) {
+    if (input.rates.length > 0) {
+      throw new PricingCatalogError(
+        'A windowed price definition carries its rates in its windows.',
+      );
     }
-    rateUnits.add(unit);
-    const amount = positiveDecimal(
-      rate.amount_decimal,
-      `rates[${index}].amount_decimal`,
-    );
-    const per = positiveDecimal(
-      rate.per_decimal,
-      `rates[${index}].per_decimal`,
-    );
-    exactRateCost({ coefficient: 1n, scale: 0 }, amount, per);
-    if (!expected.includes(unit)) {
-      throw new PricingCatalogError('Rate units must also be expected units.');
-    }
+    validateRateWindows(windows, expected);
   }
+  // Every window prices the same units, so the first stands for all of them.
+  const pricedRates = windows?.[0]?.rates ?? input.rates;
+  const rateUnits = validateRates(pricedRates, expected, 'rates');
   for (const [unit, quantity] of Object.entries(input.fixed_quantities ?? {})) {
     if (quantity === undefined) continue;
     canonicalUnit(unit, 'fixed_quantities unit');
@@ -751,7 +899,7 @@ function validateDefinition(
   }
   if (
     expected.length === 0 ||
-    (input.completeness !== 'unavailable' && input.rates.length === 0)
+    (input.completeness !== 'unavailable' && pricedRates.length === 0)
   ) {
     throw new PricingCatalogError(
       'Price definitions require expected units and priced definitions require rates.',
@@ -759,13 +907,13 @@ function validateDefinition(
   }
   if (
     input.completeness === 'partial' &&
-    (missing.length === 0 || input.rates.length === 0)
+    (missing.length === 0 || pricedRates.length === 0)
   ) {
     throw new PricingCatalogError(
       'Partial definitions require at least one rate and one missing unit.',
     );
   }
-  if (input.completeness === 'unavailable' && input.rates.length > 0) {
+  if (input.completeness === 'unavailable' && pricedRates.length > 0) {
     throw new PricingCatalogError(
       'Unavailable definitions cannot contain rates.',
     );
@@ -850,11 +998,28 @@ export function pricingSnapshotPayload(input: PricingSnapshotInput): unknown {
         missing_units: [...definition.missing_units].sort(
           compareCanonicalStrings,
         ),
-        rates: [...definition.rates].sort((left, right) =>
-          compareCanonicalStrings(left.unit, right.unit),
-        ),
+        rates: sortedRates(definition.rates),
+        ...(definition.rate_windows && {
+          rate_windows: sortedRateWindows(definition.rate_windows),
+        }),
       })),
   };
+}
+
+function sortedRates(rates: readonly PriceRate[]): readonly PriceRate[] {
+  return [...rates].sort((left, right) =>
+    compareCanonicalStrings(left.unit, right.unit),
+  );
+}
+
+/** Window order is meaningful; only each window's rate order is canonicalized. */
+function sortedRateWindows(
+  windows: readonly PriceRateWindow[],
+): readonly PriceRateWindow[] {
+  return windows.map((window) => ({
+    ...window,
+    rates: sortedRates(window.rates),
+  }));
 }
 
 export function pricingSnapshotFingerprint(
@@ -874,9 +1039,10 @@ export function priceDefinitionFingerprint(
       ...input,
       expected_units: [...input.expected_units].sort(compareCanonicalStrings),
       missing_units: [...input.missing_units].sort(compareCanonicalStrings),
-      rates: [...input.rates].sort((left, right) =>
-        compareCanonicalStrings(left.unit, right.unit),
-      ),
+      rates: sortedRates(input.rates),
+      ...(input.rate_windows && {
+        rate_windows: sortedRateWindows(input.rate_windows),
+      }),
     }),
   );
   return `sha256:${sha256Hex(bytes)}`;
@@ -977,6 +1143,121 @@ function sourcePriority(
       : 4;
 }
 
+function decimalCompare(left: Decimal, right: Decimal): number {
+  const scale = Math.max(left.scale, right.scale);
+  const leftValue = left.coefficient * 10n ** BigInt(scale - left.scale);
+  const rightValue = right.coefficient * 10n ** BigInt(scale - right.scale);
+  return leftValue === rightValue ? 0 : leftValue > rightValue ? 1 : -1;
+}
+
+/** Whether `left` charges more per unit than `right` (amount / per). */
+function rateExceeds(left: PriceRate, right: PriceRate): boolean {
+  const amount = (rate: PriceRate) =>
+    parseDecimal(rate.amount_decimal, `${rate.unit}.amount_decimal`);
+  const per = (rate: PriceRate) =>
+    parseDecimal(rate.per_decimal, `${rate.unit}.per_decimal`);
+  const product = (a: Decimal, b: Decimal): Decimal => ({
+    coefficient: a.coefficient * b.coefficient,
+    scale: a.scale + b.scale,
+  });
+  return (
+    decimalCompare(
+      product(amount(left), per(right)),
+      product(amount(right), per(left)),
+    ) > 0
+  );
+}
+
+function windowContains(window: PriceRateWindow, instant: number): boolean {
+  return (
+    (window.effective_from === undefined ||
+      Date.parse(window.effective_from) <= instant) &&
+    (window.effective_until === undefined ||
+      instant < Date.parse(window.effective_until))
+  );
+}
+
+function windowBounds(window: PriceRateWindow): PricingRateWindowBounds {
+  return {
+    ...(window.effective_from !== undefined && {
+      effective_from: window.effective_from,
+    }),
+    ...(window.effective_until !== undefined && {
+      effective_until: window.effective_until,
+    }),
+  };
+}
+
+/**
+ * The windows that price a lookup: the one in effect at `priced_at` (default
+ * now), or with `priced_until` every window overlapping [priced_at,
+ * priced_until). Empty when the windows do not cover the instant or the whole
+ * interval. An interval that ends at or before it starts is its start instant.
+ */
+function windowsForLookup(
+  windows: readonly PriceRateWindow[],
+  lookup: PricingLookup,
+): readonly PriceRateWindow[] {
+  const from =
+    lookup.priced_at === undefined ? Date.now() : Date.parse(lookup.priced_at);
+  const until =
+    lookup.priced_until === undefined
+      ? undefined
+      : Date.parse(lookup.priced_until);
+  if (until === undefined || until <= from) {
+    return windows.filter((window) => windowContains(window, from));
+  }
+  const overlapping = windows.filter(
+    (window) =>
+      (window.effective_from === undefined ||
+        Date.parse(window.effective_from) < until) &&
+      (window.effective_until === undefined ||
+        from < Date.parse(window.effective_until)),
+  );
+  const first = overlapping[0];
+  const last = overlapping[overlapping.length - 1];
+  // Windows are contiguous, so the overlap covers the interval exactly when
+  // its first window contains the start and its last reaches the end.
+  return first &&
+    last &&
+    windowContains(first, from) &&
+    (last.effective_until === undefined ||
+      Date.parse(last.effective_until) >= until)
+    ? overlapping
+    : [];
+}
+
+/** The highest rate of each unit across windows, compared per unit. */
+function highestRates(
+  windows: readonly PriceRateWindow[],
+): readonly PriceRate[] {
+  const byUnit = new Map<NormalizedBillableUnit, PriceRate>();
+  for (const window of windows) {
+    for (const rate of window.rates) {
+      const current = byUnit.get(rate.unit);
+      if (!current || rateExceeds(rate, current)) byUnit.set(rate.unit, rate);
+    }
+  }
+  return [...byUnit.values()];
+}
+
+function validatePricingTimes(lookup: PricingLookup): void {
+  if (lookup.priced_at !== undefined) {
+    canonicalTimestamp(lookup.priced_at, 'priced_at');
+  }
+  if (lookup.priced_until !== undefined) {
+    canonicalTimestamp(lookup.priced_until, 'priced_until');
+    if (
+      lookup.priced_at !== undefined &&
+      Date.parse(lookup.priced_until) < Date.parse(lookup.priced_at)
+    ) {
+      throw new PricingCatalogError(
+        'A pricing interval cannot end before it starts.',
+      );
+    }
+  }
+}
+
 export class PricingCatalog {
   readonly snapshot: PricingSnapshotInput;
   readonly configured_definitions: readonly PriceDefinitionInput[];
@@ -1020,6 +1301,7 @@ export class PricingCatalog {
   }
 
   quote(lookup: PricingLookup): PricingQuote {
+    validatePricingTimes(lookup);
     const resolvedEffective =
       lookup.effective_identity ?? requestedTarget(lookup.requested_identity);
     const definition = this.definition(lookup);
@@ -1060,7 +1342,17 @@ export class PricingCatalog {
         parseDecimal(value, `quantities.${unit}`),
       );
     }
-    const rates = new Map(definition.rates.map((rate) => [rate.unit, rate]));
+    const windows =
+      definition.rate_windows &&
+      windowsForLookup(definition.rate_windows, lookup);
+    // A time or interval no window covers prices nothing rather than a guess.
+    const uncovered = windows?.length === 0;
+    const rates = new Map(
+      (windows ? highestRates(windows) : definition.rates).map((rate) => [
+        rate.unit,
+        rate,
+      ]),
+    );
     let total: Decimal = { coefficient: 0n, scale: 0 };
     let priced = false;
     const missing = new Set<NormalizedBillableUnit>(definition.missing_units);
@@ -1092,7 +1384,9 @@ export class PricingCatalog {
     }
     const missingUnits = [...missing].sort(compareCanonicalStrings);
     const complete =
-      definition.completeness === 'complete' && missingUnits.length === 0;
+      !uncovered &&
+      definition.completeness === 'complete' &&
+      missingUnits.length === 0;
     const amount = decimalText(total);
     const provenance: PricingProvenance = {
       ...definition.provenance,
@@ -1101,11 +1395,12 @@ export class PricingCatalog {
       snapshot_version: this.snapshot.version,
       snapshot_fingerprint: this.snapshot.fingerprint,
       conditions: canonicalConditions(definition.conditions, 'conditions'),
+      ...(windows && { rate_windows: windows.map(windowBounds) }),
     };
     return ownFrozen({
       status: complete
         ? 'complete'
-        : definition.completeness === 'unavailable'
+        : uncovered || definition.completeness === 'unavailable'
           ? 'unavailable'
           : 'partial',
       ...((priced || complete) && {
@@ -1125,11 +1420,12 @@ export class PricingCatalog {
       ),
       missing_units: missingUnits,
       ...(!complete && {
-        unknown_reason:
-          definition.unknown_reason ??
-          'One or more expected billable quantities are unknown.',
+        unknown_reason: uncovered
+          ? 'No dated rate window of the matched price definition covers the pricing time.'
+          : (definition.unknown_reason ??
+            'One or more expected billable quantities are unknown.'),
       }),
-      confidence: definition.confidence,
+      confidence: uncovered ? 'unknown' : definition.confidence,
       requested_identity: lookup.requested_identity,
       ...(resolvedEffective && {
         effective_identity: resolvedEffective,
@@ -1195,6 +1491,7 @@ export class PricingCatalog {
       conditions: input.conditions,
       quantities: input.provider_reported_units,
       quantity_source: 'provider_reported',
+      ...(input.priced_at !== undefined && { priced_at: input.priced_at }),
     });
     if (quote.status !== 'complete' || quote.amount_decimal === undefined) {
       return undefined;

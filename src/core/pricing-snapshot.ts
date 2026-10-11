@@ -2,6 +2,7 @@ import type {
   NormalizedBillableUnit,
   PriceDefinitionInput,
   PriceRate,
+  PriceRateWindow,
   PricingCompleteness,
   PricingSnapshotInput,
 } from './pricing.js';
@@ -11,8 +12,10 @@ import { validatePricingSnapshot } from './pricing.js';
 const INITIAL_REVIEW_AT = '2026-08-27T00:00:00.000Z';
 /** Re-check of the xAI and You.com definitions (#4769). */
 const RECHECKED_AT = '2026-10-09T00:00:00.000Z';
+/** Gemini Flash dated rate windows (#4851). */
+const GEMINI_WINDOWS_AT = '2026-10-11T00:00:00.000Z';
 /** The snapshot review time covers its most recently retrieved definition. */
-const REVIEWED_AT = RECHECKED_AT;
+const REVIEWED_AT = GEMINI_WINDOWS_AT;
 
 interface DefinitionOptions {
   readonly target?: PriceDefinitionInput['effective_target'];
@@ -21,6 +24,7 @@ interface DefinitionOptions {
   readonly expected: readonly NormalizedBillableUnit[];
   readonly fixed?: PriceDefinitionInput['fixed_quantities'];
   readonly rates?: readonly PriceRate[];
+  readonly rateWindows?: readonly PriceRateWindow[];
   readonly missing?: readonly NormalizedBillableUnit[];
   readonly reason?: string;
   readonly reference: string;
@@ -52,6 +56,7 @@ function definition(
     ...(options.fixed && { fixed_quantities: options.fixed }),
     missing_units: options.missing ?? [],
     rates: options.rates ?? [],
+    ...(options.rateWindows && { rate_windows: options.rateWindows }),
     ...(options.reason && { unknown_reason: options.reason }),
     provenance: {
       source_class: options.fallback
@@ -213,17 +218,36 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     quantitiesReason,
     'official:ai.google.dev/gemini-api/docs/deep-research',
   ),
+  // Source: https://ai.google.dev/gemini-api/docs/pricing (accessed 2026-10-11).
+  // Paid standard tier, per 1M tokens: introductory rates through 2026-12-31,
+  // doubled from 2027-01-01. Google states no timezone, so the boundary is
+  // 2027-01-01T00:00Z. Grounding with Google Search stays $14 per 1k queries.
   definition('gemini-chat', 'chat', {
     target: { kind: 'model', target_id: 'gemini-3.6-flash' },
     conditions: { account_plan: 'payg', billing_mode: 'standard' },
     expected: [...tokenUnits, 'cache_read_tokens', 'searches'],
-    rates: [
-      rate('uncached_input_tokens', '1.5', '1000000'),
-      rate('output_tokens', '9', '1000000'),
-      rate('cache_read_tokens', '0.15', '1000000'),
-      rate('searches', '14', '1000'),
+    rateWindows: [
+      {
+        effective_until: '2027-01-01T00:00:00.000Z',
+        rates: [
+          rate('uncached_input_tokens', '0.75', '1000000'),
+          rate('output_tokens', '3.75', '1000000'),
+          rate('cache_read_tokens', '0.075', '1000000'),
+          rate('searches', '14', '1000'),
+        ],
+      },
+      {
+        effective_from: '2027-01-01T00:00:00.000Z',
+        rates: [
+          rate('uncached_input_tokens', '1.5', '1000000'),
+          rate('output_tokens', '7.5', '1000000'),
+          rate('cache_read_tokens', '0.15', '1000000'),
+          rate('searches', '14', '1000'),
+        ],
+      },
     ],
     reference: 'official:ai.google.dev/gemini-api/docs/pricing',
+    reviewedAt: GEMINI_WINDOWS_AT,
   }),
 
   // xAI
@@ -492,10 +516,10 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
 export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
   validatePricingSnapshot({
     schema_version: 1,
-    version: '2026-10-09.v1',
+    version: '2026-10-11.v1',
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:b078131a73f2cd0a7dcc3d38e429d2ad5fef996858d8a7726611adeaf514d033',
+      'sha256:2a5de0419a647df4b756e14ee1ea3e88ff7603b4116d10e432be629df58e6128',
     definitions: DEFINITIONS,
   });
