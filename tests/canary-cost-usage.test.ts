@@ -11,7 +11,6 @@ import { ClaudeProvider } from '../src/adapters/claude.js';
 import { GeminiGroundedProvider } from '../src/adapters/gemini-grounded.js';
 import { GrokCombinedProvider } from '../src/adapters/grok.js';
 import { ParallelResearchProvider } from '../src/adapters/parallel.js';
-import { formatUsageReport } from '../src/commands/usage.js';
 import { aggregateUsage } from '../src/commands/usage-data.js';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
 import type { PreparedResearchExecution } from '../src/core/execution-plan.js';
@@ -424,10 +423,5 @@ describe('live canary cost, usage, and metadata regressions (#4866)', () => {
     });
     expect(rows['grok-combined']?.costUsd).toBeCloseTo(0.74184);
     expect(usage.unknownCostResults).toBe(1);
-    const report = formatUsageReport(usage).join('\n');
-    expect(report).toContain(
-      'grok-combined: web search calls 6, x search calls 3, x posts fetched 9, x users fetched 1',
-    );
-    expect(report).toContain('1 provider result has unknown cost (not $0)');
   });
 });

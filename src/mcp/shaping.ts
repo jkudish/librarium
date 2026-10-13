@@ -9,13 +9,7 @@ import {
 import type { RunArtifactSnapshot } from '../node-run-artifact-codecs.js';
 import { presentationSourceSummary } from '../node-run-artifact-presentation.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
-import type {
-  AsyncTaskHandle,
-  DeduplicatedSource,
-  ProviderReport,
-  RunManifest,
-} from '../types.js';
-import type { SilentRunResult } from './research.js';
+import type { AsyncTaskHandle } from '../types.js';
 import {
   type ResultPageOptions,
   type RunEvidence,
@@ -121,44 +115,6 @@ function canonicalEvidence(
       error: report.error,
     })),
   };
-}
-
-/**
- * Shape a silent run into the compact `research` tool result. Full provider
- * content is deliberately excluded (token blowup) — callers fetch it via
- * `get_results`.
- */
-export function shapeResearchResult(
-  run:
-    | SilentRunResult
-    | {
-        readonly manifest: RunManifest;
-        readonly reports: ProviderReport[];
-        readonly sources: DeduplicatedSource[];
-        readonly totalCitations: number;
-        readonly totalDurationMs: number;
-        readonly outputDir?: string;
-      },
-): ResearchToolResult {
-  const { manifest, reports } = run;
-  if (manifest.schemaVersion === 2) {
-    return resultIndex({
-      runDir: manifest.outputDir,
-      query: manifest.query,
-      mode: manifest.mode,
-      sources: {
-        total: manifest.sources.total,
-        unique: manifest.sources.unique,
-      },
-      entries: reports.map((report) => ({ report, content: '' })),
-      state:
-        manifest.status === 'running' || manifest.status === 'awaiting_async'
-          ? 'pending'
-          : 'terminal',
-    });
-  }
-  const canonicalRun = run as SilentRunResult;
-  return resultIndex(canonicalEvidence(manifest, canonicalRun.outputDir));
 }
 
 function snapshotEvidence(

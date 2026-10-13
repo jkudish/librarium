@@ -1,16 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
-
-const canonicalEntries = [
-  '../src/commands/run.ts',
-  '../src/commands/answer.ts',
-  '../src/mcp/research.ts',
-] as const;
-
-const forbiddenCanonicalInputs =
-  /(?:^|\/)(?:core\/run-manifest|node-run-artifacts|node-run-reconciliation(?:-runtime)?|commands\/(?:html-report-v2|jsonl-report-v2))\.ts$/;
 
 async function inputGraph(entry: string): Promise<string[]> {
   const result = await build({
@@ -19,7 +9,7 @@ async function inputGraph(entry: string): Promise<string[]> {
     format: 'esm',
     metafile: true,
     packages: 'external',
-    platform: 'node',
+    platform: 'neutral',
     write: false,
     logLevel: 'silent',
   });
@@ -29,48 +19,27 @@ async function inputGraph(entry: string): Promise<string[]> {
 }
 
 describe('production execution authority graph', () => {
-  for (const entry of canonicalEntries) {
-    it(`${entry} reaches only the canonical run authority`, async () => {
+  for (const entry of [
+    '../src/run-cli-program.ts',
+    '../src/mcp/run-server.ts',
+    '../src/public-entry.ts',
+  ])
+    it(`${entry} uses the RunStore facade and coordinator CAS`, async () => {
       const inputs = await inputGraph(entry);
-      expect(
-        inputs.filter((path) => path.endsWith('/node-canonical-run.ts')),
-      ).toHaveLength(1);
-      expect(
-        inputs.filter((path) => forbiddenCanonicalInputs.test(path)),
-      ).toEqual([]);
+      expect(inputs).toContain('src/core/librarium.ts');
+      expect(inputs).toContain('src/node-run-store.ts');
       expect(inputs).toContain('src/node-run-json-lock.ts');
-      expect(inputs).not.toContain('src/core/run-manifest.ts');
+      expect(inputs).toContain('src/core/execution-runtime.ts');
+      expect(inputs).not.toContain('src/node-canonical-run.ts');
+      expect(inputs).not.toContain('src/node-run-artifacts.ts');
+      expect(inputs).not.toContain('src/node-request-preflight.ts');
     });
-  }
 
-  it('keeps root and core public graphs Worker-safe and legacy-free', async () => {
-    for (const entry of ['../src/index.ts', '../src/core-entry.ts']) {
-      const inputs = await inputGraph(entry);
-      expect(inputs.some((path) => forbiddenCanonicalInputs.test(path))).toBe(
-        false,
-      );
-      expect(inputs.some((path) => path.startsWith('node:'))).toBe(false);
-    }
-  });
-
-  it('keeps v2 reconciliation behind explicit schema routing', () => {
-    const asyncSource = readFileSync(
-      fileURLToPath(new URL('../src/mcp/async.ts', import.meta.url)),
-      'utf8',
-    );
-    expect(asyncSource.indexOf('schemaVersion === 3')).toBeGreaterThan(-1);
-    expect(asyncSource.indexOf('schemaVersion !== 2')).toBeGreaterThan(
-      asyncSource.indexOf('schemaVersion === 3'),
-    );
+  it('keeps the public core graph runtime-neutral', async () => {
+    const inputs = await inputGraph('../src/run-core-entry.ts');
+    expect(inputs).toContain('src/core/librarium.ts');
     expect(
-      asyncSource.indexOf('createNodeRunReconciliationRuntime('),
-    ).toBeGreaterThan(asyncSource.indexOf('schemaVersion !== 2'));
-
-    const statusSource = readFileSync(
-      fileURLToPath(new URL('../src/commands/status.ts', import.meta.url)),
-      'utf8',
-    );
-    expect(statusSource).toContain('discoverCanonicalRunDirectories');
-    expect(statusSource).toContain('createNodeRunReconciliationRuntime');
+      inputs.some((path) => /src\/(?:node-|commands\/|mcp\/)/.test(path)),
+    ).toBe(false);
   });
 });

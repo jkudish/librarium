@@ -2,11 +2,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initConfigToSave, planInitProviders } from '../src/commands/init.js';
 import type { ExecutionProfile } from '../src/contracts/domain/index.js';
 import {
   configBackgroundAttemptDeadlineAuthored,
   configInlineAttemptDeadlineAuthored,
+  configToPersist,
   loadConfig,
   mergeConfigs,
   saveConfig,
@@ -485,14 +485,15 @@ describe('research tier defaults (#4856)', () => {
 describe('config writers keep built-in deadlines unauthored (#4856)', () => {
   function initAuto(path: string, env: Record<string, string>) {
     const existing = loadConfig(path);
-    const plan = planInitProviders({
-      providers: existing.providers,
-      customProviderIds: [],
-      env,
-      auto: true,
-      enable: ['parallel-research'],
-    });
-    saveConfig(initConfigToSave(existing, plan), path);
+    existing.providers['parallel-research'] = {
+      enabled: true,
+      apiKey: env.PARALLEL_API_KEY,
+    };
+    existing.providers['valyu-research'] = {
+      enabled: true,
+      apiKey: env.VALYU_API_KEY,
+    };
+    saveConfig(configToPersist(existing, existing), path);
     return JSON.parse(readFileSync(path, 'utf8')) as {
       defaults: Record<string, unknown>;
     };

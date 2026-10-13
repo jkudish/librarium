@@ -1,0 +1,4 @@
+{
+  "input": { "version": 1, "providers": {}, "groups": { "exa": ["kagi"] } },
+  "error": "group_name_conflict"
+}
