@@ -11,7 +11,9 @@ Each entry declares `id`, optional `name`, and `quick` and/or `deep`.
 `engine: true` makes it named-only. Names must not conflict with built-ins.
 Instances belong to the client, not a global registry.
 
-A quick provider declares `execution: 'inline'` and implements `execute`.
+An inline quick provider declares `execution: 'inline'` and implements `execute`.
+Quick providers can also declare `execution: 'background'` and implement
+`submit`, `poll`, and `retrieve` for durable work.
 A deep provider declares `execution: 'background'` and implements `submit`,
 `poll`, and `retrieve`; `execute` is its convenience wait path. The provider
 must return normalized answers, citations, duration and any reported usage.
