@@ -165,8 +165,19 @@ export class FilesystemRunStore implements RunStore {
   async delete(id: string) {
     const directory = this.directory(id);
     if (!existsSync(directory)) return;
-    withRunJsonLock(join(directory, 'run.json'), () =>
-      rmSync(directory, { recursive: true, force: true }),
-    );
+    withRunJsonLock(join(directory, 'run.json'), () => {
+      const entries = readdirSync(this.directory(id), {
+        recursive: true,
+        withFileTypes: true,
+      });
+      if (entries.some((entry) => entry.isSymbolicLink()))
+        throw new Error('Run files must not be symbolic links');
+      // Keep the directory tree and live marker until token-checked release.
+      for (const entry of entries) {
+        const file = join(entry.parentPath, entry.name);
+        if (!entry.isDirectory() && file !== join(directory, 'run.json.lock'))
+          rmSync(file, { force: true });
+      }
+    });
   }
 }

@@ -1,18 +1,23 @@
+import { spawnSync } from 'node:child_process';
 import {
   cpSync,
+  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
+import { buildSync } from 'esbuild';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HttpClient } from '../src/core/http-client.js';
 import {
@@ -142,6 +147,103 @@ describe('shared simplified contract', () => {
       ]);
     },
   );
+  it('filesystem deletion does not erase a Run recreated by another process at lock release', () => {
+    const directory = temp();
+    const bundle = join(directory, 'node.mjs');
+    buildSync({
+      entryPoints: [join(process.cwd(), 'src/run-node-entry.ts')],
+      outfile: bundle,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node22.12',
+    });
+    const doc = json('fixtures/run-store/stored-run.json') as StoredRun;
+    const moduleUrl = JSON.stringify(pathToFileURL(bundle).href);
+    const script = `
+      import { spawnSync } from 'node:child_process';
+      import { join } from 'node:path';
+      import { FilesystemRunStore } from ${moduleUrl};
+      const directory = ${JSON.stringify(join(directory, 'runs'))};
+      const doc = ${JSON.stringify(doc)};
+      const store = new FilesystemRunStore(directory);
+      await store.save(doc, null);
+      const marker = join(directory, doc.run.id, 'run.json.lock');
+      const nativeFs = process.binding('fs');
+      const unlink = nativeFs.unlink;
+      let peer;
+      nativeFs.unlink = function(...args) {
+        const result = unlink.apply(this, args);
+        if (String(args[0]) === marker && !peer) {
+          peer = { started: true };
+          const child = spawnSync(process.execPath, ['--input-type=module', '-e',
+            ${JSON.stringify(`
+              import { FilesystemRunStore } from ${moduleUrl};
+              const store = new FilesystemRunStore(${JSON.stringify(join(directory, 'runs'))});
+              const doc = ${JSON.stringify(doc)};
+              await store.delete(doc.run.id);
+              const missing = await store.get(doc.run.id);
+              doc.run.question = 'recreated after deletion';
+              const version = await store.save(doc, null);
+              console.log(JSON.stringify({ missing, version }));
+            `)}
+          ], { encoding: 'utf8', timeout: 15000 });
+          peer = { status: child.status, stdout: child.stdout, stderr: child.stderr };
+        }
+        return result;
+      };
+      let deletionError;
+      try { await store.delete(doc.run.id); }
+      catch (error) { deletionError = error.message; }
+      finally { nativeFs.unlink = unlink; }
+      let stored, readError;
+      try { stored = await store.get(doc.run.id); }
+      catch (error) { readError = error.message; }
+      console.log(JSON.stringify({ peer, deletionError, readError, stored }));
+    `;
+    const child = spawnSync(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { encoding: 'utf8', timeout: 20000 },
+    );
+    expect(child.stderr).toBe('');
+    expect(child.status).toBe(0);
+    const outcome = JSON.parse(child.stdout);
+    expect(outcome.deletionError).toBeUndefined();
+    expect(outcome.readError).toBeUndefined();
+    expect(outcome.peer).toEqual({
+      status: 0,
+      stdout: `${JSON.stringify({ missing: null, version: 1 })}\n`,
+      stderr: '',
+    });
+    expect(outcome.stored).toEqual({
+      ...doc,
+      run: { ...doc.run, question: 'recreated after deletion' },
+      version: 1,
+    });
+  });
+  it('filesystem deletion rejects symlinks without deleting Run or external files', async () => {
+    const directory = temp();
+    const external = temp();
+    writeFileSync(join(external, 'untouched.txt'), 'external data');
+    const store = new FilesystemRunStore(directory);
+    const doc = json('fixtures/run-store/stored-run.json') as StoredRun;
+    await store.save(doc, null);
+    const link = join(directory, doc.run.id, 'external');
+    symlinkSync(external, link, 'junction');
+    await expect(store.delete(doc.run.id)).rejects.toThrow('symbolic links');
+    expect(await store.get(doc.run.id)).toEqual({ ...doc, version: 1 });
+    rmSync(link);
+    await store.delete(doc.run.id);
+    await store.delete(doc.run.id);
+    expect(existsSync(join(directory, doc.run.id))).toBe(true);
+    expect(await store.get(doc.run.id)).toBeNull();
+    expect(await store.list()).toEqual([]);
+    await expect(store.save(doc, 1)).rejects.toThrow('RunStore');
+    expect(readFileSync(join(external, 'untouched.txt'), 'utf8')).toBe(
+      'external data',
+    );
+  });
   it('store contract permits different JSON object key ordering', async () => {
     const store = new MemoryRunStore();
     await runStoreContract({
