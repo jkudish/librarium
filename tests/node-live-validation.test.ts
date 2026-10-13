@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCliProgram } from '../src/cli-program.js';
 import {
   type ApprovalGate,
   approvalFingerprint,
@@ -40,6 +39,7 @@ import {
   BUILTIN_PROVIDER_CATALOG,
   declaredExecutionProfile,
 } from '../src/core/provider-profiles.js';
+import { createMaintainerProgram as createCliProgram } from '../src/maintainer-program.js';
 import {
   CanonicalRunManifestV3Schema,
   createNodeCoordinatorDependencies,

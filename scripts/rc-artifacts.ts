@@ -52,7 +52,7 @@ async function main(): Promise<void> {
         tarball: manifest.npm.tarball,
         declarations: manifest.npm.declarations.length,
         package_files: manifest.npm.inventory.length,
-        contracts_fingerprint: manifest.contracts_v1.fingerprint,
+        spec_fingerprint: manifest.spec_data.fingerprint,
         matrix_fingerprint: manifest.installed_package.matrix_fingerprint,
       })}\n`,
     );

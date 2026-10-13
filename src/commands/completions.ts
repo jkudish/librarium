@@ -1,10 +1,10 @@
 import type { Command, Option } from 'commander';
 import { type CompletionShell, parseCompletionShell } from '../cli-parsers.js';
-import { DEFAULT_GROUPS } from '../constants.js';
+import { SOURCE_CATALOG } from '../core/source-catalog.js';
 
 /**
  * Static shell completion scripts (no completion framework dependency).
- * Covers commands, per-command flags, and the builtin group names.
+ * Covers commands, per-command flags, and flat source names.
  */
 
 interface CommandSpec {
@@ -14,7 +14,7 @@ interface CommandSpec {
   groupAware: boolean;
 }
 
-const GROUP_NAMES = Object.keys(DEFAULT_GROUPS);
+const GROUP_NAMES = SOURCE_CATALOG.map((source) => source.id);
 
 function optionFlags(option: Option): string[] {
   return [option.short, option.long].filter(
@@ -30,7 +30,7 @@ function commandSpecs(program: Command): CommandSpec[] {
       name: command.name(),
       description: command.description(),
       flags,
-      groupAware: command.options.some((option) => option.long === '--group'),
+      groupAware: command.options.some((option) => option.long === '--only'),
     };
   });
 }
@@ -52,7 +52,7 @@ export function zshCompletions(program: Command): string {
     .map((command) => {
       const flagWords = command.flags.join(' ');
       const groupCase = command.groupAware
-        ? `\n      if [[ $words[CURRENT-1] == '-g' || $words[CURRENT-1] == '--group' ]]; then\n        compadd ${GROUP_NAMES.join(' ')}\n        return\n      fi`
+        ? `\n      if [[ $words[CURRENT-1] == '--only' || $words[CURRENT-1] == '--skip' ]]; then\n        compadd ${GROUP_NAMES.join(' ')}\n        return\n      fi`
         : '';
       return `    ${command.name})${groupCase}\n      compadd -- ${flagWords}\n      ;;`;
     })
@@ -110,7 +110,7 @@ _librarium_completions() {
     return
   fi
 
-  if [[ " ${groupAwareNames} " == *" \${cmd} "* && ( "\${prev}" == "-g" || "\${prev}" == "--group" ) ]]; then
+  if [[ " ${groupAwareNames} " == *" \${cmd} "* && ( "\${prev}" == "--only" || "\${prev}" == "--skip" ) ]]; then
     COMPREPLY=( $(compgen -W "${GROUP_NAMES.join(' ')}" -- "\${cur}") )
     return
   fi
@@ -136,7 +136,7 @@ export function fishCompletions(program: Command): string {
   const flagLines = commands
     .flatMap((command) =>
       command.flags
-        .filter((flag) => flag !== '-g' && flag !== '--group')
+        .filter((flag) => flag !== '--only' && flag !== '--skip')
         .map((flag) => {
           const kind = flag.startsWith('--') ? '-l' : '-s';
           return `complete -c librarium -n '__fish_seen_subcommand_from ${command.name}' ${kind} ${flag.replace(/^-+/, '')}`;
@@ -146,13 +146,14 @@ export function fishCompletions(program: Command): string {
   const groupLine = `complete -c librarium -n '__fish_seen_subcommand_from ${commands
     .filter((command) => command.groupAware)
     .map((command) => command.name)
-    .join(' ')}' -s g -l group -a '${GROUP_NAMES.join(' ')}'`;
+    .join(' ')}' -l only -a '${GROUP_NAMES.join(' ')}'`;
 
   return `# librarium fish completions. Install:
 #   librarium completions fish > ~/.config/fish/completions/librarium.fish
 ${commandLines}
 ${flagLines}
 ${groupLine}
+${groupLine.replace('-l only -a', '-l skip -a')}
 `;
 }
 

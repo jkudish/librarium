@@ -39,7 +39,7 @@ describe('v2 validation foundation', () => {
     expect(ci).toContain("autoformat:\n    if: github.event_name == 'push'");
     expect(ci).toContain('contents: write');
     expect(ci.match(/Declaration consumer fixtures/g)).toHaveLength(1);
-    expect(ci.match(/Contract snapshot drift/g)).toHaveLength(1);
+    expect(ci.match(/Shared spec conformance/g)).toHaveLength(1);
     expect(ci).toContain('matrix.node-version == 24');
     expect(ci).not.toMatch(/--coverage|--shard/);
 

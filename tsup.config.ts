@@ -20,14 +20,14 @@ export default defineConfig([
   {
     ...shared,
     entry: {
-      index: 'src/index.ts',
-      core: 'src/core-entry.ts',
-      node: 'src/node-entry.ts',
+      index: 'src/public-entry.ts',
+      core: 'src/run-core-entry.ts',
+      node: 'src/run-node-entry.ts',
+      testing: 'src/testing-entry.ts',
+      maintainer: 'src/maintainer-entry.ts',
     },
-    // One neutral build context lets root/core/node share the exact same
-    // Worker-safe chunks. Node-only builtins remain external imports reachable
-    // exclusively from node.js; Node ESM accepts their bare specifiers. The
-    // packed metafile/chunk gate proves root and core cannot reach them.
+    // Core remains runtime-neutral; root/node load filesystem configuration.
+    // The packed metafile/chunk gate proves core cannot reach Node builtins.
     platform: 'neutral',
     splitting: true,
     clean: false,

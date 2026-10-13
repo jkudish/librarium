@@ -95,7 +95,7 @@ export interface ReleaseCandidateDependencies {
   readonly load_source_matrix?: (
     repositoryRoot: string,
   ) => Promise<unknown> | unknown;
-  /** Authorized package-phase probe of freshly built dist/node.js. */
+  /** Authorized package-phase probe of freshly built private maintainer entry. */
   readonly load_built_matrix?: (
     repositoryRoot: string,
   ) => Promise<unknown> | unknown;
@@ -146,7 +146,7 @@ interface FrozenPackageManifest {
     readonly inventory: readonly PackageFileRow[];
     readonly declarations: readonly PackageFileRow[];
   };
-  readonly contracts_v1: {
+  readonly spec_data: {
     readonly fingerprint: string;
     readonly files: readonly FileRow[];
   };
@@ -954,9 +954,9 @@ async function defaultLoadSourceMatrix(
 async function defaultLoadBuiltMatrix(
   repositoryRoot: string,
 ): Promise<unknown> {
-  const entry = join(repositoryRoot, 'dist', 'node.js');
+  const entry = join(repositoryRoot, 'dist', 'maintainer.js');
   if (!lstatSync(entry, { throwIfNoEntry: false })?.isFile()) {
-    fail('Freshly built package does not contain dist/node.js.');
+    fail('Freshly built package does not contain dist/maintainer.js.');
   }
   const permissionFlag = process.allowedNodeEnvironmentFlags.has('--permission')
     ? '--permission'
@@ -1094,10 +1094,12 @@ function assertPackagedInventoryShape(tarRows: readonly TarFile[]): void {
   }
   if (
     actual.some(
-      (path) => path === 'contracts/v1' || path.startsWith('contracts/v1/'),
+      (path) => path === 'librarium-spec' || path.startsWith('librarium-spec/'),
     )
   ) {
-    fail('contracts/v1 must remain absent from the npm tarball.');
+    fail(
+      'The separate librarium-spec snapshot must remain absent from the npm tarball.',
+    );
   }
   const declarations = actual.filter(
     (path) => path.endsWith('.d.ts') || path.endsWith('.d.ts.map'),
@@ -1156,19 +1158,21 @@ function contractsSnapshot(repositoryRoot: string): {
   readonly sourceRoot: string;
   readonly files: readonly FileRow[];
 } {
-  const sourceRoot = join(repositoryRoot, 'contracts', 'v1');
+  const sourceRoot = join(repositoryRoot, 'node_modules', 'librarium-spec');
   const sourceRows = listRegularFiles(sourceRoot);
   if (
     sourceRows.length === 0 ||
-    !sourceRows.some((row) => row.path === 'manifest.json') ||
-    !sourceRows.some((row) => row.path === 'checksums.sha256') ||
-    !sourceRows.some((row) => row.path === 'schema/interchange.schema.json')
+    !sourceRows.some((row) => row.path === 'sources.json') ||
+    !sourceRows.some((row) => row.path === 'schema/stored-run.schema.json') ||
+    !sourceRows.some((row) => row.path === 'schema/run.schema.json')
   ) {
-    fail('contracts/v1 inventory is incomplete.');
+    fail(
+      'librarium-spec inventory is incomplete. Run npm ci at the pinned source.',
+    );
   }
   const files = sourceRows.map((row) => ({
     ...row,
-    path: `contracts/v1/${row.path}`,
+    path: `librarium-spec/${row.path}`,
   }));
   return { fingerprint: sha256Bytes(canonicalJson(files)), sourceRoot, files };
 }
@@ -1276,7 +1280,7 @@ export async function freezeReleasePackage(input: {
       inventory: packageRows,
       declarations,
     },
-    contracts_v1: {
+    spec_data: {
       fingerprint: contracts.fingerprint,
       files: contracts.files,
     },
@@ -1303,7 +1307,7 @@ export async function freezeReleasePackage(input: {
     for (const row of contracts.files) {
       const sourcePath = join(
         contracts.sourceRoot,
-        ...row.path.slice('contracts/v1/'.length).split('/'),
+        ...row.path.slice('librarium-spec/'.length).split('/'),
       );
       copyExclusive(sourcePath, join(output, ...row.path.split('/')));
     }
@@ -1387,7 +1391,7 @@ function parseFrozenPackage(value: unknown): FrozenPackageManifest {
     [
       'candidate',
       'contract',
-      'contracts_v1',
+      'spec_data',
       'installed_package',
       'npm',
       'schema_version',
@@ -1431,8 +1435,8 @@ function parseFrozenPackage(value: unknown): FrozenPackageManifest {
     ['declarations', 'inventory', 'tarball'],
     'Frozen npm package',
   );
-  const contracts = jsonRecord(manifest.contracts_v1, 'Frozen contracts/v1');
-  exactKeys(contracts, ['files', 'fingerprint'], 'Frozen contracts/v1');
+  const contracts = jsonRecord(manifest.spec_data, 'Frozen librarium-spec');
+  exactKeys(contracts, ['files', 'fingerprint'], 'Frozen librarium-spec');
   if (
     !Array.isArray(npm.inventory) ||
     !Array.isArray(npm.declarations) ||
@@ -1454,16 +1458,16 @@ function parseFrozenPackage(value: unknown): FrozenPackageManifest {
   assertUniqueSortedPaths(contractFiles, 'Frozen contracts inventory');
   if (
     contractFiles.length === 0 ||
-    contractFiles.some((row) => !row.path.startsWith('contracts/v1/')) ||
-    !contractFiles.some((row) => row.path === 'contracts/v1/manifest.json') ||
+    contractFiles.some((row) => !row.path.startsWith('librarium-spec/')) ||
+    !contractFiles.some((row) => row.path === 'librarium-spec/sources.json') ||
     !contractFiles.some(
-      (row) => row.path === 'contracts/v1/checksums.sha256',
+      (row) => row.path === 'librarium-spec/schema/stored-run.schema.json',
     ) ||
     !contractFiles.some(
-      (row) => row.path === 'contracts/v1/schema/interchange.schema.json',
+      (row) => row.path === 'librarium-spec/schema/run.schema.json',
     )
   ) {
-    fail('Frozen contracts/v1 inventory is incomplete or unsafe.');
+    fail('Frozen librarium-spec inventory is incomplete or unsafe.');
   }
   const version = boundedString(
     candidate.version,
@@ -1520,7 +1524,7 @@ function parseFrozenPackage(value: unknown): FrozenPackageManifest {
       inventory,
       declarations,
     },
-    contracts_v1: {
+    spec_data: {
       fingerprint: sha256(
         contracts.fingerprint,
         'Frozen contracts fingerprint',
@@ -1617,17 +1621,16 @@ export async function verifyFrozenReleasePackage(
   ) {
     fail('Frozen declaration inventory drifted.');
   }
-  for (const row of manifest.contracts_v1.files)
-    verifyReference(packageRoot, row);
+  for (const row of manifest.spec_data.files) verifyReference(packageRoot, row);
   const sourceContracts = contractsSnapshot(source.root);
   if (
-    sha256Bytes(canonicalJson(manifest.contracts_v1.files)) !==
-      manifest.contracts_v1.fingerprint ||
-    canonicalJson(manifest.contracts_v1.files) !==
+    sha256Bytes(canonicalJson(manifest.spec_data.files)) !==
+      manifest.spec_data.fingerprint ||
+    canonicalJson(manifest.spec_data.files) !==
       canonicalJson(sourceContracts.files) ||
-    manifest.contracts_v1.fingerprint !== sourceContracts.fingerprint
+    manifest.spec_data.fingerprint !== sourceContracts.fingerprint
   ) {
-    fail('Frozen contracts/v1 inventory differs from its exact Git source.');
+    fail('Frozen librarium-spec inventory differs from its pinned dependency.');
   }
   const sourceMatrix = await (
     dependencies.load_source_matrix ?? defaultLoadSourceMatrix
@@ -1644,7 +1647,7 @@ export async function verifyFrozenReleasePackage(
     manifest.source_metadata.package_json.path,
     manifest.source_metadata.package_lock.path,
     manifest.npm.tarball.path,
-    ...manifest.contracts_v1.files.map((row) => row.path),
+    ...manifest.spec_data.files.map((row) => row.path),
   ].sort(compareText);
   const actualPaths = listRegularFiles(packageRoot).map((row) => row.path);
   if (canonicalJson(actualPaths) !== canonicalJson(expectedPaths)) {
@@ -1765,7 +1768,7 @@ function attestationSubjects(
 function provenanceStatement(
   manifest: Pick<
     FrozenPackageManifest,
-    'candidate' | 'contracts_v1' | 'npm' | 'source_metadata'
+    'candidate' | 'spec_data' | 'npm' | 'source_metadata'
   >,
   seaRows: readonly (ArtifactReference & { readonly name: string })[],
 ): Record<string, unknown> {
@@ -1800,8 +1803,8 @@ function provenanceStatement(
             },
           },
           {
-            uri: 'file:contracts/v1',
-            digest: { sha256: manifest.contracts_v1.fingerprint.slice(7) },
+            uri: 'file:librarium-spec',
+            digest: { sha256: manifest.spec_data.fingerprint.slice(7) },
           },
         ],
       },
@@ -1862,7 +1865,7 @@ export async function assembleReleaseCandidate(input: {
       frozen.source_metadata.package_json,
       frozen.source_metadata.package_lock,
       frozen.npm.tarball,
-      ...frozen.contracts_v1.files,
+      ...frozen.spec_data.files,
     ]) {
       copyExclusive(
         join(packageRoot, ...reference.path.split('/')),
@@ -1983,7 +1986,7 @@ function parseCandidateManifest(value: unknown): CandidateManifest {
       'candidate',
       'checksum_index',
       'contract',
-      'contracts_v1',
+      'spec_data',
       'installed_package',
       'live_validation',
       'npm',
@@ -2237,21 +2240,21 @@ export async function verifyReleaseCandidate(input: {
   ) {
     fail('Release candidate declaration inventory drifted.');
   }
-  for (const row of manifest.contracts_v1.files) verifyReference(root, row);
+  for (const row of manifest.spec_data.files) verifyReference(root, row);
   const sourceContracts = contractsSnapshot(source.root);
   if (
-    sha256Bytes(canonicalJson(manifest.contracts_v1.files)) !==
-      manifest.contracts_v1.fingerprint ||
-    canonicalJson(manifest.contracts_v1.files) !==
+    sha256Bytes(canonicalJson(manifest.spec_data.files)) !==
+      manifest.spec_data.fingerprint ||
+    canonicalJson(manifest.spec_data.files) !==
       canonicalJson(sourceContracts.files) ||
-    manifest.contracts_v1.fingerprint !== sourceContracts.fingerprint ||
+    manifest.spec_data.fingerprint !== sourceContracts.fingerprint ||
     packageRows.some(
       (row) =>
-        row.path === 'contracts/v1' || row.path.startsWith('contracts/v1/'),
+        row.path === 'librarium-spec' || row.path.startsWith('librarium-spec/'),
     )
   ) {
     fail(
-      'Release candidate contracts/v1 inventory differs from its exact Git source or package exclusion.',
+      'Release candidate librarium-spec inventory differs from its pinned dependency or package exclusion.',
     );
   }
   const sourceMatrix = await (
@@ -2399,7 +2402,7 @@ export async function verifyReleaseCandidate(input: {
     manifest.source_metadata.package_json.path,
     manifest.source_metadata.package_lock.path,
     manifest.npm.tarball.path,
-    ...manifest.contracts_v1.files.map((row) => row.path),
+    ...manifest.spec_data.files.map((row) => row.path),
     ...manifest.sea.rows.map((row) => row.path),
     ...RELEASE_CANDIDATE_RECORD_NAMES.map(
       (name) => manifest.live_validation.records[name]!.path,

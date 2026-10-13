@@ -1,24 +1,22 @@
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { createCliProgram } from '../src/cli-program.js';
 import {
   bashCompletions,
   fishCompletions,
   zshCompletions,
 } from '../src/commands/completions.js';
+import { createRunCliProgram } from '../src/run-cli-program.js';
 
-const GROUPS = [
-  'deep',
-  'quick',
-  'raw',
-  'fast',
-  'visibility',
-  'comprehensive',
-  'llm',
-  'all',
+const GROUPS = ['exa', 'kagi', 'openai', 'chatgpt', 'copilot'];
+const COMMANDS = [
+  'research',
+  'show',
+  'browse',
+  'html',
+  'summarize',
+  'completions',
 ];
-const COMMANDS = ['run', 'status', 'browse', 'html', 'refine', 'completions'];
-const program = createCliProgram();
+const program = createRunCliProgram();
 const bashAvailable = spawnSync('bash', ['--version']).status === 0;
 const zshAvailable = spawnSync('zsh', ['--version']).status === 0;
 
@@ -27,11 +25,9 @@ describe('shell completions', () => {
     const script = zshCompletions(program);
     expect(script).toContain('#compdef librarium');
     for (const command of COMMANDS) expect(script).toContain(command);
-    expect(script).toContain('--providers');
-    expect(script).toContain('--refine');
-    expect(script).toContain(
-      "'run:Run a research query across multiple providers'",
-    );
+    expect(script).toContain('--only');
+    expect(script).toContain('--deep');
+    expect(script).toContain("'research:Research a question'");
     for (const group of GROUPS) expect(script).toContain(group);
     for (const command of program.commands) {
       for (const option of command.options) {
@@ -45,10 +41,10 @@ describe('shell completions', () => {
     const script = bashCompletions(program);
     expect(script).toContain('complete -F _librarium_completions librarium');
     for (const command of COMMANDS) expect(script).toContain(command);
-    expect(script).toContain('--html');
-    expect(script).toContain(GROUPS.join(' '));
+    expect(script).toContain('--only');
+    for (const name of GROUPS) expect(script).toContain(name);
     expect(script).toContain(
-      'if [[ " run plan answer " == *" ${cmd} "* && ( "${prev}" == "-g" || "${prev}" == "--group" ) ]]; then',
+      'if [[ " research " == *" ${cmd} "* && ( "${prev}" == "--only" || "${prev}" == "--skip" ) ]]; then',
     );
   });
 
@@ -84,9 +80,9 @@ describe('shell completions', () => {
     const script = fishCompletions(program);
     expect(script).toContain('__fish_use_subcommand');
     for (const command of COMMANDS) expect(script).toContain(command);
-    expect(script).toContain(
-      "-s g -l group -a 'deep quick raw fast visibility comprehensive llm all'",
-    );
+    expect(script).toContain('-l only -a');
+    for (const name of GROUPS) expect(script).toContain(name);
+    expect(script).not.toContain('-l group');
   });
 
   it('contains no em-dashes', () => {

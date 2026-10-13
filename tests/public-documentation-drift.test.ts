@@ -1,264 +1,35 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import * as parallelAdapters from '../src/adapters/parallel.js';
-import { createCliProgram } from '../src/cli-program.js';
-import { ARTIFACTS_VERSION } from '../src/contracts/artifacts/versions.js';
-import {
-  BUILTIN_WORKFLOW_IDS,
-  QUICK_WORKFLOW_ROSTER,
-  VISIBILITY_WORKFLOW_ROSTER,
-} from '../src/core/builtin-workflows.js';
-import { BUILTIN_PRICING_SNAPSHOT } from '../src/core/pricing-snapshot.js';
-import { BUILTIN_PROFILE_BINDING_SPECS } from '../src/core/profile-bindings.js';
-import { BUILTIN_PROVIDER_DEFINITIONS } from '../src/core/provider-descriptor.js';
-import { BUILTIN_PROVIDER_CATALOG } from '../src/core/provider-profiles.js';
-import { SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION } from '../src/node-entry.js';
+import { expect, it } from 'vitest';
+import { SOURCE_CATALOG } from '../src/core/source-catalog.js';
+import { createRunCliProgram } from '../src/run-cli-program.js';
 
 const read = (path: string) =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const README = read('README.md');
-const CHANGELOG = read('CHANGELOG.md');
-const SKILL = read('SKILL.md');
-const PROVIDER_GUIDE = read('docs/provider-development.md');
-const CONTRACTS_GUIDE = read('contracts/README.md');
-const PACKAGE = JSON.parse(read('package.json')) as {
-  engines: { node: string };
-  exports: Record<string, unknown>;
-};
-const MCP_SOURCE = read('src/mcp/server.ts');
-
-const profileKeys = BUILTIN_PROVIDER_CATALOG.flatMap((provider) =>
-  provider.profiles.map(
-    (profile) => `${provider.provider_id}/${profile.profile_id}`,
-  ),
-);
-const mcpTools = [
-  ...MCP_SOURCE.matchAll(/server\.registerTool\(\s*'([^']+)'/g),
-].map((match) => match[1]);
-
-describe('public v2 documentation drift', () => {
-  it('keeps the generated catalog facts in README aligned with source', () => {
-    expect(BUILTIN_PROVIDER_CATALOG).toHaveLength(33);
-    expect(profileKeys).toHaveLength(40);
-    expect(README).toMatch(
-      /\*\*33 built-in providers\*\* and \*\*40 implemented public\s+profiles\*\*/,
+it('documents the simplified catalog, commands, package entries and MCP roster', () => {
+  const readme = read('README.md');
+  const skill = read('SKILL.md');
+  for (const source of SOURCE_CATALOG)
+    expect(readme).toContain(`\`${source.id}\``);
+  for (const command of createRunCliProgram().commands)
+    expect(readme, command.name()).toMatch(
+      new RegExp(`\`${command.name()}(?:\`|[ \\[])`),
     );
-    expect(SKILL).toContain('rather than assuming providers');
-
-    for (const provider of BUILTIN_PROVIDER_CATALOG) {
-      expect(README).toContain(`${provider.provider_id}/`);
-    }
-    for (const key of profileKeys) expect(README).toContain(`\`${key}\``);
-  });
-
-  it('excludes beta Parallel Chat from every shipping authority and public claim', () => {
-    const retained = ['parallel/research', 'parallel/search', 'parallel/turbo'];
-    expect(
-      profileKeys.filter((key) => key.startsWith('parallel/')).sort(),
-    ).toEqual(retained);
-    for (const definitions of [
-      BUILTIN_PROFILE_BINDING_SPECS,
-      BUILTIN_PRICING_SNAPSHOT.definitions,
-    ]) {
-      expect(
-        [
-          ...new Set(
-            definitions
-              .filter(({ provider_id }) => provider_id === 'parallel')
-              .map(
-                ({ provider_id, profile_id }) => `${provider_id}/${profile_id}`,
-              ),
-          ),
-        ].sort(),
-      ).toEqual(retained);
-    }
-    expect(
-      BUILTIN_PROVIDER_DEFINITIONS.filter(({ id }) =>
-        id.startsWith('parallel-'),
-      )
-        .map(({ id }) => id)
-        .sort(),
-    ).toEqual(retained.map((key) => key.replace('/', '-')));
-    expect(Object.keys(parallelAdapters).sort()).toEqual([
-      'ParallelResearchProvider',
-      'ParallelSearchProvider',
-      'ParallelTurboProvider',
-    ]);
-    for (const document of [
-      README,
-      SKILL,
-      PROVIDER_GUIDE,
-      CONTRACTS_GUIDE,
-      read('benchmark/targets.json'),
-    ]) {
-      expect(document).not.toMatch(/parallel[\s/-]+chat|ParallelChatProvider/i);
-    }
-  });
-
-  it('keeps workflow names and curated rosters aligned with source', () => {
-    expect(BUILTIN_WORKFLOW_IDS).toEqual([
-      'quick',
-      'deep',
-      'visibility',
-      'all',
-    ]);
-    for (const workflow of BUILTIN_WORKFLOW_IDS) {
-      expect(README).toContain(`| \`${workflow}\` |`);
-      expect(SKILL).toContain(`\`${workflow}\``);
-    }
-    for (const member of [
-      ...QUICK_WORKFLOW_ROSTER,
-      ...VISIBILITY_WORKFLOW_ROSTER,
-    ]) {
-      expect(README).toContain(
-        `\`${member.provider_id}/${member.profile_id}\``,
-      );
-    }
-    expect(README).toContain(
-      'Custom groups must be stored and selected as `custom:<name>`',
+  for (const name of ['research', 'get_run', 'list_sources'])
+    expect(skill).toContain(name);
+  for (const document of [
+    skill,
+    read('docs/research-options.md'),
+    read('docs/provider-development.md'),
+  ])
+    expect(document).not.toMatch(
+      /librarium (?:run|plan|status|answer|doctor|init)\b|list_providers|get_results|check_async/,
     );
-    expect(README).toContain(
-      '| `deep` | Derived from implemented research-report profiles |',
-    );
-    expect(SKILL).toContain('`deep` for research-report profiles');
-  });
-
-  it('documents every registered public command and long option', () => {
-    const program = createCliProgram();
-    for (const command of program.commands) {
-      expect(README).toContain(`\`${command.name()}\``);
-      for (const option of command.options) {
-        if (option.long && option.long !== '--help') {
-          expect(README).toMatch(new RegExp(`${option.long}(?![A-Za-z0-9_-])`));
-        }
-      }
-    }
-
-    const config = program.commands.find(
-      (command) => command.name() === 'config',
-    );
-    const migrate = config?.commands.find(
-      (command) => command.name() === 'migrate',
-    );
-    expect(migrate).toBeDefined();
-    expect(README).toContain('`config migrate`');
-    for (const option of migrate?.options ?? []) {
-      if (option.long) {
-        expect(README).toMatch(new RegExp(`${option.long}(?![A-Za-z0-9_-])`));
-      }
-    }
-  });
-
-  it('keeps the pending v2 changelog truthful', () => {
-    expect(CHANGELOG).toContain('## [2.0.0] - Unreleased');
-    expect(CHANGELOG).not.toMatch(/## \[2\.0\.0\] - \d{4}-\d{2}-\d{2}/);
-    expect(CHANGELOG).toContain(
-      'A typed public catalog with 33 built-in providers and 40 retained public',
-    );
-    expect(CHANGELOG).not.toContain('41 retained public');
-  });
-
-  it('documents the source-derived MCP tool roster', () => {
-    expect(mcpTools).toEqual([
-      'research',
-      'get_results',
-      'check_async',
-      'list_providers',
-      'list_groups',
-    ]);
-    for (const tool of mcpTools) expect(README).toContain(`\`${tool}\``);
-  });
-
-  it('keeps package boundaries and Node support aligned with package metadata', () => {
-    expect(Object.keys(PACKAGE.exports)).toEqual(['.', './core', './node']);
-    expect(PACKAGE.engines.node).toBe('>=22.12.0');
-    expect(README).toContain('`librarium`');
-    expect(README).toContain('`librarium/core`');
-    expect(README).toContain('`librarium/node`');
-    expect(README).toContain('Node.js **22.12 or newer**');
-  });
-
-  it('keeps contract and script-provider versions documented', () => {
-    expect(ARTIFACTS_VERSION).toBe('1.0.0');
-    expect(SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION).toBe(1);
-    expect(CONTRACTS_GUIDE).toContain(
-      `ARTIFACTS_VERSION\` contract (currently \`${ARTIFACTS_VERSION}\`)`,
-    );
-    expect(PROVIDER_GUIDE).toContain(
-      `\`protocolVersion: ${SCRIPT_CUSTOM_PROVIDER_PROTOCOL_VERSION}\``,
-    );
-    expect(PROVIDER_GUIDE).toContain('There is no separate `1.0.0`');
-  });
-
-  it('maps capability types to question intent from the configured catalog', () => {
-    expect(SKILL).toContain('one provider can offer several profiles');
-    expect(SKILL).toContain('assume citations or live web access');
-    expect(SKILL).toContain('Ungrounded chat-style profiles exist');
-    expect(SKILL).toContain('| search | source lists for discovery |');
-    expect(SKILL).toContain('| grounded answer | short answers backed by');
-    expect(SKILL).toContain('| research report | deeper, multi-source');
-    expect(SKILL).toContain(
-      '| surface (visibility) | observations of how AI answer engines',
-    );
-    expect(SKILL).toContain('not independent factual confirmations');
-  });
-
-  it('shows an executable MCP lifecycle example with a CLI equivalent', () => {
-    expect(SKILL).toContain(
-      'Researches across search engines and AI providers',
-    );
-    expect(SKILL).toContain(
-      '"query":"Compare managed Postgres options","group":"quick","mode":"sync"',
-    );
-    expect(SKILL).toContain('"part":"content","cursor":"<nextCursor>"');
-    expect(SKILL).toContain('"part":"citations"');
-    expect(SKILL).toContain(
-      'librarium run "Compare managed Postgres options" --group quick --mode sync',
-    );
-    expect(SKILL).toContain('`--json` prints the run');
-    expect(SKILL).toContain('MCP `refine` / CLI `--refine`');
-  });
-
-  it('keeps the skill a host-neutral operating guide with scope-bounded escalation', () => {
-    expect(SKILL).toContain('**Quick-then-deepen**');
-    expect(SKILL).toContain('**Upfront planning**');
-    expect(SKILL).toContain('Match the request, not a fixed ladder');
-    expect(SKILL).toContain('within scope and budget');
-    expect(SKILL).toContain('authorization is a new paid decision');
-    expect(SKILL).toContain('spending authority from thin');
-    expect(SKILL).toContain('has no `plan` tool');
-    expect(SKILL).toContain('per-call budget or fallback input');
-    expect(SKILL).toContain('override groups');
-    expect(SKILL).toContain('establishes affordability');
-    expect(SKILL).toContain('not absolute provider billing');
-    expect(SKILL).toContain('complements research passes');
-    expect(SKILL).toContain('names your host actually');
-    expect(SKILL).toContain('no CLI is needed');
-    expect(SKILL).toContain('do not re-ask for already-authorized scope');
-    expect(SKILL).toContain('Collection and synthesis are separate');
-    expect(SKILL).not.toContain('34 built-in providers');
-    expect(SKILL).not.toContain('Never auto-escalate');
-    expect(SKILL).not.toContain('always start with `quick`');
-  });
-
-  it('keeps the execution, provenance, privacy, and paid-validation boundaries explicit', () => {
-    for (const text of [README, SKILL, PROVIDER_GUIDE]) {
-      expect(text).toContain('background/durable');
-    }
-    expect(README).toContain('process-local');
-    expect(PROVIDER_GUIDE).toContain('process-local');
-    expect(README).toContain(
-      'correlated visibility evidence, not five independent confirmations',
-    );
-    expect(README).toContain('not official OpenAI, Google, or Microsoft APIs');
-    expect(README).toContain('fails closed if the account rejects it');
-    expect(README).toContain(
-      'missing estimate, missing reported cost, API unit, or token price is unknown',
-    );
-    expect(README).toContain('separate live-validation approval protocol');
-    expect(PROVIDER_GUIDE).toContain(
-      'exact-profile remote cancellation only for\n`valyu/research`',
-    );
-    expect(SKILL).not.toContain('higher citation count = higher confidence');
-  });
+  expect(Object.keys(JSON.parse(read('package.json')).exports)).toEqual([
+    '.',
+    './core',
+    './node',
+    './testing',
+  ]);
+  expect(read('CHANGELOG.md')).toContain('2.0.0 — Unreleased');
+  expect(read('docs/migration-v1-to-v2.md')).toContain('backup');
 });

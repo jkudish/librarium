@@ -336,13 +336,19 @@ function resolveFixturePath(fixturePath: string): string {
   return realCandidate;
 }
 
-function resolveRepositoryReference(reference: string): string {
+function resolveRepositoryReference(
+  reference: string,
+  historicalSurface = false,
+): string {
   if (isAbsolute(reference)) {
     throw new Error(`Source reference must be relative: ${reference}`);
   }
   const candidate = resolve(repositoryRoot, reference);
   assertContainedPath(repositoryRoot, candidate);
   if (!existsSync(candidate)) {
+    // Public boundary provenance is historical, frozen by the approved hash.
+    // JS 2.0 removes those surface files; provider evidence still must exist.
+    if (historicalSurface) return candidate;
     throw new Error(`Source reference does not exist: ${reference}`);
   }
   const realCandidate = realpathSync(candidate);
@@ -465,7 +471,11 @@ describe('v1 migration and provider-fixture baseline', () => {
       expect(fixture.source.references.length, fixture.id).toBeGreaterThan(0);
       for (const reference of fixture.source.references) {
         expect(
-          () => resolveRepositoryReference(reference),
+          () =>
+            resolveRepositoryReference(
+              reference,
+              fixture.category === 'public_boundary',
+            ),
           fixture.id,
         ).not.toThrow();
         expect(reference, fixture.id).not.toMatch(

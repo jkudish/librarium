@@ -1,0 +1,38 @@
+{
+  "input": {
+    "version": 1,
+    "providers": {
+      "parallel-research": {
+        "apiKey": "$PARALLEL_API_KEY",
+        "options": { "processor": "ultra" }
+      },
+      "valyu-research": {
+        "apiKey": "$VALYU_API_KEY",
+        "options": { "mode": "heavy", "outputFormats": ["markdown"] }
+      },
+      "grok-combined": { "apiKey": "$XAI_API_KEY" },
+      "perplexity-sonar-deep": { "apiKey": "keychain:perplexity" }
+    },
+    "defaults": {
+      "maxCostUsd": 0.5,
+      "maxEstimatedCostUsd": 0.3,
+      "mode": "mixed"
+    },
+    "groups": { "custom:deep": ["parallel-research", "valyu-research"] }
+  },
+  "expected": {
+    "version": 3,
+    "sources": {
+      "parallel": { "key": "env:PARALLEL_API_KEY", "processor": "ultra" },
+      "valyu": {
+        "key": "env:VALYU_API_KEY",
+        "mode": "heavy",
+        "output": ["markdown"]
+      },
+      "grok": { "key": "env:XAI_API_KEY", "search": "both" },
+      "perplexity": { "key": "keychain:perplexity", "deep_effort": "high" }
+    },
+    "groups": { "deep": ["parallel", "valyu"] },
+    "max_cost": "0.3"
+  }
+}

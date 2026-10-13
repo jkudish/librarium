@@ -7,6 +7,6 @@
     "sourceMap": false,
     "types": ["node"]
   },
-  "files": ["src/node-entry.ts"],
+  "files": ["src/public-entry.ts", "src/run-node-entry.ts"],
   "include": []
 }

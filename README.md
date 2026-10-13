@@ -1,284 +1,167 @@
-<p align="center">
-  <img src="art/gh-og.png" alt="Librarium" width="100%" />
-</p>
+# Librarium
 
-<h1 align="center">Librarium</h1>
+One research interface, many sources, durable Runs. Ask a question, choose
+`quick` or `deep`, optionally narrow the sources, and set a spending cap.
+Answers, citations, provenance and honest cost data stay together in a Run.
 
-<p align="center"><strong>Evidence-aware, multi-provider research for people and agents.</strong></p>
+## Install and set up
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/librarium"><img src="https://img.shields.io/npm/v/librarium?color=cb3837&label=npm" alt="npm version" /></a>
-  <a href="https://github.com/jkudish/librarium/actions/workflows/ci.yml"><img src="https://github.com/jkudish/librarium/actions/workflows/ci.yml/badge.svg" alt="CI status" /></a>
-  <a href="https://github.com/jkudish/librarium/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/librarium?color=blue" alt="License: MIT" /></a>
-  <img src="https://img.shields.io/node/v/librarium?color=5fa04e" alt="Node >= 22.12" />
-</p>
-
-Librarium sends a research query to explicit provider profiles and keeps the
-results, citations, cost data, and provenance together. It supports search,
-grounded answers, consumer-surface observations, and longer research jobs.
-Agreement is not proof. The output records what happened so callers can inspect
-the evidence.
-
-The CLI and MCP server are complete applications. The package also exposes
-composable library boundaries for custom runtimes.
-
-## Install
-
-Install with npm (requires Node.js **22.12 or newer**):
+Requires **Node.js 22.12 or newer**. This branch is the unreleased JS 2.0
+candidate; npm's current published version may still be 1.x.
 
 ```bash
 npm install -g librarium
-```
-
-Or install the standalone binary, which bundles its own runtime:
-
-```bash
-# Homebrew (macOS and Linux)
-brew install jkudish/tap/librarium
-
-# Installer (macOS and Linux, x64 and arm64)
-curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh
-```
-
-Then check the version:
-
-```bash
 librarium --version
+librarium setup
+librarium setup --check
 ```
 
-The installer downloads the latest GitHub release, verifies its SHA-256
-against the release's `SHA256SUMS`, and installs to `/usr/local/bin` (it uses
-`sudo` when that directory is not writable). Set `LIBRARIUM_INSTALL_DIR` to
-install elsewhere. On Windows, download `librarium-windows-x64.exe` from
-[GitHub releases](https://github.com/jkudish/librarium/releases) or use npm.
-Standalone binaries skip npm custom-provider modules; use the npm package if
-you need them.
+Keys can be literal values or `env:EXA_API_KEY` references. Environment keys
+also work without a config file. Never paste credentials into a research
+question. `setup --check` is offline. Live requests can incur provider charges.
 
-`librarium upgrade` updates npm and Homebrew installs. For an installer
-install, run the installer again.
+## Research and resume
 
-## Run your first query
+The research commands are `research`, `show`, `summarize`, `sources`, `groups`,
+`setup` and `mcp`.
 
 ```bash
-librarium init
-librarium doctor
-
-# Offline preview. No provider request.
-librarium plan "What changed in PostgreSQL 17?"
-
-# May make paid provider requests.
-librarium run "What changed in PostgreSQL 17?" --group quick
+librarium research "Compare managed PostgreSQL services" --dry-run --json
+librarium research "Compare managed PostgreSQL services"
+librarium research "Compare managed PostgreSQL services" --deep --only exa,openai --max-cost 1
+librarium research "Compare managed PostgreSQL services" --deep --no-wait
+librarium show run_01JAB2C3D4E5F6G7H8J9K0M1N2 --wait --json
+librarium show --source exa
+librarium summarize --verify --source openai
 ```
 
-`init` walks you through choosing providers and where to store each key: the
-OS keychain (macOS), a shell environment variable, or the config file. If your
-provider keys are already exported as environment variables, run
-`librarium init --auto` instead. It enables every provider whose key it finds,
-except opt-in providers such as the LLM-tier and Parallel providers, which
-`init --enable <ids>` turns on.
+Depth selects the source variant, not its execution type. `quick` usually
+runs inline; collectors can use durable tasks even at quick depth. `deep`
+uses durable tasks; `show`, library `get`, and MCP `get_run` resume the saved
+handles rather than submit again. Ctrl-C
+detaches and prints a `show` command. `show` and `summarize` use the latest Run
+when no id is supplied. Old 1.x run directories are not readable by `show`.
+CLI `--no-wait` requires `--deep` except for a dry run, because quick Runs
+may include inline calls that cannot durably detach from their process.
 
-With `SEARCHAPI_API_KEY` exported, `init --auto` also enables the SearchAPI
-consumer surfaces, so `--group visibility` works without further setup. They
-run only when you select `visibility`, `all`, a custom group that names them, or
-a surface profile; the default `quick` workflow never includes them.
+The default source set is every set-up research source, **never engines**.
+`--only` and `--skip` accept comma-separated source, engine, or saved group
+names. Missing credentials for an explicitly named source are an error.
 
-A run names each group member it skips and how to enable it.
+## Sources and engines
 
-`doctor` checks configuration and credential presence offline. Only
-`doctor --live` loads trusted custom code, makes provider requests, and may
-incur charges.
+`librarium sources --json` reports configuration, quick/deep availability,
+source options, and bounded price hints. The shared catalog contains **16
+research sources** and **5 engines**, in budget-admission order:
 
-`plan` runs canonical compilation, local credential-reference resolution, and
-budget admission. It stops before adapter initialization and makes no provider
-requests. “Plan ready” is not authentication, availability, a frozen executable
-plan, a price quote, or a final-bill guarantee.
+| Sources | Sources | Engines (named only) |
+| --- | --- | --- |
+| `brave`, `claude`, `exa`, `firecrawl` | `gemini`, `google`, `grok`, `jina` | `chatgpt`, `gemini-app` |
+| `kagi`, `openai`, `openrouter`, `parallel` | `perplexity`, `tavily`, `valyu`, `you` | `google-ai-mode`, `google-ai-overview`, `copilot` |
 
-New requests default to `quick` in `sync` mode. `run --json` reserves stdout for
-JSON and sends progress to stderr. Use `answer --verify` for evidence-bounded
-answer synthesis; incomplete verification does not turn a model answer into a
-verified claim.
+Engines describe what consumer products showed, not what their official
+research APIs answered. Their results have `observation: "surface"`. The
+collector is configuration, not part of the engine name. Availability differs
+by language and collector; inspect `sources` before selecting a variant.
 
-## Catalog
-
-The v2 catalog has **33 built-in providers** and **40 implemented public
-profiles**. Selection and provenance use `provider_id/profile_id`.
-
-| Provider family | Public profiles |
-| --- | --- |
-| Brave | `brave-search/search`, `brave-answers/grounded` |
-| Claude | `claude/chat` |
-| Exa | `exa/search`, `exa/research` |
-| Firecrawl | `firecrawl-search/search` |
-| Gemini | `gemini-grounded/grounded`, `gemini-deep/research`, `gemini-chat/chat` |
-| Grok | `grok/web`, `grok-x-only/x`, `grok-combined/combined` |
-| Jina | `jina-search/search` |
-| Kagi | `kagi-fastgpt/grounded` |
-| OpenAI | `openai-research/research`, `openai-chat/chat` |
-| OpenRouter | `openrouter/grounded`, `openrouter/chat` |
-| Parallel | `parallel/search`, `parallel/turbo`, `parallel/research` |
-| Perplexity | `perplexity-search/search`, `perplexity-sonar-pro/grounded`, `perplexity-deep-research/research`, `perplexity-sonar-deep/research` |
-| SearchAPI | `searchapi/search`, `searchapi-chatgpt/surface`, `searchapi-gemini/surface`, `searchapi-google-ai-mode/surface`, `searchapi-bing-copilot/surface`, `searchapi-google-ai-overview/surface` |
-| SerpAPI | `serpapi/search` |
-| SerpBase | `serpbase/search`, `serpbase/news` |
-| Tavily | `tavily/search` |
-| Valyu | `valyu/search`, `valyu/research` |
-| You.com | `you-research/grounded`, `you-research/research`, `you-answer/grounded` |
-
-Built-in workflows:
-
-| Workflow | Selection |
-| --- | --- |
-| `quick` | Curated low-latency search and grounded answers |
-| `deep` | Derived from implemented research-report profiles |
-| `visibility` | Five collected consumer surfaces and three API baselines |
-| `all` | Derived from every selectable profile allowed by workflow policy |
-
-Processors, modes, prices, default deadlines, and request options for
-`parallel/research` and `valyu/research` are listed in
-[research options](docs/research-options.md).
-
-Custom groups must be stored and selected as `custom:<name>`. `quick` includes
-raw `exa/search`. Explicit provider selection takes precedence over a group and
-does not silently widen to all enabled providers.
-
-## Evidence and custody
-
-- Direct APIs are `api_output`. SearchAPI consumer profiles are
-  `surface_snapshot` records collected by SearchAPI. They are
-  not official OpenAI, Google, or Microsoft APIs.
-- The five SearchAPI surfaces share one collector. Agreement is
-  correlated visibility evidence, not five independent confirmations.
-- Citations are untrusted source references, not guarantees that a URL is safe,
-  authoritative, reachable, or supportive of a nearby claim.
-- `background/durable` work keeps provider-scoped handles for later polling and
-  retrieval. `background/process-local` work needs the owning process state.
-- Remote cancellation is not universal. Preserve run directories for recovery.
-- A missing estimate, missing reported cost, API unit, or token price is unknown,
-  never a zero-cost guarantee.
-
-Every provider call can send the query and selected options upstream. Retention,
-billing, and account behavior belong to that provider. SearchAPI zero retention
-is sent only when configured and fails closed if the account rejects it.
-
-The normal tests and demo make no provider requests. Paid validation uses a
-separate live-validation approval protocol with a frozen target and explicit
-authorization.
-
-## CLI reference
+Groups are user-saved source lists. There are no built-in groups.
 
 ```bash
-librarium run <query> [options]
-librarium plan <query> [--answer] [--verify] [selection options]
-librarium answer <query> [run options] [--verify]
+librarium groups add visibility chatgpt gemini-app google-ai-mode
+librarium research "How do AI products describe Acme?" --only visibility
+librarium groups remove visibility
 ```
 
-| Command | Options |
-| --- | --- |
-| `run` | `--providers`, `--group`, `--mode`, `--output`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--yes`, `--no-fallback`, `--json`, `--refine`, `--html`, `--jsonl`, `--open` |
-| `plan` | `--providers`, `--group`, `--mode`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--no-fallback`, `--refine`, `--answer`, `--verify`, `--json` |
-| `answer` | `--providers`, `--group`, `--mode`, `--output`, `--parallel`, `--timeout`, `--max-cost`, `--max-estimated-cost`, `--yes`, `--no-fallback`, `--json`, `--refine`, `--verify`, `--html`, `--jsonl`, `--open` |
-| `live-validation` | `--targets`, `--approval`, `--confirm`, `--paid`, `--continue`, `--candidate-root`, `--artifact-root`, `--artifact`, `--fixture` |
-| `status` | `--wait`, `--retrieve`, `--json` |
-| `usage` | `--days`, `--json`, `--output` |
-| `browse` | `--output` |
-| `html` | `--open` |
-| `jsonl` | no explicit option |
-| `refine` | `--json` |
-| `completions` | no explicit option |
-| `ls` | `--json` |
-| `groups` | `--json` |
-| `init` | `--auto`, `--enable` |
-| `doctor` | `--json`, `--live` |
-| `config` | `--json`, `--global`, `--menu` |
-| `config migrate` | `--from`, `--project`, `--output`, `--force` |
-| `cleanup` | `--days`, `--all`, `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
-| `clear` | `--interactive`, `--dry-run`, `--yes`, `--output`, `--json` |
-| `upgrade` | `--check`, `--dry-run`, `--force`, `--target` |
-| `install-skill` | `--force`, `--dry-run` |
-| `mcp` | no explicit option |
+## JavaScript
 
-`async` admits only durable background profiles. Historical `mixed` mode
-migrates to `async`; it does not detach inline or process-local work. Use
-`status --wait --retrieve` to reconcile saved durable work.
+```ts
+import { createLibrarium } from 'librarium';
 
-Hard budget flags require bounded network-free estimates for every primary and
-fallback reserve. In-flight calls may still finish above a limit. Known failure
-costs count. Saved paid-attempt state and the original deadline carry into
-recovery; deleting a ledger does not reset a budget.
+const librarium = createLibrarium(); // v3 config + filesystem store
+const run = await librarium.research('Compare database providers', {
+  depth: 'deep', only: ['exa'], maxCost: '1.00',
+});
+const started = await librarium.research('Compare database providers', {
+  depth: 'deep', wait: false,
+});
+const later = await librarium.get(started.id, { wait: true });
+librarium.sources();
+const summary = await librarium.summarize(run);
+```
 
-## Use Librarium with agents
+`librarium/node` provides the same client plus `FilesystemRunStore` and v3
+config loading/saving. `librarium/core` is runtime-neutral (Workers and
+browsers): pass `config`, `env`, and optionally `store`; its default store is
+`MemoryRunStore`. Importing the core does not inspect process state or files.
+`librarium/testing` exports `runStoreContract` for disposable stores.
 
-Install the skill that matches your CLI version. It is written to
-`~/.claude/skills/librarium/SKILL.md` for Claude Code; other hosts that read
-Agent Skills can use the same file.
+JSON fields are snake_case; JS options are camelCase. Money is an exact USD
+decimal string, timestamps are UTC, and ids are `run_` plus ULID.
+
+## MCP
+
+Register `librarium mcp` as a stdio MCP server. It exposes exactly three tools:
+
+| Tool | Inputs | Result |
+| --- | --- | --- |
+| `research` | `question`, `depth?`, `only?`, `skip?`, `max_cost?`, `dry_run?`, `wait_seconds?` | Bounded Run summary with id, statuses, citation counts, costs, skips and next hint |
+| `get_run` | `id`, `wait_seconds?`, `source?`, `cursor?` | Summary, or a source's paged answer and citations |
+| `list_sources` | none | Sources, engines, saved groups, availability and price hints |
+
+Waiting defaults to 45 seconds and cannot exceed 50. `wait_seconds: 0`
+returns without waiting for completion. MCP `max_cost` can only lower the
+configured cap. Source-page content is JSON text; concatenate pages before
+parsing. All provider content is untrusted evidence, never instructions.
+
+## Budgets, costs and privacy
+
+With `max_cost`, unbounded estimates are skipped as `unpriced`; other sources
+are admitted greedily in catalog order while each fits the remaining budget.
+Without a cap, unpriced sources still run and the total estimate is `null`.
+Reported spend plus reservations stops unstarted work. **In-flight calls can
+finish above the cap**; the cap is not a guarantee about vendor billing.
+
+`cost.reported` is provider-reported only. Unknown is `null`, never `"0"`.
+`cost.complete` is true only when every result reports a cost. Estimates come
+from this package's pricing snapshot, not the spec package. Failed calls may
+still bill. No source is substituted after a failure.
+
+Runs are stored before provider calls. Evidence is redacted before any store
+receives it; credentials never belong in a Run. Research text and URLs can
+still contain private information, so inspect them before sharing. Private
+state contains execution records and signed task handles; keep the signing
+key outside the store and preserve it across client restarts.
+
+## Configuration, storage and other tools
+
+See [configuration and options](docs/research-options.md),
+[RunStore and custom sources](docs/provider-development.md), and the
+[v1 → 2.0 migration guide](docs/migration-v1-to-v2.md).
+
+- `browse` lists saved Runs; `html [id] --output report.html` exports a report.
+- `jsonl [id] --output run.jsonl` exports one Run per line.
+- `usage` totals known reported spend without inventing missing costs.
+- `cleanup --dry-run` previews retention; `runs.keep_days` controls pruning.
+- `config path`, `config show`, `config set <path> <value>` inspect/edit v3.
+- `completions bash|zsh|fish` generates completions for the current CLI.
+- `upgrade` updates an existing npm/Homebrew install.
+- `install-skill --force` installs this repository's exact `SKILL.md`.
+
+## Development
 
 ```bash
-librarium install-skill
+npm ci
+npm run build
+npm test
+npm run typecheck
+npm run lint
+npm run test:workers
+npm run test:integration
+npm run test:pty
+npm run test:declarations
 ```
 
-To give the agent tools, register `librarium mcp` as a stdio MCP server. Every
-host runs the same command:
-
-```bash
-claude mcp add --scope user librarium -- librarium mcp   # Claude Code
-codex mcp add librarium -- librarium mcp                 # Codex
-amp mcp add librarium -- librarium mcp                   # Amp
-```
-
-For Cursor, add the server to `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a
-project):
-
-```json
-{
-  "mcpServers": {
-    "librarium": {
-      "command": "librarium",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-For any other host, register a stdio server named `librarium` with command
-`librarium` and arguments `["mcp"]`. If the host cannot find `librarium`, use
-the absolute path that `command -v librarium` prints.
-
-The MCP server reads the same configuration as the CLI. Keys saved in the
-config file or the macOS keychain work in every host. Keys stored as
-environment-variable references, which `init --auto` writes, must be present in
-the server's environment. Claude Code passes your shell environment. Codex
-passes only a small default set, so list the variables in `env_vars` under
-`[mcp_servers.librarium]` in `~/.codex/config.toml`. In Cursor, add an `env`
-entry such as `"EXA_API_KEY": "${env:EXA_API_KEY}"`. Other hosts have their own
-`env` setting, such as `amp mcp add --env`.
-
-The MCP tools are `research`, `get_results`, `check_async`, `list_providers`,
-and `list_groups`. Research returns a bounded index. Read complete evidence and
-citations with `get_results` pages instead of assuming the first response
-contains the whole result.
-
-## Library boundaries
-
-| Import | Ownership |
-| --- | --- |
-| `librarium` | Worker-safe schemas, catalog, and pure contract utilities |
-| `librarium/core` | Injected planning, coordination, and execution ports |
-| `librarium/node` | Node configuration, credentials, trusted custom providers, and artifact services |
-
-Importing `librarium` does not read the host, load adapters, access credentials,
-start the CLI, or write files. Core callers supply concrete adapters and
-runtime dependencies. Custom providers are executable code; trust them as code,
-not as data.
-
-The language-neutral terminal interchange lives in
-[`contracts/v1`](contracts/README.md). It does not make the JavaScript and PHP
-runtimes interchangeable.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks. Provider authors
-should also read [provider development](docs/provider-development.md).
-
-## License
-
-Librarium is open-source software licensed under the [MIT license](LICENSE).
+Tests use offline transports and the pinned `librarium-spec` selection, Run,
+RunStore and filesystem fixtures. Do not use live provider calls as a build
+check. Release certification and publication require separate authorization;
+see [release recovery](docs/release-candidate-recovery.md).

@@ -308,6 +308,47 @@ export function parseLibrariumRun(runDirectory) {
   const manifest = readJson(
     resolveArtifactReference(runDir, 'run.json', 'run manifest'),
   );
+  if (manifest.spec === 'librarium.run/1') {
+    if (
+      !['done', 'partial', 'failed'].includes(manifest.status) ||
+      !Array.isArray(manifest.results)
+    )
+      throw new Error('Run has not reached a terminal response');
+    const providerOutputs = manifest.results.map((result) => ({
+      provider: result.source,
+      profile: `${result.provenance.provider}/${result.provenance.variant}`,
+      tier:
+        manifest.depth === 'deep'
+          ? 'deep-research'
+          : result.answer === null
+            ? 'raw-search'
+            : 'ai-grounded',
+      status: result.status === 'done' ? 'success' : 'error',
+      durationMs: result.duration_ms,
+      error: result.error?.message,
+      model: result.provenance.model,
+      content: result.answer ?? '',
+      citations: result.citations,
+      usage:
+        result.cost.reported === null
+          ? null
+          : {
+              costUsd: Number(result.cost.reported),
+              costUsdDecimal: result.cost.reported,
+            },
+      metering: null,
+      rawFiles: {
+        output: `answers/${result.source}.md`,
+        meta: `evidence/${result.source}.json`,
+      },
+    }));
+    return {
+      runDir,
+      manifest,
+      providerOutputs,
+      sources: canonicalSources(providerOutputs),
+    };
+  }
   if (manifest.schemaVersion === 3) {
     return parseCanonicalRun(runDir, manifest);
   }

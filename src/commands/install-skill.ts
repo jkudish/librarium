@@ -33,7 +33,7 @@ function isCompleteLibrariumSkill(content: string): boolean {
   if (!frontmatter?.[1].match(/^description:\s*\S.+$/m)) return false;
   if (!/^name: librarium$/m.test(frontmatter[1])) return false;
   const body = normalized.slice(frontmatter[0].length);
-  return /^# Librarium\b/m.test(body) && /\blibrarium run\b/.test(body);
+  return /^# Librarium\b/m.test(body) && /\blibrarium research\b/.test(body);
 }
 
 function assertSafeDestination(skillDir: string, skillFile: string): void {

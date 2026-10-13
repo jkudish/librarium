@@ -1,89 +1,96 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FALLBACK_PATH, HAPPY_PATH } from '../fixtures/config/mock-config.js';
-import {
-  type PtySession,
-  ptyAvailable,
-  skipReason,
-  spawnCli,
-} from './harness.js';
+import { KEY, ptyAvailable, spawnCli } from './harness.js';
 
-const SHOW_CURSOR = '[?25h';
-const HIDE_CURSOR = '[?25l';
-
-const describeMaybe = ptyAvailable() ? describe : describe.skip;
-
-describeMaybe(
-  `run (live table) [${ptyAvailable() ? 'pty' : skipReason()}]`,
-  () => {
-    let session: (PtySession & { dispose: () => void }) | null = null;
-
-    afterEach(() => {
-      session?.kill();
-      session?.dispose();
-      session = null;
+const transport = resolve(import.meta.dirname, '../fixtures/run-transport.mjs');
+const env = { KAGI_API_KEY: 'dummy', NODE_OPTIONS: `--import=${transport}` };
+const configV3 = {
+  version: 3 as const,
+  sources: { kagi: { key: 'env:KAGI_API_KEY' } },
+  runs: { path: './runs' },
+};
+const describePty = ptyAvailable() ? describe : describe.skip;
+describePty('Run terminal surface (offline)', () => {
+  let session: ReturnType<typeof spawnCli> | undefined;
+  afterEach(() => {
+    session?.kill();
+    session?.dispose();
+    session = undefined;
+  });
+  it('shows live progress and a completed quick Run without leaking credentials', async () => {
+    session = spawnCli({
+      args: ['research', 'Australia', '--only', 'kagi'],
+      configV3,
+      env: { ...env, FIXTURE_DELAY: '600' },
     });
-
-    it('renders all rows, resolves to ✓, prints summary, restores cursor, exits 0', async () => {
-      session = spawnCli({
-        args: ['run', 'pty smoke happy path', '-g', 'smoke'],
-        config: HAPPY_PATH,
-      });
-
-      const { code } = await session.waitForExit();
-      const out = session.output();
-      const plain = session.plain();
-
-      // Every provider row rendered and resolved to success.
-      expect(plain).toContain('mock-grounded');
-      expect(plain).toContain('mock-search');
-      expect(plain).toContain('mock-second');
-      expect(plain).toContain('✓');
-      // No failures in the happy path.
-      expect(plain).not.toContain('✗');
-
-      // Summary block landmarks.
-      expect(plain).toMatch(/3 succeeded, 0 failed, 0 async pending/);
-      expect(plain).toContain('unique sources after dedupe');
-
-      // Cursor restored: the final emitted control sequence shows the cursor
-      // (live-table writes SHOW_CURSOR on stop), and the run does not end in a
-      // hidden-cursor state.
-      expect(out).toContain(SHOW_CURSOR);
-      // Robust invariant: the last cursor state change must be a show, not a
-      // hide (exact trailing bytes depend on exit-hook ordering).
-      expect(out.lastIndexOf(SHOW_CURSOR)).toBeGreaterThan(
-        out.lastIndexOf(HIDE_CURSOR),
-      );
-
-      expect(code).toBe(0);
+    await session.waitForText('kagi: running');
+    expect((await session.waitForExit()).code).toBe(0);
+    expect(session.plain()).toContain('kagi: done');
+    expect(session.plain()).toContain('reported USD unknown');
+    expect(session.plain()).not.toContain('dummy');
+  });
+  it('Ctrl-C detaches and show marks interrupted inline work failed without resubmission', async () => {
+    session = spawnCli({
+      args: ['research', 'interrupt me', '--only', 'kagi'],
+      configV3,
+      env: { ...env, FIXTURE_DELAY: '10000' },
     });
-
-    it('shows ✗ row, ↳ fallback notice, and a recovered fallback row', async () => {
-      session = spawnCli({
-        args: ['run', 'pty smoke fallback', '-g', 'smoke'],
-        config: FALLBACK_PATH,
-      });
-
-      const { code } = await session.waitForExit();
-      const plain = session.plain();
-
-      // The failing primary surfaces an ✗ row with its error.
-      expect(plain).toContain('mock-flaky');
-      expect(plain).toContain('✗');
-      expect(plain).toContain('The provider returned an error.');
-
-      // The fallback notice and the recovered fallback row both appear.
-      expect(plain).toContain('↳ falling back to mock-backup');
-      expect(plain).toContain('mock-backup');
-
-      // The healthy primary still succeeds.
-      expect(plain).toContain('mock-ok');
-      expect(plain).toContain('✓');
-
-      // A recovered primary means the run's intent was satisfied (exit 0),
-      // and the cursor is restored.
-      expect(session.output()).toContain(SHOW_CURSOR);
-      expect(code).toBe(0);
+    await session.waitForText('kagi: running');
+    session.sigint();
+    expect((await session.waitForExit()).code).toBe(130);
+    const id = session
+      .plain()
+      .match(/Resume: librarium show (run_[A-Z0-9]+)/)?.[1];
+    expect(id).toBeDefined();
+    const home = session.home;
+    const next = spawnCli({
+      args: ['show', id as string, '--json'],
+      cwd: home,
+      env: { ...env, HOME: home },
     });
-  },
-);
+    try {
+      expect((await next.waitForExit()).code).toBe(0);
+      expect(next.plain()).toContain('interrupted');
+      expect(
+        JSON.parse(readFileSync(join(home, 'calls.json'), 'utf8')),
+      ).toHaveLength(1);
+      expect(readdirSync(join(home, 'runs'))).toContain(id);
+    } finally {
+      next.kill();
+      next.dispose();
+    }
+  });
+  it('setup masks its credential prompt and writes validated config v3', async () => {
+    session = spawnCli({
+      args: ['setup'],
+      env: {
+        NODE_OPTIONS: `--import=${resolve(import.meta.dirname, '../fixtures/network-denied.mjs')}`,
+      },
+    });
+    await session.waitForText('Source to configure');
+    session.write(KEY.ENTER);
+    await session.waitForText('Credential reference');
+    session.write(`env:BRAVE_API_KEY${KEY.ENTER}`);
+    await session.waitForText('Source options as JSON');
+    session.write(KEY.ENTER);
+    await session.waitForText('Default maximum USD');
+    session.write(`1.25${KEY.ENTER}`);
+    await session.waitForText('Summary source');
+    session.write(KEY.ENTER);
+    expect((await session.waitForExit()).code).toBe(0);
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(session.home, '.config/librarium/config.json'),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      version: 3,
+      sources: { brave: { key: 'env:BRAVE_API_KEY' } },
+      max_cost: '1.25',
+      summarize: { source: 'openai' },
+    });
+  });
+});
