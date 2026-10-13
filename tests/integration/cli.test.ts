@@ -119,6 +119,10 @@ describe('built Run CLI, offline only', () => {
     const result = run(
       ['research', 'Australia', '--only', 'kagi', '--json'],
       'run-transport',
+      {
+        FIXTURE_ANSWER:
+          'Canberra.\n\n## Findings\n\n<script>window.evidenceRan = true</script>\n\n[unsafe](javascript:alert(1))',
+      },
     );
     expect(result.status, result.stderr).toBe(0);
     const doc = RunSchema.parse(JSON.parse(result.stdout));
@@ -137,11 +141,6 @@ describe('built Run CLI, offline only', () => {
     const output = join(home, 'report.html');
     expect(run(['html', doc.id, '-o', output]).status).toBe(0);
     expect(readFileSync(output, 'utf8')).toContain('Canberra');
-    const statePath = join(runs, doc.id, 'run.json');
-    doc.results[0].answer =
-      '## Findings\n\n<script>window.evidenceRan = true</script>\n\n[unsafe](javascript:alert(1))';
-    writeFileSync(statePath, JSON.stringify(doc));
-    expect(run(['html', doc.id, '-o', output]).status).toBe(0);
     const html = readFileSync(output, 'utf8');
     expect(html).toContain('<h2>Findings</h2>');
     expect(html).toContain('&lt;script&gt;');

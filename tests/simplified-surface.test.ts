@@ -171,6 +171,15 @@ describe('shared simplified contract', () => {
     );
     expect(doc).toEqual(json('fixtures/run-store/stored-run.json'));
     expect(ajv.validate('stored-run.schema.json', doc)).toBe(true);
+    const store = new FilesystemRunStore(incoming);
+    // Other runtimes own their private state, including any signature format.
+    await store.save(
+      { ...doc!, state: { signature: 'foreign-runtime-signature' } },
+      doc!.version,
+    );
+    await expect(createLibrarium({ store }).get(doc!.run.id)).resolves.toEqual(
+      doc!.run,
+    );
     writeFileSync(
       join(incoming, doc?.run.id as string, 'state.json'),
       JSON.stringify({ state: {} }),
@@ -584,20 +593,34 @@ describe('Run lifecycle without network', () => {
       nested: { client_secret_payload: '[REDACTED]' },
     });
   });
-  it.each(['answer', 'error', 'base64 credential'])(
+  it.each(['answer', 'error', 'base64 credential', 'base64url credential'])(
     'redacts encoded credentials and unsafe URLs from public %s and every store write',
     async (kind) => {
-      const rawCredential = 'private:key /+value';
+      const rawCredential = "private:key /+value!'()*\u083e\u083f";
       const credential =
         kind === 'base64 credential'
           ? Buffer.from(rawCredential).toString('base64')
-          : rawCredential;
+          : kind === 'base64url credential'
+            ? Buffer.from(rawCredential).toString('base64url')
+            : rawCredential;
+      const uri = encodeURIComponent(rawCredential);
+      const strictUri = uri.replace(
+        /[!'()*]/g,
+        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+      );
+      const base64 = Buffer.from(rawCredential).toString('base64');
       const forms = [
         rawCredential,
-        encodeURIComponent(rawCredential),
+        uri,
+        uri.replace(/%[A-F0-9]{2}/g, (encoded) => encoded.toLowerCase()),
+        strictUri,
+        strictUri.replace(/%[A-F0-9]{2}/g, (encoded) => encoded.toLowerCase()),
         new URLSearchParams({ key: rawCredential }).toString().slice(4),
-        Buffer.from(rawCredential).toString('base64'),
-        ...(kind === 'base64 credential' ? rawCredential.split(':') : []),
+        base64,
+        base64.replace(/=+$/, ''),
+        base64.replace(/\+/g, '-').replace(/\//g, '_'),
+        Buffer.from(rawCredential).toString('base64url'),
+        ...(kind.startsWith('base64') ? rawCredential.split(':') : []),
       ];
       const unsafe = [
         'https://user:unknown-password@example.com/doc',
@@ -651,6 +674,250 @@ describe('Run lifecycle without network', () => {
         expect(
           run.results[0].citations.map((citation) => citation.url),
         ).toEqual([benign]);
+    },
+  );
+  it.each(['memory', 'filesystem'])(
+    '%s rejects altered resume metadata before IO and retains legitimate restart',
+    async (kind) => {
+      const store =
+        kind === 'memory'
+          ? new MemoryRunStore()
+          : new FilesystemRunStore(temp());
+      const handleKey = new Uint8Array(32).fill(8);
+      let io = 0;
+      let submits = 0;
+      let complete = false;
+      const other: Provider = {
+        id: 'other-provider',
+        displayName: 'Other',
+        tier: 'ai-grounded',
+        execution: 'background',
+        envVar: '',
+        requiresApiKey: false,
+        async execute() {
+          throw new Error('Use durable lifecycle');
+        },
+        async submit() {
+          submits++;
+          io++;
+          return {
+            provider: this.id,
+            taskId: 'other-one',
+            query: 'q',
+            status: 'running',
+            submittedAt: Date.now(),
+          };
+        },
+        async poll() {
+          io++;
+          return { status: complete ? 'completed' : 'running' };
+        },
+        async retrieve() {
+          io++;
+          return {
+            provider: this.id,
+            tier: this.tier,
+            content: 'Other findings',
+            citations: [],
+            durationMs: 1,
+          };
+        },
+      };
+      const httpClient: HttpClient = async (_url, options) => {
+        io++;
+        if (options?.method === 'POST') submits++;
+        expect(options?.headers?.['x-api-key']).toBe('dummy-exa-secret');
+        return response({
+          id: 'agent_one',
+          object: 'agent_run',
+          status: complete ? 'completed' : 'running',
+          createdAt: new Date().toISOString(),
+          output: {
+            text: complete ? 'Exa findings' : '',
+            structured: null,
+            grounding: [],
+          },
+          usage: {},
+        }) as never;
+      };
+      const settings = {
+        handleKey,
+        env: {
+          EXA_API_KEY: 'dummy-exa-secret',
+          OPENAI_API_KEY: 'dummy-openai-secret',
+        },
+        httpClient,
+        customSources: [{ id: 'other', deep: other }],
+      };
+      const first = createLibrarium({ ...settings, store });
+      const initial = await first.research('q', {
+        depth: 'deep',
+        only: ['exa', 'other'],
+        wait: false,
+      });
+      await expect
+        .poll(async () =>
+          Object.keys(
+            (await store.get(initial.id))?.state.handles ?? {},
+          ).sort(),
+        )
+        .toEqual(['exa', 'other']);
+      const original = (await store.get(initial.id))!;
+      const mutations: ((doc: StoredRun) => void)[] = [
+        (doc) => {
+          doc.run.results[0].source = 'openai';
+        },
+        (doc) => {
+          doc.run.depth = 'quick';
+        },
+        (doc) => {
+          doc.run.id = 'run_01JAB2C3D4E5F6G7H8J9K0M1N4';
+        },
+        (doc) => {
+          doc.run.results.reverse();
+        },
+        (doc) => {
+          doc.run.results[0].provenance.provider = 'openai';
+        },
+        (doc) => {
+          doc.run.status = 'done';
+          doc.run.finished_at = new Date().toISOString();
+        },
+      ];
+      for (const mutate of mutations) {
+        const doc = structuredClone(original);
+        mutate(doc);
+        const current = await store.get(doc.run.id);
+        await store.save(doc, current?.version ?? null);
+        const before = io;
+        await expect(
+          createLibrarium({ ...settings, store }).get(doc.run.id),
+        ).rejects.toThrow('signature');
+        expect(io).toBe(before);
+        if (doc.run.id !== original.run.id) await store.delete(doc.run.id);
+        else
+          await store.save(
+            original,
+            (await store.get(original.run.id))!.version,
+          );
+      }
+      const before = io;
+      await expect(
+        createLibrarium({
+          ...settings,
+          store: {
+            save: store.save.bind(store),
+            list: store.list.bind(store),
+            delete: store.delete.bind(store),
+            get: async () => original,
+          },
+        }).get('run_01JAB2C3D4E5F6G7H8J9K0M1N4'),
+      ).rejects.toThrow('signature');
+      expect(io).toBe(before);
+      complete = true;
+      const restarted = await createLibrarium({
+        ...settings,
+        store: {
+          save: store.save.bind(store),
+          list: store.list.bind(store),
+          delete: store.delete.bind(store),
+          async get(id) {
+            const doc = await store.get(id);
+            return (
+              doc && {
+                ...doc,
+                run: Object.fromEntries(
+                  Object.entries(doc.run).reverse(),
+                ) as StoredRun['run'],
+                state: Object.fromEntries(Object.entries(doc.state).reverse()),
+              }
+            );
+          },
+        },
+      }).get(initial.id, { wait: true });
+      expect(restarted?.status).toBe('done');
+      expect(restarted?.results.map((result) => result.answer)).toEqual([
+        'Exa findings',
+        'Other findings',
+      ]);
+      expect(submits).toBe(2);
+    },
+  );
+  it.each(['memory', 'filesystem'])(
+    '%s quick durable sources finish and resume accepted handles after their owner dies',
+    async (kind) => {
+      const store =
+        kind === 'memory'
+          ? new MemoryRunStore()
+          : new FilesystemRunStore(temp());
+      const handleKey = new Uint8Array(32).fill(6);
+      let submits = 0;
+      let polls = 0;
+      let snapshot: StoredRun | null = null;
+      const provider: Provider = {
+        id: 'quick-durable-provider',
+        displayName: 'Quick durable',
+        tier: 'ai-grounded',
+        execution: 'background',
+        envVar: '',
+        requiresApiKey: false,
+        async execute() {
+          throw new Error('Use durable lifecycle');
+        },
+        async submit() {
+          submits++;
+          return {
+            provider: this.id,
+            taskId: 'quick-one',
+            query: 'q',
+            status: 'running',
+            submittedAt: Date.now(),
+          };
+        },
+        async poll(handle) {
+          expect(handle.taskId).toBe('quick-one');
+          polls++;
+          if (polls === 2)
+            snapshot = await store.get((await store.list())[0].id);
+          return { status: polls === 1 ? 'running' : 'completed' };
+        },
+        async retrieve(handle) {
+          expect(handle.taskId).toBe('quick-one');
+          return {
+            provider: this.id,
+            tier: this.tier,
+            content: 'Quick durable findings',
+            citations: [],
+            durationMs: 1,
+          };
+        },
+      };
+      const customSources = [{ id: 'quick-durable', quick: provider }];
+      const first = createLibrarium({
+        store,
+        handleKey,
+        customSources,
+        owner: { id: 'old-owner', alive: () => true },
+      });
+      const run = await first.research('q');
+      expect(run.status).toBe('done');
+      expect(run.results[0].answer).toBe('Quick durable findings');
+      expect(snapshot).not.toBeNull();
+      const recovered =
+        kind === 'memory'
+          ? new MemoryRunStore()
+          : new FilesystemRunStore(temp());
+      await recovered.save(snapshot!, null);
+      const reader = createLibrarium({
+        store: recovered,
+        handleKey,
+        customSources,
+        owner: { id: 'new-owner', alive: (id) => id !== 'old-owner' },
+      });
+      const resumed = await reader.get(run.id, { wait: true });
+      expect(resumed?.status).toBe('done');
+      expect(resumed?.results[0].answer).toBe('Quick durable findings');
+      expect(submits).toBe(1);
     },
   );
   it('two clients retain one accepted handle when initialization races a CAS retry', async () => {

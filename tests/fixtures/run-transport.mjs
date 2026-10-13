@@ -18,7 +18,9 @@ globalThis.fetch = async (url, options) => {
   if (uri === 'https://kagi.com/api/v0/fastgpt')
     return Response.json({
       data: {
-        output: 'Canberra is the capital city of Australia.',
+        output:
+          process.env.FIXTURE_ANSWER ??
+          'Canberra is the capital city of Australia.',
         references: [{ url: 'https://example.org/capital', title: 'Capital' }],
       },
     });

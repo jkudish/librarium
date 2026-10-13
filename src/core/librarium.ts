@@ -4,6 +4,7 @@ import { initializeProviders } from '../adapters/index.js';
 import { INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS } from '../internal-adapter-ids.js';
 import type { Provider, ProviderResult } from '../types.js';
 import { reportedCostDecimal } from './budget.js';
+import { canonicalJson } from './catalog-fingerprint.js';
 import { type ConfigV3Input, ConfigV3Schema } from './config-v3.js';
 import { type CoordinatorState, recordAttemptFinished } from './coordinator.js';
 import { parseCoordinatorState } from './coordinator-state-schema.js';
@@ -245,12 +246,13 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
   }
   async function signState(
     state: Record<string, unknown>,
+    run: Run,
   ): Promise<Record<string, unknown>> {
     const { signature: _signature, ...body } = state;
     const signature = await crypto.subtle.sign(
       'HMAC',
       await signingKey,
-      new TextEncoder().encode(JSON.stringify(body)),
+      new TextEncoder().encode(canonicalJson({ run, state: body })),
     );
     return {
       ...body,
@@ -259,9 +261,17 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       ).join(''),
     };
   }
-  async function verifyState(state: Record<string, unknown>) {
+  async function verifyState(
+    state: Record<string, unknown>,
+    run: Run,
+    expectedId = run.id,
+  ) {
     const { signature, ...body } = state;
-    if (typeof signature !== 'string' || !/^[a-f0-9]{64}$/.test(signature))
+    if (
+      run.id !== expectedId ||
+      typeof signature !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(signature)
+    )
       throw new Error('Invalid stored execution signature');
     const bytes = Uint8Array.from(signature.match(/../g) ?? [], (byte) =>
       Number.parseInt(byte, 16),
@@ -271,7 +281,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         'HMAC',
         await signingKey,
         bytes,
-        new TextEncoder().encode(JSON.stringify(body)),
+        new TextEncoder().encode(canonicalJson({ run, state: body })),
       ))
     )
       throw new Error('Invalid stored execution signature');
@@ -358,7 +368,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       const reference = BUILTIN_PROVIDER_CATALOG.find(
         (entry) =>
           entry.provider_id ===
-          (depth === 'deep'
+          (provider.execution === 'background'
             ? 'openai-research'
             : provider.tier === 'raw-search'
               ? 'exa'
@@ -591,7 +601,10 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
   }
   async function persist(doc: StoredRun, expected: number | null) {
     doc.run = RunSchema.parse(redact(doc.run));
-    doc.state = await signState(redact(doc.state) as Record<string, unknown>);
+    doc.state = await signState(
+      redact(doc.state) as Record<string, unknown>,
+      doc.run,
+    );
     doc.files = redact(doc.files) as Record<string, string>;
     return store.save(doc, expected);
   }
@@ -602,7 +615,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     for (let i = 0; i < 64; i++) {
       const current = await store.get(id);
       if (!current) throw new Error(`Run not found: ${id}`);
-      await verifyState(current.state);
+      await verifyState(current.state, current.run, id);
       const next = change(current);
       try {
         next.version = await persist(next, current.version);
@@ -614,7 +627,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     throw new RunStoreConflict();
   }
   async function execute(doc: StoredRun, resume: boolean) {
-    await verifyState(doc.state);
+    await verifyState(doc.state, doc.run);
     const prepared = doc.state.prepared as PreparedResearchExecution;
     const savedProviders = doc.state.providers as Record<
       string,
@@ -730,7 +743,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       async load(id) {
         const current = await store.get(id);
         if (!current) return undefined;
-        await verifyState(current.state);
+        await verifyState(current.state, current.run, id);
         return {
           version: current.version,
           state: parseCoordinatorState(current.state.execution),
@@ -746,7 +759,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       async compareAndSwap(id, expectedVersion, state) {
         const current = await store.get(id);
         if (!current) return { ok: false, current: undefined };
-        await verifyState(current.state);
+        await verifyState(current.state, current.run, id);
         if (current.version !== expectedVersion)
           return {
             ok: false,
@@ -891,6 +904,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         let state = parseCoordinatorState(doc.state.execution);
         for (const attempt of state.attempts.filter(
           (attempt) =>
+            attempt.profile.invocation === 'inline' &&
             ['running', 'dispatch_pending'].includes(attempt.status) &&
             (Date.now() >= Date.parse(attempt.deadline_at) ||
               (typeof doc.state.owner === 'string' &&
@@ -951,14 +965,15 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
   }
   const active = new Map<string, Promise<Run>>();
   async function observe(id: string, wait: boolean): Promise<Run | null> {
+    const doc = await store.get(id);
+    if (doc?.state.prepared) await verifyState(doc.state, doc.run, id);
     const underway = active.get(id);
     if (underway) {
-      if (!wait) return (await store.get(id))?.run ?? null;
-      const run = await underway;
+      if (!wait) return doc?.run ?? null;
+      await underway;
       active.delete(id);
-      return run.status === 'running' ? observe(id, true) : run;
+      return observe(id, true);
     }
-    const doc = await store.get(id);
     if (doc?.run.status !== 'running' || !doc.state.prepared)
       return doc?.run ?? null;
     const work = execute(doc, !!doc.state.execution);

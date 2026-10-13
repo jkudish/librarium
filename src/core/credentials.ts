@@ -87,6 +87,7 @@ export function redactCredentialText(
   const add = (credential: string) => {
     if (!credential) return;
     forms.add(credential);
+    forms.add(encodeURIComponent(credential));
     forms.add(
       encodeURIComponent(credential).replace(
         /[!'()*]/g,
@@ -94,20 +95,27 @@ export function redactCredentialText(
       ),
     );
     forms.add(new URLSearchParams({ key: credential }).toString().slice(4));
-    forms.add(
-      btoa(
-        Array.from(new TextEncoder().encode(credential), (byte) =>
-          String.fromCharCode(byte),
-        ).join(''),
-      ),
+    const base64 = btoa(
+      Array.from(new TextEncoder().encode(credential), (byte) =>
+        String.fromCharCode(byte),
+      ).join(''),
     );
+    for (const encoded of [
+      base64,
+      base64.replace(/\+/g, '-').replace(/\//g, '_'),
+    ]) {
+      forms.add(encoded);
+      forms.add(encoded.replace(/=+$/, ''));
+    }
   };
   for (const credential of knownCredentials) {
     if (!credential) continue;
     add(credential);
     try {
-      const bytes = atob(credential);
-      if (btoa(bytes) !== credential) continue;
+      const standard = credential.replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = atob(standard);
+      if (btoa(bytes).replace(/=+$/, '') !== standard.replace(/=+$/, ''))
+        continue;
       const decoded = new TextDecoder('utf-8', { fatal: true }).decode(
         Uint8Array.from(bytes, (character) => character.charCodeAt(0)),
       );
@@ -118,8 +126,18 @@ export function redactCredentialText(
     }
   }
   let redacted = value;
-  for (const form of [...forms].sort((a, b) => b.length - a.length))
-    redacted = redacted.split(form).join('[REDACTED]');
+  for (const form of [...forms].sort((a, b) => b.length - a.length)) {
+    // Only percent-escape hex digits are case-insensitive; credential text is not.
+    const pattern = form
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/%[a-f0-9]{2}/gi, (encoded) =>
+        encoded.replace(
+          /[a-f]/gi,
+          (hex) => `[${hex.toLowerCase()}${hex.toUpperCase()}]`,
+        ),
+      );
+    redacted = redacted.replace(new RegExp(pattern, 'g'), '[REDACTED]');
+  }
   return redacted.replace(
     /([?&](?:api[_-]?key|key|access[_-]?token)=)[^&#\s"'\\]+/gi,
     '$1[REDACTED]',
