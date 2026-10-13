@@ -83,12 +83,109 @@ export function redactCredentialText(
   value: string,
   knownCredentials: readonly (string | undefined)[] = [],
 ): string {
-  let redacted = value;
+  const forms = new Set<string>();
+  const add = (credential: string) => {
+    if (!credential) return;
+    forms.add(credential);
+    forms.add(
+      encodeURIComponent(credential).replace(
+        /[!'()*]/g,
+        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+      ),
+    );
+    forms.add(new URLSearchParams({ key: credential }).toString().slice(4));
+    forms.add(
+      btoa(
+        Array.from(new TextEncoder().encode(credential), (byte) =>
+          String.fromCharCode(byte),
+        ).join(''),
+      ),
+    );
+  };
   for (const credential of knownCredentials) {
-    if (credential) redacted = redacted.split(credential).join('[REDACTED]');
+    if (!credential) continue;
+    add(credential);
+    try {
+      const bytes = atob(credential);
+      if (btoa(bytes) !== credential) continue;
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(
+        Uint8Array.from(bytes, (character) => character.charCodeAt(0)),
+      );
+      add(decoded);
+      for (const component of decoded.split(':')) add(component);
+    } catch {
+      // Most API keys are not canonical Base64 credentials.
+    }
   }
+  let redacted = value;
+  for (const form of [...forms].sort((a, b) => b.length - a.length))
+    redacted = redacted.split(form).join('[REDACTED]');
   return redacted.replace(
     /([?&](?:api[_-]?key|key|access[_-]?token)=)[^&#\s"'\\]+/gi,
     '$1[REDACTED]',
   );
+}
+
+/** Reject credential-bearing evidence URLs, including nested encoded keys. */
+export function safeEvidenceUrl(value: string): string | null {
+  if (
+    value !== value.trim() ||
+    value.length > 8192 ||
+    Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 32 || code === 127 || character === '\\';
+    })
+  )
+    return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    !url.hostname ||
+    url.username ||
+    url.password
+  )
+    return null;
+  const credentialKey = (key: string) => {
+    const parts = key
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+    return [...parts, parts.join('')].some((part) =>
+      /^(?:key|sig|auth|authorization|authentication|session|sessionid|apikey|apiaccesskey|accesskeyid)$|(?:signature|credential|token|secret|password|passwd)$/.test(
+        part,
+      ),
+    );
+  };
+  for (const [index, component] of [
+    url.pathname,
+    url.search,
+    url.hash,
+  ].entries()) {
+    let decoded = component;
+    try {
+      for (let pass = 0; pass < 3; pass++) {
+        const next = decodeURIComponent(decoded.replace(/\+/g, ' '));
+        if (next === decoded) break;
+        decoded = next;
+      }
+    } catch {
+      return null;
+    }
+    if (/%[a-f0-9]{2}/i.test(decoded)) return null;
+    for (const assignment of decoded.matchAll(/(?:^|[?&#;/=])([^?&#;/=]+)=/g))
+      if (credentialKey(assignment[1])) return null;
+    if (
+      index > 0 &&
+      decoded
+        .split(/[?&#;]/)
+        .some((part) => !part.includes('=') && credentialKey(part))
+    )
+      return null;
+  }
+  return value;
 }

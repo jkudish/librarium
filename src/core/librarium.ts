@@ -8,7 +8,7 @@ import { type ConfigV3Input, ConfigV3Schema } from './config-v3.js';
 import { type CoordinatorState, recordAttemptFinished } from './coordinator.js';
 import { parseCoordinatorState } from './coordinator-state-schema.js';
 import type { CoordinationStateStore } from './coordinator-store.js';
-import { redactCredentialText } from './credentials.js';
+import { redactCredentialText, safeEvidenceUrl } from './credentials.js';
 import {
   admitResearchExecution,
   materializeResearchExecution,
@@ -224,6 +224,10 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         .replace(
           /([?&](?:token|signature|sig|x-amz-(?:credential|signature|security-token)|x-goog-(?:credential|signature))=)[^&#\s"'\\]+/gi,
           '$1[REDACTED]',
+        )
+        .replace(
+          /https?:\/\/[^\s<>"'`\\]+/gi,
+          (url) => safeEvidenceUrl(url) ?? '[REDACTED]',
         );
     if (Array.isArray(value)) return value.map(redact);
     if (value && typeof value === 'object')
@@ -324,6 +328,10 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       );
       if (depth === 'deep' && options.processor !== undefined)
         adapterOptions.processor = options.processor;
+      if (source.id === 'openai' && options.effort !== undefined) {
+        delete adapterOptions.effort;
+        adapterOptions.reasoningEffort = options.effort;
+      }
       if (source.id === 'valyu' && depth === 'deep') {
         if (options.mode !== undefined) adapterOptions.mode = options.mode;
         if (options.output !== undefined)
@@ -514,14 +522,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
               : 'running',
         answer,
         citations: (output?.citations ?? [])
-          .filter((citation) => {
-            try {
-              new URL(citation.url);
-              return true;
-            } catch {
-              return false;
-            }
-          })
+          .filter((citation) => safeEvidenceUrl(citation.url) !== null)
           .map((citation) => ({
             url: citation.url,
             ...(citation.title && { title: citation.title }),
@@ -736,9 +737,10 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         };
       },
       async create(state) {
-        const current = await update(state.request_id, (doc) =>
-          project(doc, state),
-        );
+        const current = await update(state.request_id, (doc) => {
+          if (doc.state.execution) throw new RunStoreConflict();
+          return project(doc, state);
+        });
         return { version: current.version, state };
       },
       async compareAndSwap(id, expectedVersion, state) {
@@ -932,12 +934,19 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       )
         return current?.run as Run;
     }
-    await runPreparedExecution(prepared, {
-      store: coordination,
-      coordinator,
-      attempts,
-      resume_existing: resume,
-    });
+    try {
+      await runPreparedExecution(prepared, {
+        store: coordination,
+        coordinator,
+        attempts,
+        resume_existing: resume,
+      });
+    } catch (error) {
+      if (resume || !(error instanceof RunStoreConflict)) throw error;
+      const current = await store.get(doc.run.id);
+      if (!current) throw new Error(`Run not found: ${doc.run.id}`);
+      return execute(current, true);
+    }
     return (await store.get(doc.run.id))?.run as Run;
   }
   const active = new Map<string, Promise<Run>>();

@@ -7,6 +7,7 @@ import {
   exaResearchOptions,
   firecrawlSearchOptions,
   getBuiltinProviderDefinition,
+  openAiChatOptions,
   openAiResearchOptions,
   openRouterGroundedOptions,
   openRouterOptions as openRouterOptionsSchema,
@@ -427,11 +428,12 @@ const factories: Record<string, ProviderFactory> = {
       }),
   ),
   'openai-chat': typedFactory(
-    webSearchOptions,
+    openAiChatOptions,
     (context) =>
       new OpenAIChatProvider({
         model: model('openai-chat', context),
         webSearch: webSearch(context),
+        reasoningEffort: context.options.reasoningEffort,
       }),
   ),
   'gemini-chat': typedFactory(

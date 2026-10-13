@@ -96,9 +96,52 @@ describe('shared simplified contract', () => {
         expect(ajv.validate('run.schema.json', run)).toBe(lane === 'valid');
         expect(RunSchema.safeParse(run).success).toBe(lane === 'valid');
       });
-  it('memory store passes the shared contract', async () => {
-    await runStoreContract(new MemoryRunStore());
-  });
+  it.each(['memory', 'filesystem'])(
+    '%s store passes the shared contract and returns no page for a missing cursor',
+    async (kind) => {
+      const store =
+        kind === 'memory'
+          ? new MemoryRunStore()
+          : new FilesystemRunStore(temp());
+      await runStoreContract(store);
+      const older = json('fixtures/run-store/stored-run.json') as StoredRun;
+      await store.save(older, null);
+      expect((await store.list()).map((run) => run.id)).toEqual([
+        'run_01JAB2C3D4E5F6G7H8J9K0M1N3',
+        older.run.id,
+      ]);
+      await expect(
+        store.list({ before: 'run_01JAB2C3D4E5F6G7H8J9K0M1N4' }),
+      ).resolves.toEqual([]);
+      const newer = (await store.get('run_01JAB2C3D4E5F6G7H8J9K0M1N3'))!;
+      older.run.created_at = '2026-10-12T18:04:11Z';
+      newer.run.created_at = '2026-10-12T18:04:11.500Z';
+      await store.save(older, 1);
+      await store.save(newer, newer.version);
+      const offset = structuredClone(older);
+      offset.run.id = 'run_01JAB2C3D4E5F6G7H8J9K0M1N4';
+      offset.run.created_at = '2026-10-12T11:04:11.500-07:00';
+      await store.save(offset, null);
+      const ids = [offset.run.id, newer.run.id, older.run.id];
+      expect((await store.list()).map((run) => run.id)).toEqual(ids);
+      expect(
+        (await store.list({ before: offset.run.id, limit: 1 })).map(
+          (run) => run.id,
+        ),
+      ).toEqual([newer.run.id]);
+      expect(
+        (await store.list({ before: newer.run.id })).map((run) => run.id),
+      ).toEqual([older.run.id]);
+      const finer = structuredClone(offset);
+      finer.run.id = 'run_01JAB2C3D4E5F6G7H8J9K0M1N1';
+      finer.run.created_at = '2026-10-12T18:04:11.500001Z';
+      await store.save(finer, null);
+      expect((await store.list()).map((run) => run.id)).toEqual([
+        finer.run.id,
+        ...ids,
+      ]);
+    },
+  );
   it('store contract permits different JSON object key ordering', async () => {
     const store = new MemoryRunStore();
     await runStoreContract({
@@ -118,9 +161,7 @@ describe('shared simplified contract', () => {
       },
     });
   });
-  it('filesystem passes the shared contract and reads the shared folder', async () => {
-    const directory = temp();
-    await runStoreContract(new FilesystemRunStore(directory));
+  it('filesystem reads the shared folder', async () => {
     const incoming = temp();
     cpSync(join(spec, 'fixtures/run-store/filesystem'), incoming, {
       recursive: true,
@@ -287,9 +328,15 @@ describe('Run lifecycle without network', () => {
       },
     });
     expect(
-      (await client.research('q', { only: ['openai'] })).results[0].answer,
+      (
+        await client.research('q', {
+          only: ['openai'],
+          options: { openai: { effort: 'low' } },
+        })
+      ).results[0].answer,
     ).toBe('Mapped answer');
     expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ reasoning: { effort: 'low' } });
     const plan = await client.research('q', {
       depth: 'deep',
       only: ['parallel', 'valyu'],
@@ -303,6 +350,30 @@ describe('Run lifecycle without network', () => {
     expect(plan.results.map((result) => result.provenance.variant)).toEqual([
       'research',
       'research',
+    ]);
+  });
+  it('forwards canonical OpenAI effort to the actual durable request', async () => {
+    const store = new MemoryRunStore();
+    const calls: unknown[] = [];
+    const client = createLibrarium({
+      store,
+      env: { OPENAI_API_KEY: 'dummy-openai' },
+      httpClient: async (_url, options) => {
+        if (options?.method === 'POST') calls.push(options.body);
+        return response({ id: 'resp_effort', status: 'queued' }) as never;
+      },
+    });
+    const run = await client.research('q', {
+      only: ['openai'],
+      depth: 'deep',
+      options: { openai: { effort: 'low' } },
+      wait: false,
+    });
+    await expect
+      .poll(async () => (await store.get(run.id))?.state.handles)
+      .toHaveProperty('openai');
+    expect(calls).toEqual([
+      expect.objectContaining({ reasoning: { effort: 'low' } }),
     ]);
   });
   it('redacts question credentials from every store-bound document and rejects tampered handles', async () => {
@@ -512,6 +583,152 @@ describe('Run lifecycle without network', () => {
       sessionToken: '[REDACTED]',
       nested: { client_secret_payload: '[REDACTED]' },
     });
+  });
+  it.each(['answer', 'error', 'base64 credential'])(
+    'redacts encoded credentials and unsafe URLs from public %s and every store write',
+    async (kind) => {
+      const rawCredential = 'private:key /+value';
+      const credential =
+        kind === 'base64 credential'
+          ? Buffer.from(rawCredential).toString('base64')
+          : rawCredential;
+      const forms = [
+        rawCredential,
+        encodeURIComponent(rawCredential),
+        new URLSearchParams({ key: rawCredential }).toString().slice(4),
+        Buffer.from(rawCredential).toString('base64'),
+        ...(kind === 'base64 credential' ? rawCredential.split(':') : []),
+      ];
+      const unsafe = [
+        'https://user:unknown-password@example.com/doc',
+        'https://example.com/?%61pi%5Fkey=unknown-query-secret',
+        'https://example.com/?redirect=%3Faccess_token%3Dunknown-nested-secret',
+        'https://example.com/#sessionid=unknown-fragment-secret',
+        'https://example.com/%2525252574oken=unknown-deep-secret',
+      ];
+      const benign = 'https://example.com/token?monkey=1&secretary=2';
+      const text = [...forms, ...unsafe, benign].join('\n');
+      const store = new MemoryRunStore();
+      const saved: StoredRun[] = [];
+      const client = createLibrarium({
+        store: {
+          get: store.get.bind(store),
+          list: store.list.bind(store),
+          delete: store.delete.bind(store),
+          async save(doc, expected) {
+            saved.push(structuredClone(doc));
+            return store.save(doc, expected);
+          },
+        },
+        env: { KAGI_API_KEY: credential },
+        httpClient: async () =>
+          response(
+            kind !== 'error'
+              ? {
+                  data: {
+                    output: text,
+                    references: [...unsafe, benign].map((url) => ({ url })),
+                  },
+                }
+              : { error: [{ msg: text }] },
+          ) as never,
+      });
+      const run = await client.research('q', { only: ['kagi'] });
+      expect(run.status).toBe(kind !== 'error' ? 'done' : 'failed');
+      const publicText =
+        kind !== 'error'
+          ? run.results[0].answer
+          : run.results[0].error?.message;
+      if (kind !== 'error') {
+        expect(publicText).toContain(benign);
+        expect(publicText).toContain('[REDACTED]');
+      } else expect(publicText).toBe('The provider returned an error.');
+      for (const secret of [...forms, ...unsafe]) {
+        expect(JSON.stringify(saved)).not.toContain(secret);
+        expect(JSON.stringify(run)).not.toContain(secret);
+      }
+      if (kind !== 'error')
+        expect(
+          run.results[0].citations.map((citation) => citation.url),
+        ).toEqual([benign]);
+    },
+  );
+  it('two clients retain one accepted handle when initialization races a CAS retry', async () => {
+    const backing = new MemoryRunStore();
+    let hold = true;
+    let reached: () => void = () => {};
+    let release: () => void = () => {};
+    const reachedBarrier = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const store = {
+      save: backing.save.bind(backing),
+      list: backing.list.bind(backing),
+      delete: backing.delete.bind(backing),
+      async get(id: string) {
+        const doc = await backing.get(id);
+        if (hold && doc?.state.prepared && !doc.state.execution) {
+          hold = false;
+          reached();
+          await barrier;
+        }
+        return doc;
+      },
+    };
+    const handleKey = new Uint8Array(32).fill(9);
+    let submits = 0;
+    let complete = false;
+    const httpClient: HttpClient = async (url, options) => {
+      const submission = options?.method === 'POST';
+      if (submission) submits++;
+      const done = !submission && complete;
+      return response({
+        id: submission ? `agent_run_${submits}` : url.split('/').at(-1),
+        object: 'agent_run',
+        status: done ? 'completed' : 'running',
+        createdAt: new Date().toISOString(),
+        completedAt: done ? new Date().toISOString() : null,
+        output: {
+          text: done ? 'Retained findings' : '',
+          structured: null,
+          grounding: [],
+        },
+        usage: {},
+      }) as never;
+    };
+    const first = createLibrarium({
+      store,
+      handleKey,
+      env: { EXA_API_KEY: 'dummy' },
+      httpClient,
+    });
+    const initial = await first.research('q', { depth: 'deep', wait: false });
+    await reachedBarrier;
+    const second = createLibrarium({
+      store,
+      handleKey,
+      env: { EXA_API_KEY: 'dummy' },
+      httpClient,
+    });
+    try {
+      expect((await second.get(initial.id))?.status).toBe('running');
+      expect(
+        JSON.stringify((await backing.get(initial.id))?.state.handles),
+      ).toContain('agent_run_1');
+      complete = true;
+    } finally {
+      release();
+    }
+    const final = await first.get(initial.id, { wait: true });
+    expect(final?.status).toBe('done');
+    expect(final?.results[0].answer).toBe('Retained findings');
+    expect(submits).toBe(1);
+    expect(
+      JSON.stringify((await backing.get(initial.id))?.state.handles),
+    ).toContain('agent_run_1');
   });
   it('resumes a signed deep handle after a filesystem/client restart, without resubmission', async () => {
     const store = new FilesystemRunStore(temp());

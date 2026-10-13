@@ -124,13 +124,19 @@ export function listRuns(
   const limit = opts.limit ?? 50;
   if (!Number.isInteger(limit) || limit < 0)
     throw new TypeError('limit must be a nonnegative integer');
+  // Date.parse truncates finer-than-millisecond precision allowed by RFC 3339.
+  const fraction = (run: Run) =>
+    (run.created_at.match(/\.(\d+)/)?.[1] ?? '').replace(/0+$/, '');
   runs.sort(
     (a, b) =>
-      b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+      Date.parse(b.created_at) - Date.parse(a.created_at) ||
+      fraction(b).localeCompare(fraction(a)) ||
+      b.id.localeCompare(a.id),
   );
   const start = opts.before
     ? runs.findIndex((run) => run.id === opts.before) + 1
     : 0;
+  if (opts.before && start === 0) return [];
   return runs.slice(start, start + limit).map(runSummary);
 }
 export class MemoryRunStore implements RunStore {

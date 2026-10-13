@@ -35,12 +35,14 @@ librarium show --source exa
 librarium summarize --verify --source openai
 ```
 
-`quick` runs inline. `deep` submits durable tasks; `show`, library `get`, and
-MCP `get_run` resume the saved handles rather than submit again. Ctrl-C
+Depth selects the source variant, not its execution type. `quick` usually
+runs inline; collectors can use durable tasks even at quick depth. `deep`
+uses durable tasks; `show`, library `get`, and MCP `get_run` resume the saved
+handles rather than submit again. Ctrl-C
 detaches and prints a `show` command. `show` and `summarize` use the latest Run
 when no id is supplied. Old 1.x run directories are not readable by `show`.
-CLI `--no-wait` requires `--deep` except for a dry run: quick calls cannot
-durably detach from their calling process.
+CLI `--no-wait` requires `--deep` except for a dry run, because quick Runs
+may include inline calls that cannot durably detach from their process.
 
 The default source set is every set-up research source, **never engines**.
 `--only` and `--skip` accept comma-separated source, engine, or saved group

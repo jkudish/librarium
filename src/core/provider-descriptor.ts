@@ -139,6 +139,9 @@ export const openAiResearchOptions = commonOptions.extend({
     .optional(),
   returnTokenBudget: z.enum(['default', 'unlimited']).optional(),
 });
+export const openAiChatOptions = webSearchOptions.extend({
+  reasoningEffort: openAiResearchOptions.shape.reasoningEffort,
+});
 export const claudeOptions = webSearchOptions
   .extend({
     maxTokens: z.number().int().positive().optional(),
@@ -1153,7 +1156,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     tier: 'llm',
     envVar: 'OPENAI_API_KEY',
     defaultModel: 'gpt-6-luna',
-    optionsSchema: webSearchOptions,
+    optionsSchema: openAiChatOptions,
     display: {
       family: 'OpenAI',
       name: 'OpenAI Chat',

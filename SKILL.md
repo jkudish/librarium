@@ -12,8 +12,9 @@ Do not assume a source has a deep variant, citations, a key, or a bounded price.
 
 ## Choose the request
 
-Ask a concrete question. `quick` (default) produces search/answers inline;
-`deep` submits durable research tasks. The default is every set-up research
+Ask a concrete question. Depth selects a source variant, not execution type:
+`quick` (default) usually runs inline, but collectors can use durable tasks;
+`deep` uses durable research tasks. The default is every set-up research
 source, never engines. Narrow with `only`/`skip`; groups are saved source lists,
 not built-ins. Engines (`chatgpt`, `gemini-app`, `google-ai-mode`,
 `google-ai-overview`, `copilot`) run only when named and produce surface
