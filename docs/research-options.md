@@ -56,7 +56,7 @@ This package supports only the default `searchapi` collector, which reads
 `SEARCHAPI_API_KEY` when no key is set. The shared catalog also lists
 DataForSEO and Firecrawl collectors; only the Laravel package implements them,
 and this package skips engines set to them with reason `no_collector`.
-The pinned `librarium-spec/sources.json` catalog owns these names.
+The `librarium-spec` `sources.json` catalog owns these names.
 
 ## Source options
 
