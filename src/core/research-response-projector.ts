@@ -15,8 +15,10 @@ import {
   CitationSchema,
   ProviderMetaSchema,
   type ResearchResult,
+  ResearchResultSchema,
   UsageSchema,
 } from '../contracts/interchange/research-result.js';
+import { decimalUsdFromNumber, reportedCostDecimal } from './budget.js';
 import type {
   AttemptLaunch,
   CoordinatorAttemptState,
@@ -24,6 +26,10 @@ import type {
   CoordinatorState,
 } from './coordinator.js';
 import { classifySourceKindFromUrl } from './source-kind.js';
+import {
+  quoteProviderReportedUsage,
+  type ReportedUsageQuote,
+} from './usage-normalization.js';
 
 const CanonicalOutputBase = {
   result_id: OpaqueIdSchema,
@@ -105,6 +111,7 @@ const LegacyProviderResultSchema = z.strictObject({
   provider: z.string().min(1),
   tier: z.enum(['deep-research', 'ai-grounded', 'raw-search', 'llm']),
   content: z.string(),
+  contentFormat: z.literal('json').optional(),
   citations: z.array(
     z.strictObject({
       url: z.string().min(1),
@@ -146,8 +153,22 @@ const LegacyProviderResultSchema = z.strictObject({
       cacheReadInputTokens: z.number().int().safe().nonnegative().optional(),
       reasoningTokens: z.number().int().safe().nonnegative().optional(),
       costUsd: z.number().finite().nonnegative().optional(),
+      costUsdDecimal: z
+        .string()
+        .regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/)
+        .optional(),
       billableUnits: z.number().finite().nonnegative().optional(),
       unit: z.string().min(1).optional(),
+      searchRequests: z.number().int().safe().nonnegative().optional(),
+      serverToolUsage: z
+        .record(
+          z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+          z.number().int().safe().nonnegative(),
+        )
+        .optional(),
+      billableQuantities: z
+        .record(z.string().min(1), z.number().finite().nonnegative())
+        .optional(),
       raw: z.unknown().optional(),
     })
     .optional(),
@@ -206,26 +227,31 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function decimalFromNumber(value: number): string {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error('Usage costs must be finite non-negative numbers.');
-  }
-  if (Number.isInteger(value)) return String(value);
-  const fixed = value.toFixed(18).replace(/0+$/, '').replace(/\.$/, '');
-  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(fixed)) {
-    throw new Error('Usage cost cannot be represented as an exact decimal.');
-  }
-  return fixed;
+/** The provider-reported cost as an exact decimal, never a float expansion. */
+function legacyActualCost(
+  result: z.infer<typeof LegacyProviderResultSchema>,
+): string | undefined {
+  return (
+    reportedCostDecimal(result.usage) ??
+    reportedCostDecimal({ costUsd: result.metering?.actual?.costUsd })
+  );
 }
 
 function legacyUsage(
   result: z.infer<typeof LegacyProviderResultSchema>,
+  quote: ReportedUsageQuote | undefined,
 ): CanonicalProviderOutput['usage'] {
   const promptTokens = result.usage?.inputTokens ?? result.tokenUsage?.input;
   const completionTokens =
     result.usage?.outputTokens ?? result.tokenUsage?.output;
-  const actualCost = result.usage?.costUsd ?? result.metering?.actual?.costUsd;
-  const estimatedCost = result.metering?.estimate?.estimatedCostUsd;
+  const actualCost = legacyActualCost(result);
+  // A missing provider-reported cost stays unknown. Only a complete snapshot
+  // quote of the reported quantities becomes an estimate, and never an actual.
+  const estimatedCost =
+    quote?.amount_usd ??
+    (result.metering?.estimate?.estimatedCostUsd === undefined
+      ? undefined
+      : decimalUsdFromNumber(result.metering.estimate.estimatedCostUsd));
   const usage = {
     ...(promptTokens !== undefined && { prompt_tokens: promptTokens }),
     ...(completionTokens !== undefined && {
@@ -240,12 +266,11 @@ function legacyUsage(
     ...(result.usage?.reasoningTokens !== undefined && {
       reasoning_tokens: result.usage.reasoningTokens,
     }),
-    ...(actualCost !== undefined && {
-      actual_cost: decimalFromNumber(actualCost),
+    ...(result.usage?.searchRequests !== undefined && {
+      server_tool_search_requests: result.usage.searchRequests,
     }),
-    ...(estimatedCost !== undefined && {
-      estimated_cost: decimalFromNumber(estimatedCost),
-    }),
+    ...(actualCost !== undefined && { actual_cost: actualCost }),
+    ...(estimatedCost !== undefined && { estimated_cost: estimatedCost }),
     ...((actualCost !== undefined || estimatedCost !== undefined) && {
       currency: 'USD',
     }),
@@ -311,6 +336,10 @@ export function normalizeProviderAttemptOutput(
   resultId: string,
   output: unknown,
   completedAt: string,
+  options: {
+    /** When the attempt ran, for dated rates; defaults to `completedAt`. */
+    readonly priced_at?: string;
+  } = {},
 ): CanonicalProviderOutput {
   const canonical = CanonicalProviderOutputSchema.safeParse(output);
   if (canonical.success) {
@@ -335,10 +364,26 @@ export function normalizeProviderAttemptOutput(
     }
   });
 
+  const quote =
+    legacyActualCost(legacy) === undefined
+      ? quoteProviderReportedUsage(
+          launch.profile.identity,
+          legacy.usage?.billableQuantities,
+          options.priced_at ?? completedAt,
+        )
+      : undefined;
+  const serverToolUsage = legacy.usage?.serverToolUsage;
   const providerMeta = ProviderMetaSchema.parse({
     ...(legacy.providerMeta ?? {}),
     'librarium:tier': legacy.tier,
     'librarium:duration_ms': legacy.durationMs,
+    ...(serverToolUsage &&
+      Object.keys(serverToolUsage).length > 0 && {
+        'librarium:server_tool_usage': serverToolUsage,
+      }),
+    ...(quote && {
+      'librarium:cost_estimate': { source: 'pricing_snapshot', ...quote },
+    }),
     ...(legacy.metering && {
       'librarium:metering': {
         kind: legacy.metering.kind,
@@ -352,8 +397,9 @@ export function normalizeProviderAttemptOutput(
 
   return CanonicalProviderOutputSchema.parse({
     result_id: resultId,
-    content_format: 'markdown',
-    content: legacy.content,
+    ...(legacy.contentFormat === 'json'
+      ? { content_format: 'json', content: JSON.parse(legacy.content) }
+      : { content_format: 'markdown', content: legacy.content }),
     observed_at: completedAt,
     completed_at: completedAt,
     ...(legacy.model && { model: legacy.model }),
@@ -381,7 +427,7 @@ export function normalizeProviderAttemptOutput(
         locator: nonEmpty(citation.locator),
       }),
     })),
-    ...(legacyUsage(legacy) && { usage: legacyUsage(legacy) }),
+    ...(legacyUsage(legacy, quote) && { usage: legacyUsage(legacy, quote) }),
     provider_meta: providerMeta,
   });
 }
@@ -406,8 +452,6 @@ const SUPPORTED_CORPORA = new Set([
   'x',
   'files',
   'places',
-  // Specialized is internal-only: project it by omitting it from the older
-  // terminal provenance vocabulary.
   'specialized',
 ]);
 
@@ -460,10 +504,7 @@ function terminalProvenance(
     retrieval_methods: [
       profile.retrieval_method as ResearchResult['provenance']['retrieval_methods'][number],
     ],
-    corpora: profile.corpora.filter(
-      (corpus): corpus is ResearchResult['provenance']['corpora'][number] =>
-        corpus !== 'specialized',
-    ),
+    corpora: [...profile.corpora],
     ...(profile.result_kind === 'surface_observation' && {
       observation_mode: profile.observation_mode,
     }),
@@ -636,6 +677,7 @@ function aggregateUsage(
     'cache_write_input_tokens',
     'cache_read_input_tokens',
     'reasoning_tokens',
+    'server_tool_search_requests',
   ] as const;
   const aggregate: NonNullable<ResearchResponse['usage']> = {};
   for (const field of integerFields) {
@@ -685,16 +727,12 @@ export interface ResearchResponseProjectionOptions {
   readonly generator_version: string;
 }
 
-/** Deterministically project private coordinator state into the public receipt. */
-export function projectResearchResponse(
+/** Project committed successes without requiring or inventing a terminal state. */
+export function projectSucceededResearchResults(
   state: CoordinatorState,
   outputsByAttempt: Readonly<Record<string, CanonicalProviderOutput>>,
-  options: ResearchResponseProjectionOptions,
-): ResearchResponse {
-  if (state.status === 'running') {
-    throw new Error('A running coordinator state has no terminal response.');
-  }
-  const results = [...state.slots]
+): ResearchResult[] {
+  return [...state.slots]
     .sort((left, right) => left.position - right.position)
     .flatMap((slot) => {
       if (slot.status !== 'succeeded') return [];
@@ -708,8 +746,22 @@ export function projectResearchResponse(
           `Succeeded attempt ${attempt.attempt_id} has no durable provider output.`,
         );
       }
-      return [projectResult(state, slot, attempt, output)];
+      return [
+        ResearchResultSchema.parse(projectResult(state, slot, attempt, output)),
+      ];
     });
+}
+
+/** Deterministically project private coordinator state into the public receipt. */
+export function projectResearchResponse(
+  state: CoordinatorState,
+  outputsByAttempt: Readonly<Record<string, CanonicalProviderOutput>>,
+  options: ResearchResponseProjectionOptions,
+): ResearchResponse {
+  if (state.status === 'running') {
+    throw new Error('A running coordinator state has no terminal response.');
+  }
+  const results = projectSucceededResearchResults(state, outputsByAttempt);
   const errors = terminalErrors(state);
   const status =
     results.length > 0

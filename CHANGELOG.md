@@ -7,220 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
+## [2.0.0] - 2026-10-27
 
-- Removed beta `parallel/chat` from v2 shipping support after repeated
-  incompatible HTTP-success payloads, including after accepting both documented
-  content shapes. Parallel Search, Turbo, and Research remain supported through
-  their separate Search and Task APIs; this is not a live-validation claim.
-
-## [2.0.0] - 2026-08-27
-
-Version 2 replaces Librarium's provider, configuration, execution, package,
-and artifact contracts. Review the breaking changes before upgrading from v1.
+Version 2.0.0 replaces the 1.x commands, configuration, MCP tools, library
+exports and run format. Read the [upgrade guide](docs/migration-v1-to-v2.md)
+before upgrading.
 
 ### Breaking changes
 
-- Node package installs now require Node.js 22.12 or newer. The CLI uses
-  Commander 15 and validates query, provider, workflow, mode, concurrency,
-  timeout, budget, cleanup, usage, completion, and config inputs before running
-  a command.
-- Package exports have been redesigned. `librarium` is the side-effect-free,
-  Worker-safe schema, migration, and catalog entry point. `librarium/core`
-  exposes planning, transport, coordination, and execution with injected
-  dependencies. `librarium/node` owns config files, credentials, trusted custom
-  providers, and Node-specific validation. Legacy dispatcher, registry,
-  adapter-constructor, file-runner, and raw keychain exports are no longer
-  public. The CLI remains available through the `librarium` executable.
-- Configuration is now a strict, versioned, snake_case v2 schema. Migration
-  defaults to deterministic preview. Writing through `config migrate --output`
-  or `saveConfigV2()` requires an explicit destination, validates
-  before writing, preserves source files, and uses atomic owner-only saves.
-  Project input produces a merged preview rather than a flattened project
-  file. Custom groups use `custom:<name>` so they cannot shadow built-in
-  workflows. Custom providers are executable code and must be explicitly
-  trusted after migration.
-- Provider selection and provenance now use public `provider_id/profile_id`
-  identities. Internal adapter IDs are not stable configuration identifiers.
-  The built-in workflow set is now exactly `quick`, `deep`, `visibility`, and
-  `all`. The old `raw`, `fast`, `llm`, `models`, `comprehensive`, `social`, and
-  `xai` built-ins have been removed.
-- Retired provider IDs are rejected by the v2 CLI, MCP server, and native v2
-  config. Migrate `perplexity-sonar` to `perplexity-sonar-pro`,
-  `perplexity-deep` to `perplexity-sonar-deep`, and `openai-deep` or
-  `openai-deep-o3` to `openai-research`. The migration-only
-  `perplexity-pro-search` and `perplexity-advanced-deep` IDs map to the
-  corresponding Agent API profiles. The v1 config migrator converts retired
-  IDs without modifying the source file. Completed historical artifacts keep
-  their recorded IDs, but pending handles cannot be resumed through a renamed
-  provider.
-- New runs use the canonical `run.json` schema version 3 and artifact version
-  `3.0.0`. The manifest records request, lifecycle, provider attempts, durable
-  handles, usage, metering, and concrete artifact filenames. The separate
-  public artifact contracts for provider metadata, sources, and JSONL records
-  are version `1.0.0`. Provider files now use collision-resistant
-  `provider-${stem}--${sha256(providerId)}` names, and consumers must read the
-  exact `outputFile` and `metaFile` values from `run.json`.
-- Custom and hand-written providers must declare an inline or background
-  execution contract. Background providers must implement the complete
-  execute, submit, poll, and retrieve lifecycle. Script providers use a
-  versioned process envelope on stdin and stdout; partial lifecycle
-  declarations are rejected.
-- `HttpRequestOptions.maxRetries` has been replaced by an explicit retry
-  policy. GET requests use bounded safe retries by default. Non-GET requests
-  retry only when configured as idempotent with an idempotency key.
-
-### Fixed
-
-- Keep Gemini Deep Research's reversible preview `failed` and `incomplete`
-  observations provisional until completion or the frozen request deadline,
-  while preserving terminal cancellation and budget-exhaustion states.
-- Correlate Tavily Research submissions with the frozen canonical attempt ID
-  and recover an uncertain create response only when Tavily's project-scoped
-  Logs API proves exactly one accepted task; ambiguous custody never resubmits.
-- Query Tavily's Logs API with a valid two-day UTC window during uncertain
-  Research submission recovery; Tavily rejects equal start and end dates.
-
-### Changed
-
-- Remove `tavily/research` from the v2 public catalog because Tavily does not
-  provide recoverable submission custody after an ambiguous create response.
-  `tavily/search` remains available.
-- Remove the redundant Amp plugin and its `install-plugin` command. Amp orbs
-  now use the global Librarium User Skill with the v2 CLI; repository orbs
-  install and verify the exact built checkout instead of npm's v1 `latest`.
+- The npm package requires Node.js 22.12 or newer (1.x required 20.12).
+- The CLI commands are `research`, `show`, `summarize`, `sources`,
+  `groups add|remove`, `setup` and `mcp`. `run`, `status`, `answer`, `ls`,
+  `init`, `doctor` and `refine` are removed and print their replacement.
+  `-p`, `-g`, `--mode`, `--refine` and `--max-estimated-cost` are removed the
+  same way.
+- Sources have flat names: 16 research sources and 5 named-only engines from
+  the shared `librarium-spec` catalog. 1.x provider ids such as
+  `brave-answers` are rejected; former variants are source options such as
+  `grok` with `search: both`.
+- Groups are lists you save. Built-in groups, execution modes and provider
+  `fallback` are removed. Without `--only`, every set-up research source runs; engines
+  run only when named.
+- Config is version 3. Loading a 1.x config writes `config.json.v1.backup`
+  and then saves version 3, printing notices for settings it drops.
+  `$VAR` references become `env:VAR`. Version 2 never shipped and is rejected.
+- `show` cannot read 1.x run directories.
+- The MCP server exposes exactly `research`, `get_run` and `list_sources`.
+  `get_results`, `check_async`, `list_providers` and `list_groups` are removed.
+- The library client is `createLibrarium()` with `research`, `get`, `sources`
+  and `summarize`. Package exports are `librarium`, `librarium/core`,
+  `librarium/node` and `librarium/testing`.
 
 ### Added
 
-- A typed public catalog with 33 built-in providers and 40 retained public
-  profiles. Descriptors are the source of truth for profile identity,
-  selection, credentials, models, options, metering, execution capabilities,
-  and provenance.
-- Four built-in workflows:
-  - `quick` is a curated low-latency set of Gemini Grounded, OpenRouter
-    Grounded, Brave Answers, Exa Search, Kagi FastGPT, and Parallel Turbo.
-  - `deep` is derived from implemented research-report profiles.
-  - `visibility` compares six SearchAPI-collected consumer surfaces with
-    first-party Perplexity, Gemini, and Grok API baselines.
-  - `all` is derived from all selectable profiles that satisfy workflow policy.
-- SearchAPI consumer-surface profiles for ChatGPT, Gemini, Perplexity, Google
-  AI Mode, Bing Copilot, and Google AI Overview. Results preserve collector,
-  surface, access, and account-context provenance. The six surfaces share one
-  collector, so agreement is recorded as correlated observation rather than
-  independent confirmation.
-- Grok profiles for web search (`grok/web`), X-only search
-  (`grok-x-only/x`), and combined web and X search
-  (`grok-combined/combined`). Each profile keeps a distinct public identity in
-  config, artifacts, and reports.
-- Durable research profiles for Exa Research, OpenAI Research, Parallel
-  Research, Perplexity Agent medium and high, Valyu Research, and You Research.
-  Durable work can be resumed across processes using provider-scoped handles.
-- Parallel Search profiles for advanced search and turbo search, plus Parallel
-  Research. `parallel/turbo` is included in `quick`.
-- Valyu Search and Research, You.com Answer, and expanded You.com Research
-  profiles with validated options, lifecycle handling, usage, and citations.
-- Configurable Firecrawl Search for web and news sources, locale and time
-  filters, source limits, domain filters, categories, deduplicated citations,
-  and provider-reported credit usage.
-- Perplexity Search controls for multi-query input, country and language,
-  domain allow and deny filters, result limits, context size, and extraction
-  token budgets.
-- A canonical execution runtime for inline, process-local background, and
-  durable background providers. It includes request compilation, preflight,
-  admission, dispatch, polling, retrieval, fallback, deadline, cancellation,
-  custody, and reconciliation boundaries.
-- Shared CLI and MCP run reconciliation backed by locked, revisioned run
-  state. `status` performs one reconciliation pass before rendering;
-  `status --wait --retrieve` can finish durable work without resubmitting it.
-- A language-neutral TypeScript/PHP terminal contract snapshot in
-  `contracts/v1`. It defines exactly `ResearchResponse`, `ResearchResult`,
-  `Citation`, `Source`, `ResultProvenance`, `Usage`, and `ResearchError`, with
-  generated JSON Schema, fixtures, checksums, and compatibility tests.
-- Frozen pricing definitions and network-free exact estimates where the
-  selected provider options make an exact pre-dispatch price possible.
-  Provider-reported costs, exact estimates, metered units, and unknown costs
-  remain separate. `--max-cost` and `--max-estimated-cost` provide distinct
-  lower-bound and admission controls.
-- A network-denied live-validation fixture mode and a separately gated,
-  targeted paid-validation path. Validation receipts preserve provider,
-  profile, pricing, provenance, artifact, and custody evidence.
-- Five MCP tools: `research`, `get_results`, `check_async`, `list_providers`,
-  and `list_groups`.
-- A shipped agent skill for agent-driven v2 research workflows.
-- Offline performance benchmarks, packed-consumer checks, Worker declaration
-  checks, terminal contract fixtures, and deterministic network-denied demo
-  replay coverage.
+- Every request except a dry run is saved as a Run before the first provider
+  call. Run ids are `run_` plus a ULID. Each result records its answer,
+  citations, cost, `api` or `surface` observation and provenance.
+- `quick` (default) and `deep` depth. `--deep --no-wait` detaches after
+  submission. `show --wait`, `get(id, { wait: true })` and MCP `get_run`
+  resume signed private task handles instead of submitting again. Ctrl-C
+  detaches and prints the `show` command.
+- `--max-cost`, config `max_cost` and MCP `max_cost` set a USD cap. Admission
+  skips unpriced sources, then admits each source, in catalog order, whose
+  estimate fits the remaining budget. Reported spend plus reservations stops
+  unstarted work; in-flight calls can finish above the cap. An MCP `max_cost`
+  can only lower the configured cap.
+- RunStore has four methods (`get`, `save`, `list`, `delete`) with
+  version-checked saves. `MemoryRunStore` and `FilesystemRunStore` ship, a
+  config `runs.store.module` loads a custom store, and `librarium/testing`
+  exports `runStoreContract`.
+- The filesystem layout (`run.json`, versioned `state.json`, `answers/`,
+  redacted `evidence/`) matches the Laravel package.
+- `summarize` writes a separate Run linked by `summary_of`. It uses
+  `summarize.source`, then `--source`, then the first set-up source among
+  `openai`, `claude`, `gemini` and `openrouter`, and never retries another
+  source after a failure. `--verify` checks the synthesis with the same
+  source.
+- `librarium/core` runs in Workers and browsers with a memory store by
+  default and reads no process state or files on import.
 
 ### Changed
 
-- OpenAI deep research now uses `openai-research/research` on the Responses API
-  with GPT-5.6 Sol by default, current web search, configurable reasoning
-  effort, durable background execution, normalized URL citations, token usage,
-  model overrides, and `default` or `unlimited` return-token budgets.
-- Perplexity research now uses the Agent API. Sonar Pro uses the inline low
-  preset, Deep Research uses durable medium, and Sonar Deep uses durable high.
-  Raw `perplexity-search/search` remains a separate Search API profile.
-- OpenRouter Grounded uses the `openrouter:web_search` server tool instead of
-  the deprecated `:online` model suffix. OpenRouter Chat defaults to
-  `openai/gpt-5.6-terra`.
-- Claude defaults to `claude-sonnet-5` with a 16,000-token output limit,
-  adaptive thinking, and medium effort. Gemini Chat defaults to
-  `gemini-3.6-flash`.
-- SearchAPI authentication now uses an `Authorization: Bearer` header rather
-  than URL credentials. The optional `zeroRetention` setting sends
-  `zero_retention=true` and fails closed if the account rejects it.
-- SearchAPI Google now normalizes AI Overview, top stories, discussions,
-  inline videos, and Knowledge Graph evidence from one request. The dedicated
-  Google AI Overview profile owns the separate page-token retrieval and
-  reserves two logical request units.
-- CLI and MCP research use the same Node run service, lifecycle events,
-  provider catalog, reconciliation path, artifact store, and report
-  presentation. Machine-readable CLI output stays on stdout while progress and
-  diagnostics stay on stderr.
-- Provider output distinguishes direct API responses from collected consumer
-  surfaces. Citations, source overlap, collection provenance, provider-reported
-  usage, and estimated cost remain separate facts rather than being collapsed
-  into a confidence claim.
-- HTML and JSONL reports now render from the canonical run state. URLs are
-  treated as untrusted identifiers and sanitized before presentation.
-- The project now builds with TypeScript 7 and Zod 4. The dependency stack was
-  refreshed across the CLI, build, formatting, MCP, and Worker test tooling.
+- Money is an exact USD decimal string. Unknown reported cost is `null`,
+  never `"0"`, and estimates never replace provider-reported charges.
+- `browse`, `html`, `jsonl`, `usage` and `cleanup` read the new Run layout,
+  and `cleanup` follows `runs.keep_days`. `config` reads and edits v3 config.
+  `completions`, `upgrade` and `install-skill` remain.
+- Request and Run schemas, the source catalog and conformance fixtures come
+  from the shared `librarium-spec` package, which the Laravel package also
+  uses.
 
-### Fixed
-
-- Prevented duplicate or unsafe background submissions across ambiguous
-  responses, retries, process restarts, and concurrent CLI or MCP
-  reconciliation. Provider-specific custody handling now preserves exact
-  remote identities and terminalizes bounded deadlines.
-- Kept Gemini Deep Research preview failures provisional until completion or
-  the frozen deadline while preserving terminal cancellation and budget states.
-- Hardened Exa, Parallel, Perplexity, Tavily, Valyu, and You.com background
-  parsing, polling, retrieval, error classification, identity binding, and
-  provenance handling.
-- Rejected insecure Firecrawl result URLs and unsafe provider metadata,
-  including nested credentials, access tokens, raw responses, and binary
-  payloads.
-- Preserved provider-reported pricing units and safe failure evidence without
-  inventing USD values or replacing unknown costs with zero.
-- Added atomic config and run-state writes, lock contention recovery, Windows
-  owner-only ACL handling, bounded rename retries, and path-containment checks.
-- Hardened Commander ingress, HTTP response limits, cancellation, retry
-  boundaries, custom-provider process termination, and post-commit dispatch
-  fencing.
-
-### Removed
-
-- `tavily/research` from the public v2 catalog because Tavily cannot provide
-  recoverable custody after an ambiguous create response. `tavily/search`
-  remains available.
-- New submissions to OpenAI's retired `o4-mini-deep-research` and
-  `o3-deep-research` models.
-- Retired execution IDs `perplexity-sonar`, `perplexity-deep`,
-  `perplexity-pro-search`, `perplexity-advanced-deep`, `openai-deep`, and
-  `openai-deep-o3`, plus the deprecated OpenAI deep adapter wrappers.
-- The legacy `async-tasks.json` store and its read, write, and fallback paths.
-- Legacy public dispatcher, registry, adapter-constructor, file-runner, and raw
-  keychain exports.
 
 ## [1.4.1] - 2026-07-23
 
@@ -251,7 +107,7 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
   reports honest API-reported cost converted from xAI's `cost_in_usd_ticks`.
   Defaults to `grok-4.5` with a per-provider model override (`grok-4.3` for
   cost-sensitive runs). Requires `XAI_API_KEY`. Joins the `comprehensive` and
-  `all` groups only — deliberately not `quick`/`fast`, so default-group runs
+  `all` groups only; deliberately not `quick`/`fast`, so default-group runs
   see no cost change. X/social search is intentionally excluded from requests.
 - Benchmark CI guard lockstep test: every provider credential env var must be
   present in the benchmark secret blocklist.
@@ -264,10 +120,10 @@ and artifact contracts. Review the breaking changes before upgrading from v1.
   usage comes from Brave's response headers; `usage.costUsd` is set only when
   Brave reports an explicit dollar figure. Provider id, env var, tier, and
   group membership are unchanged. Answer content is now the native Answers
-  markdown — the adapter-fabricated `## AI Summary`/`## Web Results` headings
+  markdown; the adapter-fabricated `## AI Summary`/`## Web Results` headings
   are gone.
 - `brave-answers` metering moved from `request_priced` (fixed $0.009 estimate)
-  to `api_unit_priced` (search + token billing, units-only — no fabricated USD
+  to `api_unit_priced` (search + token billing, units-only, no fabricated USD
   pre-dispatch estimate). `PRICING_VERSION` bumped to `2026-07`.
 - Dependency refresh within existing ranges (biome 2.5.5, wrangler 4.113,
   marked, p-limit, vitest-pool-workers).
@@ -403,8 +259,8 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 #### Added
 - `librarium/core` package export for programmatic use from Workers-compatible runtimes
 - Structured in-memory dispatch results with provider text, citations/source URLs, duration, status, and errors
-- Gemini Grounded Search provider adapter: `gemini-grounded` — Gemini `gemini-2.5-flash` with the `googleSearch` tool
-- OpenRouter Online Search provider adapter: `openrouter-online` — OpenRouter `openai/gpt-4o-mini:online` with Exa-backed grounding annotations
+- Gemini Grounded Search provider adapter: `gemini-grounded`: Gemini `gemini-2.5-flash` with the `googleSearch` tool
+- OpenRouter Online Search provider adapter: `openrouter-online`: OpenRouter `openai/gpt-4o-mini:online` with Exa-backed grounding annotations
 - Cloudflare Workers compatibility test suite using `@cloudflare/vitest-pool-workers`
 
 #### Changed
@@ -414,16 +270,16 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 ## [0.1.3] - 2026-04-11
 
 ### Added
-- Firecrawl Search provider adapter: `firecrawl-search` — web search via Firecrawl v2 Search API (raw-search tier)
-- OpenAI Deep Research (o3) provider adapter: `openai-deep-o3` — higher-quality deep research using the o3-deep-research model
-- You.com Research provider adapter: `you-research` — AI-powered research with cited answers (ai-grounded tier)
-- Jina AI Search provider adapter: `jina-search` — search-to-markdown API for LLM-native content (raw-search tier)
-- Kagi FastGPT provider adapter: `kagi-fastgpt` — AI answers with curated, ad-free sources (ai-grounded tier)
+- Firecrawl Search provider adapter: `firecrawl-search`: web search via Firecrawl v2 Search API (raw-search tier)
+- OpenAI Deep Research (o3) provider adapter: `openai-deep-o3`: higher-quality deep research using the o3-deep-research model
+- You.com Research provider adapter: `you-research`: AI-powered research with cited answers (ai-grounded tier)
+- Jina AI Search provider adapter: `jina-search`: search-to-markdown API for LLM-native content (raw-search tier)
+- Kagi FastGPT provider adapter: `kagi-fastgpt`: AI answers with curated, ad-free sources (ai-grounded tier)
 
 ### Fixed
-- Perplexity Agent API endpoint updated from `/v1/responses` to canonical `/v1/agent` — fixes HTTP 400 errors for the canonical Agent providers (`perplexity-sonar-pro`, `perplexity-sonar-deep`, `perplexity-deep-research`) in both health checks and live queries
+- Perplexity Agent API endpoint updated from `/v1/responses` to canonical `/v1/agent`: fixes HTTP 400 errors for the canonical Agent providers (`perplexity-sonar-pro`, `perplexity-sonar-deep`, `perplexity-deep-research`) in both health checks and live queries
 - Perplexity Deep Research health check: removed unsupported `max_output_tokens` parameter from test request
-- OpenAI Deep Research health check failing with HTTP 404 — deep research models don't appear in `/v1/models` endpoint; test now verifies API key via general models list
+- OpenAI Deep Research health check failing with HTTP 404: deep research models don't appear in `/v1/models` endpoint; test now verifies API key via general models list
 
 ## [0.1.2] - 2026-02-23
 
@@ -445,7 +301,7 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 ## [0.1.1] - 2026-02-23
 
 ### Added
-- Provider-level fallback on failure — optional `fallback` field in provider config triggers a backup provider when the primary fails for any reason (exception, error response, or timeout). Fallback providers can be `enabled: false` to only activate as backups. ([#2](https://github.com/jkudish/librarium/issues/2) — thanks @taocoding99)
+- Provider-level fallback on failure: optional `fallback` field in provider config triggers a backup provider when the primary fails for any reason (exception, error response, or timeout). Fallback providers can be `enabled: false` to only activate as backups. ([#2](https://github.com/jkudish/librarium/issues/2), thanks @taocoding99)
 
 
 ## [0.1.0] - 2026-02-21
@@ -467,7 +323,7 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - Curl-based installer script (`scripts/install.sh`) for one-line binary installation
 - Homebrew tap (`brew install jkudish/tap/librarium`) for macOS and Linux
 - Install method detection (`detectInstallMethod()`) supporting npm, pnpm, yarn, Homebrew, and standalone binary
-- Multi-method upgrade command — `librarium upgrade` auto-detects install method and uses the correct upgrade path
+- Multi-method upgrade command: `librarium upgrade` auto-detects install method and uses the correct upgrade path
 - GitHub Releases with platform binaries attached automatically on release
 - `build:sea` script for building standalone executables locally
 
@@ -477,7 +333,6 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - Response size guard (10MB) on HTTP client
 
 [Unreleased]: https://github.com/jkudish/librarium/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/jkudish/librarium/compare/v1.4.1...v2.0.0
 [1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0
 [0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
@@ -488,3 +343,4 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 [1.3.0]: https://github.com/jkudish/librarium/releases/tag/v1.3.0
 [1.4.0]: https://github.com/jkudish/librarium/releases/tag/v1.4.0
 [1.4.1]: https://github.com/jkudish/librarium/releases/tag/v1.4.1
+[2.0.0]: https://github.com/jkudish/librarium/releases/tag/v2.0.0

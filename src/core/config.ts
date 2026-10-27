@@ -9,11 +9,13 @@ import {
 } from '../constants.js';
 import type { Config, Defaults, ProjectConfig } from '../types.js';
 import { ConfigSchema, ProjectConfigSchema } from '../types.js';
+import { RESERVED_WORKFLOW_IDS } from './builtin-workflows.js';
 import { validateConfigV2 } from './config-v2.js';
 import type { EnvRecord } from './credentials.js';
 import { hasCredential, resolveCredential } from './credentials.js';
 import { safeWriteFile } from './fs-utils.js';
 import {
+  isRetiredUpstreamProviderId,
   migrateRetiredProviderId,
   migrateRetiredProviderToken,
   retiredProviderGuidance,
@@ -55,6 +57,112 @@ function setConfigGroupProvenance(
   return config;
 }
 
+interface DeadlineAuthorship {
+  readonly inline: boolean;
+  readonly background: boolean;
+}
+
+/**
+ * Whether the inline and background attempt deadlines were authored (config
+ * file, project config, or CLI flag) rather than filled from DEFAULT_CONFIG.
+ * Only an unauthored deadline may yield to a per-profile default.
+ */
+const deadlineAuthorshipByConfig = new WeakMap<Config, DeadlineAuthorship>();
+
+/**
+ * True unless this module loaded or merged the config without an authored
+ * inline timeout. Hand-built Config values count as authored, so library
+ * callers keep exactly the deadline they pass.
+ */
+export function configInlineAttemptDeadlineAuthored(config: Config): boolean {
+  return deadlineAuthorshipByConfig.get(config)?.inline ?? true;
+}
+
+/** The background (`asyncTimeout`) counterpart of the inline check above. */
+export function configBackgroundAttemptDeadlineAuthored(
+  config: Config,
+): boolean {
+  return deadlineAuthorshipByConfig.get(config)?.background ?? true;
+}
+
+/**
+ * The config to write: `next` without the attempt deadlines that `source`
+ * filled from DEFAULT_CONFIG, so saving a config never turns a built-in
+ * deadline into an authored one that hides per-profile defaults. `next`
+ * inherits `source`'s deadline authorship for later saves.
+ */
+export function configToPersist(source: Config, next: Config = source): Config {
+  const authorship: DeadlineAuthorship = {
+    inline: configInlineAttemptDeadlineAuthored(source),
+    background: configBackgroundAttemptDeadlineAuthored(source),
+  };
+  if (next !== source) deadlineAuthorshipByConfig.set(next, authorship);
+  const { timeout, asyncTimeout, ...defaults } = next.defaults;
+  return {
+    ...next,
+    // Omitted deadlines are filled from DEFAULT_CONFIG again on load.
+    defaults: {
+      ...defaults,
+      ...(authorship.inline && { timeout }),
+      ...(authorship.background && { asyncTimeout }),
+    } as Config['defaults'],
+  };
+}
+
+/**
+ * The shipped defaults, in seconds. Earlier `init` runs and v1-to-v2
+ * migrations copied them into config files without the user choosing them, so
+ * a configured value equal to one of them is treated as unauthored and lets
+ * per-profile defaults apply. Any other configured value is authored.
+ */
+const LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS = 30;
+const LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS = 1800;
+
+function configuredSeconds(value: unknown, legacyDefault: number): boolean {
+  return value !== undefined && value !== legacyDefault;
+}
+
+function configuredMilliseconds(
+  value: unknown,
+  legacyDefault: number,
+): boolean {
+  return value !== undefined && value !== legacyDefault * 1_000;
+}
+
+function rawDeadlineAuthorship(raw: unknown): DeadlineAuthorship {
+  if (typeof raw !== 'object' || raw === null) {
+    return { inline: false, background: false };
+  }
+  const record = raw as Record<string, unknown>;
+  const block =
+    record.version === 2 ? record.execution_defaults : record.defaults;
+  if (typeof block !== 'object' || block === null) {
+    return { inline: false, background: false };
+  }
+  const defaults = block as Record<string, unknown>;
+  return record.version === 2
+    ? {
+        inline: configuredMilliseconds(
+          defaults.inline_attempt_deadline_ms,
+          LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+        ),
+        background: configuredMilliseconds(
+          defaults.background_attempt_deadline_ms,
+          LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+        ),
+      }
+    : {
+        inline: configuredSeconds(
+          defaults.timeout,
+          LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+        ),
+        background: configuredSeconds(
+          defaults.asyncTimeout,
+          LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+        ),
+      };
+}
+
 /**
  * Returns authored global/project group layers for a config loaded or merged
  * by this module. Hand-built Config values are treated as authored global
@@ -63,6 +171,32 @@ function setConfigGroupProvenance(
 export function configGroupProvenance(config: Config): ConfigGroupProvenance {
   const known = groupProvenanceByConfig.get(config);
   return known ?? { global: config.groups, project: {} };
+}
+
+/**
+ * The global groups a writer may persist: exactly what the user authored.
+ * Built-in rosters injected by `loadConfig` are never written back.
+ */
+export function authoredGlobalGroups(config: Config): Record<string, string[]> {
+  return cloneGroups(configGroupProvenance(config).global);
+}
+
+/**
+ * Earlier `init` runs wrote every injected default roster to disk. A stored
+ * group named after a built-in workflow whose members exactly match the
+ * shipped default is that copy, not a user's choice, so it must not shadow the
+ * built-in workflow as a custom group. Any edit keeps it authored.
+ */
+function isStoredBuiltinRosterCopy(
+  name: string,
+  members: readonly string[],
+): boolean {
+  const shipped = DEFAULT_GROUPS[name];
+  return (
+    RESERVED_WORKFLOW_IDS.has(name) &&
+    shipped !== undefined &&
+    orderedExactMatch(members, shipped)
+  );
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -105,19 +239,13 @@ function exactMicrousdToUsd(value: string | undefined): number | undefined {
   return usd;
 }
 
-function compatibilityConfigFromV2(raw: unknown, path: string): Config {
+function compatibilityConfigFromV2(raw: unknown, path: string): unknown {
   const validated = validateConfigV2(raw);
   if (!validated.ok) {
-    const diagnostics = validated.issues
-      .map(
-        ({ code, path: issuePath, message }) =>
-          `${code} ${issuePath}: ${message}`,
-      )
-      .join('; ');
-    throw new Error(`Invalid Librarium v2 config in ${path}: ${diagnostics}`);
+    throw new Error(`Invalid Librarium v2 config in ${path}.`);
   }
   const native = validated.config;
-  return ConfigSchema.parse({
+  return {
     version: 1,
     defaults: {
       outputDir: native.runtime.output_dir,
@@ -187,7 +315,7 @@ function compatibilityConfigFromV2(raw: unknown, path: string): Config {
     ...(native.runtime.answer !== undefined && {
       answer: native.runtime.answer,
     }),
-  });
+  };
 }
 
 /**
@@ -241,8 +369,8 @@ export function validateFallbacks(config: Config): string[] {
  */
 export function loadConfig(globalPath?: string): Config {
   const path = globalPath ?? CONFIG_FILE;
-  if (!existsSync(path))
-    return setConfigGroupProvenance(
+  if (!existsSync(path)) {
+    const config = setConfigGroupProvenance(
       {
         ...DEFAULT_CONFIG,
         providers: {},
@@ -252,26 +380,41 @@ export function loadConfig(globalPath?: string): Config {
       },
       { global: {}, project: {} },
     );
+    deadlineAuthorshipByConfig.set(config, {
+      inline: false,
+      background: false,
+    });
+    return config;
+  }
 
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch (e) {
-    throw new Error(
-      `Invalid JSON in ${path}: ${e instanceof Error ? e.message : e}`,
-    );
+  } catch {
+    throw new Error(`Unable to read valid JSON from ${path}.`);
   }
-  const config =
+  const parsed = ConfigSchema.safeParse(
     typeof raw === 'object' &&
-    raw !== null &&
-    Object.hasOwn(raw, 'version') &&
-    (raw as { version?: unknown }).version === 2
+      raw !== null &&
+      Object.hasOwn(raw, 'version') &&
+      (raw as { version?: unknown }).version === 2
       ? compatibilityConfigFromV2(raw, path)
-      : ConfigSchema.parse(raw);
+      : raw,
+  );
+  if (!parsed.success) {
+    throw new Error(`Invalid Librarium config in ${path}.`);
+  }
+  const config = parsed.data;
   // Keep the authored spelling for the pure v2 mapper. v1 still mutates
   // config.groups below, but doing that here would erase alias provenance
   // before the mapper can issue its structured migration diagnostic.
-  const explicitGlobalGroups = cloneGroups(config.groups);
+  const explicitGlobalGroups = cloneGroups(
+    Object.fromEntries(
+      Object.entries(config.groups).filter(
+        ([name, members]) => !isStoredBuiltinRosterCopy(name, members),
+      ),
+    ),
+  );
   const storedDefaultGroupRosters = captureStoredDefaultGroupRosters(
     config.groups,
   );
@@ -299,6 +442,7 @@ export function loadConfig(globalPath?: string): Config {
     console.error(`[librarium] warning: ${warning}`);
   }
 
+  deadlineAuthorshipByConfig.set(config, rawDeadlineAuthorship(raw));
   return setConfigGroupProvenance(config, {
     global: explicitGlobalGroups,
     project: {},
@@ -315,12 +459,14 @@ export function loadProjectConfig(cwd: string): ProjectConfig | null {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, 'utf-8'));
-  } catch (e) {
-    throw new Error(
-      `Invalid JSON in ${path}: ${e instanceof Error ? e.message : e}`,
-    );
+  } catch {
+    throw new Error(`Unable to read valid JSON from ${path}.`);
   }
-  return ProjectConfigSchema.parse(raw);
+  const parsed = ProjectConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(`Invalid Librarium project config in ${path}.`);
+  }
+  return parsed.data;
 }
 
 /**
@@ -393,6 +539,24 @@ export function mergeConfigs(
   }
 
   migrateLegacyProviderIds(merged);
+
+  deadlineAuthorshipByConfig.set(merged, {
+    // A CLI flag is always an explicit choice, even at the shipped default.
+    inline:
+      configInlineAttemptDeadlineAuthored(global) ||
+      configuredSeconds(
+        project?.defaults?.timeout,
+        LEGACY_DEFAULT_INLINE_TIMEOUT_SECONDS,
+      ) ||
+      cliFlags?.timeout !== undefined,
+    background:
+      configBackgroundAttemptDeadlineAuthored(global) ||
+      configuredSeconds(
+        project?.defaults?.asyncTimeout,
+        LEGACY_DEFAULT_ASYNC_TIMEOUT_SECONDS,
+      ) ||
+      cliFlags?.asyncTimeout !== undefined,
+  });
 
   const globalGroups = configGroupProvenance(global).global;
   const projectGroups = project?.groups ?? {};
@@ -499,8 +663,46 @@ function normalizeProjectProviderConfigs(
   return layer.providers;
 }
 
-function migrateLegacyProviderIds(config: Config): string[] {
+/**
+ * Remove ids retired upstream from a v1 layer. They have no equivalent
+ * profile, so unlike renamed ids they are dropped (with guidance), never
+ * rewritten to a different provider.
+ */
+function removeRetiredUpstreamProviders(config: Config): string[] {
   const warnings: string[] = [];
+  for (const id of Object.keys(config.providers)) {
+    if (!isRetiredUpstreamProviderId(id)) continue;
+    delete config.providers[id];
+    warnings.push(`Ignoring provider config. ${retiredProviderGuidance(id)}`);
+  }
+  for (const [id, providerConfig] of Object.entries(config.providers)) {
+    const fallback = providerConfig.fallback;
+    if (fallback === undefined || !isRetiredUpstreamProviderId(fallback)) {
+      continue;
+    }
+    const { fallback: _retired, ...rest } = providerConfig;
+    config.providers[id] = rest;
+    warnings.push(
+      `Ignoring provider "${id}" fallback. ${retiredProviderGuidance(fallback)}`,
+    );
+  }
+  for (const [groupName, members] of Object.entries(config.groups)) {
+    const retained = members.filter((member) => {
+      if (!isRetiredUpstreamProviderId(member.split('/')[0] ?? '')) {
+        return true;
+      }
+      warnings.push(
+        `Removing group "${groupName}" member "${member}". ${retiredProviderGuidance(member)}`,
+      );
+      return false;
+    });
+    if (retained.length !== members.length) config.groups[groupName] = retained;
+  }
+  return warnings;
+}
+
+function migrateLegacyProviderIds(config: Config): string[] {
+  const warnings: string[] = removeRetiredUpstreamProviders(config);
   const migratedProviders: Config['providers'] = {};
 
   // Both retired OpenAI deep-research entries map to one canonical provider.
@@ -598,8 +800,9 @@ function migrateLegacyProviderIds(config: Config): string[] {
 }
 
 /**
- * Ordered canonical rosters shipped immediately before the visibility/provider
- * expansion. These are intentionally enumerated rather than inferred from git
+ * Ordered canonical rosters shipped by earlier releases: the roster before the
+ * visibility/provider expansion and the roster before searchapi-perplexity was
+ * retired upstream. These are intentionally enumerated rather than inferred from git
  * history or subset membership: only an exact stored default is safe to move.
  */
 const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
@@ -619,6 +822,32 @@ const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
       'exa',
       'you-research',
       'kagi-fastgpt',
+    ],
+    // Shipped until searchapi-perplexity was retired upstream (#4769).
+    [
+      'parallel-research',
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'openai-research',
+      'gemini-deep',
+      'valyu-research',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'grok-x-only',
+      'grok-combined',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'you-answer',
+      'kagi-fastgpt',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
     ],
   ],
   all: [
@@ -642,6 +871,44 @@ const PRIOR_CANONICAL_GROUP_SNAPSHOTS: Readonly<
       'searchapi',
       'serpapi',
       'tavily',
+    ],
+    // Shipped until searchapi-perplexity was retired upstream (#4769).
+    [
+      'parallel-research',
+      'perplexity-sonar-deep',
+      'perplexity-deep-research',
+      'openai-research',
+      'gemini-deep',
+      'valyu-research',
+      'perplexity-sonar-pro',
+      'gemini-grounded',
+      'grok',
+      'grok-x-only',
+      'grok-combined',
+      'openrouter-online',
+      'brave-answers',
+      'exa',
+      'you-research',
+      'you-answer',
+      'kagi-fastgpt',
+      'jina-search',
+      'firecrawl-search',
+      'perplexity-search',
+      'brave-search',
+      'searchapi',
+      'serpapi',
+      'serpbase-search',
+      'serpbase-news',
+      'tavily',
+      'valyu-search',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-perplexity',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+      'parallel-search',
+      'parallel-turbo',
     ],
   ],
 };

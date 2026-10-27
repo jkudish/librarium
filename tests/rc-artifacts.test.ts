@@ -114,7 +114,7 @@ function matrix(overrides: Record<string, unknown> = {}) {
     schema_version: 1,
     catalog_digest: catalogDigest,
     pricing_snapshot_fingerprint: pricingFingerprint,
-    targets: Array.from({ length: 41 }, (_, index) => {
+    targets: Array.from({ length: 40 }, (_, index) => {
       const id = String(index).padStart(2, '0');
       return {
         key: `provider-${id}/profile`,
@@ -230,11 +230,22 @@ function fixtureRepository(
     'export declare const node: true;\n',
   );
   writeFileSync(join(repository, 'dist/index.d.ts.map'), '{}\n');
-  mkdirSync(join(repository, 'contracts/v1/schema'), { recursive: true });
-  writeFileSync(join(repository, 'contracts/v1/manifest.json'), '{}\n');
-  writeFileSync(join(repository, 'contracts/v1/checksums.sha256'), 'fixture\n');
+  mkdirSync(join(repository, 'node_modules/librarium-spec/schema'), {
+    recursive: true,
+  });
   writeFileSync(
-    join(repository, 'contracts/v1/schema/interchange.schema.json'),
+    join(repository, 'node_modules/librarium-spec/sources.json'),
+    '{}\n',
+  );
+  writeFileSync(
+    join(
+      repository,
+      'node_modules/librarium-spec/schema/stored-run.schema.json',
+    ),
+    '{}\n',
+  );
+  writeFileSync(
+    join(repository, 'node_modules/librarium-spec/schema/run.schema.json'),
     '{}\n',
   );
   commitRepository(repository);
@@ -376,7 +387,7 @@ describe('release candidate artifact contract', () => {
     }
   });
 
-  it('accepts the real 41-profile matrix and its versioned catalog digest', () => {
+  it('accepts the real 40-profile matrix and its versioned catalog digest', () => {
     const actual = buildCanonicalValidationMatrix();
     expect(actual.catalog_digest).toMatch(/^fnv1a64\.1:[0-9a-f]{16}$/);
     expect(() => assertReleaseMatrixParity(actual, actual)).not.toThrow();
@@ -386,17 +397,17 @@ describe('release candidate artifact contract', () => {
     [
       'duplicate targets',
       (value: any) => (value.targets[1] = value.targets[0]),
-      'exact sorted 41-profile matrix',
+      'exact sorted 40-profile matrix',
     ],
     [
       'unsorted targets',
       (value: any) => value.targets.reverse(),
-      'exact sorted 41-profile matrix',
+      'exact sorted 40-profile matrix',
     ],
     [
       'wrong target count',
       (value: any) => value.targets.pop(),
-      'exact sorted 41-profile matrix',
+      'exact sorted 40-profile matrix',
     ],
     [
       'per-target digest drift',
@@ -434,7 +445,7 @@ describe('release candidate artifact contract', () => {
     [
       'wrong target count',
       (value: any) => (value.installed_package.target_count = 42),
-      'must contain exactly 41 targets',
+      'must contain exactly 40 targets',
     ],
     [
       'per-target digest drift',
@@ -491,7 +502,7 @@ describe('release candidate artifact contract', () => {
   });
 
   it('probes a freshly built package matrix under permission isolation when available', async () => {
-    if (!existsSync(join(process.cwd(), 'dist/node.js'))) return;
+    if (!existsSync(join(process.cwd(), 'dist/maintainer.js'))) return;
     const trusted = buildCanonicalValidationMatrix();
     const built = await releaseCandidateInternals.defaultLoadBuiltMatrix(
       process.cwd(),
@@ -533,7 +544,7 @@ describe('release candidate artifact contract', () => {
       },
     });
     expect(commands.map((args) => args[0])).toEqual(['run', 'pack']);
-    expect(frozen.installed_package.target_count).toBe(41);
+    expect(frozen.installed_package.target_count).toBe(40);
     expect(frozen.npm.inventory).toContainEqual(
       expect.objectContaining({ path: 'dist/release-matrix.json' }),
     );
@@ -550,15 +561,17 @@ describe('release candidate artifact contract', () => {
       dependencies: fixtureDependencies,
     });
     expect(verified.candidate).toEqual(fixture.candidate.candidate);
-    expect(verified.installed_package.target_count).toBe(41);
+    expect(verified.installed_package.target_count).toBe(40);
     expect(verified.sea.rows).toHaveLength(5);
     expect(verified.live_validation.record_names).toEqual(
       RELEASE_CANDIDATE_RECORD_NAMES,
     );
     expect(
-      verified.npm.inventory.some((row) => row.path.startsWith('contracts/v1')),
+      verified.npm.inventory.some((row) =>
+        row.path.startsWith('librarium-spec'),
+      ),
     ).toBe(false);
-    expect(verified.contracts_v1.files).toHaveLength(3);
+    expect(verified.spec_data.files).toHaveLength(3);
     const authority = createFilesystemCandidateAuthority({
       repository_root: fixture.repository,
       package_json: join(fixture.repository, 'package.json'),
@@ -771,7 +784,7 @@ describe('release candidate artifact contract', () => {
       'contract',
       (root: string) =>
         writeFileSync(
-          join(root, 'contracts/v1/schema/interchange.schema.json'),
+          join(root, 'librarium-spec/schema/run.schema.json'),
           'mutated',
         ),
     ],
@@ -1014,21 +1027,21 @@ describe('release candidate artifact contract', () => {
     const fixture = await completeFixture();
     const contractPath = join(
       fixture.candidateRoot,
-      'contracts/v1/schema/interchange.schema.json',
+      'librarium-spec/schema/run.schema.json',
     );
     writeFileSync(contractPath, '{"mutated":true}\n');
     mutateCanonical(
       join(fixture.candidateRoot, 'candidate.json'),
       (manifest) => {
-        const row = manifest.contracts_v1.files.find(
+        const row = manifest.spec_data.files.find(
           (candidate: any) =>
-            candidate.path === 'contracts/v1/schema/interchange.schema.json',
+            candidate.path === 'librarium-spec/schema/run.schema.json',
         );
         const bytes = readFileSync(contractPath);
         row.sha256 = sha256(bytes);
         row.size = bytes.byteLength;
-        manifest.contracts_v1.fingerprint = sha256(
-          releaseCandidateInternals.canonicalJson(manifest.contracts_v1.files),
+        manifest.spec_data.fingerprint = sha256(
+          releaseCandidateInternals.canonicalJson(manifest.spec_data.files),
         );
       },
     );
@@ -1039,7 +1052,7 @@ describe('release candidate artifact contract', () => {
         candidate_root: fixture.candidateRoot,
         dependencies: fixtureDependencies,
       }),
-    ).rejects.toThrow('exact Git source');
+    ).rejects.toThrow('pinned dependency');
   });
 
   it('keeps approved records cross-linked to self-consistent source and contract mutations', async () => {
@@ -1075,21 +1088,21 @@ describe('release candidate artifact contract', () => {
     const contractFixture = await completeFixture();
     const contractPath = join(
       contractFixture.candidateRoot,
-      'contracts/v1/schema/interchange.schema.json',
+      'librarium-spec/schema/run.schema.json',
     );
     writeFileSync(contractPath, '{"changed":true}\n');
     mutateCanonical(
       join(contractFixture.candidateRoot, 'candidate.json'),
       (manifest) => {
-        const row = manifest.contracts_v1.files.find(
+        const row = manifest.spec_data.files.find(
           (candidate: any) =>
-            candidate.path === 'contracts/v1/schema/interchange.schema.json',
+            candidate.path === 'librarium-spec/schema/run.schema.json',
         );
         const bytes = readFileSync(contractPath);
         row.sha256 = sha256(bytes);
         row.size = bytes.byteLength;
-        manifest.contracts_v1.fingerprint = sha256(
-          releaseCandidateInternals.canonicalJson(manifest.contracts_v1.files),
+        manifest.spec_data.fingerprint = sha256(
+          releaseCandidateInternals.canonicalJson(manifest.spec_data.files),
         );
       },
     );
@@ -1209,7 +1222,7 @@ describe('release candidate artifact contract', () => {
     [
       'contracts fingerprint',
       (manifest: any) => {
-        manifest.contracts_v1.fingerprint = `sha256:${'d'.repeat(64)}`;
+        manifest.spec_data.fingerprint = `sha256:${'d'.repeat(64)}`;
       },
     ],
     [

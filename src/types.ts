@@ -47,10 +47,30 @@ export interface ProviderUsage {
   cacheReadInputTokens?: number;
   reasoningTokens?: number;
   costUsd?: number;
+  /**
+   * The same reported cost as an exact decimal USD string, taken from the
+   * provider's own representation (for example xAI's integer cost ticks).
+   * Persisted in preference to `costUsd`, whose binary value can't be exact.
+   */
+  costUsdDecimal?: string;
   /** Provider-reported billable units, such as credits. Never estimated. */
   billableUnits?: number;
   /** Unit for billableUnits, such as 'credit', 'request', or 'token'. */
   unit?: string;
+  /** Provider-reported server-side search tool requests (web and X searches). */
+  searchRequests?: number;
+  /**
+   * Provider-reported server-side tool counts under snake_case names, such as
+   * xAI's `x_posts_fetched`. Never estimated.
+   */
+  serverToolUsage?: Record<string, number>;
+  /**
+   * Provider-reported quantities in pricing-snapshot units (for example
+   * `uncached_input_tokens`, `output_tokens`, `searches`). Set only by
+   * adapters that know how their provider bills each reported count; used to
+   * price an estimate when the provider reports no cost.
+   */
+  billableQuantities?: Record<string, number>;
   raw?: unknown;
 }
 
@@ -173,6 +193,11 @@ export interface ProviderResult {
   provider: string;
   tier: ProviderTier;
   content: string; // Markdown content
+  /**
+   * `json` marks `content` as serialized JSON requested through a structured
+   * output schema. Omitted means Markdown.
+   */
+  contentFormat?: 'json';
   citations: Citation[];
   durationMs: number;
   model?: string;
@@ -222,6 +247,8 @@ export interface AsyncTaskHandle {
   lastPollError?: string;
   /** Safe, allowlisted facts for an immediately failed accepted task. */
   failureDiagnostic?: ProviderFailureDiagnostic;
+  /** Provider-reported usage, including charges on a terminal submission. */
+  usage?: ProviderUsage;
   outputDir?: string;
 }
 
@@ -234,6 +261,8 @@ export interface AsyncPollResult {
   rawStatus?: string;
   /** Safe, allowlisted facts when the observed task state is failed. */
   failureDiagnostic?: ProviderFailureDiagnostic;
+  /** Provider-reported usage; failed or cancelled work is not necessarily free. */
+  usage?: ProviderUsage;
 }
 
 // Fields shared by every provider implementation.

@@ -352,7 +352,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 130,
-        target: configurableTarget('model', 'gpt-5.6-sol'),
+        target: configurableTarget('model', 'gpt-6.1-sol'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -385,7 +385,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'grounded',
         selection_order: 220,
-        target: configurableTarget('model', 'gemini-2.5-flash'),
+        target: configurableTarget('model', 'gemini-3.8-flash'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -580,7 +580,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'grounded',
         selection_order: 260,
-        target: configurableTarget('model', 'openai/gpt-4o-mini'),
+        target: configurableTarget('model', 'openai/gpt-6-luna'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -593,7 +593,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 530,
-        target: configurableTarget('model', 'openai/gpt-5.6-terra'),
+        target: configurableTarget('model', 'openai/gpt-6-luna'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],
@@ -620,7 +620,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'web',
         selection_order: 230,
-        target: configurableTarget('model', 'grok-4.6'),
+        target: configurableTarget('model', 'grok-4.7'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -647,7 +647,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'x',
         selection_order: 240,
-        target: configurableTarget('model', 'grok-4.6'),
+        target: configurableTarget('model', 'grok-4.7'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         corpora: ['x'],
@@ -672,7 +672,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'combined',
         selection_order: 250,
-        target: configurableTarget('model', 'grok-4.6'),
+        target: configurableTarget('model', 'grok-4.7'),
         result_kind: 'grounded_answer',
         grounding_policy: 'required',
         // One attempt, one result, one metering record, two corpora. This is
@@ -715,7 +715,8 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'research',
         selection_order: 190,
-        target: providerManagedTarget('agent'),
+        // research_effort selects a priced tier; the adapter defaults to standard.
+        target: configurableTarget('preset', 'standard'),
         result_kind: 'research_report',
         grounding_policy: 'required',
         corpora: ['web'],
@@ -893,7 +894,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -917,37 +918,13 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
         selection_order: 410,
         operator_id: 'google',
         surface_id: 'gemini',
-      }),
-    ],
-  },
-  {
-    provider_id: 'searchapi-perplexity',
-    order: 203,
-    aliases: [],
-    display: {
-      family: 'SearchAPI',
-      name: 'SearchAPI Perplexity',
-      description: 'SearchAPI-observed Perplexity consumer answer.',
-      best_for: 'Comparing the cited answer visible on the Perplexity surface.',
-      setup_url: SEARCHAPI_SETUP_URL,
-    },
-    credential: {
-      env_var: 'SEARCHAPI_API_KEY',
-      required: true,
-      auto_enable: false,
-    },
-    profiles: [
-      surfaceProfile({
-        selection_order: 420,
-        operator_id: 'perplexity',
-        surface_id: 'perplexity',
       }),
     ],
   },
@@ -965,7 +942,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -989,7 +966,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -1007,14 +984,14 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       family: 'SearchAPI',
       name: 'SearchAPI Google AI Overview',
       description:
-        'Dedicated two-stage SearchAPI-observed Google AI Overview answer.',
+        'SearchAPI-observed Google AI Overview answer, read inline first; a page-token request follows only when needed.',
       best_for: 'Comparing the dedicated Google AI Overview and its citations.',
       setup_url: SEARCHAPI_SETUP_URL,
     },
     credential: {
       env_var: 'SEARCHAPI_API_KEY',
       required: true,
-      auto_enable: false,
+      auto_enable: true,
     },
     profiles: [
       surfaceProfile({
@@ -1112,7 +1089,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 500,
-        target: configurableTarget('model', 'claude-sonnet-5'),
+        target: configurableTarget('model', 'claude-sonnet-5-5'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],
@@ -1142,7 +1119,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 510,
-        target: configurableTarget('model', 'gpt-5-mini'),
+        target: configurableTarget('model', 'gpt-6-luna'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],
@@ -1172,7 +1149,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       declare({
         profile_id: 'chat',
         selection_order: 520,
-        target: configurableTarget('model', 'gemini-3.6-flash'),
+        target: configurableTarget('model', 'gemini-3.8-flash'),
         result_kind: 'grounded_answer',
         grounding_policy: 'optional',
         corpora: ['web'],

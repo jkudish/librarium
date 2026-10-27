@@ -1,4 +1,3 @@
-import { lstatSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { projectCanonicalRunPresentation } from '../node-canonical-presentation.js';
 import {
@@ -10,13 +9,7 @@ import {
 import type { RunArtifactSnapshot } from '../node-run-artifact-codecs.js';
 import { presentationSourceSummary } from '../node-run-artifact-presentation.js';
 import { RunArtifactRepository } from '../node-run-artifacts.js';
-import type {
-  AsyncTaskHandle,
-  DeduplicatedSource,
-  ProviderReport,
-  RunManifest,
-} from '../types.js';
-import type { SilentRunResult } from './research.js';
+import type { AsyncTaskHandle } from '../types.js';
 import {
   type ResultPageOptions,
   type RunEvidence,
@@ -122,44 +115,6 @@ function canonicalEvidence(
       error: report.error,
     })),
   };
-}
-
-/**
- * Shape a silent run into the compact `research` tool result. Full provider
- * content is deliberately excluded (token blowup) — callers fetch it via
- * `get_results`.
- */
-export function shapeResearchResult(
-  run:
-    | SilentRunResult
-    | {
-        readonly manifest: RunManifest;
-        readonly reports: ProviderReport[];
-        readonly sources: DeduplicatedSource[];
-        readonly totalCitations: number;
-        readonly totalDurationMs: number;
-        readonly outputDir?: string;
-      },
-): ResearchToolResult {
-  const { manifest, reports } = run;
-  if (manifest.schemaVersion === 2) {
-    return resultIndex({
-      runDir: manifest.outputDir,
-      query: manifest.query,
-      mode: manifest.mode,
-      sources: {
-        total: manifest.sources.total,
-        unique: manifest.sources.unique,
-      },
-      entries: reports.map((report) => ({ report, content: '' })),
-      state:
-        manifest.status === 'running' || manifest.status === 'awaiting_async'
-          ? 'pending'
-          : 'terminal',
-    });
-  }
-  const canonicalRun = run as SilentRunResult;
-  return resultIndex(canonicalEvidence(manifest, canonicalRun.outputDir));
 }
 
 function snapshotEvidence(
@@ -337,23 +292,9 @@ function readRunEvidence(
   const runsRoot = dirname(resolve(runDir));
   if (readRunJsonSchemaVersion(runsRoot, runDir) === 3) {
     const manifest = readCanonicalRunManifest(runsRoot, runDir);
-    const evidence = canonicalEvidence(manifest, runDir);
-    for (const entry of evidence.entries) {
-      try {
-        const path = resolveContainedFile(runDir, entry.report.outputFile);
-        const metadata = lstatSync(path);
-        if (!metadata.isFile() || metadata.isSymbolicLink()) {
-          throw new PathContainmentError(
-            'Derived canonical provider output must be a regular file.',
-          );
-        }
-        entry.content = readFileSync(path, 'utf8');
-        entry.available = true;
-      } catch {
-        // Derived files are optional. Canonical safe output is authoritative.
-      }
-    }
-    return evidence;
+    // A derived file may be stale, empty, or replaced. Only committed canonical
+    // output supplies v3 evidence; reading never repairs presentation files.
+    return canonicalEvidence(manifest, runDir);
   }
   let snapshot: ReturnType<RunArtifactRepository['readSnapshot']>;
   try {

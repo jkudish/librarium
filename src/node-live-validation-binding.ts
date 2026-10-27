@@ -412,7 +412,7 @@ function verifyRcInstalledMatrix(value: unknown): void {
     'RC installed-package matrix',
   );
   if (
-    matrix.target_count !== 41 ||
+    matrix.target_count !== 40 ||
     typeof matrix.catalog_digest !== 'string' ||
     !/^fnv1a64\.1:[0-9a-f]{16}$/.test(matrix.catalog_digest) ||
     typeof matrix.pricing_snapshot_fingerprint !== 'string' ||
@@ -420,7 +420,7 @@ function verifyRcInstalledMatrix(value: unknown): void {
     typeof matrix.matrix_fingerprint !== 'string' ||
     !/^sha256:[0-9a-f]{64}$/.test(matrix.matrix_fingerprint) ||
     !Array.isArray(matrix.targets) ||
-    matrix.targets.length !== 41
+    matrix.targets.length !== 40
   ) {
     throw new CanonicalLiveValidationError(
       'RC installed-package matrix identity is invalid.',
@@ -470,7 +470,7 @@ function verifyRcInstalledMatrix(value: unknown): void {
     return target.key;
   });
   if (
-    new Set(keys).size !== 41 ||
+    new Set(keys).size !== 40 ||
     JSON.stringify(keys) !== JSON.stringify([...keys].sort(rcCompareText)) ||
     sha256Bytes(
       rcCanonicalJson({
@@ -491,7 +491,7 @@ function rcSourceContracts(repositoryRoot: string): {
   readonly fingerprint: string;
   readonly files: readonly RcArtifactReference[];
 } {
-  const sourceRoot = resolve(repositoryRoot, 'contracts', 'v1');
+  const sourceRoot = resolve(repositoryRoot, 'node_modules', 'librarium-spec');
   const files: RcArtifactReference[] = [];
   const visit = (directory: string): void => {
     const entries = (() => {
@@ -499,7 +499,7 @@ function rcSourceContracts(repositoryRoot: string): {
         return readdirSync(directory, { withFileTypes: true });
       } catch {
         throw new CanonicalLiveValidationError(
-          'RC source contracts/v1 inventory is missing.',
+          'RC pinned librarium-spec inventory is missing; run npm ci.',
         );
       }
     })();
@@ -508,21 +508,21 @@ function rcSourceContracts(repositoryRoot: string): {
     )) {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(entry.name)) {
         throw new CanonicalLiveValidationError(
-          'RC source contracts/v1 contains an unsafe name.',
+          'RC pinned librarium-spec contains an unsafe name.',
         );
       }
       const path = resolve(directory, entry.name);
       const stat = lstatSync(path);
       if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
         throw new CanonicalLiveValidationError(
-          'RC source contracts/v1 contains a symlink or special file.',
+          'RC pinned librarium-spec contains a symlink or special file.',
         );
       }
       if (stat.isDirectory()) visit(path);
       else {
         const bytes = readFileSync(path);
         files.push({
-          path: `contracts/v1/${relative(sourceRoot, path).split(sep).join('/')}`,
+          path: `librarium-spec/${relative(sourceRoot, path).split(sep).join('/')}`,
           sha256: sha256Bytes(bytes),
           size: bytes.byteLength,
         });
@@ -532,14 +532,14 @@ function rcSourceContracts(repositoryRoot: string): {
   visit(sourceRoot);
   files.sort((left, right) => rcCompareText(left.path, right.path));
   if (
-    !files.some((row) => row.path === 'contracts/v1/manifest.json') ||
-    !files.some((row) => row.path === 'contracts/v1/checksums.sha256') ||
+    !files.some((row) => row.path === 'librarium-spec/sources.json') ||
     !files.some(
-      (row) => row.path === 'contracts/v1/schema/interchange.schema.json',
-    )
+      (row) => row.path === 'librarium-spec/schema/stored-run.schema.json',
+    ) ||
+    !files.some((row) => row.path === 'librarium-spec/schema/run.schema.json')
   ) {
     throw new CanonicalLiveValidationError(
-      'RC source contracts/v1 inventory is incomplete.',
+      'RC pinned librarium-spec inventory is incomplete.',
     );
   }
   return { files, fingerprint: sha256Bytes(rcCanonicalJson(files)) };
@@ -683,7 +683,7 @@ function verifyRcCandidateTree(
       'candidate',
       'checksum_index',
       'contract',
-      'contracts_v1',
+      'spec_data',
       'installed_package',
       'live_validation',
       'npm',
@@ -726,7 +726,7 @@ function verifyRcCandidateTree(
   }
   const source = rcRecord(candidate.source_metadata, 'RC source metadata');
   const npm = rcRecord(candidate.npm, 'RC npm metadata');
-  const contracts = rcRecord(candidate.contracts_v1, 'RC contracts metadata');
+  const contracts = rcRecord(candidate.spec_data, 'RC spec metadata');
   const sea = rcRecord(candidate.sea, 'RC SEA metadata');
   const live = rcRecord(
     candidate.live_validation,
@@ -1232,7 +1232,7 @@ function verifyRcTransitiveRecords(
       candidateFacts.packageJsonSha256.slice('sha256:'.length) ||
     dependencyDigests.get('file:source/package-lock.json')?.sha256 !==
       candidateFacts.packageLockSha256.slice('sha256:'.length) ||
-    dependencyDigests.get('file:contracts/v1')?.sha256 !==
+    dependencyDigests.get('file:librarium-spec')?.sha256 !==
       candidateFacts.contractsFingerprint.slice('sha256:'.length)
   ) {
     throw new CanonicalLiveValidationError(

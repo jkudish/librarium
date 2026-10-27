@@ -216,7 +216,10 @@ export function getProviderMeta(
  */
 export async function initializeProviders(
   config: ProviderInitConfig = {},
-  options: { readonly builtinAdapterIds?: Iterable<string> } = {},
+  initialization: {
+    readonly builtinAdapterIds?: Iterable<string>;
+    readonly onProvider?: (provider: Provider) => void;
+  } = {},
 ): Promise<ProviderInitResult> {
   providers.clear();
   const providerConfig = config.providers ?? {};
@@ -225,8 +228,8 @@ export async function initializeProviders(
   const httpStreamClient = config.httpStreamClient;
   const warnings: string[] = [];
 
-  const admittedBuiltinIds = options.builtinAdapterIds
-    ? new Set(options.builtinAdapterIds)
+  const admittedBuiltinIds = initialization.builtinAdapterIds
+    ? new Set(initialization.builtinAdapterIds)
     : undefined;
   const descriptors = [
     ...BUILTIN_PROVIDER_DESCRIPTORS,
@@ -316,6 +319,7 @@ export async function initializeProviders(
     provider.source = 'builtin';
     provider.requiresApiKey = descriptor.credential.required;
     registerProvider(provider);
+    initialization.onProvider?.(provider);
   }
 
   return {

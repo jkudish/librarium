@@ -100,6 +100,17 @@ export class BraveAnswersProvider extends BaseProvider {
         this.extractUsage(response.headers),
         streamed.tokenUsage,
       );
+      if (!parsed.content) {
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: '',
+          citations: [],
+          durationMs: Math.round(performance.now() - start),
+          error: 'Brave Answers request failed.',
+          failureDiagnostic: { kind: 'provider' },
+        };
+      }
 
       return {
         provider: this.id,

@@ -16,11 +16,56 @@ export const RETIRED_PROVIDER_REPLACEMENTS = Object.freeze({
 
 export type RetiredProviderId = keyof typeof RETIRED_PROVIDER_REPLACEMENTS;
 
+interface UpstreamRetirement {
+  /** Why the upstream service no longer exists, in safe display text. */
+  readonly reason: string;
+  /** Nearest current provider, offered as guidance only and never migrated. */
+  readonly alternative: string;
+  /** How the alternative differs, so callers can choose it deliberately. */
+  readonly alternativeNote: string;
+}
+
+/**
+ * Provider ids retired because their upstream API was withdrawn.
+ *
+ * Unlike RETIRED_PROVIDER_REPLACEMENTS these have no equivalent profile, so v1
+ * migration never rewrites them; every current selector and native-v2 config
+ * rejects them with guidance instead.
+ */
+export const RETIRED_UPSTREAM_PROVIDERS: Readonly<
+  Record<string, UpstreamRetirement>
+> = Object.freeze({
+  'searchapi-perplexity': Object.freeze({
+    reason:
+      'SearchAPI deprecated its Perplexity engine (HTTP 503 "This API has been deprecated.") and offers no replacement',
+    alternative: 'perplexity-sonar-pro',
+    alternativeNote:
+      'it returns a Perplexity API answer, not an observation of the Perplexity consumer surface',
+  }),
+});
+
 export function retiredProviderReplacement(id: string): string | undefined {
   return Object.hasOwn(RETIRED_PROVIDER_REPLACEMENTS, id)
     ? RETIRED_PROVIDER_REPLACEMENTS[id as RetiredProviderId]
     : undefined;
 }
+
+function upstreamRetirement(id: string): UpstreamRetirement | undefined {
+  return Object.hasOwn(RETIRED_UPSTREAM_PROVIDERS, id)
+    ? RETIRED_UPSTREAM_PROVIDERS[id]
+    : undefined;
+}
+
+/** True for a provider id retired upstream without a migration target. */
+export function isRetiredUpstreamProviderId(id: string): boolean {
+  return upstreamRetirement(id) !== undefined;
+}
+
+/** Every retired spelling, renamed or retired upstream; reserved forever. */
+export const RETIRED_PROVIDER_IDS: readonly string[] = Object.freeze([
+  ...Object.keys(RETIRED_PROVIDER_REPLACEMENTS),
+  ...Object.keys(RETIRED_UPSTREAM_PROVIDERS),
+]);
 
 export function isRetiredProviderId(id: string): id is RetiredProviderId {
   return retiredProviderReplacement(id) !== undefined;
@@ -44,8 +89,12 @@ export function retiredProviderTokenReplacement(
     : [replacement, ...suffix].join('/');
 }
 
+/** True for any retired spelling, including ids retired upstream. */
 export function isRetiredProviderToken(token: string): boolean {
-  return retiredProviderTokenReplacement(token) !== undefined;
+  return (
+    retiredProviderTokenReplacement(token) !== undefined ||
+    isRetiredUpstreamProviderId(token.split('/')[0] ?? '')
+  );
 }
 
 /** v1-only canonicalization. Current selectors must not call this helper. */
@@ -70,6 +119,11 @@ export function retiredProviderMigrationPriority(
 }
 
 export function retiredProviderGuidance(token: string): string | undefined {
+  const providerId = token.split('/')[0] ?? '';
+  const upstream = upstreamRetirement(providerId);
+  if (upstream) {
+    return `Provider "${providerId}" was retired upstream: ${upstream.reason}. It is not replaced automatically; "${upstream.alternative}" is the nearest alternative, but ${upstream.alternativeNote}.`;
+  }
   const replacement = retiredProviderTokenReplacement(token);
   return replacement
     ? token.split('/')[0] === 'perplexity-pro-search'

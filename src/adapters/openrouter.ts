@@ -10,6 +10,13 @@ import { BaseProvider } from './base.js';
 
 export type OpenRouterProfile = 'grounded' | 'chat';
 export type OpenRouterDataCollection = 'allow' | 'deny';
+export type OpenRouterWebSearchEngine =
+  | 'auto'
+  | 'native'
+  | 'exa'
+  | 'firecrawl'
+  | 'parallel'
+  | 'perplexity';
 export type OpenRouterReasoningEffort =
   | 'none'
   | 'minimal'
@@ -22,6 +29,7 @@ export type OpenRouterReasoningEffort =
 export interface OpenRouterProviderOptions extends BaseProviderOptions {
   model?: string;
   webSearch?: boolean;
+  webSearchEngine?: OpenRouterWebSearchEngine;
   providerOrder?: string[];
   allowFallbacks?: boolean;
   requireParameters?: boolean;
@@ -67,6 +75,65 @@ interface OpenRouterResponse {
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 /**
+ * Explicit defaults; every one is configurable. Exa is pinned because `auto`
+ * switches OpenAI models to OpenAI native search, billed at $10 per 1k calls
+ * instead of Exa's $7 per 1k. Fallbacks are off so the configured model is the
+ * one that answers, and require_parameters keeps the web search tool from
+ * being silently dropped by an endpoint that does not support it. Data
+ * collection, ZDR and reasoning are left at OpenRouter's and the model's own
+ * defaults.
+ */
+const DEFAULT_WEB_SEARCH_ENGINE: OpenRouterWebSearchEngine = 'exa';
+const DEFAULT_ALLOW_FALLBACKS = false;
+const DEFAULT_REQUIRE_PARAMETERS = true;
+
+const PLAIN_DECIMAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+
+/**
+ * `usage.cost` exactly as OpenRouter wrote it in the JSON body, so the persisted
+ * cost is the provider's decimal rather than a binary expansion of the parsed
+ * number. Undefined without a body, in exponent form, or where the parser does
+ * not expose number source text; the parsed number is used then.
+ */
+function reportedCostSource(body: string | undefined): string | undefined {
+  if (body === undefined) return undefined;
+  const sources = new WeakMap<object, string>();
+  let root: unknown;
+  try {
+    root = JSON.parse(body, function (
+      this: unknown,
+      key: string,
+      value: unknown,
+      context?: { source?: string },
+    ) {
+      if (
+        key === 'cost' &&
+        typeof value === 'number' &&
+        typeof context?.source === 'string' &&
+        this !== null &&
+        typeof this === 'object'
+      ) {
+        sources.set(this, context.source);
+      }
+      return value;
+    } as (this: unknown, key: string, value: unknown) => unknown);
+  } catch {
+    return undefined;
+  }
+  const usage =
+    root !== null && typeof root === 'object'
+      ? (root as { usage?: unknown }).usage
+      : undefined;
+  const source =
+    usage !== null && typeof usage === 'object'
+      ? sources.get(usage)
+      : undefined;
+  return source !== undefined && PLAIN_DECIMAL.test(source)
+    ? source
+    : undefined;
+}
+
+/**
  * OpenRouter's single v2 provider implementation. Legacy adapter ids retain
  * their exact binding so v1 configuration can migrate without guessing a
  * profile. The profile is a constructor fact, never an option.
@@ -99,9 +166,12 @@ export class OpenRouterProvider extends BaseProvider {
         'OpenRouter grounded profile always requires web search.',
       );
     }
+    if (options.webSearchEngine !== undefined && !this.webSearch) {
+      throw new Error('OpenRouter webSearchEngine requires web search.');
+    }
     if (options.zdr === true && this.webSearch) {
       throw new Error(
-        'OpenRouter ZDR does not apply to the web plugin; disable web search before enabling ZDR.',
+        'OpenRouter ZDR does not apply to web search; disable web search before enabling ZDR.',
       );
     }
   }
@@ -164,7 +234,7 @@ export class OpenRouterProvider extends BaseProvider {
           input: data.usage?.prompt_tokens,
           output: data.usage?.completion_tokens,
         },
-        usage: this.extractUsage(data.usage),
+        usage: this.extractUsage(data.usage, reportedCostSource(response.text)),
         providerMeta: this.metadata(data),
       };
     } catch (error) {
@@ -180,20 +250,19 @@ export class OpenRouterProvider extends BaseProvider {
     return result.error ? { ok: false, error: result.error } : { ok: true };
   }
 
-  private requestBody(query: string): Record<string, unknown> {
-    const provider = {
+  private providerRouting(): Record<string, unknown> {
+    return {
       ...(this.options.providerOrder && { order: this.options.providerOrder }),
-      ...(this.options.allowFallbacks !== undefined && {
-        allow_fallbacks: this.options.allowFallbacks,
-      }),
-      ...(this.options.requireParameters !== undefined && {
-        require_parameters: this.options.requireParameters,
-      }),
+      allow_fallbacks: this.options.allowFallbacks,
+      require_parameters: this.options.requireParameters,
       ...(this.options.dataCollection && {
         data_collection: this.options.dataCollection,
       }),
       ...(this.options.zdr !== undefined && { zdr: this.options.zdr }),
     };
+  }
+
+  private requestBody(query: string): Record<string, unknown> {
     const reasoning = {
       ...(this.options.reasoningEffort && {
         effort: this.options.reasoningEffort,
@@ -208,16 +277,33 @@ export class OpenRouterProvider extends BaseProvider {
     return {
       model: this.model,
       messages: [{ role: 'user', content: query }],
-      ...(this.webSearch && { plugins: [{ id: 'web' }] }),
-      ...(Object.keys(provider).length > 0 && { provider }),
+      ...(this.webSearch && {
+        tools: [
+          {
+            type: 'openrouter:web_search',
+            parameters: { engine: this.options.webSearchEngine },
+          },
+        ],
+      }),
+      provider: this.providerRouting(),
       ...(Object.keys(reasoning).length > 0 && { reasoning }),
     };
   }
 
-  private get options(): OpenRouterProviderOptions {
+  private get options(): OpenRouterProviderOptions & {
+    allowFallbacks: boolean;
+    requireParameters: boolean;
+  } {
     return {
-      webSearch: this.webSearch,
       ...this.config,
+      webSearch: this.webSearch,
+      ...(this.webSearch && {
+        webSearchEngine:
+          this.config.webSearchEngine ?? DEFAULT_WEB_SEARCH_ENGINE,
+      }),
+      allowFallbacks: this.config.allowFallbacks ?? DEFAULT_ALLOW_FALLBACKS,
+      requireParameters:
+        this.config.requireParameters ?? DEFAULT_REQUIRE_PARAMETERS,
     };
   }
 
@@ -227,33 +313,14 @@ export class OpenRouterProvider extends BaseProvider {
       'openrouter:profile': this.profile,
       'openrouter:search': {
         enabled: this.webSearch,
+        ...(this.options.webSearchEngine && {
+          engine: this.options.webSearchEngine,
+        }),
         ...(usage?.server_tool_use?.web_search_requests !== undefined && {
           requests: usage.server_tool_use.web_search_requests,
         }),
       },
-      ...(this.options.providerOrder ||
-      this.options.allowFallbacks !== undefined ||
-      this.options.requireParameters !== undefined ||
-      this.options.dataCollection ||
-      this.options.zdr !== undefined
-        ? {
-            'openrouter:routing': {
-              ...(this.options.providerOrder && {
-                order: this.options.providerOrder,
-              }),
-              ...(this.options.allowFallbacks !== undefined && {
-                allow_fallbacks: this.options.allowFallbacks,
-              }),
-              ...(this.options.requireParameters !== undefined && {
-                require_parameters: this.options.requireParameters,
-              }),
-              ...(this.options.dataCollection && {
-                data_collection: this.options.dataCollection,
-              }),
-              ...(this.options.zdr !== undefined && { zdr: this.options.zdr }),
-            },
-          }
-        : {}),
+      'openrouter:routing': this.providerRouting(),
       ...(this.options.reasoningEffort ||
       this.options.reasoningMaxTokens !== undefined ||
       this.options.reasoningExclude !== undefined
@@ -278,9 +345,14 @@ export class OpenRouterProvider extends BaseProvider {
     };
   }
 
-  private extractUsage(usage?: OpenRouterUsage): ProviderUsage | undefined {
+  private extractUsage(
+    usage?: OpenRouterUsage,
+    costSource?: string,
+  ): ProviderUsage | undefined {
     if (!usage) return undefined;
     return {
+      ...(usage.cost !== undefined &&
+        costSource !== undefined && { costUsdDecimal: costSource }),
       inputTokens: usage.prompt_tokens,
       outputTokens: usage.completion_tokens,
       totalTokens: usage.total_tokens,

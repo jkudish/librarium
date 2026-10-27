@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
+import { build } from 'esbuild';
 
 const DIST = 'dist';
 const SEA_CONFIG = join(DIST, 'sea-config.json');
@@ -51,9 +52,19 @@ console.log(`  Output:  ${outputPath}`);
 
 // Step 1: Bundle with esbuild into CJS (SEA requires CJS)
 console.log('\n1. Bundling with esbuild...');
-run(
-  `npx esbuild src/cli.ts --bundle --platform=node --target=node22.12 --format=cjs --outfile=${CJS_BUNDLE} --define:__VERSION__='"${pkg.version}"' --external:fsevents`,
-);
+await build({
+  entryPoints: ['src/cli.ts'],
+  bundle: true,
+  platform: 'node',
+  target: 'node22.12',
+  format: 'cjs',
+  outfile: CJS_BUNDLE,
+  define: {
+    __VERSION__: JSON.stringify(pkg.version),
+    __BUNDLED_SKILL__: JSON.stringify(readFileSync('SKILL.md', 'utf8')),
+  },
+  external: ['fsevents'],
+});
 
 // Step 2: Generate SEA config and blob
 console.log('\n2. Generating SEA blob...');

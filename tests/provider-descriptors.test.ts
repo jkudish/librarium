@@ -25,7 +25,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(39);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(38);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -104,7 +104,6 @@ describe('built-in provider descriptors', () => {
       'parallel-turbo',
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
@@ -122,12 +121,6 @@ describe('built-in provider descriptors', () => {
 
     expect(optIn).toEqual(
       expect.arrayContaining([
-        'searchapi-chatgpt',
-        'searchapi-gemini',
-        'searchapi-perplexity',
-        'searchapi-google-ai-mode',
-        'searchapi-bing-copilot',
-        'searchapi-google-ai-overview',
         'claude',
         'openai-chat',
         'gemini-chat',
@@ -138,10 +131,20 @@ describe('built-in provider descriptors', () => {
         'you-answer',
       ]),
     );
-    expect(
-      BUILTIN_PROVIDER_DESCRIPTORS.find(({ id }) => id === 'searchapi')
-        ?.credential.autoEnable,
-    ).toBe(true);
+    // init --auto enables SearchAPI search and its surfaces together (#4856).
+    for (const id of [
+      'searchapi',
+      'searchapi-chatgpt',
+      'searchapi-gemini',
+      'searchapi-google-ai-mode',
+      'searchapi-bing-copilot',
+      'searchapi-google-ai-overview',
+    ]) {
+      expect(
+        BUILTIN_PROVIDER_DESCRIPTORS.find((descriptor) => descriptor.id === id)
+          ?.credential.autoEnable,
+      ).toBe(true);
+    }
     expect(
       BUILTIN_PROVIDER_DESCRIPTORS.find(
         ({ id }) => id === 'perplexity-sonar-pro',
@@ -230,7 +233,6 @@ describe('built-in provider descriptors', () => {
     for (const id of [
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
@@ -327,7 +329,7 @@ describe('built-in provider descriptors', () => {
       'https://openrouter.ai/api/v1/chat/completions',
       expect.objectContaining({
         body: {
-          model: 'openai/gpt-5.6-terra',
+          model: 'openai/gpt-6-luna',
           messages: [{ role: 'user', content: 'factory policy check' }],
           provider: {
             order: ['openai', 'azure'],
@@ -367,7 +369,6 @@ describe('built-in provider descriptors', () => {
     const ids = [
       'searchapi-chatgpt',
       'searchapi-gemini',
-      'searchapi-perplexity',
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',

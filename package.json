@@ -1,22 +1,26 @@
 {
   "name": "librarium",
   "version": "2.0.0",
-  "description": "Evidence-aware multi-provider research with explicit profile provenance",
+  "description": "Research one question across search and AI sources and keep answers, citations and costs in resumable Runs",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/public-entry.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/public-entry.d.ts",
       "import": "./dist/index.js"
     },
     "./core": {
-      "types": "./dist/core-entry.d.ts",
+      "types": "./dist/run-core-entry.d.ts",
       "import": "./dist/core.js"
     },
     "./node": {
-      "types": "./dist/node-entry.d.ts",
+      "types": "./dist/run-node-entry.d.ts",
       "import": "./dist/node.js"
+    },
+    "./testing": {
+      "types": "./dist/testing-entry.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "bin": {
@@ -29,11 +33,12 @@
     "build": "node scripts/clean-dist.mjs && npm run verify:typescript && npm run build:declarations && tsup",
     "build:declarations": "node scripts/run-typescript.mjs --project tsconfig.node-declarations.json && node scripts/run-typescript.mjs --project tsconfig.declarations.json",
     "build:sea": "node scripts/build-sea.mjs",
-    "contracts:generate": "node scripts/generate-contract-snapshot.mjs",
+    "test:conformance": "vitest run tests/simplified-surface.test.ts",
     "benchmark": "node benchmark/cli.mjs",
     "benchmark:performance": "node --experimental-strip-types benchmark/performance/cli.mjs",
     "benchmark:validate": "node benchmark/validate.mjs",
     "benchmark:ci": "node benchmark/ci.mjs",
+    "live-validation": "npm run build && node scripts/live-validation.mjs",
     "live-validation:fixture": "vitest run tests/node-live-validation.test.ts tests/node-live-validation-production.test.ts",
     "pricing:snapshot": "node scripts/pricing-snapshot.mjs",
     "rc:package": "node scripts/rc-artifacts.mjs package",
@@ -60,17 +65,18 @@
     "lint:fix": "biome check --write src/ tests/ benchmark/"
   },
   "dependencies": {
-    "@clack/prompts": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@clack/prompts": "^1.8.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "commander": "^15.0.0",
-    "marked": "^18.0.9",
+    "librarium-spec": "^1.0.0",
+    "marked": "^18.1.0",
     "ora": "^9.4.1",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.8",
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@types/node": "^22.20.1",
+    "@biomejs/biome": "^2.5.15",
+    "@cloudflare/vitest-plugin": "^1.4.0",
+    "@types/node": "^22.20.5",
     "@typescript/typescript6": "6.0.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
@@ -80,7 +86,7 @@
     "strip-ansi": "^7.2.0",
     "tsup": "^8.5.1",
     "typescript": "7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.3"
   },
   "overrides": {
     "tsup": {
@@ -110,7 +116,7 @@
   ],
   "license": "MIT",
   "author": "Joey Kudish",
-  "homepage": "https://librarium.agentsy.build",
+  "homepage": "https://librarium.si",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jkudish/librarium.git"

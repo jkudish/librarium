@@ -10,6 +10,9 @@ import {
   DEFAULT_GROK_MODEL,
   validateGrokOptions,
 } from '../../src/adapters/grok-responses.js';
+import type { ExecutionProfile } from '../../src/contracts/domain/index.js';
+import type { AttemptLaunch } from '../../src/core/coordinator.js';
+import { normalizeProviderAttemptOutput } from '../../src/core/research-response-projector.js';
 
 vi.mock('../../src/constants.js', async (importOriginal) => {
   const original =
@@ -35,8 +38,44 @@ function provider(model?: string): GrokProvider {
 
 function outputResponse(text = 'Grounded answer.'): Record<string, unknown> {
   return {
-    model: 'grok-4.6',
+    model: 'grok-4.7',
     output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
+  };
+}
+
+function grokLaunch(): AttemptLaunch {
+  const profile: ExecutionProfile = {
+    identity: {
+      provider_id: 'grok',
+      profile_id: 'web',
+      target: {
+        primary: {
+          model_selection: 'configurable',
+          kind: 'model',
+          target_id: 'grok-4.7',
+        },
+      },
+    },
+    result_kind: 'grounded_answer',
+    grounding_policy: 'required',
+    observation_mode: 'api_output',
+    corpora: ['web'],
+    retrieval_method: 'model_search_tool',
+    access_mode: 'direct',
+    operator_id: 'xai',
+    invocation: 'inline',
+    resumability: 'none',
+  };
+  return {
+    attempt_id: 'attempt-grok',
+    slot_id: 'slot-grok',
+    profile,
+    binding: { adapter_id: 'grok', binding_id: 'binding-grok' },
+    catalog_digest: 'catalog-digest',
+    query: 'ground this',
+    deadline_at: '2026-09-08T12:01:00.000Z',
+    delivery_lease_id: 'lease-grok',
+    idempotency_key: 'idempotency-grok',
   };
 }
 
@@ -54,7 +93,7 @@ describe('GrokProvider', () => {
   it('treats a null error field on a successful response as success', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'grok-4.6',
+        model: 'grok-4.7',
         error: null,
         output: [
           {
@@ -84,7 +123,7 @@ describe('GrokProvider', () => {
     const secondMarker = answer.indexOf('[[2]]');
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'grok-4.6',
+        model: 'grok-4.7',
         output: [
           {
             type: 'message',
@@ -155,6 +194,29 @@ describe('GrokProvider', () => {
     expect(result.citations).toEqual([]);
   });
 
+  it('reads the nested reasoning and cached token counts of live xAI responses', async () => {
+    // Shape observed from api.x.ai/v1/responses on 2026-10-09 (#4767).
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        ...outputResponse(),
+        usage: {
+          input_tokens: 52164,
+          input_tokens_details: { cached_tokens: 32896 },
+          output_tokens: 2410,
+          output_tokens_details: { reasoning_tokens: 2239 },
+          total_tokens: 54574,
+          cost_in_usd_ticks: 944440000,
+        },
+      }),
+    );
+
+    const result = await provider().execute('ground this', { timeout: 10 });
+
+    expect(result.usage?.cacheReadInputTokens).toBe(32896);
+    expect(result.usage?.reasoningTokens).toBe(2239);
+    expect(result.usage?.costUsd).toBeCloseTo(0.094444, 9);
+  });
+
   it('extracts honest token usage and preserves server-side tool usage raw', async () => {
     const usage = {
       input_tokens: 120,
@@ -180,12 +242,27 @@ describe('GrokProvider', () => {
     expect(result.usage?.inputTokens).toBe(120);
     expect(result.usage?.outputTokens).toBe(45);
     expect(result.usage?.totalTokens).toBe(165);
+    expect(result.usage?.cacheReadInputTokens).toBe(10);
+    expect(result.usage?.reasoningTokens).toBe(20);
     expect(result.usage?.raw).toMatchObject({
       strategy: 'web',
       usage,
       server_side_tool_usage: serverSideToolUsage,
     });
     expect(result.usage?.costUsd).toBeUndefined();
+
+    const terminalOutput = normalizeProviderAttemptOutput(
+      grokLaunch(),
+      'result-grok',
+      result,
+      '2026-09-08T12:00:01.000Z',
+    );
+    expect(terminalOutput.usage).toEqual({
+      prompt_tokens: 120,
+      completion_tokens: 45,
+      cache_read_input_tokens: 10,
+      reasoning_tokens: 20,
+    });
   });
 
   it('converts reported cost_in_usd_ticks into a reported costUsd', async () => {
@@ -211,6 +288,33 @@ describe('GrokProvider', () => {
     expect(result.usage?.raw).toMatchObject({ strategy: 'web', usage });
   });
 
+  it.each([
+    // The canary's grok-combined bill, once persisted as 0.741840000000000055.
+    [7_418_400_000, '0.74184'],
+    // Its binary expansion is 12345.678901234499790007.
+    [123_456_789_012_345, '12345.6789012345'],
+    [7, '0.0000000007'],
+  ])('persists %i cost ticks as the exact decimal %s', async (ticks, usd) => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        ...outputResponse(),
+        usage: { input_tokens: 1, output_tokens: 1, cost_in_usd_ticks: ticks },
+      }),
+    );
+
+    const result = await provider().execute('ground this', { timeout: 10 });
+
+    expect(result.usage?.costUsdDecimal).toBe(usd);
+    expect(
+      normalizeProviderAttemptOutput(
+        grokLaunch(),
+        'result-grok',
+        result,
+        '2026-09-08T12:00:01.000Z',
+      ).usage?.actual_cost,
+    ).toBe(usd);
+  });
+
   it('sends the exact shipping model and only the Responses API web_search tool', async () => {
     const fetchMock = vi
       .fn()
@@ -226,7 +330,7 @@ describe('GrokProvider', () => {
       'Bearer xai-test-key',
     );
     expect(body).toEqual({
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       input: [{ role: 'user', content: 'ground this' }],
       tools: [{ type: 'web_search' }],
     });
@@ -301,7 +405,7 @@ describe('GrokProvider', () => {
       timeout: 10,
     });
 
-    expect(result.model).toBe('grok-4.6');
+    expect(result.model).toBe('grok-4.7');
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(options.body as string).model).toBe('grok-4.3');
   });
@@ -383,7 +487,7 @@ describe('GrokProvider — live-verified edge cases', () => {
   it('drops url_citation annotations that lack a url', async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
-        model: 'grok-4.6',
+        model: 'grok-4.7',
         output: [
           {
             type: 'message',
@@ -432,14 +536,14 @@ describe('Grok search strategies', () => {
     vi.restoreAllMocks();
   });
 
-  it('binds every shipping adapter to the exact grok-4.6 default', () => {
+  it('binds every shipping adapter to the exact grok-4.7 default', () => {
     const credentials = { env: { XAI_API_KEY: 'xai-test-key' } };
-    expect(DEFAULT_GROK_MODEL).toBe('grok-4.6');
+    expect(DEFAULT_GROK_MODEL).toBe('grok-4.7');
     expect([
       new GrokProvider({ credentials }).model,
       new GrokXOnlyProvider({ credentials }).model,
       new GrokCombinedProvider({ credentials }).model,
-    ]).toEqual(['grok-4.6', 'grok-4.6', 'grok-4.6']);
+    ]).toEqual(['grok-4.7', 'grok-4.7', 'grok-4.7']);
   });
 
   it('classifies citation source kinds from URL identity only', () => {
@@ -526,26 +630,26 @@ describe('Grok search strategies', () => {
 
   it('builds X-only and combined tool arrays from immutable strategies', () => {
     expect(
-      buildGrokRequestBody('grok-4.6', 'q', 'x', {
+      buildGrokRequestBody('grok-4.7', 'q', 'x', {
         allowedXHandles: ['elonmusk'],
         maxTurns: 3,
       }),
     ).toEqual({
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       input: [{ role: 'user', content: 'q' }],
       tools: [{ type: 'x_search', allowed_x_handles: ['elonmusk'] }],
       max_turns: 3,
     });
 
     expect(
-      buildGrokRequestBody('grok-4.6', 'q', 'combined', {
+      buildGrokRequestBody('grok-4.7', 'q', 'combined', {
         allowedDomains: ['x.ai'],
         enableImageUnderstanding: true,
         enableVideoUnderstanding: true,
         maxOutputTokens: 2048,
       }),
     ).toEqual({
-      model: 'grok-4.6',
+      model: 'grok-4.7',
       input: [{ role: 'user', content: 'q' }],
       tools: [
         {

@@ -69,9 +69,10 @@ interface OpenAIResponsesResponse {
 export interface OpenAIChatProviderOptions extends BaseProviderOptions {
   model?: string;
   webSearch?: boolean;
+  reasoningEffort?: string;
 }
 
-const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-5-mini';
+const DEFAULT_OPENAI_CHAT_MODEL = 'gpt-6-luna';
 
 /**
  * OpenAI LLM provider.
@@ -83,11 +84,13 @@ export class OpenAIChatProvider extends BaseProvider {
   readonly tier: ProviderTier = 'llm';
   readonly model: string;
   readonly webSearch: boolean;
+  readonly reasoningEffort?: string;
 
   constructor(options: OpenAIChatProviderOptions = {}) {
     super(options);
     this.model = options.model?.trim() || DEFAULT_OPENAI_CHAT_MODEL;
     this.webSearch = options.webSearch ?? true;
+    this.reasoningEffort = options.reasoningEffort;
   }
 
   async execute(
@@ -116,6 +119,9 @@ export class OpenAIChatProvider extends BaseProvider {
           body: {
             model: this.model,
             messages: [{ role: 'user', content: query }],
+            ...(this.reasoningEffort && {
+              reasoning_effort: this.reasoningEffort,
+            }),
           },
           timeout: options.timeout * 1000,
           signal: options.signal,
@@ -207,6 +213,9 @@ export class OpenAIChatProvider extends BaseProvider {
             input: query,
             tools: [{ type: 'web_search' }],
             tool_choice: 'auto',
+            ...(this.reasoningEffort && {
+              reasoning: { effort: this.reasoningEffort },
+            }),
           },
           timeout: options.timeout * 1000,
           signal: options.signal,

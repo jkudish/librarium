@@ -13,10 +13,9 @@ const LLM_PROVIDERS = [
   'openrouter-chat',
 ] as const;
 
-const NEW_OPT_IN_PROVIDERS = [
+const SEARCHAPI_SURFACE_PROVIDERS = [
   'searchapi-chatgpt',
   'searchapi-gemini',
-  'searchapi-perplexity',
   'searchapi-google-ai-mode',
   'searchapi-bing-copilot',
   'searchapi-google-ai-overview',
@@ -74,20 +73,22 @@ describe('computeInitProviderChoices (init opt-in policy)', () => {
     }
   });
 
-  it('lists new shared-key providers but never selects them automatically', () => {
-    const choices = computeInitProviderChoices({
+  it('selects the SearchAPI surfaces when SEARCHAPI_API_KEY is present (#4856)', () => {
+    const withKey = computeInitProviderChoices({
       SEARCHAPI_API_KEY: 'searchapi-key',
-      PERPLEXITY_API_KEY: 'perplexity-key',
     });
+    const withoutKey = computeInitProviderChoices({});
 
-    for (const id of NEW_OPT_IN_PROVIDERS) {
-      const choice = choices.find((candidate) => candidate.id === id);
-      expect(choice).toMatchObject({
+    for (const id of SEARCHAPI_SURFACE_PROVIDERS) {
+      expect(withKey.find((candidate) => candidate.id === id)).toMatchObject({
         id,
         keyPresent: true,
-        isOptIn: true,
-        enableByDefault: false,
+        isOptIn: false,
+        enableByDefault: true,
       });
+      expect(withoutKey.find((candidate) => candidate.id === id)).toMatchObject(
+        { keyPresent: false, enableByDefault: false },
+      );
     }
   });
 

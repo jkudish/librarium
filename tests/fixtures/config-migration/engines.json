@@ -1,0 +1,28 @@
+{
+  "input": {
+    "providers": {
+      "searchapi-chatgpt": { "apiKey": "$SEARCHAPI_API_KEY", "enabled": true },
+      "searchapi-bing-copilot": { "apiKey": "literal-dummy", "enabled": false }
+    },
+    "defaults": { "group": "visibility" },
+    "groups": { "mine": ["exa/search", "grok-combined/combined"] }
+  },
+  "expected": {
+    "version": 3,
+    "engines": {
+      "collector": "searchapi",
+      "chatgpt": { "key": "env:SEARCHAPI_API_KEY", "enabled": true },
+      "copilot": { "key": "literal-dummy", "enabled": false }
+    },
+    "groups": {
+      "mine": ["exa", "grok"],
+      "visibility": [
+        "chatgpt",
+        "gemini-app",
+        "google-ai-mode",
+        "google-ai-overview",
+        "copilot"
+      ]
+    }
+  }
+}

@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCliProgram } from '../src/cli-program.js';
 import {
   type ApprovalGate,
   approvalFingerprint,
@@ -40,6 +39,7 @@ import {
   BUILTIN_PROVIDER_CATALOG,
   declaredExecutionProfile,
 } from '../src/core/provider-profiles.js';
+import { createMaintainerProgram as createCliProgram } from '../src/maintainer-program.js';
 import {
   CanonicalRunManifestV3Schema,
   createNodeCoordinatorDependencies,
@@ -82,9 +82,9 @@ afterEach(() => {
 });
 
 describe('canonical v3 live validation matrix', () => {
-  it('derives the exact implemented 41-profile matrix, including durable private adapters', () => {
+  it('derives the exact implemented 40-profile matrix, including durable private adapters', () => {
     const matrix = buildCanonicalValidationMatrix();
-    expect(matrix.targets).toHaveLength(41);
+    expect(matrix.targets).toHaveLength(40);
     expect(matrix.targets.map((target) => target.key)).not.toContain(
       'parallel/chat',
     );
@@ -103,10 +103,10 @@ describe('canonical v3 live validation matrix', () => {
       adapter_id: 'exa-research',
       credential_family: 'EXA_API_KEY',
     });
-    expect(new Set(matrix.targets.map((target) => target.key)).size).toBe(41);
+    expect(new Set(matrix.targets.map((target) => target.key)).size).toBe(40);
     expect(
       new Set(matrix.targets.map((target) => target.adapter_id)).size,
-    ).toBe(41);
+    ).toBe(40);
   });
 
   it('admits only one exact prepared canonical profile and never a legacy selector list', () => {
@@ -208,7 +208,7 @@ describe('canonical v3 live validation matrix', () => {
       catalog_authority: catalog,
     });
     expect(matrix.catalog_digest).toBe(catalog.digest);
-    expect(matrix.targets).toHaveLength(41);
+    expect(matrix.targets).toHaveLength(40);
     expect(
       matrix.targets.every(
         (target) => target.catalog_digest === catalog.digest,

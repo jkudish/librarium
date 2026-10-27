@@ -189,7 +189,7 @@ function renderHomebrewFormula(input: {
 # candidate-fingerprint: ${input.fingerprint}
 class Librarium < Formula
   desc "Evidence-aware multi-provider research"
-  homepage "https://librarium.agentsy.build"
+  homepage "https://librarium.si"
   version "${input.version}"
   license "MIT"
 

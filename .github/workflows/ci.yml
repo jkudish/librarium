@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, release/v2-candidate]
 
 permissions:
   contents: read
@@ -104,11 +104,9 @@ jobs:
         if: runner.os == 'Linux' && matrix.node-version == 24
         run: npm run test:declarations
 
-      - name: Contract snapshot drift
+      - name: Shared spec conformance
         if: runner.os == 'Linux' && matrix.node-version == 24
-        run: |
-          npm run contracts:generate
-          git diff --exit-code -- contracts/v1
+        run: npm run test:conformance
 
       - name: Unit tests
         run: npm run test

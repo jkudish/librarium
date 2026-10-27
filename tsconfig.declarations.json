@@ -9,8 +9,8 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
   "files": [
-    "src/index.ts",
-    "src/core-entry.ts"
+    "src/run-core-entry.ts",
+    "src/testing-entry.ts"
   ],
   "include": []
 }

@@ -11,7 +11,12 @@ import {
   type SearchApiAiResponse,
   searchApiAiResponseError,
 } from '../core/searchapi-ai.js';
+import {
+  searchApiErrorFailureDiagnostic,
+  searchApiHttpFailureDiagnostic,
+} from '../core/searchapi-diagnostics.js';
 import type {
+  ProviderFailureDiagnostic,
   ProviderOptions,
   ProviderResult,
   ProviderTier,
@@ -85,6 +90,7 @@ export class SearchApiGeminiProvider extends BaseProvider {
       return this.errorResult(
         Math.round(performance.now() - start),
         redactSearchApiErrorText(this.formatCatchError(error), apiKey),
+        searchApiErrorFailureDiagnostic(error, options.signal),
       );
     }
   }
@@ -109,10 +115,15 @@ export class SearchApiGeminiProvider extends BaseProvider {
         zeroRetention: this.zeroRetention,
         credentialEnvVar: this.envVar,
       }),
+      searchApiHttpFailureDiagnostic(status),
     );
   }
 
-  private errorResult(durationMs: number, error: string): ProviderResult {
+  private errorResult(
+    durationMs: number,
+    error: string,
+    failureDiagnostic?: ProviderFailureDiagnostic,
+  ): ProviderResult {
     return {
       provider: this.id,
       tier: this.tier,
@@ -121,6 +132,7 @@ export class SearchApiGeminiProvider extends BaseProvider {
       durationMs,
       ...(this.zeroRetention ? { preventFallback: true as const } : {}),
       error,
+      ...(failureDiagnostic && { failureDiagnostic }),
     };
   }
 }

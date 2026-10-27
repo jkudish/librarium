@@ -134,6 +134,29 @@ describe('SearchAPI Google AI Mode and Bing Copilot adapters', () => {
   );
 
   it.each(engines)(
+    '$id rejects credential-bearing reference URLs',
+    async ({ create }) => {
+      const result = await create(async <T>() =>
+        response(200, {
+          markdown: 'Non-empty grounded answer.',
+          reference_links: [
+            {
+              url: 'https://username:password@evidence.example.test/private',
+              title: 'Unsafe reference',
+            },
+          ],
+        } as T),
+      ).execute('unsafe reference', { timeout: 7 });
+
+      expect(result).toMatchObject({
+        content: 'Non-empty grounded answer.',
+        citations: [],
+      });
+      expect(JSON.stringify(result)).not.toContain('username:password');
+    },
+  );
+
+  it.each(engines)(
     '$id falls back to its documented text blocks and drops malformed references',
     async ({ id, fixtures, fallback, validCitation, create }) => {
       const result = await create(async <T>() =>

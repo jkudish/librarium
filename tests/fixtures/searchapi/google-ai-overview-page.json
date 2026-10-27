@@ -1,0 +1,51 @@
+{
+  "search_metadata": { "id": "search_synthetic_page", "status": "Success" },
+  "search_parameters": {
+    "engine": "google_ai_overview",
+    "page_token": "synthetic-page-token"
+  },
+  "markdown": "Synthetic tools include Example Brand [0](https://www.google.com/goto?url=CAESOFN5bnRoZXRpYy1vcGFxdWUtdG9rZW4tb25l) and others [1](https://www.example.net/guide).",
+  "text_blocks": [
+    {
+      "type": "paragraph",
+      "answer": "Synthetic tools include Example Brand and others."
+    }
+  ],
+  "reference_links": [
+    {
+      "index": 0,
+      "title": "Example Brand — Home",
+      "link": "https://www.google.com/goto?url=CAESOFN5bnRoZXRpYy1vcGFxdWUtdG9rZW4tb25l",
+      "snippet": "Synthetic snippet.",
+      "source": "Example Brand",
+      "favicon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://example.com&client=AIM&size=128&type=FAVICON&fallback_opts=TYPE,SIZE,URL"
+    },
+    {
+      "index": 1,
+      "title": "Synthetic guide",
+      "link": "https://www.example.net/guide",
+      "snippet": "A plain publisher link.",
+      "source": "Example Net"
+    },
+    {
+      "index": 2,
+      "title": "Legacy redirect",
+      "link": "https://www.google.com/url?q=https://www.example.org/legacy&sa=U",
+      "source": "Example Org",
+      "favicon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://www.example.org&client=AIM"
+    },
+    {
+      "index": 3,
+      "title": "Shopping result",
+      "link": "https://www.google.com/search?q=product&prds=pvt:hg,productid:1&ibp=oshop",
+      "source": "Google",
+      "favicon": "https://encrypted-tbn1.gstatic.com/faviconV2?url=https://www.google.com&client=AIM"
+    },
+    {
+      "index": 4,
+      "title": "Opaque without favicon",
+      "link": "https://www.google.com/goto?url=CAESOFN5bnRoZXRpYy1vcGFxdWUtdG9rZW4tdGhyZWU",
+      "source": "Unknown"
+    }
+  ]
+}

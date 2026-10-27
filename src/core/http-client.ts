@@ -58,6 +58,11 @@ export interface HttpResponse<T = unknown> {
   data: T;
   headers: Record<string, string>;
   durationMs: number;
+  /**
+   * The raw response body, when the client keeps it. Lets an adapter read a
+   * number exactly as the provider wrote it, which `data` cannot preserve.
+   */
+  text?: string;
 }
 
 /** Injectable transport contract used by providers and application services. */
@@ -213,6 +218,7 @@ export async function httpRequest<T = unknown>(
         data,
         headers: Object.fromEntries(response.headers.entries()),
         durationMs,
+        text,
       };
     } catch (error) {
       if (error instanceof HttpResponseTooLargeError) {

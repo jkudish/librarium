@@ -78,7 +78,6 @@ export const QUICK_WORKFLOW_ROSTER: readonly WorkflowRosterMember[] = [
 export const VISIBILITY_WORKFLOW_ROSTER: readonly WorkflowRosterMember[] = [
   { provider_id: 'searchapi-chatgpt', profile_id: 'surface' },
   { provider_id: 'searchapi-gemini', profile_id: 'surface' },
-  { provider_id: 'searchapi-perplexity', profile_id: 'surface' },
   { provider_id: 'searchapi-google-ai-mode', profile_id: 'surface' },
   { provider_id: 'searchapi-bing-copilot', profile_id: 'surface' },
   { provider_id: 'searchapi-google-ai-overview', profile_id: 'surface' },

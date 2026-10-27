@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import stripAnsiLib from 'strip-ansi';
+import type { ConfigV3Input } from '../../src/core/config-v3.js';
 import {
   buildMockConfig,
   type MockConfigSpec,
@@ -82,6 +83,7 @@ export interface PtySession {
 export interface SpawnOptions {
   args: string[];
   config?: MockConfigSpec;
+  configV3?: ConfigV3Input;
   cols?: number;
   rows?: number;
   cwd?: string;
@@ -199,6 +201,14 @@ export function spawnCli(
   if (!pty) throw new Error('node-pty is not available');
 
   const { home, dispose } = makeIsolatedHome(opts.config);
+  if (opts.configV3) {
+    const directory = join(home, '.config/librarium');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, 'config.json'),
+      JSON.stringify(opts.configV3),
+    );
+  }
   // Run inside the isolated home unless the test needs a specific cwd (e.g. a
   // fixture run directory). cwd must not contain a .librarium.json that could
   // perturb config; the temp HOME is safe.

@@ -273,41 +273,323 @@ describe('Parallel first-party providers', () => {
     });
   });
 
-  it('fails a bad processor before a billable submission', async () => {
-    const http = vi.fn();
+  it.each(['pro-fast', 'ultra-fast', 'ultra16x'])(
+    'fails the unlisted processor %s before a billable submission',
+    async (model) => {
+      const http = vi.fn();
+      const provider = new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: http as unknown as HttpClient,
+        model,
+      });
+      await expect(
+        provider.submit('research', { timeout: 90 }),
+      ).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message: expect.stringContaining(
+          'processor must be one of: lite, base, core, core2x, pro, ultra, ultra2x, ultra4x, ultra8x',
+        ),
+        failureDiagnostic: { kind: 'invalid_request' },
+      });
+      expect(http).not.toHaveBeenCalled();
+    },
+  );
+
+  it('maps every exposed Task Run option onto the documented create body', async () => {
+    const http = client({ run_id: 'trun_2', status: 'queued' }, 202);
+    await new ParallelResearchProvider({
+      apiKey: key,
+      httpClient: http,
+      model: 'ultra8x',
+      configuredOptions: {
+        includeDomains: ['Docs.Python.org/3/', '.EDU'],
+        afterDate: '2025-06-01',
+        location: 'gb',
+        outputSchema: 'A one-paragraph executive summary.',
+        metadata: { ticket: 'LIB-1', attempt: 2, urgent: true },
+        memoryScopeKey: 'team_research-1',
+      },
+    }).submit('research', { timeout: 90 });
+
+    const [url, create] = (http as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, HttpRequestOptions];
+    expect(url).toBe('https://api.parallel.ai/v1/tasks/runs');
+    // Hosts are case-insensitive; Parallel matches paths case-sensitively.
+    expect(create.body).toEqual({
+      input: 'research',
+      processor: 'ultra8x',
+      task_spec: {
+        output_schema: {
+          type: 'text',
+          description: 'A one-paragraph executive summary.',
+        },
+      },
+      source_policy: {
+        include_domains: ['docs.python.org/3', '.edu'],
+        after_date: '2025-06-01',
+      },
+      advanced_settings: { location: 'GB' },
+      metadata: { ticket: 'LIB-1', attempt: 2, urgent: true },
+      memory_scope_key: 'team_research-1',
+    });
+  });
+
+  it('requests and returns JSON output for a JSON Schema outputSchema', async () => {
+    const jsonSchema = {
+      type: 'object',
+      properties: { gdp: { type: 'string' } },
+      required: ['gdp'],
+    };
+    const http = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 202,
+        statusText: 'Accepted',
+        headers: {},
+        durationMs: 1,
+        data: { run_id: 'trun_3', status: 'queued' },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        durationMs: 1,
+        data: {
+          run: { run_id: 'trun_3', status: 'completed', processor: 'core' },
+          output: {
+            type: 'json',
+            content: { gdp: '$3.1 trillion (2023)' },
+            basis: [
+              {
+                field: 'gdp',
+                citations: [{ url: 'https://example.test/gdp', excerpts: [] }],
+              },
+            ],
+          },
+        },
+      });
     const provider = new ParallelResearchProvider({
       apiKey: key,
       httpClient: http as unknown as HttpClient,
       model: 'core',
+      configuredOptions: { outputSchema: jsonSchema },
     });
-    await expect(provider.submit('research', { timeout: 90 })).rejects.toThrow(
-      'processor must be one of',
-    );
-    expect(http).not.toHaveBeenCalled();
+    const handle = await provider.submit('GDP of France', { timeout: 90 });
+    expect(
+      (http.mock.calls[0] as [string, HttpRequestOptions])[1].body,
+    ).toMatchObject({
+      task_spec: { output_schema: { type: 'json', json_schema: jsonSchema } },
+    });
+    const result = await provider.retrieve(handle);
+    expect(result.error).toBeUndefined();
+    expect(JSON.parse(result.content)).toEqual({ gdp: '$3.1 trillion (2023)' });
+    expect(result.citations).toEqual([
+      expect.objectContaining({ url: 'https://example.test/gdp' }),
+    ]);
   });
 
-  it('rejects malformed Task create and status bodies without accepting a remote state', async () => {
-    const createProvider = new ParallelResearchProvider({
+  it('does not accept text output when JSON was requested', async () => {
+    const http = client({
+      run: { run_id: 'trun_4', status: 'completed' },
+      output: { type: 'text', content: 'Prose instead of JSON.' },
+    });
+    const result = await new ParallelResearchProvider({
       apiKey: key,
-      httpClient: client({ run_id: 'trun_1', status: 42 }),
+      httpClient: http,
+      configuredOptions: { outputSchema: { type: 'object' } },
+    }).retrieve({
+      provider: 'parallel-research',
+      taskId: 'trun_4',
+      query: 'q',
+      submittedAt: 0,
+      status: 'completed',
+    });
+    expect(result.error).toBe(
+      'Parallel returned a completed Task without JSON output',
+    );
+  });
+
+  it.each([
+    [{ includeDomains: ['https://example.com'] }],
+    [{ includeDomains: ['example.com:8080/docs'] }],
+    [{ includeDomains: ['example.com/a/../b'] }],
+    [{ includeDomains: ['example.com/docs?x=1'] }],
+    [{ afterDate: '2026-02-30' }],
+    [{ outputSchema: {} }],
+    [{ metadata: { 'seventeen-chars-k': 'v' } }],
+    [{ metadata: { k: 'x'.repeat(513) } }],
+    [{ metadata: { k: { nested: true } } }],
+    [{ memoryScopeKey: 'has space' }],
+    [{ dataSources: { free: ['pubmed'] } }],
+    [{ previousInteractionId: 'trun_1' }],
+  ])(
+    'rejects an invalid or omitted Task option before dispatch (%o)',
+    async (configuredOptions) => {
+      const http = vi.fn();
+      await expect(
+        new ParallelResearchProvider({
+          apiKey: key,
+          httpClient: http as unknown as HttpClient,
+          configuredOptions,
+        }).submit('research', { timeout: 90 }),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining('parallel-research options'),
+        failureDiagnostic: { kind: 'invalid_request' },
+      });
+      expect(http).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [401, { kind: 'authentication', httpStatus: 401 }],
+    [408, { kind: 'timeout', httpStatus: 408 }],
+    [429, { kind: 'rate_limit', httpStatus: 429 }],
+    [503, { kind: 'provider', httpStatus: 503 }],
+  ] as const)(
+    'keeps HTTP %s submission diagnostics bounded without retrying',
+    async (status, failureDiagnostic) => {
+      const secret = 'raw-provider-secret';
+      const http = vi.fn().mockResolvedValue({
+        status,
+        statusText: 'Error',
+        headers: {},
+        durationMs: 1,
+        data: { error: { message: `Bearer ${secret}`, api_key: secret } },
+      });
+      const provider = new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: http as unknown as HttpClient,
+        model: 'pro',
+      });
+
+      const submission = provider.submit('research', { timeout: 90 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Parallel submission failed before a valid task handle was returned.',
+        failureDiagnostic,
+      });
+      await expect(submission).rejects.not.toThrow(secret);
+      expect(http).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps a network submission failure ambiguous without retrying', async () => {
+    const http = vi
+      .fn()
+      .mockRejectedValue(
+        new TypeError('fetch failed with Bearer raw-provider-secret'),
+      );
+    const provider = new ParallelResearchProvider({
+      apiKey: key,
+      httpClient: http as unknown as HttpClient,
       model: 'pro',
     });
-    await expect(
-      createProvider.submit('research', { timeout: 90 }),
-    ).rejects.toThrow('invalid task response');
 
+    await expect(
+      provider.submit('research', { timeout: 90 }),
+    ).rejects.toMatchObject({
+      name: 'UnsafeToRetrySubmissionError',
+      failureDiagnostic: { kind: 'network' },
+    });
+    expect(http).toHaveBeenCalledOnce();
+  });
+
+  it.each([401, 403, 404])(
+    'keeps accepted custody after HTTP %s and observes eventual completion',
+    async (status) => {
+      const http = vi
+        .fn()
+        .mockResolvedValueOnce({
+          status,
+          statusText: 'Error',
+          headers: {},
+          durationMs: 1,
+          data: { error: 'unavailable' },
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          durationMs: 1,
+          data: { run_id: 'trun_1', status: 'completed' },
+        });
+      const provider = new ParallelResearchProvider({
+        apiKey: key,
+        httpClient: http as unknown as HttpClient,
+        model: 'pro',
+      });
+      const handle = { taskId: 'trun_1', status: 'running' } as never;
+
+      await expect(provider.poll(handle)).rejects.toThrow(
+        `Poll returned HTTP ${status}`,
+      );
+      await expect(provider.poll(handle)).resolves.toMatchObject({
+        status: 'completed',
+        rawStatus: 'completed',
+      });
+    },
+  );
+
+  it('preserves valid task identity across malformed create and status observations', async () => {
+    const createHttp = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        durationMs: 1,
+        data: { run_id: 'trun_1', status: 42 },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        durationMs: 1,
+        data: { run_id: 'trun_1', status: 'completed' },
+      });
+    const createProvider = new ParallelResearchProvider({
+      apiKey: key,
+      httpClient: createHttp as unknown as HttpClient,
+      model: 'pro',
+    });
+    const handle = await createProvider.submit('research', { timeout: 90 });
+    expect(handle).toMatchObject({
+      taskId: 'trun_1',
+      status: 'pending',
+      providerStatus: 'invalid_response',
+    });
+    await expect(createProvider.poll(handle)).resolves.toMatchObject({
+      status: 'completed',
+    });
+
+    const pollHttp = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        durationMs: 1,
+        data: { run_id: 'trun_1' },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        durationMs: 1,
+        data: { run_id: 'trun_1', status: 'completed' },
+      });
     const pollProvider = new ParallelResearchProvider({
       apiKey: key,
-      httpClient: client({ run_id: 'trun_1' }),
+      httpClient: pollHttp as unknown as HttpClient,
       model: 'pro',
     });
     await expect(
       pollProvider.poll({ taskId: 'trun_1' } as never),
-    ).resolves.toEqual({
-      status: 'failed',
-      rawStatus: 'invalid_response',
-      message: 'Parallel returned an invalid task status response',
-    });
+    ).rejects.toThrow('Parallel returned an invalid task status response');
+    await expect(
+      pollProvider.poll({ taskId: 'trun_1' } as never),
+    ).resolves.toMatchObject({ status: 'completed' });
   });
 
   it.each([
@@ -325,30 +607,36 @@ describe('Parallel first-party providers', () => {
         model: 'pro',
       });
 
-      await expect(
-        provider.submit('research', { timeout: 90 }),
-      ).rejects.toThrow('invalid task response');
+      const submission = provider.submit('research', { timeout: 90 });
+      await expect(submission).rejects.toMatchObject({
+        name: 'UnsafeToRetrySubmissionError',
+        message:
+          'Parallel submission failed before a valid task handle was returned.',
+        failureDiagnostic: { kind: 'provider' },
+      });
+      await expect(submission).rejects.not.toHaveProperty(
+        'failureDiagnostic.httpStatus',
+      );
     },
   );
 
   it.each([
-    [{ status: 'running' }, 'invalid_response'],
-    [{ run_id: 'trun_other', status: 'running' }, 'identity_mismatch'],
-    [{ run_id: ' trun_1', status: 'running' }, 'invalid_response'],
-    [{ run_id: 'trun_1 ', status: 'running' }, 'invalid_response'],
+    [{ status: 'running' }, 'invalid task status response'],
+    [{ run_id: 'trun_other', status: 'running' }, 'different run_id'],
+    [{ run_id: ' trun_1', status: 'running' }, 'invalid task status response'],
+    [{ run_id: 'trun_1 ', status: 'running' }, 'invalid task status response'],
   ])(
     'rejects Task status with missing or mismatched run identity (%o)',
-    async (data, rawStatus) => {
+    async (data, message) => {
       const provider = new ParallelResearchProvider({
         apiKey: key,
         httpClient: client(data),
         model: 'pro',
       });
 
-      const result = await provider.poll({ taskId: 'trun_1' } as never);
-      expect(result).toMatchObject({ status: 'failed', rawStatus });
-      expect(result.status).not.toBe('running');
-      expect(result.status).not.toBe('completed');
+      await expect(
+        provider.poll({ taskId: 'trun_1' } as never),
+      ).rejects.toThrow(message);
     },
   );
 

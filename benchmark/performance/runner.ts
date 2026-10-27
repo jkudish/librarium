@@ -2,7 +2,6 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { arch, cpus, platform, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createCliProgram } from '../../src/cli-program.js';
 import { discoverRuns } from '../../src/commands/browse-data.js';
 import type {
   FrozenPlanningCatalog,
@@ -22,6 +21,7 @@ import {
   discoverCanonicalRunDirectories,
   runCanonicalPreparedExecution,
 } from '../../src/node-canonical-run.js';
+import { createRunCliProgram } from '../../src/run-cli-program.js';
 import type { Provider } from '../../src/types.js';
 import { measure, PERFORMANCE_SCHEMA_VERSION } from './lib.mjs';
 
@@ -443,7 +443,7 @@ async function main(): Promise<void> {
       ...(await measure({
         warmup,
         iterations,
-        operation: () => createCliProgram().helpInformation(),
+        operation: () => createRunCliProgram().helpInformation(),
       })),
     });
     metrics.push({

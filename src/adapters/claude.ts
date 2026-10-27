@@ -7,7 +7,7 @@ import type {
 } from '../types.js';
 import { BaseProvider, type BaseProviderOptions } from './base.js';
 
-interface AnthropicTextBlock {
+interface AnthropicContentBlock {
   type?: string;
   text?: string;
   citations?: AnthropicCitation[];
@@ -23,6 +23,8 @@ interface AnthropicCitation {
 interface AnthropicUsage {
   input_tokens?: number;
   output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   server_tool_use?: {
     web_search_requests?: number;
   };
@@ -30,8 +32,9 @@ interface AnthropicUsage {
 
 interface AnthropicResponse {
   model?: string;
-  content?: AnthropicTextBlock[];
+  content?: AnthropicContentBlock[];
   stop_reason?: string;
+  stop_details?: { type?: string; category?: string | null } | null;
   usage?: AnthropicUsage;
   error?: {
     type?: string;
@@ -47,10 +50,20 @@ export interface ClaudeProviderOptions extends BaseProviderOptions {
   effort?: unknown;
 }
 
-const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5';
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
 const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_MAX_TOKENS = 16000;
-const THINKING_MODES = ['adaptive', 'disabled'] as const;
+/**
+ * Explicit defaults, all configurable. Sonnet 5.5 documents adaptive thinking
+ * and effort `high` as its own API defaults; they are sent explicitly so the
+ * request does not drift when Anthropic changes a default. max_tokens covers
+ * thinking plus text (Sonnet 5.5 allows up to 128k).
+ */
+const DEFAULT_MAX_TOKENS = 64000;
+const DEFAULT_THINKING = 'adaptive';
+const DEFAULT_EFFORT = 'high';
+// `between_tools` is Sonnet 5.5's lowest setting; `disabled` is for earlier
+// models, and Sonnet 5.5 rejects it.
+const THINKING_MODES = ['adaptive', 'between_tools', 'disabled'] as const;
 type ThinkingMode = (typeof THINKING_MODES)[number];
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -89,6 +102,51 @@ function parseEffort(value: unknown): EffortLevel | undefined {
   );
 }
 
+function isToolBlock(type: string | undefined): boolean {
+  return (
+    type === 'tool_use' ||
+    type === 'server_tool_use' ||
+    (type?.endsWith('_tool_result') ?? false)
+  );
+}
+
+/**
+ * The answer is the text after the last tool call or result. Text before it
+ * is the model's commentary between searches ("I'll search for..."). Sonnet
+ * 5.5 returns longer between-tool notes as progress-update `thinking` blocks,
+ * which are never answer text (their text is empty at the default display),
+ * and keeps only short remarks as `text`.
+ */
+function answerBlocks(
+  blocks: AnthropicContentBlock[] | undefined,
+): AnthropicContentBlock[] {
+  if (!Array.isArray(blocks)) return [];
+  const lastTool = blocks.findLastIndex((block) => isToolBlock(block.type));
+  return blocks.slice(lastTool + 1).filter((block) => block.type === 'text');
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Anthropic bills `input_tokens` (which already excludes cache reads and
+ * writes), `output_tokens` (thinking included), the two cache counts, and
+ * each web search. Only counts the response reports are included.
+ */
+function billableQuantities(usage: AnthropicUsage): Record<string, number> {
+  const quantities: Record<string, number> = {};
+  const add = (unit: string, value: unknown): void => {
+    if (isCount(value)) quantities[unit] = value;
+  };
+  add('uncached_input_tokens', usage.input_tokens);
+  add('output_tokens', usage.output_tokens);
+  add('cache_read_tokens', usage.cache_read_input_tokens);
+  add('cache_write_tokens', usage.cache_creation_input_tokens);
+  add('searches', usage.server_tool_use?.web_search_requests);
+  return quantities;
+}
+
 /**
  * Claude LLM provider.
  * Uses Anthropic web search by default for current answers and citations.
@@ -117,17 +175,30 @@ export class ClaudeProvider extends BaseProvider {
   }
 
   get thinking(): ThinkingMode | undefined {
-    return (
+    const thinking =
       parseThinking(this.configuredThinking) ??
-      (this.model === DEFAULT_CLAUDE_MODEL ? 'adaptive' : undefined)
-    );
+      (this.model === DEFAULT_CLAUDE_MODEL ? DEFAULT_THINKING : undefined);
+    if (thinking === 'disabled' && this.model === DEFAULT_CLAUDE_MODEL) {
+      throw new Error(
+        `${DEFAULT_CLAUDE_MODEL} rejects thinking "disabled"; use "between_tools" to turn off up-front thinking`,
+      );
+    }
+    return thinking;
   }
 
   get effort(): EffortLevel | undefined {
-    return (
+    const effort =
       parseEffort(this.configuredEffort) ??
-      (this.model === DEFAULT_CLAUDE_MODEL ? 'medium' : undefined)
-    );
+      (this.model === DEFAULT_CLAUDE_MODEL ? DEFAULT_EFFORT : undefined);
+    if (
+      parseThinking(this.configuredThinking) === 'between_tools' &&
+      (effort === 'xhigh' || effort === 'max')
+    ) {
+      throw new Error(
+        'claude thinking "between_tools" requires effort high or below',
+      );
+    }
+    return effort;
   }
 
   async execute(
@@ -185,29 +256,37 @@ export class ClaudeProvider extends BaseProvider {
         };
       }
 
-      const content =
-        data.content
-          ?.filter((block) => block.type === 'text')
-          .map((block) => block.text ?? '')
-          .filter(Boolean)
-          .join('\n')
-          .trim() ?? '';
-      const citations = this.extractCitations(data.content);
+      const answer = answerBlocks(data.content);
+      // Claude splits one answer into consecutive text blocks at citation
+      // boundaries, so the blocks are joined without a separator.
+      const content = answer
+        .map((block) => block.text ?? '')
+        .join('')
+        .trim();
+      const citations = this.extractCitations(answer);
 
-      if (!content) {
-        // A 200 with no usable text is not a success: surface the model's
-        // stop_reason (e.g. max_tokens, refusal) so it can fail over rather
-        // than inflate the success count with an empty answer.
+      if (!content || data.stop_reason === 'refusal') {
+        // A 200 with no usable answer is not a success: surface the model's
+        // stop_reason (e.g. max_tokens, pause_turn, refusal) so it can fail
+        // over rather than inflate the success count with an empty answer.
+        // A refusal is never an answer, even after partial text.
+        const category = data.stop_details?.category;
         const reason = data.stop_reason
-          ? `stop_reason: ${data.stop_reason}`
+          ? `stop_reason: ${data.stop_reason}${category ? ` (${category})` : ''}`
           : 'no content blocks returned';
+        const usage = this.extractUsage(data.usage);
         return {
           provider: this.id,
           tier: this.tier,
           content: '',
           citations: [],
           durationMs,
-          error: `Claude returned an empty response (${reason})`,
+          // A stopped turn can still bill its thinking and search tokens.
+          ...(usage && { model: data.model ?? this.model, usage }),
+          error:
+            data.stop_reason === 'refusal'
+              ? `Claude declined the request (${reason})`
+              : `Claude returned an empty response (${reason})`,
         };
       }
 
@@ -223,6 +302,9 @@ export class ClaudeProvider extends BaseProvider {
           output: data.usage?.output_tokens,
         },
         usage: this.extractUsage(data.usage),
+        ...(typeof data.stop_reason === 'string' && {
+          providerMeta: { 'anthropic:stop_reason': data.stop_reason },
+        }),
       };
     } catch (err) {
       const durationMs = Math.round(performance.now() - start);
@@ -248,6 +330,7 @@ export class ClaudeProvider extends BaseProvider {
     const input = usage.input_tokens;
     const output = usage.output_tokens;
     if (input === undefined && output === undefined) return undefined;
+    const searches = usage.server_tool_use?.web_search_requests;
     return {
       inputTokens: input,
       outputTokens: output,
@@ -255,13 +338,15 @@ export class ClaudeProvider extends BaseProvider {
         input !== undefined && output !== undefined
           ? input + output
           : undefined,
+      cacheReadInputTokens: usage.cache_read_input_tokens,
+      cacheWriteInputTokens: usage.cache_creation_input_tokens,
+      ...(isCount(searches) && { searchRequests: searches }),
+      billableQuantities: billableQuantities(usage),
       raw: usage,
     };
   }
 
-  private extractCitations(blocks?: AnthropicTextBlock[]): Citation[] {
-    if (!Array.isArray(blocks)) return [];
-
+  private extractCitations(blocks: AnthropicContentBlock[]): Citation[] {
     const seen = new Set<string>();
     const citations: Citation[] = [];
 
