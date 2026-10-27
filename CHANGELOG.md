@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-27
+
 Version 2.0.0 replaces the 1.x commands, configuration, MCP tools, library
 exports and run format. Read the [upgrade guide](docs/migration-v1-to-v2.md)
 before upgrading.
@@ -74,6 +76,7 @@ before upgrading.
 - Request and Run schemas, the source catalog and conformance fixtures come
   from the shared `librarium-spec` package, which the Laravel package also
   uses.
+
 
 ## [1.4.1] - 2026-07-23
 
@@ -329,7 +332,7 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 - API keys use environment variable references, never stored in plaintext
 - Response size guard (10MB) on HTTP client
 
-[Unreleased]: https://github.com/jkudish/librarium/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/jkudish/librarium/compare/v2.0.0...HEAD
 [1.1.0]: https://github.com/jkudish/librarium/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jkudish/librarium/releases/tag/v1.0.0
 [0.2.0]: https://github.com/jkudish/librarium/compare/v0.1.3...v0.2.0
@@ -340,3 +343,4 @@ The first stable release: the 0.1.x research fan-out core plus a complete intera
 [1.3.0]: https://github.com/jkudish/librarium/releases/tag/v1.3.0
 [1.4.0]: https://github.com/jkudish/librarium/releases/tag/v1.4.0
 [1.4.1]: https://github.com/jkudish/librarium/releases/tag/v1.4.1
+[2.0.0]: https://github.com/jkudish/librarium/releases/tag/v2.0.0
