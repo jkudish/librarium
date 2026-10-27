@@ -2,7 +2,9 @@
 
 The public client speaks in source names and depths. Existing provider
 adapters, pricing and coordinator code are private implementation details.
-Do not expose selector identities or task handles in the public Run.
+Do not expose selector identities or task handles in the public Run. The
+website covers the same API in
+[custom sources and RunStores](https://librarium.si/docs/custom-providers).
 
 ## Add a source to a client
 
@@ -91,8 +93,8 @@ until you have established that its owner has died.
 
 ## Verify offline
 
-Run `npm test -- --run tests/simplified-surface.test.ts`, `npm run
-test:workers`, and `npm run test:declarations`. Built-in stores run the shared
+Run `npm run test:conformance`, `npm run test:workers`, and
+`npm run test:declarations`. Built-in stores run the shared
 contract and the filesystem store reads the normative shared fixture folder.
 Provider transports must be injected in tests; live requests require separate
 spending authorization.

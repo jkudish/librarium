@@ -1,7 +1,7 @@
 {
   "name": "librarium",
   "version": "2.0.0",
-  "description": "One research interface, many sources, durable Runs",
+  "description": "Research one question across search and AI sources and keep answers, citations and costs in resumable Runs",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/public-entry.d.ts",

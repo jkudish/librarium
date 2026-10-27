@@ -30,6 +30,9 @@ it('documents the simplified catalog, commands, package entries and MCP roster',
     './node',
     './testing',
   ]);
-  expect(read('CHANGELOG.md')).toContain('2.0.0 — Unreleased');
+  // .github/scripts/parse-changelog.sh dates the heading when 2.0.0 is cut.
+  expect(read('CHANGELOG.md')).toMatch(
+    /^## \[Unreleased\]\n\nVersion 2\.0\.0 replaces|^## \[2\.0\.0\] - \d{4}-\d{2}-\d{2}$/m,
+  );
   expect(read('docs/migration-v1-to-v2.md')).toContain('backup');
 });

@@ -1,12 +1,23 @@
 # Migrate from Librarium 1.x to 2.0
 
-JS 2.0 is unreleased. Upgrade only after checking the installed package's
-version; `main` and currently published channels may still contain 1.x.
-Node package installs require Node.js 22.12 or newer.
+The npm package requires Node.js 22.12 or newer. Before upgrading, let
+pending 1.x tasks finish and keep their run directories; 2.0 cannot read them.
+
+```bash
+npm install -g librarium@2
+# or
+brew upgrade jkudish/tap/librarium
+librarium --version
+librarium setup --check
+```
+
+`librarium --version` should print a 2.x version. The first 2.0 command that
+loads your config migrates it, as described below. The website has a shorter
+[upgrade summary](https://librarium.si/docs/upgrading-to-v2).
 
 ## Config migration is automatic and backed up
 
-Loading an unversioned/1.x config writes its original bytes to
+Loading an unversioned or 1.x config writes its original bytes to
 `config.json.v1.backup` before saving version 3. Existing backups are never
 overwritten. If backup or validation fails, the new config is not written.
 Config v2 never shipped and is not an intermediate migration format.
@@ -18,23 +29,24 @@ to sources; the old built-in visibility roster becomes a saved group of
 engines. Removed modes and fallback settings produce migration notices.
 Review notices and run `librarium setup --check` before spending.
 
-To roll back, preserve the new config separately, restore the backup, and run
-the matching 1.x binary. Do not overwrite either backup or pending Run data.
+To roll back, copy the new config somewhere safe, restore
+`config.json.v1.backup` as `config.json`, and reinstall 1.x with
+`npm install -g librarium@1`. Do not overwrite either backup or pending Run
+data.
 
 ## Command and option replacements
 
 | 1.x | 2.0 |
 | --- | --- |
 | `run` | `research` |
-| `plan` | `research --dry-run` |
 | `status` | `show` |
 | `answer` | `summarize` |
 | `ls` | `sources` |
 | `init`, `doctor` | `setup`, `setup --check` |
-| `-p`, `-g`, `custom:` names | `--only` / `--skip` with flat names |
+| `-p`, `-g` | `--only` / `--skip` with flat names |
 | `--mode` | `--deep` when deep work is intended; execution is automatic |
 | `--max-estimated-cost` | `--max-cost` |
-| `--no-fallback`, reserves | no substitution; use `--only` / `--skip` |
+| provider `fallback` | no substitution; use `--only` / `--skip` |
 | `refine`, `--refine` | removed; write the question directly |
 
 Removed names fail with replacement guidance rather than silently executing.

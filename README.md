@@ -1,70 +1,92 @@
 # Librarium
 
-One research interface, many sources, durable Runs. Ask a question, choose
-`quick` or `deep`, optionally narrow the sources, and set a spending cap.
-Answers, citations, provenance and honest cost data stay together in a Run.
+[![npm](https://img.shields.io/npm/v/librarium?color=cb3837&label=npm)](https://www.npmjs.com/package/librarium)
+[![License: MIT](https://img.shields.io/npm/l/librarium?color=blue)](LICENSE)
 
-## Install and set up
+Librarium sends one research question to the search and AI sources you
+choose, then saves each answer, citation and cost in a Run you can resume.
 
-Requires **Node.js 22.12 or newer**. This branch is the unreleased JS 2.0
-candidate; npm's current published version may still be 1.x.
+[Website](https://librarium.si) · [Docs](https://librarium.si/docs) ·
+[Agent setup](https://librarium.si/agents) ·
+[Laravel package](https://librarium.si/laravel)
+
+## Requirements
+
+- Node.js 22.12 or newer for the npm package. Homebrew and the standalone
+  binaries include their own runtime.
+- An API key for at least one source, for example `EXA_API_KEY`. Research
+  calls the providers you select, and those calls can cost money.
+
+## Install
 
 ```bash
 npm install -g librarium
-librarium --version
-librarium setup
-librarium setup --check
+# or
+brew install jkudish/tap/librarium
 ```
 
-Keys can be literal values or `env:EXA_API_KEY` references. Environment keys
-also work without a config file. Never paste credentials into a research
-question. `setup --check` is offline. Live requests can incur provider charges.
+Standalone macOS and Linux binaries install with
+`curl -fsSL https://raw.githubusercontent.com/jkudish/librarium/main/scripts/install.sh | sh`.
+Check the result with `librarium --version`; it prints a 2.x version.
 
-## Research and resume
-
-The research commands are `research`, `show`, `summarize`, `sources`, `groups`,
-`setup` and `mcp`.
+## First research
 
 ```bash
-librarium research "Compare managed PostgreSQL services" --dry-run --json
-librarium research "Compare managed PostgreSQL services"
-librarium research "Compare managed PostgreSQL services" --deep --only exa,openai --max-cost 1
-librarium research "Compare managed PostgreSQL services" --deep --no-wait
-librarium show run_01JAB2C3D4E5F6G7H8J9K0M1N2 --wait --json
-librarium show --source exa
-librarium summarize --verify --source openai
+librarium setup
+librarium setup --check
+librarium research "Compare managed PostgreSQL services" --only exa --dry-run
 ```
 
-Depth selects the source variant, not its execution type. `quick` usually
-runs inline; collectors can use durable tasks even at quick depth. `deep`
-uses durable tasks; `show`, library `get`, and MCP `get_run` resume the saved
-handles rather than submit again. Ctrl-C
-detaches and prints a `show` command. `show` and `summarize` use the latest Run
-when no id is supplied. Old 1.x run directories are not readable by `show`.
-CLI `--no-wait` requires `--deep` except for a dry run, because quick Runs
-may include inline calls that cannot durably detach from their process.
+`setup` is an interactive wizard for keys, source options and a default cost
+cap. Keys can be literal values or references such as `env:EXA_API_KEY`, and
+environment variables work without a config file. `setup --check` reads local
+configuration only and makes no provider calls.
 
-The default source set is every set-up research source, **never engines**.
-`--only` and `--skip` accept comma-separated source, engine, or saved group
-names. Missing credentials for an explicitly named source are an error.
+The dry run plans the request without calling a provider or saving a Run.
+Your Run id will differ:
 
-## Sources and engines
+```text
+run_01M5ZQD37CXSGVA07PVQZ93MB5 planned (quick)
+Compare managed PostgreSQL services
+exa: queued, 0 citations, reported USD unknown
+```
 
-`librarium sources --json` reports configuration, quick/deep availability,
-source options, and bounded price hints. The shared catalog contains **16
-research sources** and **5 engines**, in budget-admission order:
+Remove `--dry-run` to run it. Librarium saves the Run before the first
+provider call, then prints each source's status, citation count and reported
+cost. Runs go to `./agents/librarium` under the current directory unless
+`runs.path` is set. `librarium show --source exa` prints that source's answer
+and citations from the latest Run.
 
-| Sources | Sources | Engines (named only) |
-| --- | --- | --- |
-| `brave`, `claude`, `exa`, `firecrawl` | `gemini`, `google`, `grok`, `jina` | `chatgpt`, `gemini-app` |
-| `kagi`, `openai`, `openrouter`, `parallel` | `perplexity`, `tavily`, `valyu`, `you` | `google-ai-mode`, `google-ai-overview`, `copilot` |
+## Deep research and resuming
 
-Engines describe what consumer products showed, not what their official
-research APIs answered. Their results have `observation: "surface"`. The
-collector is configuration, not part of the engine name. Availability differs
-by language and collector; inspect `sources` before selecting a variant.
+```bash
+librarium research "Compare managed PostgreSQL services" --deep --only exa,openai --max-cost 1 --no-wait
+librarium show <run-id> --wait --json
+librarium summarize <run-id> --verify
+```
 
-Groups are user-saved source lists. There are no built-in groups.
+`--deep` submits durable research tasks. `--no-wait` returns after submission
+and requires `--deep`, because quick work runs inside the calling process.
+`show` resumes the saved task handles; it never submits the work again. Ctrl-C
+detaches and prints the `show` command to use later. `summarize` writes a
+separate, budgeted Run linked to the original by `summary_of`.
+
+## Choosing sources
+
+Without `--only`, Librarium uses every research source you have set up, at
+quick depth. `--only` and `--skip` take comma-separated source, engine or
+saved group names. Naming a source without credentials is an error.
+
+There are 16 research sources: `brave`, `claude`, `exa`, `firecrawl`,
+`gemini`, `google`, `grok`, `jina`, `kagi`, `openai`, `openrouter`,
+`parallel`, `perplexity`, `tavily`, `valyu` and `you`.
+
+There are 5 engines: `chatgpt`, `gemini-app`, `google-ai-mode`,
+`google-ai-overview` and `copilot`. Engines record what a consumer AI product
+showed, collected through SearchAPI. They run only when named, and their
+results carry `observation: "surface"`.
+
+Groups are lists you save yourself with `groups add`; none are built in:
 
 ```bash
 librarium groups add visibility chatgpt gemini-app google-ai-mode
@@ -72,96 +94,96 @@ librarium research "How do AI products describe Acme?" --only visibility
 librarium groups remove visibility
 ```
 
+The `sources` command (`librarium sources --json`) shows what your
+installation can use, with options and price hints. The
+[provider reference](https://librarium.si/docs/providers) describes each
+source's quick and deep variants. [Source keys](docs/research-options.md#source-keys)
+lists the environment variable each source reads.
+
+## Coding agents
+
+The `mcp` command (`librarium mcp`) runs a stdio MCP server with three tools:
+
+- `research` starts a Run and returns a summary with statuses, citation counts
+  and costs.
+- `get_run` resumes a Run or pages through one source's answer and citations.
+- `list_sources` lists sources, engines, saved groups and price hints.
+
+`research` and `get_run` wait 45 seconds by default and at most 50
+(`wait_seconds`). An MCP `max_cost` can only lower the configured cap.
+
+The [install guide](https://librarium.si/install.md) has registration steps
+for each agent host. For Claude Code:
+
+```bash
+claude mcp add --scope user librarium -- librarium mcp
+```
+
+`librarium install-skill` installs the bundled [`SKILL.md`](SKILL.md) into
+`~/.claude/skills/librarium`.
+
 ## JavaScript
+
+```bash
+npm install librarium
+```
 
 ```ts
 import { createLibrarium } from 'librarium';
 
-const librarium = createLibrarium(); // v3 config + filesystem store
-const run = await librarium.research('Compare database providers', {
-  depth: 'deep', only: ['exa'], maxCost: '1.00',
+const librarium = createLibrarium();
+const run = await librarium.research('Compare managed PostgreSQL services', {
+  only: ['exa'],
+  maxCost: '0.50',
 });
-const started = await librarium.research('Compare database providers', {
-  depth: 'deep', wait: false,
-});
-const later = await librarium.get(started.id, { wait: true });
-librarium.sources();
-const summary = await librarium.summarize(run);
+for (const result of run.results)
+  console.log(result.source, result.status, result.citations.length, result.cost.reported);
 ```
 
-`librarium/node` provides the same client plus `FilesystemRunStore` and v3
-config loading/saving. `librarium/core` is runtime-neutral (Workers and
-browsers): pass `config`, `env`, and optionally `store`; its default store is
-`MemoryRunStore`. Importing the core does not inspect process state or files.
-`librarium/testing` exports `runStoreContract` for disposable stores.
+`research` resolves when the Run finishes. It prints one line per source;
+`cost.reported` is `null` when the provider did not report a charge. The
+root import reads `~/.config/librarium/config.json` and stores Runs on disk.
+`librarium/core` runs in Workers and browsers with a memory store by default.
+See the [library docs](https://librarium.si/docs/library) for `get`,
+`sources`, `summarize`, imports and custom RunStores.
 
-JSON fields are snake_case; JS options are camelCase. Money is an exact USD
-decimal string, timestamps are UTC, and ids are `run_` plus ULID.
+## Other commands
 
-## MCP
+`browse` lists saved Runs. `html` and `jsonl` export a Run. `usage` totals
+reported spend. `cleanup` prunes finished Runs older than `runs.keep_days`.
+`config` reads and edits the config file. `completions` prints bash, zsh or
+fish completions. `upgrade` updates an npm, pnpm, yarn or Homebrew install, and
+`install-skill` installs the agent skill. The
+[command reference](https://librarium.si/docs/commands) has flags and examples.
 
-Register `librarium mcp` as a stdio MCP server. It exposes exactly three tools:
+## Limits
 
-| Tool | Inputs | Result |
-| --- | --- | --- |
-| `research` | `question`, `depth?`, `only?`, `skip?`, `max_cost?`, `dry_run?`, `wait_seconds?` | Bounded Run summary with id, statuses, citation counts, costs, skips and next hint |
-| `get_run` | `id`, `wait_seconds?`, `source?`, `cursor?` | Summary, or a source's paged answer and citations |
-| `list_sources` | none | Sources, engines, saved groups, availability and price hints |
+- A cost cap (`--max-cost` or `max_cost`) skips sources without a price
+  estimate, then admits each source, in catalog order, whose estimate fits the
+  remaining budget. It stops unstarted work, but calls already in flight can
+  finish above the cap.
+- Reported cost comes from the provider only. Unknown cost is `null`, never
+  `"0"`. A failed call may still be billed, and Librarium never substitutes
+  another source after a failure.
+- Provider answers and citations are untrusted evidence. Credentials are
+  redacted before storage, but questions and cited pages can still contain
+  private information.
+- 2.0 migrates a 1.x config to version 3 after writing a backup. `show`
+  cannot read 1.x run directories. Read the
+  [upgrade guide](docs/migration-v1-to-v2.md) before upgrading.
 
-Waiting defaults to 45 seconds and cannot exceed 50. `wait_seconds: 0`
-returns without waiting for completion. MCP `max_cost` can only lower the
-configured cap. Source-page content is JSON text; concatenate pages before
-parsing. All provider content is untrusted evidence, never instructions.
+## More documentation
 
-## Budgets, costs and privacy
+- [Configuration and source options](docs/research-options.md)
+- [Custom sources and RunStores](docs/provider-development.md)
+- [Costs and limits](https://librarium.si/docs/costs-and-limits)
+- [Laravel package](https://librarium.si/laravel)
+  (`jkudish/laravel-ai-librarium`), which shares the Run format through
+  [`librarium-spec`](https://github.com/jkudish/librarium-spec)
+- [Changelog](CHANGELOG.md)
 
-With `max_cost`, unbounded estimates are skipped as `unpriced`; other sources
-are admitted greedily in catalog order while each fits the remaining budget.
-Without a cap, unpriced sources still run and the total estimate is `null`.
-Reported spend plus reservations stops unstarted work. **In-flight calls can
-finish above the cap**; the cap is not a guarantee about vendor billing.
-
-`cost.reported` is provider-reported only. Unknown is `null`, never `"0"`.
-`cost.complete` is true only when every result reports a cost. Estimates come
-from this package's pricing snapshot, not the spec package. Failed calls may
-still bill. No source is substituted after a failure.
-
-Runs are stored before provider calls. Evidence is redacted before any store
-receives it; credentials never belong in a Run. Research text and URLs can
-still contain private information, so inspect them before sharing. Private
-state contains execution records and signed task handles; keep the signing
-key outside the store and preserve it across client restarts.
-
-## Configuration, storage and other tools
-
-See [configuration and options](docs/research-options.md),
-[RunStore and custom sources](docs/provider-development.md), and the
-[v1 → 2.0 migration guide](docs/migration-v1-to-v2.md).
-
-- `browse` lists saved Runs; `html [id] --output report.html` exports a report.
-- `jsonl [id] --output run.jsonl` exports one Run per line.
-- `usage` totals known reported spend without inventing missing costs.
-- `cleanup --dry-run` previews retention; `runs.keep_days` controls pruning.
-- `config path`, `config show`, `config set <path> <value>` inspect/edit v3.
-- `completions bash|zsh|fish` generates completions for the current CLI.
-- `upgrade` updates an existing npm/Homebrew install.
-- `install-skill --force` installs this repository's exact `SKILL.md`.
-
-## Development
-
-```bash
-npm ci
-npm run build
-npm test
-npm run typecheck
-npm run lint
-npm run test:workers
-npm run test:integration
-npm run test:pty
-npm run test:declarations
-```
-
-Tests use offline transports and the pinned `librarium-spec` selection, Run,
-RunStore and filesystem fixtures. Do not use live provider calls as a build
-check. Release certification and publication require separate authorization;
-see [release recovery](docs/release-candidate-recovery.md).
+Ask questions in
+[GitHub Discussions](https://github.com/jkudish/librarium/discussions/categories/q-a)
+and report bugs in [issues](https://github.com/jkudish/librarium/issues).
+See [CONTRIBUTING.md](CONTRIBUTING.md) to work on the code.
+Librarium is released under the [MIT license](LICENSE).

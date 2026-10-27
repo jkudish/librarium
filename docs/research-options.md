@@ -1,8 +1,10 @@
 # Configure sources and Run storage
 
 The CLI and Node client load `~/.config/librarium/config.json`. `setup` writes
-version 3. A source is set up when it has a resolved key and `enabled` is not
-false. An environment variable works without a config entry.
+version 3. The website's
+[configuration guide](https://librarium.si/docs/configuration) covers the
+same file. A source is set up when it has a resolved key and `enabled` is
+not false. An environment variable works without a config entry.
 
 ```json
 {
@@ -25,6 +27,37 @@ Relative run paths resolve from the calling directory. A custom store's module
 path resolves relative to the config file. `runs.keep_days: null` disables
 automatic retention. `cleanup` prunes only terminal Runs.
 
+## Source keys
+
+A `key` can be a literal value or an `env:NAME` reference. Without a `key`,
+each source reads the environment variable for the variant it would use:
+
+| Source | Environment variable |
+| --- | --- |
+| brave | `BRAVE_ANSWERS_API_KEY`; `BRAVE_API_KEY` with `results: search` |
+| claude | `ANTHROPIC_API_KEY` |
+| exa | `EXA_API_KEY` |
+| firecrawl | `FIRECRAWL_API_KEY` |
+| gemini | `GEMINI_API_KEY` |
+| google | `SEARCHAPI_API_KEY`; `SERPAPI_API_KEY` or `SERPBASE_API_KEY` for those collectors |
+| grok | `XAI_API_KEY` |
+| jina | `JINA_AI_API_KEY` |
+| kagi | `KAGI_API_KEY` |
+| openai | `OPENAI_API_KEY` |
+| openrouter | `OPENROUTER_API_KEY` |
+| parallel | `PARALLEL_API_KEY` |
+| perplexity | `PERPLEXITY_API_KEY` |
+| tavily | `TAVILY_API_KEY` |
+| valyu | `VALYU_API_KEY` |
+| you | `YOU_COM_API_KEY` |
+
+Engines are collected through `engines.collector`, keyed by `engines.key`.
+This package supports only the default `searchapi` collector, which reads
+`SEARCHAPI_API_KEY` when no key is set. The shared catalog also lists
+DataForSEO and Firecrawl collectors; only the Laravel package implements them,
+and this package skips engines set to them with reason `no_collector`.
+The pinned `librarium-spec/sources.json` catalog owns these names.
+
 ## Source options
 
 Options are directly under a source's config entry. Library calls can override
@@ -43,8 +76,8 @@ the authoritative shared option catalog.
 | openai | `model`, `effort` |
 | openrouter | `quick: grounded` (default) or `chat`, `model` |
 | parallel | `quick: turbo` (default) or `search`; `processor: pro` (default) |
-| perplexity | `quick: sonar-pro` (default), `search`, `agent` (check language availability); `deep_effort: medium` (default) or `high` |
-| valyu | `mode: standard` (default), `output` |
+| perplexity | `quick: sonar-pro` (default), `search`, `agent` (Laravel package only); `deep_effort: medium` (default) or `high` |
+| valyu | `mode: standard` (default); `output: ["markdown", "pdf"]` (default) |
 | you | `quick: answer` (default) or `research` |
 
 Exa, Jina, Kagi and Tavily have no public source options. Variant mapping stays
@@ -52,7 +85,8 @@ inside the package; users select one flat source name.
 
 Parallel processors are `lite`, `base`, `core`, `core2x`, `pro`, `ultra`,
 `ultra2x`, `ultra4x`, `ultra8x`. Valyu modes are `fast`, `standard`, `heavy`,
-`max`. Each uses the existing snapshot and per-target durable deadline. Valyu
+`max`. Each has its own price estimate in the package pricing snapshot and
+its own durable deadline. Valyu
 PDF URLs, when returned, are bearer links; evidence must be reviewed before
 sharing. A price hint is an admission estimate, never a reported charge.
 

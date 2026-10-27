@@ -4,10 +4,12 @@ description: "Researches across search and AI sources with cited evidence and st
 compatibility: Requires the Librarium 2.x CLI or three-tool MCP server.
 ---
 
-# Librarium — Research with stored Runs
+# Librarium: research with stored Runs
 
 Use the installed 2.x surface. Check the version; never silently substitute
-1.x. Discover configuration with `list_sources` or `librarium sources --json`.
+1.x. If Librarium is missing, follow https://librarium.si/install.md and ask
+before installing. Discover configuration with `list_sources` or
+`librarium sources --json`.
 Do not assume a source has a deep variant, citations, a key, or a bounded price.
 
 ## Choose the request
