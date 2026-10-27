@@ -57,7 +57,7 @@ else
   printf '{}\n' > "$TMP/assets.json"
   while IFS=$'\t' read -r name url; do
     test -n "$name"
-    curl -fsS --retry 3 --retry-all-errors -H "$AUTH_HEADER" -H 'Accept: application/octet-stream' -o "$TMP/asset" "$url"
+    curl -fsSL --retry 3 --retry-all-errors -H "$AUTH_HEADER" -H 'Accept: application/octet-stream' -o "$TMP/asset" "$url"
     digest="sha256:$(sha256sum "$TMP/asset" | awk '{print $1}')"
     jq --arg name "$name" --arg digest "$digest" '. + {($name): $digest}' "$TMP/assets.json" > "$TMP/assets.next"
     mv "$TMP/assets.next" "$TMP/assets.json"

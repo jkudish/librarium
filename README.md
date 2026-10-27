@@ -1,6 +1,6 @@
 # Librarium
 
-[![npm](https://img.shields.io/npm/v/librarium?color=cb3837&label=npm)](https://www.npmjs.com/package/librarium)
+[![npm](https://img.shields.io/npm/v/librarium?label=npm)](https://www.npmjs.com/package/librarium)
 [![License: MIT](https://img.shields.io/npm/l/librarium?color=blue)](LICENSE)
 
 Librarium sends one research question to the search and AI sources you
@@ -8,7 +8,7 @@ choose, then saves each answer, citation and cost in a Run you can resume.
 
 [Website](https://librarium.si) · [Docs](https://librarium.si/docs) ·
 [Agent setup](https://librarium.si/agents) ·
-[Laravel package](https://librarium.si/laravel)
+[Laravel package](https://github.com/jkudish/laravel-ai-librarium)
 
 ## Requirements
 
@@ -177,7 +177,7 @@ fish completions. `upgrade` updates an npm, pnpm, yarn or Homebrew install, and
 - [Configuration and source options](docs/research-options.md)
 - [Custom sources and RunStores](docs/provider-development.md)
 - [Costs and limits](https://librarium.si/docs/costs-and-limits)
-- [Laravel package](https://librarium.si/laravel)
+- [Laravel package](https://github.com/jkudish/laravel-ai-librarium)
   (`jkudish/laravel-ai-librarium`), which shares the Run format through
   [`librarium-spec`](https://github.com/jkudish/librarium-spec)
 - [Changelog](CHANGELOG.md)
