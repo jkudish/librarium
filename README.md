@@ -1,7 +1,13 @@
 # Librarium
 
 [![npm](https://img.shields.io/npm/v/librarium?label=npm)](https://www.npmjs.com/package/librarium)
+[![npm downloads](https://img.shields.io/npm/dm/librarium)](https://www.npmjs.com/package/librarium)
+[![CI](https://github.com/jkudish/librarium/actions/workflows/ci.yml/badge.svg)](https://github.com/jkudish/librarium/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/npm/l/librarium?color=blue)](LICENSE)
+
+<p align="center">
+  <img src=".github/librarium-banner.png" alt="librarium: Give your agent more than one source." />
+</p>
 
 Librarium sends one research question to the search and AI sources you
 choose, then saves each answer, citation and cost in a Run you can resume.
@@ -185,5 +191,22 @@ fish completions. `upgrade` updates an npm, pnpm, yarn or Homebrew install, and
 Ask questions in
 [GitHub Discussions](https://github.com/jkudish/librarium/discussions/categories/q-a)
 and report bugs in [issues](https://github.com/jkudish/librarium/issues).
-See [CONTRIBUTING.md](CONTRIBUTING.md) to work on the code.
-Librarium is released under the [MIT license](LICENSE).
+
+## The Librarium family
+
+- [Laravel AI Librarium](https://github.com/jkudish/laravel-ai-librarium): the Laravel package (`composer require jkudish/laravel-ai-librarium`).
+- [Laravel AI Librarium: Firecrawl](https://github.com/jkudish/laravel-ai-librarium-firecrawl): collects AI answer engine results for the Laravel package through Firecrawl browser sessions.
+- [librarium-spec](https://github.com/jkudish/librarium-spec): the shared Run schemas, source catalog and conformance fixtures.
+- [librarium.si](https://librarium.si): documentation for all of them.
+
+## Sponsoring
+
+If you find Librarium useful, consider becoming a [sponsor](https://github.com/sponsors/jkudish) or [donating](https://stripe.com/@jkudish).
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to work on the code. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+## License
+
+[MIT](LICENSE)
