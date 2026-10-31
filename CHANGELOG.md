@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 
 - Updated `marked` to 18.1.2, `vitest` to 5.0.5, `zod` to 4.6.7 and `@modelcontextprotocol/sdk` to 1.32.2.
-- Updated `@biomejs/biome` to 2.6.4 and `@cloudflare/vitest-plugin` to 1.4.10.
+- Updated `@cloudflare/vitest-plugin` to 1.4.10. (`@biomejs/biome` 2.6.4 was assessed and deliberately reverted: it requires a `biome.json` schema migration and its new `useMathMinMax` rule suggests a `Math.max()` rewrite that is unsafe for the BigInt reduce in `request-deadline-migration.ts`.)
 - Updated the build toolchain: `tsup` 9.0.0 (verified identical bundle output).
 - `@types/node` deliberately remains on the supported Node.js 22 line.
 
