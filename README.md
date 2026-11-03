@@ -153,6 +153,33 @@ root import reads `~/.config/librarium/config.json` and stores Runs on disk.
 See the [library docs](https://librarium.si/docs/library) for `get`,
 `sources`, `summarize`, imports and custom RunStores.
 
+Results may also carry `search_results`: pages the source's own web search
+returned while answering, including uncited pages. These are not extra
+`citations` and do not prove that the model read or rejected a page. The list
+preserves provider order and keeps the first occurrence of each exact URL.
+Absent or `null` means the source does not report its retrieval set; `[]`
+means it reported an empty one. Items have a `url` and optional nullable
+`title`, `snippet`, and RFC 3339 `published_at`.
+
+OpenAI web-search answers, Claude, and Perplexity's Agent-backed
+answer/research variants report this list. Claude supplies URLs and titles,
+not decrypted snippets or publication dates. Perplexity also supplies
+snippets and publication dates when available.
+OpenAI requests `web_search_call.action.sources` when web search is enabled
+and retains source URLs plus titles if returned. Older responses without
+this field omit the list rather than reporting an empty set. Engines and
+search-only sources (including Perplexity search) omit it. CLI summaries and
+MCP responses show a search-result count when known; read the full Run JSON
+for the retrieval list. Readers built against spec 1.0 must be upgraded before
+reading Runs with this field.
+
+The shared catalog offers `collector: direct | dataforseo` for `openai`,
+`claude`, `perplexity`, and `gemini`. Only `direct` (the default) is available
+in JavaScript. `sources` / `list_sources` expose the PHP-only variants as
+unavailable at quick depth; selecting `dataforseo` for quick requests never
+falls back to a direct adapter. The collector and its requirements do not
+affect deep requests, which use the direct deep variant when one exists.
+
 ## Other commands
 
 `browse` lists saved Runs. `html` and `jsonl` export a Run. `usage` totals

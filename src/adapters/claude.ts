@@ -1,3 +1,4 @@
+import { deduplicateSearchResults } from '../core/normalizer.js';
 import type {
   Citation,
   ProviderOptions,
@@ -11,6 +12,9 @@ interface AnthropicContentBlock {
   type?: string;
   text?: string;
   citations?: AnthropicCitation[];
+  content?:
+    | { type?: string; url?: string; title?: string }[]
+    | { type?: string };
 }
 
 interface AnthropicCitation {
@@ -264,6 +268,30 @@ export class ClaudeProvider extends BaseProvider {
         .join('')
         .trim();
       const citations = this.extractCitations(answer);
+      const searches = (data.content ?? []).filter(
+        (block) =>
+          block.type === 'web_search_tool_result' &&
+          Array.isArray(block.content),
+      );
+      const searchResults = searches.length
+        ? deduplicateSearchResults(
+            searches.flatMap((block) =>
+              (Array.isArray(block.content) ? block.content : []).flatMap(
+                (result) =>
+                  result.type === 'web_search_result' && result.url
+                    ? [
+                        {
+                          url: result.url,
+                          ...(result.title !== undefined && {
+                            title: result.title,
+                          }),
+                        },
+                      ]
+                    : [],
+              ),
+            ),
+          )
+        : undefined;
 
       if (!content || data.stop_reason === 'refusal') {
         // A 200 with no usable answer is not a success: surface the model's
@@ -295,6 +323,7 @@ export class ClaudeProvider extends BaseProvider {
         tier: this.tier,
         content,
         citations,
+        ...(searchResults !== undefined && { search_results: searchResults }),
         durationMs,
         model: data.model ?? this.model,
         tokenUsage: {

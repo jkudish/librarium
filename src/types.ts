@@ -199,6 +199,8 @@ export interface ProviderResult {
    */
   contentFormat?: 'json';
   citations: Citation[];
+  /** The provider's retrieval set, not just pages cited in its answer. */
+  search_results?: import('./core/run.js').SearchResult[] | null;
   durationMs: number;
   model?: string;
   tokenUsage?: { input?: number; output?: number };

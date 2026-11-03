@@ -1,5 +1,17 @@
 import type { Citation, DeduplicatedSource } from '../types.js';
 
+/** Preserve provider order and metadata; only identical URL strings collapse. */
+export function deduplicateSearchResults<T extends { url: string }>(
+  results: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  return results.filter((result) => {
+    if (seen.has(result.url)) return false;
+    seen.add(result.url);
+    return true;
+  });
+}
+
 /**
  * Normalize a URL for deduplication:
  * - Strip protocol (http/https)

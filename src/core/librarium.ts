@@ -25,6 +25,7 @@ import {
   type HttpRequestOptions,
   httpRequest,
 } from './http-client.js';
+import { deduplicateSearchResults } from './normalizer.js';
 import { usdDecimalToMicrousd } from './pricing.js';
 import { executionAdapterProfileBindings } from './profile-bindings.js';
 import {
@@ -213,11 +214,14 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     validateSourceOptions(source, merged);
     return merged;
   };
-  const credentials = definitions.flatMap((source) =>
-    ['quick', 'deep'].map((depth) =>
-      keyFor(source, depth as 'quick' | 'deep', sourceOptions(source)),
-    ),
-  );
+  const credentials = definitions.flatMap((source) => {
+    sourceOptions(source);
+    // Collect default credentials without validating unused variant combinations.
+    // Planning and resumed execution add the selected variant's credential.
+    return ['quick', 'deep'].map((depth) =>
+      keyFor(source, depth as 'quick' | 'deep', {}),
+    );
+  });
   function redact(value: unknown): unknown {
     if (typeof value === 'string')
       return redactCredentialText(value, credentials)
@@ -439,30 +443,37 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     }
     return { providers, variants, catalog, estimates };
   }
-  function setup(overrides: Record<string, Record<string, unknown>> = {}) {
+  function setup(
+    overrides: Record<string, Record<string, unknown>> = {},
+    depth?: 'quick' | 'deep',
+  ) {
     return {
       sources: definitions
-        .filter(
-          (source) =>
-            source.kind === 'research' &&
-            config.sources[source.id]?.enabled !== false &&
-            (!!keyFor(
-              source,
-              'quick',
-              sourceOptions(source, overrides[source.id]),
-            ) ||
-              !!keyFor(
-                source,
-                'deep',
-                sourceOptions(source, overrides[source.id]),
-              ) ||
-              custom.some(
-                (item) =>
-                  item.id === source.id &&
-                  (item.quick?.requiresApiKey === false ||
-                    item.deep?.requiresApiKey === false),
-              )),
-        )
+        .filter((source) => {
+          if (
+            source.kind !== 'research' ||
+            config.sources[source.id]?.enabled === false
+          )
+            return false;
+          const options = sourceOptions(source, overrides[source.id]);
+          let quickKey: string | undefined;
+          try {
+            quickKey = keyFor(source, 'quick', options);
+          } catch (error) {
+            if (depth !== 'deep' || !(error instanceof TypeError)) throw error;
+            quickKey = keyFor(source, 'quick', {});
+          }
+          return (
+            !!quickKey ||
+            !!keyFor(source, 'deep', options) ||
+            custom.some(
+              (item) =>
+                item.id === source.id &&
+                (item.quick?.requiresApiKey === false ||
+                  item.deep?.requiresApiKey === false),
+            )
+          );
+        })
         .map((source) => source.id),
       engines: {
         collector: config.engines.collector,
@@ -537,6 +548,13 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
             url: citation.url,
             ...(citation.title && { title: citation.title }),
           })),
+        ...(Array.isArray(output?.search_results) &&
+          result.observation === 'api' &&
+          slot.primary.result_kind !== 'search_results' && {
+            search_results: deduplicateSearchResults(
+              output.search_results,
+            ).filter((item) => safeEvidenceUrl(item.url) !== null),
+          }),
         cost: {
           ...result.cost,
           reported:
@@ -655,13 +673,15 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       const frozen = (
         doc.state.options as Record<string, Record<string, unknown>> | undefined
       )?.[definition.id];
+      const key = keyFor(
+        definition,
+        doc.run.depth,
+        frozen ?? sourceOptions(definition),
+      );
+      if (key && !credentials.includes(key)) credentials.push(key);
       providers[configId] = {
         ...providers[configId],
-        apiKey: keyFor(
-          definition,
-          doc.run.depth,
-          frozen ?? sourceOptions(definition),
-        ),
+        apiKey: key,
       };
     }
     const instances = new Map<string, Provider | undefined>();
@@ -881,6 +901,13 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
                     ),
                   ).values(),
                 ],
+                ...((first.search_results != null ||
+                  second?.search_results != null) && {
+                  search_results: deduplicateSearchResults([
+                    ...(first.search_results ?? []),
+                    ...(second?.search_results ?? []),
+                  ]),
+                }),
                 usage:
                   reported === undefined
                     ? undefined
@@ -1018,7 +1045,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         : source,
     );
     const selected = selectSources(
-      setup(options.options),
+      setup(options.options, options.depth ?? 'quick'),
       plan.estimates,
       {
         question: q,

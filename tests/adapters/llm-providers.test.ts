@@ -26,6 +26,94 @@ describe('llm providers', () => {
 
   // --- Claude (Anthropic Messages API) ---
 
+  it.each(['absent', 'error', 'empty', 'results'])(
+    'keeps Claude %s retrieval separate from cited pages',
+    async (kind) => {
+      const content =
+        kind === 'error'
+          ? { type: 'web_search_tool_result_error', error_code: 'unavailable' }
+          : kind === 'empty'
+            ? []
+            : [
+                {
+                  type: 'web_search_result',
+                  url: 'https://example.com/uncited',
+                  title: 'First',
+                  encrypted_content: 'opaque',
+                  page_age: 'April 30, 2025',
+                },
+                {
+                  type: 'web_search_result',
+                  url: 'https://example.com/cited',
+                  title: 'Cited',
+                },
+              ];
+      const provider = new ClaudeProvider({
+        credentials: { env: { ANTHROPIC_API_KEY: 'dummy' } },
+        httpClient: async () =>
+          ({
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            durationMs: 1,
+            data: {
+              content: [
+                ...(kind === 'absent'
+                  ? []
+                  : [{ type: 'web_search_tool_result', content }]),
+                ...(kind !== 'results'
+                  ? []
+                  : [
+                      {
+                        type: 'web_search_tool_result',
+                        content: [
+                          {
+                            type: 'web_search_result',
+                            url: 'https://example.com/uncited',
+                            title: 'Later',
+                          },
+                          {
+                            type: 'web_search_result',
+                            url: 'https://example.com/uncited/',
+                            title: 'Distinct URL',
+                          },
+                        ],
+                      },
+                    ]),
+                {
+                  type: 'text',
+                  text: 'Answer',
+                  citations: [
+                    {
+                      type: 'web_search_result_location',
+                      url: 'https://example.com/cited',
+                    },
+                  ],
+                },
+              ],
+            },
+          }) as never,
+      });
+      const result = await provider.execute('q', { timeout: 10 });
+      expect(result.error).toBeUndefined();
+      expect(result.citations.map((citation) => citation.url)).toEqual([
+        'https://example.com/cited',
+      ]);
+      if (kind === 'absent' || kind === 'error')
+        expect(result).not.toHaveProperty('search_results');
+      else
+        expect(result.search_results).toEqual(
+          kind === 'empty'
+            ? []
+            : [
+                { url: 'https://example.com/uncited', title: 'First' },
+                { url: 'https://example.com/cited', title: 'Cited' },
+                { url: 'https://example.com/uncited/', title: 'Distinct URL' },
+              ],
+        );
+    },
+  );
+
   it('calls the Anthropic Messages API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {
@@ -411,6 +499,7 @@ describe('llm providers', () => {
     expect(result.provider).toBe('openai-chat');
     expect(result.tier).toBe('llm');
     expect(result.content).toBe('OpenAI answer.');
+    expect(result).not.toHaveProperty('search_results');
     expect(result.citations).toEqual([
       {
         url: 'https://example.com/openai',
@@ -434,8 +523,111 @@ describe('llm providers', () => {
       input: 'hello',
       tools: [{ type: 'web_search' }],
       tool_choice: 'auto',
+      include: ['web_search_call.action.sources'],
     });
   });
+
+  it.each(['missing', 'empty', 'results'])(
+    'keeps OpenAI %s search sources separate from citation annotations',
+    async (state) => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse(200, {
+          output: [
+            {
+              type: 'web_search_call',
+              action: {
+                type: 'search',
+                ...(state !== 'missing' && {
+                  sources:
+                    state === 'empty'
+                      ? []
+                      : [
+                          { type: 'url', title: 'Missing URL' },
+                          { type: 'url', url: null },
+                          { type: 'url', url: 123 },
+                          { type: 'url', url: '' },
+                          { type: 'file', url: 'https://example.com/not-url' },
+                          { type: 'url', url: 'https://example.com/uncited' },
+                          {
+                            type: 'url',
+                            url: 'https://example.com/cited',
+                            title: 'First title',
+                          },
+                        ],
+                }),
+              },
+            },
+            ...(state === 'results'
+              ? [
+                  {
+                    type: 'web_search_call',
+                    action: {
+                      type: 'search',
+                      sources: [
+                        {
+                          type: 'url',
+                          url: 'https://example.com/cited',
+                          title: 'Later title',
+                        },
+                        {
+                          type: 'url',
+                          url: 'https://example.com/uncited',
+                          title: 'Do not backfill',
+                        },
+                        { type: 'url', url: 'https://example.com/uncited/' },
+                        { url: 'https://example.com/without-type' },
+                      ],
+                    },
+                  },
+                ]
+              : []),
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'An answer with one citation.',
+                  annotations: [
+                    {
+                      type: 'url_citation',
+                      url: 'https://example.com/cited',
+                      title: 'Citation title',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const provider = new OpenAIChatProvider({
+        credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+      });
+      const result = await provider.execute('hello', { timeout: 10 });
+      expect(result.error).toBeUndefined();
+      expect(result.citations).toEqual([
+        {
+          url: 'https://example.com/cited',
+          title: 'Citation title',
+          provider: 'openai-chat',
+        },
+      ]);
+      if (state === 'missing') {
+        expect(result).not.toHaveProperty('search_results');
+      } else {
+        expect(result.search_results).toEqual(
+          state === 'empty'
+            ? []
+            : [
+                { url: 'https://example.com/uncited' },
+                { url: 'https://example.com/cited', title: 'First title' },
+                { url: 'https://example.com/uncited/' },
+                { url: 'https://example.com/without-type' },
+              ],
+        );
+      }
+    },
+  );
 
   it('can disable OpenAI web search and use chat completions', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
@@ -454,6 +646,7 @@ describe('llm providers', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.content).toBe('OpenAI answer.');
+    expect(result).not.toHaveProperty('search_results');
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.openai.com/v1/chat/completions');

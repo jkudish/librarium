@@ -7,6 +7,13 @@ export const SourceNameSchema = z
   .regex(/^[a-z0-9][a-z0-9-]*$/)
   .max(64);
 const time = z.iso.datetime({ offset: true });
+export const SearchResultSchema = z.strictObject({
+  url: z.url(),
+  title: z.string().nullable().optional(),
+  snippet: z.string().nullable().optional(),
+  published_at: time.nullable().optional(),
+});
+export type SearchResult = z.infer<typeof SearchResultSchema>;
 export const RunResultSchema = z
   .strictObject({
     source: SourceNameSchema,
@@ -16,6 +23,7 @@ export const RunResultSchema = z
     citations: z.array(
       z.strictObject({ url: z.url(), title: z.string().nullable().optional() }),
     ),
+    search_results: z.array(SearchResultSchema).nullable().optional(),
     cost: z.strictObject({
       estimated: MoneySchema.nullable(),
       reported: MoneySchema.nullable(),

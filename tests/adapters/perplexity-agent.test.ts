@@ -132,6 +132,95 @@ function failed(id: string, code: string) {
 }
 
 describe('Perplexity Agent API adapters', () => {
+  it.each(['absent', 'empty', 'results'])(
+    'preserves %s retrieval and exact-URL first occurrences across searches',
+    async (kind) => {
+      const data = {
+        ...completed('retrieval', 'Answer [1]'),
+        output: [
+          ...(kind === 'absent'
+            ? []
+            : [
+                {
+                  type: 'search_results',
+                  results:
+                    kind === 'empty'
+                      ? []
+                      : [
+                          {
+                            id: 1,
+                            url: 'https://example.test/one',
+                            title: 'First',
+                            snippet: 'Snippet',
+                            date: '2026-10-01',
+                          },
+                          {
+                            id: 2,
+                            url: 'https://example.test/uncited',
+                            title: 'Uncited',
+                            last_updated: '2026-10-02',
+                          },
+                        ],
+                },
+              ]),
+          ...(kind !== 'results'
+            ? []
+            : [
+                {
+                  type: 'search_results',
+                  results: [
+                    {
+                      id: 3,
+                      url: 'https://example.test/one',
+                      title: 'Duplicate',
+                    },
+                    {
+                      id: 4,
+                      url: 'https://example.test/one/',
+                      date: 'not a date',
+                    },
+                  ],
+                },
+              ]),
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: kind === 'results' ? 'Answer [1]' : 'Answer',
+              },
+            ],
+          },
+        ],
+      };
+      const result = await new PerplexitySonarProProvider({
+        apiKey: 'dummy',
+        httpClient: queuedClient([{ data }]).client,
+      }).execute('q', { timeout: 10 });
+      expect(result.error).toBeUndefined();
+      expect(result.citations.map((citation) => citation.url)).toEqual(
+        kind === 'results' ? ['https://example.test/one'] : [],
+      );
+      if (kind === 'absent')
+        expect(result).not.toHaveProperty('search_results');
+      else
+        expect(result.search_results).toEqual(
+          kind === 'empty'
+            ? []
+            : [
+                {
+                  url: 'https://example.test/one',
+                  title: 'First',
+                  snippet: 'Snippet',
+                  published_at: '2026-10-01T00:00:00.000Z',
+                },
+                { url: 'https://example.test/uncited', title: 'Uncited' },
+                { url: 'https://example.test/one/' },
+              ],
+        );
+    },
+  );
+
   it('uses the strict low preset request and preserves typed evidence and reported usage', async () => {
     const { client, calls } = queuedClient([{ data: completed('inline-1') }]);
     const provider = new PerplexitySonarProProvider({
@@ -164,6 +253,14 @@ describe('Perplexity Agent API adapters', () => {
         provider: 'perplexity-sonar-pro',
         providerReference: '1',
       },
+    ]);
+    expect(result.search_results).toEqual([
+      {
+        url: 'https://example.test/source',
+        title: 'Source title',
+        snippet: 'Source snippet',
+      },
+      { url: 'https://example.test/considered-only', title: 'Uncited result' },
     ]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
@@ -270,6 +367,10 @@ describe('Perplexity Agent API adapters', () => {
     });
     const retrieved = await provider.retrieve(submitted);
     expect(retrieved.content).toBe('Research result [1]');
+    expect(retrieved.search_results?.map((result) => result.url)).toEqual([
+      'https://example.test/source',
+      'https://example.test/considered-only',
+    ]);
     expect(retrieved.model).toBe('openai/gpt-5.6-luna');
     expect(calls.map(({ url, options }) => [url, options.method])).toEqual([
       ['https://api.perplexity.ai/v1/agent', 'POST'],

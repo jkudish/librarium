@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Implemented librarium-spec 1.1's optional per-result `search_results`, separate
+  from citations, with strict Run validation and memory/filesystem round trips.
+  Claude extracts web-search result URLs/titles; Perplexity Agent-backed
+  answers and research retain uncited results, snippets, and publication dates.
+  Exact-URL duplicates keep their first occurrence and provider order. Missing,
+  null, and empty retrieval sets remain distinct. CLI and MCP show known counts.
+- OpenAI web-search answers request `web_search_call.action.sources` and retain
+  all returned source URLs (and titles if present), independently of cited
+  `url_citation` annotations. Missing source arrays omit `search_results`;
+  reported empty arrays remain `[]`. Disabling web search sends no `include`
+  parameter and omits the retrieval set.
+- Exposed the shared `collector: direct | dataforseo` option for OpenAI, Claude,
+  Perplexity, and Gemini. DataForSEO variants remain unavailable in JavaScript
+  at quick depth and cannot silently dispatch the direct quick adapter. The
+  collector and its option requirements apply only to quick requests; deep
+  requests keep the direct deep variant and any `deep_effort` selection.
+
+### Fixed
+
+- Ignore OpenAI search-source entries with missing, non-string, or empty URLs,
+  or a non-URL source type, without losing the answer or valid sources.
+- Redact option-variant credentials during resumed Runs, including variants
+  selected by request overrides. Keep sources configured by those credentials
+  in deep requests' `no_deep_variant` skips rather than treating them as absent.
+
+### Dependencies
+
+- Require `librarium-spec` `^1.1.0`.
+
 ## [2.0.1] - 2026-10-30
 
 ### Security

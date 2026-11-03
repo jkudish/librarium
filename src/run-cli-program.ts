@@ -69,7 +69,7 @@ function display(run: Run, json = false) {
   print(`${run.id} ${run.status} (${run.depth})\n${run.question}`);
   for (const result of run.results)
     print(
-      `${result.source}: ${result.status}, ${result.citations.length} citations, reported USD ${result.cost.reported ?? 'unknown'}`,
+      `${result.source}: ${result.status}, ${result.citations.length} citations${result.search_results == null ? '' : `, ${result.search_results.length} search results`}, reported USD ${result.cost.reported ?? 'unknown'}`,
     );
   for (const skip of run.skipped)
     print(`${skip.source}: skipped (${skip.reason})`);
@@ -190,7 +190,7 @@ export function createRunCliProgram(): Command {
         print(
           options.json
             ? result
-            : `${result.answer ?? ''}\n${result.citations.map((citation) => citation.url).join('\n')}`,
+            : `${result.answer ?? ''}\n${result.citations.map((citation) => citation.url).join('\n')}${result.search_results == null ? '' : `\n${result.search_results.length} search results`}`,
         );
       } else display(run, options.json);
     });
