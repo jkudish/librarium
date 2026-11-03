@@ -9,6 +9,8 @@ import {
   HttpRequestTimeoutError,
   HttpResponseTooLargeError,
 } from '../core/http-client.js';
+import { deduplicateSearchResults } from '../core/normalizer.js';
+import { type SearchResult, SearchResultSchema } from '../core/run.js';
 import type {
   AsyncPollResult,
   AsyncTaskHandle,
@@ -77,6 +79,7 @@ export interface AgentSearchResult {
   readonly title?: string;
   readonly snippet?: string;
   readonly source?: string;
+  readonly published_at?: string;
 }
 
 export interface ParsedAgentResponse {
@@ -85,6 +88,7 @@ export interface ParsedAgentResponse {
   readonly model?: string;
   readonly messages: readonly string[];
   readonly searchResults: readonly AgentSearchResult[];
+  readonly retrievalResults?: readonly SearchResult[];
   readonly usage?: ParsedAgentUsage;
   readonly error?: { readonly code?: string; readonly message?: string };
 }
@@ -335,24 +339,35 @@ function parseSearchResult(value: unknown): AgentSearchResult {
     source.source === undefined
       ? undefined
       : safeIdentifier(source.source, 'search result source');
+  // `date` is publication time; `last_updated` is not. Preserve only dates
+  // expressible by the Run contract, rather than guessing free-form dates.
+  const date = typeof source.date === 'string' ? source.date : undefined;
+  const publishedAt =
+    date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T00:00:00Z` : date;
+  const validDate =
+    publishedAt !== undefined &&
+    SearchResultSchema.shape.published_at.safeParse(publishedAt).success;
   return {
     id,
     url,
     ...(title === undefined ? {} : { title }),
     ...(snippet === undefined ? {} : { snippet }),
     ...(sourceType === undefined ? {} : { source: sourceType }),
+    ...(validDate && { published_at: new Date(publishedAt).toISOString() }),
   };
 }
 
 function parseOutput(value: unknown): {
   messages: string[];
   searchResults: AgentSearchResult[];
+  reportsSearchResults: boolean;
 } {
   if (!Array.isArray(value)) {
     throw responseError('Perplexity Agent output was malformed.');
   }
   const messages: string[] = [];
   const searchResults: AgentSearchResult[] = [];
+  let reportsSearchResults = false;
   const resultIds = new Set<string>();
   for (const itemValue of value) {
     const item = record(itemValue);
@@ -375,6 +390,7 @@ function parseOutput(value: unknown): {
       continue;
     }
     if (item.type === 'search_results') {
+      reportsSearchResults = true;
       if (!Array.isArray(item.results)) {
         throw responseError('Perplexity Agent search results were malformed.');
       }
@@ -395,7 +411,7 @@ function parseOutput(value: unknown): {
       throw responseError('Perplexity Agent output type was unsupported.');
     }
   }
-  return { messages, searchResults };
+  return { messages, searchResults, reportsSearchResults };
 }
 
 function citedResultIds(
@@ -500,6 +516,16 @@ export function parseAgentResponse(
     searchResults: searchResults.filter((result) =>
       cited.has(searchResultKey(result.id)),
     ),
+    ...(output?.reportsSearchResults && {
+      retrievalResults: deduplicateSearchResults(
+        searchResults.map(({ url, title, snippet, published_at }) => ({
+          url,
+          ...(title !== undefined && { title }),
+          ...(snippet !== undefined && { snippet }),
+          ...(published_at !== undefined && { published_at }),
+        })),
+      ),
+    }),
     ...(usage === undefined ? {} : { usage }),
     ...(error === undefined ? {} : { error }),
   };
@@ -821,6 +847,9 @@ function resultFromResponse(
     provider,
     tier,
     content: response.messages.join(''),
+    ...(response.retrievalResults !== undefined && {
+      search_results: [...response.retrievalResults],
+    }),
     citations: response.searchResults.map(
       (result): Citation => ({
         url: result.url,

@@ -58,6 +58,13 @@ Waiting defaults to 45 seconds, maximum 50. MCP `max_cost` can only lower the
 configured cap. A Run summary contains statuses and citation counts, not
 evidence; never synthesize from the summary alone. Fetch source pages, follow
 the cursor, concatenate JSON text, and parse the complete answer/citations.
+When reported, summaries and source pages also include `search_result_count`.
+The full Run JSON's optional `search_results` contains retrieved pages, not
+additional citations. Missing or null means unreported; `[]` means reported
+empty. Do not infer that an uncited retrieved page was read or rejected.
+Search-only sources and engines omit the list. The catalog's `dataforseo`
+collector on `openai`, `claude`, `perplexity`, and `gemini` is PHP-only;
+JavaScript supports the default `direct` collector and rejects that variant.
 
 ## Resume rather than resubmit
 

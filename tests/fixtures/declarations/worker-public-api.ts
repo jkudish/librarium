@@ -23,6 +23,7 @@ import {
   type RunStore,
   RunStoreConflict,
   type RunSummary,
+  type SearchResult,
   type StoredRun,
   StoredRunSchema,
 } from 'librarium/core';
@@ -47,8 +48,16 @@ export type PublicInventory = [
   AsyncTaskHandle,
   AsyncPollResult,
   Citation,
+  SearchResult,
   HttpClient,
 ];
+const retrieval: SearchResult = {
+  url: 'https://example.com',
+  snippet: null,
+  published_at: '2026-10-01T00:00:00Z',
+};
+const retrievalSet: RunResult['search_results'] = [retrieval];
+void retrievalSet;
 const store: RunStore = new MemoryRunStore();
 const client: Librarium = createLibrarium({ config: { version: 3 }, store });
 const run: Promise<Run> = client.research('q', {

@@ -83,6 +83,14 @@ the authoritative shared option catalog.
 Exa, Jina, Kagi and Tavily have no public source options. Variant mapping stays
 inside the package; users select one flat source name.
 
+`openai`, `claude`, `perplexity`, and `gemini` also expose the shared
+`collector: direct | dataforseo` option. `direct` is the default and the only
+JavaScript implementation. The DataForSEO LLM Responses variants have
+`js: null`: `sources --json` and MCP `list_sources` retain that availability
+information. Selecting one fails before storage or dispatch, never silently
+using the direct adapter. Sources without a deep variant remain skipped at
+deep depth. DataForSEO LLM Responses is separate from engine collectors.
+
 Parallel processors are `lite`, `base`, `core`, `core2x`, `pro`, `ultra`,
 `ultra2x`, `ultra4x`, `ultra8x`. Valyu modes are `fast`, `standard`, `heavy`,
 `max`. Each has its own price estimate in the package pricing snapshot and

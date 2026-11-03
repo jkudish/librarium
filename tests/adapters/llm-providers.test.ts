@@ -26,6 +26,94 @@ describe('llm providers', () => {
 
   // --- Claude (Anthropic Messages API) ---
 
+  it.each(['absent', 'error', 'empty', 'results'])(
+    'keeps Claude %s retrieval separate from cited pages',
+    async (kind) => {
+      const content =
+        kind === 'error'
+          ? { type: 'web_search_tool_result_error', error_code: 'unavailable' }
+          : kind === 'empty'
+            ? []
+            : [
+                {
+                  type: 'web_search_result',
+                  url: 'https://example.com/uncited',
+                  title: 'First',
+                  encrypted_content: 'opaque',
+                  page_age: 'April 30, 2025',
+                },
+                {
+                  type: 'web_search_result',
+                  url: 'https://example.com/cited',
+                  title: 'Cited',
+                },
+              ];
+      const provider = new ClaudeProvider({
+        credentials: { env: { ANTHROPIC_API_KEY: 'dummy' } },
+        httpClient: async () =>
+          ({
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            durationMs: 1,
+            data: {
+              content: [
+                ...(kind === 'absent'
+                  ? []
+                  : [{ type: 'web_search_tool_result', content }]),
+                ...(kind !== 'results'
+                  ? []
+                  : [
+                      {
+                        type: 'web_search_tool_result',
+                        content: [
+                          {
+                            type: 'web_search_result',
+                            url: 'https://example.com/uncited',
+                            title: 'Later',
+                          },
+                          {
+                            type: 'web_search_result',
+                            url: 'https://example.com/uncited/',
+                            title: 'Distinct URL',
+                          },
+                        ],
+                      },
+                    ]),
+                {
+                  type: 'text',
+                  text: 'Answer',
+                  citations: [
+                    {
+                      type: 'web_search_result_location',
+                      url: 'https://example.com/cited',
+                    },
+                  ],
+                },
+              ],
+            },
+          }) as never,
+      });
+      const result = await provider.execute('q', { timeout: 10 });
+      expect(result.error).toBeUndefined();
+      expect(result.citations.map((citation) => citation.url)).toEqual([
+        'https://example.com/cited',
+      ]);
+      if (kind === 'absent' || kind === 'error')
+        expect(result).not.toHaveProperty('search_results');
+      else
+        expect(result.search_results).toEqual(
+          kind === 'empty'
+            ? []
+            : [
+                { url: 'https://example.com/uncited', title: 'First' },
+                { url: 'https://example.com/cited', title: 'Cited' },
+                { url: 'https://example.com/uncited/', title: 'Distinct URL' },
+              ],
+        );
+    },
+  );
+
   it('calls the Anthropic Messages API with web search and extracts citations', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse(200, {

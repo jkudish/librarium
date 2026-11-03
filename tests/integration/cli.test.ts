@@ -9,8 +9,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import retrievalRun from 'librarium-spec/fixtures/runs/valid/quick-search-results.json' with {
+  type: 'json',
+};
 import { afterAll, describe, expect, it } from 'vitest';
 import { RunSchema } from '../../src/core/run.js';
+import { FilesystemRunStore } from '../../src/node-run-store.js';
 
 const cli = resolve(import.meta.dirname, '../../dist/cli.js');
 const home = mkdtempSync(join(tmpdir(), 'librarium-surface-cli-'));
@@ -176,5 +180,27 @@ describe('built Run CLI, offline only', () => {
           call.url.includes('exa.ai') && call.method === 'POST',
       ),
     ).toHaveLength(1);
+  });
+  it('shows retrieval counts without confusing empty and unreported sets', async () => {
+    const doc = RunSchema.parse(retrievalRun);
+    await new FilesystemRunStore(runs).save(
+      { run: doc, state: {}, files: {}, version: 1 },
+      null,
+    );
+    const shown = run(['show', doc.id]);
+    expect(shown.status, shown.stderr).toBe(0);
+    expect(shown.stdout).toContain(
+      'claude: done, 1 citations, 2 search results,',
+    );
+    expect(shown.stdout).toContain(
+      'perplexity: done, 0 citations, 0 search results,',
+    );
+    expect(shown.stdout).toContain('exa: done, 1 citations, reported USD');
+    expect(shown.stdout).toContain('gemini: done, 1 citations, reported USD');
+    expect(run(['show', doc.id, '--source', 'claude']).stdout).toContain(
+      '2 search results',
+    );
+    expect(JSON.parse(run(['show', doc.id, '--json']).stdout)).toEqual(doc);
+    await new FilesystemRunStore(runs).delete(doc.id);
   });
 });

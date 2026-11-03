@@ -16,6 +16,7 @@ export type {
   RunResult,
   RunStore,
   RunSummary,
+  SearchResult,
   StoredRun,
 } from './core/run.js';
 export {

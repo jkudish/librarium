@@ -22,6 +22,9 @@ function summary(run: Run) {
       source: result.source,
       status: result.status,
       citation_count: result.citations.length,
+      ...(result.search_results != null && {
+        search_result_count: result.search_results.length,
+      }),
     })),
     cost: run.cost,
     skipped: run.skipped,
@@ -149,6 +152,9 @@ export function createRunMcpServer(
         const encoded = JSON.stringify({
           answer: result.answer,
           citations: result.citations,
+          ...(result.search_results != null && {
+            search_result_count: result.search_results.length,
+          }),
         });
         const tag = `${run.id}/${input.source}/${createHash('sha256').update(encoded).digest('hex')}`;
         let offset = 0;

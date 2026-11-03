@@ -64,6 +64,22 @@ const response = <T>(data: T) => ({
 });
 
 describe('shared simplified contract', () => {
+  it.each(['memory', 'filesystem'])(
+    '%s preserves all shared retrieval-set representations',
+    async (kind) => {
+      const store =
+        kind === 'memory'
+          ? new MemoryRunStore()
+          : new FilesystemRunStore(temp());
+      const run = RunSchema.parse(
+        json('fixtures/runs/valid/quick-search-results.json'),
+      );
+      const doc = { run, state: {}, files: {}, version: 1 };
+      await store.save(doc, null);
+      expect(await store.get(run.id)).toEqual(doc);
+    },
+  );
+
   for (const name of readdirSync(join(spec, 'fixtures/selection')).filter(
     (name) => name.endsWith('.json'),
   ))
@@ -360,6 +376,104 @@ describe('shared simplified contract', () => {
 });
 
 describe('Run lifecycle without network', () => {
+  it.each(['memory', 'filesystem'])(
+    '%s reads back a JS-written retrieval set without promoting uncited pages',
+    async (kind) => {
+      const store =
+        kind === 'memory'
+          ? new MemoryRunStore()
+          : new FilesystemRunStore(temp());
+      const handleKey = new Uint8Array(32).fill(2);
+      const client = createLibrarium({
+        store,
+        handleKey,
+        env: { PERPLEXITY_API_KEY: 'dummy-secret' },
+        httpClient: async () =>
+          response({
+            id: 'retrieval',
+            status: 'completed',
+            model: 'openai/gpt-5.6-luna',
+            output: [
+              {
+                type: 'search_results',
+                results: [
+                  { id: 1, url: 'https://example.com/cited', title: 'Cited' },
+                  {
+                    id: 2,
+                    url: 'https://example.com/uncited',
+                    title: 'Uncited',
+                    snippet: 'dummy-secret',
+                    date: '2026-10-01',
+                  },
+                  { id: 3, url: 'https://example.com/uncited', title: 'Later' },
+                  {
+                    id: 4,
+                    url: 'https://user:password@example.com/private',
+                    title: 'Unsafe',
+                  },
+                ],
+              },
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'Answer [1]' }],
+              },
+            ],
+          }) as never,
+      });
+      const run = await client.research('q', { only: ['perplexity'] });
+      expect(run.status).toBe('done');
+      expect(run.results[0].citations).toEqual([
+        { url: 'https://example.com/cited', title: 'Cited' },
+      ]);
+      expect(run.results[0].search_results).toEqual([
+        { url: 'https://example.com/cited', title: 'Cited' },
+        {
+          url: 'https://example.com/uncited',
+          title: 'Uncited',
+          snippet: '[REDACTED]',
+          published_at: '2026-10-01T00:00:00.000Z',
+        },
+      ]);
+      const reader =
+        kind === 'memory'
+          ? store
+          : new FilesystemRunStore((store as FilesystemRunStore).path);
+      expect((await reader.get(run.id))?.run).toEqual(run);
+      expect(
+        await createLibrarium({ store: reader, handleKey }).get(run.id),
+      ).toEqual(run);
+    },
+  );
+
+  it.each(['openai', 'claude', 'perplexity', 'gemini'])(
+    '%s rejects the PHP-only collector instead of dispatching direct at either depth',
+    async (source) => {
+      const store = new MemoryRunStore();
+      const client = createLibrarium({
+        store,
+        config: {
+          version: 3,
+          sources: { [source]: { key: 'dummy', collector: 'dataforseo' } },
+        },
+        httpClient: async () => {
+          throw new Error('Must not dispatch');
+        },
+      });
+      const info = client.sources().find((item) => item.id === source)!;
+      expect(info.options?.collector.variants?.dataforseo.js).toBeNull();
+      expect(info.variants?.quick?.available).toBe(false);
+      expect(info.variants?.deep?.available ?? false).toBe(false);
+      await expect(client.research('q', { only: [source] })).rejects.toThrow(
+        'Source variant unavailable in JS',
+      );
+      if (source !== 'claude')
+        await expect(
+          client.research('q', { only: [source], depth: 'deep' }),
+        ).rejects.toThrow('Source variant unavailable in JS');
+      expect(await store.list()).toEqual([]);
+    },
+  );
+
   it('custom sources are client-scoped, engines named-only, and quick results survive concurrent readers', async () => {
     let release: (() => void) | undefined;
     const ready = new Promise<void>((resolve) => {
@@ -514,6 +628,53 @@ describe('Run lifecycle without network', () => {
     await store.save(doc, doc.version);
     await expect(client.get(run.id)).rejects.toThrow('signature');
   });
+  it('verified summaries retain retrieval from both calls in first-seen order', async () => {
+    let call = 0;
+    const provider: Provider = {
+      id: 'local-summary',
+      displayName: 'Local summary',
+      tier: 'llm',
+      execution: 'inline',
+      envVar: '',
+      requiresApiKey: false,
+      test: async () => ({ ok: true }),
+      async execute() {
+        call++;
+        return {
+          provider: this.id,
+          tier: this.tier,
+          content: call === 1 ? 'Draft' : 'Verified',
+          citations: [],
+          durationMs: 1,
+          search_results:
+            call === 1
+              ? [
+                  { url: 'https://example.com/draft-only' },
+                  { url: 'https://example.com/shared', title: 'First' },
+                ]
+              : [
+                  { url: 'https://example.com/shared', title: 'Later' },
+                  { url: 'https://example.com/verification-only' },
+                ],
+        };
+      },
+    };
+    const client = createLibrarium({
+      customSources: [{ id: 'local-summary', quick: provider }],
+    });
+    const summary = await client.summarize(
+      RunSchema.parse(json('fixtures/run-store/stored-run.json').run),
+      { source: 'local-summary', verify: true },
+    );
+    expect(summary.results[0].answer).toBe('Verified');
+    expect(summary.results[0].search_results).toEqual([
+      { url: 'https://example.com/draft-only' },
+      { url: 'https://example.com/shared', title: 'First' },
+      { url: 'https://example.com/verification-only' },
+    ]);
+    expect(call).toBe(2);
+  });
+
   it('summary uses fixed/configured source precedence, tracks verification and leaves source Run unchanged', async () => {
     const store = new MemoryRunStore();
     const original = json('fixtures/run-store/stored-run.json') as StoredRun;
@@ -1247,6 +1408,14 @@ describe('new public transports', () => {
       expect(
         JSON.parse((listed.content as { text: string }[])[0].text).sources,
       ).toHaveLength(21);
+      const listedSources = JSON.parse(
+        (listed.content as { text: string }[])[0].text,
+      ).sources;
+      for (const id of ['openai', 'claude', 'perplexity', 'gemini'])
+        expect(
+          listedSources.find((source: { id: string }) => source.id === id)
+            .options.collector.variants.dataforseo.js,
+        ).toBeNull();
       const denied = await client.callTool({
         name: 'research',
         arguments: { question: 'q', max_cost: '2', dry_run: true },
@@ -1266,10 +1435,16 @@ describe('new public transports', () => {
     const run = structuredClone(json('fixtures/run-store/stored-run.json').run);
     run.status = 'running';
     run.finished_at = null;
+    run.results[0].search_results = [
+      { url: 'https://example.com/uncited', snippet: 'x'.repeat(20000) },
+    ];
+    const store = new MemoryRunStore();
+    await store.save({ run, state: {}, files: {}, version: 1 }, null);
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();
     const client = new Client({ name: 'deadline', version: '1' });
     const server = createRunMcpServer({
+      store,
       client: {
         research: async () => run,
         get: async () => new Promise(() => {}),
@@ -1292,7 +1467,25 @@ describe('new public transports', () => {
             arguments: { question: 'q', wait_seconds: 1 },
           })
         ).structuredContent,
-      ).toMatchObject({ id: run.id, status: 'running' });
+      ).toMatchObject({
+        id: run.id,
+        status: 'running',
+        results: [expect.objectContaining({ search_result_count: 1 })],
+      });
+      const page = (
+        await client.callTool({
+          name: 'get_run',
+          arguments: {
+            id: run.id,
+            source: run.results[0].source,
+            wait_seconds: 0,
+          },
+        })
+      ).structuredContent;
+      expect(JSON.parse(page!.content as string)).toMatchObject({
+        search_result_count: 1,
+      });
+      expect(JSON.stringify(page)).not.toContain('https://example.com/uncited');
       expect(Date.now() - started).toBeLessThan(2500);
       expect(
         (

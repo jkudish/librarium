@@ -25,6 +25,7 @@ import {
   type HttpRequestOptions,
   httpRequest,
 } from './http-client.js';
+import { deduplicateSearchResults } from './normalizer.js';
 import { usdDecimalToMicrousd } from './pricing.js';
 import { executionAdapterProfileBindings } from './profile-bindings.js';
 import {
@@ -537,6 +538,13 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
             url: citation.url,
             ...(citation.title && { title: citation.title }),
           })),
+        ...(Array.isArray(output?.search_results) &&
+          result.observation === 'api' &&
+          slot.primary.result_kind !== 'search_results' && {
+            search_results: deduplicateSearchResults(
+              output.search_results,
+            ).filter((item) => safeEvidenceUrl(item.url) !== null),
+          }),
         cost: {
           ...result.cost,
           reported:
@@ -881,6 +889,13 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
                     ),
                   ).values(),
                 ],
+                ...((first.search_results != null ||
+                  second?.search_results != null) && {
+                  search_results: deduplicateSearchResults([
+                    ...(first.search_results ?? []),
+                    ...(second?.search_results ?? []),
+                  ]),
+                }),
                 usage:
                   reported === undefined
                     ? undefined

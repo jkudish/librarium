@@ -138,10 +138,12 @@ export function resolveSourceVariant(
   if (source.kind === 'engine')
     return depth === 'quick' ? source.collectors?.[collector] : undefined;
   let variant = source.variants?.[depth];
+  if (!variant) return undefined;
   for (const [name, option] of Object.entries(source.options ?? {})) {
     const value = options[name] ?? option.default;
     if (
-      ((depth === 'quick' && name !== 'deep_effort') ||
+      (name === 'collector' ||
+        (depth === 'quick' && name !== 'deep_effort') ||
         (depth === 'deep' && name === 'deep_effort')) &&
       option.variants &&
       typeof value === 'string'

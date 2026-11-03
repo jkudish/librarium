@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Implemented librarium-spec 1.1's optional per-result `search_results`, separate
+  from citations, with strict Run validation and memory/filesystem round trips.
+  Claude extracts web-search result URLs/titles; Perplexity Agent-backed
+  answers and research retain uncited results, snippets, and publication dates.
+  Exact-URL duplicates keep their first occurrence and provider order. Missing,
+  null, and empty retrieval sets remain distinct. CLI and MCP show known counts.
+- Exposed the shared `collector: direct | dataforseo` option for OpenAI, Claude,
+  Perplexity, and Gemini. DataForSEO variants remain unavailable in JavaScript
+  and cannot silently dispatch the direct adapter, including at deep depth.
+
+### Dependencies
+
+- Require `librarium-spec` `^1.1.0`.
+
 ## [2.0.1] - 2026-10-30
 
 ### Security
