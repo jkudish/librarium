@@ -22,7 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter and omits the retrieval set.
 - Exposed the shared `collector: direct | dataforseo` option for OpenAI, Claude,
   Perplexity, and Gemini. DataForSEO variants remain unavailable in JavaScript
-  and cannot silently dispatch the direct adapter, including at deep depth.
+  at quick depth and cannot silently dispatch the direct quick adapter. The
+  collector and its option requirements apply only to quick requests; deep
+  requests keep the direct deep variant and any `deep_effort` selection.
+
+### Fixed
+
+- Ignore OpenAI search-source entries with missing, non-string, or empty URLs,
+  or a non-URL source type, without losing the answer or valid sources.
 
 ### Dependencies
 

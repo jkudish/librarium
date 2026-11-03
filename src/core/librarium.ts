@@ -214,11 +214,14 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     validateSourceOptions(source, merged);
     return merged;
   };
-  const credentials = definitions.flatMap((source) =>
-    ['quick', 'deep'].map((depth) =>
-      keyFor(source, depth as 'quick' | 'deep', sourceOptions(source)),
-    ),
-  );
+  const credentials = definitions.flatMap((source) => {
+    sourceOptions(source);
+    // Collect default credentials without validating unused variant combinations.
+    // Planning adds the selected variant's credential before execution.
+    return ['quick', 'deep'].map((depth) =>
+      keyFor(source, depth as 'quick' | 'deep', {}),
+    );
+  });
   function redact(value: unknown): unknown {
     if (typeof value === 'string')
       return redactCredentialText(value, credentials)
@@ -440,7 +443,10 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     }
     return { providers, variants, catalog, estimates };
   }
-  function setup(overrides: Record<string, Record<string, unknown>> = {}) {
+  function setup(
+    overrides: Record<string, Record<string, unknown>> = {},
+    depth?: 'quick' | 'deep',
+  ) {
     return {
       sources: definitions
         .filter(
@@ -450,7 +456,9 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
             (!!keyFor(
               source,
               'quick',
-              sourceOptions(source, overrides[source.id]),
+              depth === 'deep'
+                ? {}
+                : sourceOptions(source, overrides[source.id]),
             ) ||
               !!keyFor(
                 source,
@@ -1033,7 +1041,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         : source,
     );
     const selected = selectSources(
-      setup(options.options),
+      setup(options.options, options.depth ?? 'quick'),
       plan.estimates,
       {
         question: q,

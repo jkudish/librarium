@@ -542,6 +542,11 @@ describe('llm providers', () => {
                     state === 'empty'
                       ? []
                       : [
+                          { type: 'url', title: 'Missing URL' },
+                          { type: 'url', url: null },
+                          { type: 'url', url: 123 },
+                          { type: 'url', url: '' },
+                          { type: 'file', url: 'https://example.com/not-url' },
                           { type: 'url', url: 'https://example.com/uncited' },
                           {
                             type: 'url',
@@ -570,6 +575,7 @@ describe('llm providers', () => {
                           title: 'Do not backfill',
                         },
                         { type: 'url', url: 'https://example.com/uncited/' },
+                        { url: 'https://example.com/without-type' },
                       ],
                     },
                   },
@@ -616,6 +622,7 @@ describe('llm providers', () => {
                 { url: 'https://example.com/uncited' },
                 { url: 'https://example.com/cited', title: 'First title' },
                 { url: 'https://example.com/uncited/' },
+                { url: 'https://example.com/without-type' },
               ],
         );
       }

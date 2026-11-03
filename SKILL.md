@@ -64,7 +64,8 @@ additional citations. Missing or null means unreported; `[]` means reported
 empty. Do not infer that an uncited retrieved page was read or rejected.
 Search-only sources and engines omit the list. The catalog's `dataforseo`
 collector on `openai`, `claude`, `perplexity`, and `gemini` is PHP-only;
-JavaScript supports the default `direct` collector and rejects that variant.
+JavaScript rejects that quick variant. Collector options and their requirements
+do not affect deep requests, which keep the direct deep variant when available.
 
 ## Resume rather than resubmit
 

@@ -87,9 +87,12 @@ inside the package; users select one flat source name.
 `collector: direct | dataforseo` option. `direct` is the default and the only
 JavaScript implementation. The DataForSEO LLM Responses variants have
 `js: null`: `sources --json` and MCP `list_sources` retain that availability
-information. Selecting one fails before storage or dispatch, never silently
-using the direct adapter. Sources without a deep variant remain skipped at
-deep depth. DataForSEO LLM Responses is separate from engine collectors.
+information. Selecting one at quick depth fails before storage or dispatch,
+never silently using the direct quick adapter. The collector and its
+requirements replace only the quick variant; deep requests use the direct
+deep variant, including any `deep_effort` selection. Sources without a deep
+variant remain skipped at deep depth. DataForSEO LLM Responses is separate
+from engine collectors.
 
 Parallel processors are `lite`, `base`, `core`, `core2x`, `pro`, `ultra`,
 `ultra2x`, `ultra4x`, `ultra8x`. Valyu modes are `fast`, `standard`, `heavy`,

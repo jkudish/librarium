@@ -176,7 +176,9 @@ reading Runs with this field.
 The shared catalog offers `collector: direct | dataforseo` for `openai`,
 `claude`, `perplexity`, and `gemini`. Only `direct` (the default) is available
 in JavaScript. `sources` / `list_sources` expose the PHP-only variants as
-unavailable; selecting `dataforseo` never falls back to a direct adapter.
+unavailable at quick depth; selecting `dataforseo` for quick requests never
+falls back to a direct adapter. The collector and its requirements do not
+affect deep requests, which use the direct deep variant when one exists.
 
 ## Other commands
 

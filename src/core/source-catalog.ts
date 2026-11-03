@@ -142,8 +142,7 @@ export function resolveSourceVariant(
   for (const [name, option] of Object.entries(source.options ?? {})) {
     const value = options[name] ?? option.default;
     if (
-      (name === 'collector' ||
-        (depth === 'quick' && name !== 'deep_effort') ||
+      ((depth === 'quick' && name !== 'deep_effort') ||
         (depth === 'deep' && name === 'deep_effort')) &&
       option.variants &&
       typeof value === 'string'

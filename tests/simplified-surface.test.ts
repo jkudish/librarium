@@ -446,7 +446,7 @@ describe('Run lifecycle without network', () => {
   );
 
   it.each(['openai', 'claude', 'perplexity', 'gemini'])(
-    '%s rejects the PHP-only collector instead of dispatching direct at either depth',
+    '%s rejects the PHP-only quick collector but keeps its direct deep variant',
     async (source) => {
       const store = new MemoryRunStore();
       const client = createLibrarium({
@@ -462,15 +462,58 @@ describe('Run lifecycle without network', () => {
       const info = client.sources().find((item) => item.id === source)!;
       expect(info.options?.collector.variants?.dataforseo.js).toBeNull();
       expect(info.variants?.quick?.available).toBe(false);
-      expect(info.variants?.deep?.available ?? false).toBe(false);
+      expect(info.variants?.deep?.available ?? false).toBe(source !== 'claude');
       await expect(client.research('q', { only: [source] })).rejects.toThrow(
         'Source variant unavailable in JS',
       );
-      if (source !== 'claude')
-        await expect(
-          client.research('q', { only: [source], depth: 'deep' }),
-        ).rejects.toThrow('Source variant unavailable in JS');
+      const definition = SOURCE_CATALOG.find((item) => item.id === source)!;
+      expect(
+        resolveSourceVariant(definition, 'deep', { collector: 'dataforseo' }),
+      ).toEqual(definition.variants?.deep);
       expect(await store.list()).toEqual([]);
+    },
+  );
+
+  it.each(['medium', 'high'])(
+    'runs direct Perplexity deep %s despite quick-only collector requirements',
+    async (effort) => {
+      const client = createLibrarium({
+        env: { PERPLEXITY_API_KEY: 'dummy' },
+        config: {
+          version: 3,
+          sources: {
+            perplexity: {
+              collector: 'dataforseo',
+              quick: 'search',
+              deep_effort: effort,
+            },
+          },
+        },
+        httpClient: async () =>
+          response({
+            id: 'deep-result',
+            status: 'completed',
+            model: 'openai/gpt-5.6-luna',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: 'Direct deep answer' }],
+              },
+            ],
+          }) as never,
+      });
+      const run = await client.research('q', {
+        only: ['perplexity'],
+        depth: 'deep',
+      });
+      expect(run.results[0].error).toBeNull();
+      expect(run.status).toBe('done');
+      expect(run.results[0].answer).toBe('Direct deep answer');
+      expect(run.results[0].provenance.provider).toBe(
+        effort === 'high'
+          ? 'perplexity-sonar-deep'
+          : 'perplexity-deep-research',
+      );
     },
   );
 

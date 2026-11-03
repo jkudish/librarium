@@ -50,7 +50,7 @@ interface OpenAIResponseOutputItem {
   type?: string;
   content?: OpenAIResponseContent[];
   action?: {
-    sources?: { url: string; title?: string }[];
+    sources?: { type?: string; url?: unknown; title?: string }[];
   };
 }
 
@@ -251,10 +251,13 @@ export class OpenAIChatProvider extends BaseProvider {
       const searchResults = searches.length
         ? deduplicateSearchResults(
             searches.flatMap((item) =>
-              (item.action?.sources ?? []).map(({ url, title }) => ({
-                url,
-                ...(title !== undefined && { title }),
-              })),
+              (item.action?.sources ?? []).flatMap(({ type, url, title }) =>
+                typeof url === 'string' &&
+                url !== '' &&
+                (type === undefined || type === 'url')
+                  ? [{ url, ...(title !== undefined && { title }) }]
+                  : [],
+              ),
             ),
           )
         : undefined;
