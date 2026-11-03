@@ -217,7 +217,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
   const credentials = definitions.flatMap((source) => {
     sourceOptions(source);
     // Collect default credentials without validating unused variant combinations.
-    // Planning adds the selected variant's credential before execution.
+    // Planning and resumed execution add the selected variant's credential.
     return ['quick', 'deep'].map((depth) =>
       keyFor(source, depth as 'quick' | 'deep', {}),
     );
@@ -449,29 +449,31 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
   ) {
     return {
       sources: definitions
-        .filter(
-          (source) =>
-            source.kind === 'research' &&
-            config.sources[source.id]?.enabled !== false &&
-            (!!keyFor(
-              source,
-              'quick',
-              depth === 'deep'
-                ? {}
-                : sourceOptions(source, overrides[source.id]),
-            ) ||
-              !!keyFor(
-                source,
-                'deep',
-                sourceOptions(source, overrides[source.id]),
-              ) ||
-              custom.some(
-                (item) =>
-                  item.id === source.id &&
-                  (item.quick?.requiresApiKey === false ||
-                    item.deep?.requiresApiKey === false),
-              )),
-        )
+        .filter((source) => {
+          if (
+            source.kind !== 'research' ||
+            config.sources[source.id]?.enabled === false
+          )
+            return false;
+          const options = sourceOptions(source, overrides[source.id]);
+          let quickKey: string | undefined;
+          try {
+            quickKey = keyFor(source, 'quick', options);
+          } catch (error) {
+            if (depth !== 'deep' || !(error instanceof TypeError)) throw error;
+            quickKey = keyFor(source, 'quick', {});
+          }
+          return (
+            !!quickKey ||
+            !!keyFor(source, 'deep', options) ||
+            custom.some(
+              (item) =>
+                item.id === source.id &&
+                (item.quick?.requiresApiKey === false ||
+                  item.deep?.requiresApiKey === false),
+            )
+          );
+        })
         .map((source) => source.id),
       engines: {
         collector: config.engines.collector,
@@ -671,13 +673,15 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       const frozen = (
         doc.state.options as Record<string, Record<string, unknown>> | undefined
       )?.[definition.id];
+      const key = keyFor(
+        definition,
+        doc.run.depth,
+        frozen ?? sourceOptions(definition),
+      );
+      if (key && !credentials.includes(key)) credentials.push(key);
       providers[configId] = {
         ...providers[configId],
-        apiKey: keyFor(
-          definition,
-          doc.run.depth,
-          frozen ?? sourceOptions(definition),
-        ),
+        apiKey: key,
       };
     }
     const instances = new Map<string, Provider | undefined>();

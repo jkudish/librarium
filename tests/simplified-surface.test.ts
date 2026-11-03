@@ -502,6 +502,9 @@ describe('Run lifecycle without network', () => {
             ],
           }) as never,
       });
+      await expect(
+        client.research('q', { only: ['perplexity'] }),
+      ).rejects.toThrow('Invalid option combination for perplexity.collector');
       const run = await client.research('q', {
         only: ['perplexity'],
         depth: 'deep',
@@ -514,6 +517,28 @@ describe('Run lifecycle without network', () => {
           ? 'perplexity-sonar-deep'
           : 'perplexity-deep-research',
       );
+    },
+  );
+
+  it.each([false, true])(
+    'keeps option-credential sources in deep skipped results (named=%s)',
+    async (named) => {
+      const client = createLibrarium({
+        config: { version: 3, sources: { brave: { results: 'search' } } },
+        env: { BRAVE_API_KEY: 'brave-search-key' },
+        httpClient: async () => {
+          throw new Error('Must not dispatch');
+        },
+      });
+      const run = await client.research('q', {
+        depth: 'deep',
+        ...(named && { only: ['brave'] }),
+      });
+      expect(run.status).toBe('done');
+      expect(run.results).toEqual([]);
+      expect(run.skipped).toEqual([
+        { source: 'brave', reason: 'no_deep_variant' },
+      ]);
     },
   );
 
@@ -1149,9 +1174,13 @@ describe('Run lifecycle without network', () => {
       expect(submits).toBe(2);
     },
   );
-  it.each(['memory', 'filesystem'])(
-    '%s quick durable sources finish and resume accepted handles after their owner dies',
-    async (kind) => {
+  it.each(
+    ['memory', 'filesystem'].flatMap((kind) =>
+      ['config', 'request'].map((selection) => ({ kind, selection })),
+    ),
+  )(
+    '$kind resumes accepted quick handles and redacts $selection option credentials',
+    async ({ kind, selection }) => {
       const store =
         kind === 'memory'
           ? new MemoryRunStore()
@@ -1192,22 +1221,39 @@ describe('Run lifecycle without network', () => {
           return {
             provider: this.id,
             tier: this.tier,
-            content: 'Quick durable findings',
+            content: 'Quick durable findings variant-resume-key',
             citations: [],
             durationMs: 1,
           };
         },
       };
       const customSources = [{ id: 'quick-durable', quick: provider }];
+      const config = {
+        version: 3 as const,
+        sources: { brave: selection === 'config' ? { results: 'search' } : {} },
+      };
+      const env = { BRAVE_API_KEY: 'variant-resume-key' };
       const first = createLibrarium({
         store,
         handleKey,
         customSources,
+        config,
+        env,
+        httpClient: async () =>
+          response({
+            web: { results: [{ url: 'https://example.com', title: 'Brave' }] },
+          }) as never,
         owner: { id: 'old-owner', alive: () => true },
       });
-      const run = await first.research('q');
+      const run = await first.research('q', {
+        ...(selection === 'request' && {
+          options: { brave: { results: 'search' } },
+        }),
+      });
       expect(run.status).toBe('done');
-      expect(run.results[0].answer).toBe('Quick durable findings');
+      expect(
+        run.results.find((result) => result.source === 'quick-durable')?.answer,
+      ).toBe('Quick durable findings [REDACTED]');
       expect(snapshot).not.toBeNull();
       const recovered =
         kind === 'memory'
@@ -1218,11 +1264,19 @@ describe('Run lifecycle without network', () => {
         store: recovered,
         handleKey,
         customSources,
+        config,
+        env,
         owner: { id: 'new-owner', alive: (id) => id !== 'old-owner' },
       });
       const resumed = await reader.get(run.id, { wait: true });
       expect(resumed?.status).toBe('done');
-      expect(resumed?.results[0].answer).toBe('Quick durable findings');
+      expect(
+        resumed?.results.find((result) => result.source === 'quick-durable')
+          ?.answer,
+      ).toBe('Quick durable findings [REDACTED]');
+      expect(JSON.stringify(await recovered.get(run.id))).not.toContain(
+        'variant-resume-key',
+      );
       expect(submits).toBe(1);
     },
   );

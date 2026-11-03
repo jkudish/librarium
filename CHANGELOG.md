@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Ignore OpenAI search-source entries with missing, non-string, or empty URLs,
   or a non-URL source type, without losing the answer or valid sources.
+- Redact option-variant credentials during resumed Runs, including variants
+  selected by request overrides. Keep sources configured by those credentials
+  in deep requests' `no_deep_variant` skips rather than treating them as absent.
 
 ### Dependencies
 
