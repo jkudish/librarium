@@ -499,6 +499,7 @@ describe('llm providers', () => {
     expect(result.provider).toBe('openai-chat');
     expect(result.tier).toBe('llm');
     expect(result.content).toBe('OpenAI answer.');
+    expect(result).not.toHaveProperty('search_results');
     expect(result.citations).toEqual([
       {
         url: 'https://example.com/openai',
@@ -522,8 +523,104 @@ describe('llm providers', () => {
       input: 'hello',
       tools: [{ type: 'web_search' }],
       tool_choice: 'auto',
+      include: ['web_search_call.action.sources'],
     });
   });
+
+  it.each(['missing', 'empty', 'results'])(
+    'keeps OpenAI %s search sources separate from citation annotations',
+    async (state) => {
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse(200, {
+          output: [
+            {
+              type: 'web_search_call',
+              action: {
+                type: 'search',
+                ...(state !== 'missing' && {
+                  sources:
+                    state === 'empty'
+                      ? []
+                      : [
+                          { type: 'url', url: 'https://example.com/uncited' },
+                          {
+                            type: 'url',
+                            url: 'https://example.com/cited',
+                            title: 'First title',
+                          },
+                        ],
+                }),
+              },
+            },
+            ...(state === 'results'
+              ? [
+                  {
+                    type: 'web_search_call',
+                    action: {
+                      type: 'search',
+                      sources: [
+                        {
+                          type: 'url',
+                          url: 'https://example.com/cited',
+                          title: 'Later title',
+                        },
+                        {
+                          type: 'url',
+                          url: 'https://example.com/uncited',
+                          title: 'Do not backfill',
+                        },
+                        { type: 'url', url: 'https://example.com/uncited/' },
+                      ],
+                    },
+                  },
+                ]
+              : []),
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'An answer with one citation.',
+                  annotations: [
+                    {
+                      type: 'url_citation',
+                      url: 'https://example.com/cited',
+                      title: 'Citation title',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      const provider = new OpenAIChatProvider({
+        credentials: { env: { OPENAI_API_KEY: 'openai-key' } },
+      });
+      const result = await provider.execute('hello', { timeout: 10 });
+      expect(result.error).toBeUndefined();
+      expect(result.citations).toEqual([
+        {
+          url: 'https://example.com/cited',
+          title: 'Citation title',
+          provider: 'openai-chat',
+        },
+      ]);
+      if (state === 'missing') {
+        expect(result).not.toHaveProperty('search_results');
+      } else {
+        expect(result.search_results).toEqual(
+          state === 'empty'
+            ? []
+            : [
+                { url: 'https://example.com/uncited' },
+                { url: 'https://example.com/cited', title: 'First title' },
+                { url: 'https://example.com/uncited/' },
+              ],
+        );
+      }
+    },
+  );
 
   it('can disable OpenAI web search and use chat completions', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
@@ -542,6 +639,7 @@ describe('llm providers', () => {
 
     expect(result.error).toBeUndefined();
     expect(result.content).toBe('OpenAI answer.');
+    expect(result).not.toHaveProperty('search_results');
 
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.openai.com/v1/chat/completions');

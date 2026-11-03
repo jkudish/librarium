@@ -1,3 +1,4 @@
+import { deduplicateSearchResults } from '../core/normalizer.js';
 import type {
   Citation,
   ProviderOptions,
@@ -48,6 +49,9 @@ interface OpenAIResponseContent {
 interface OpenAIResponseOutputItem {
   type?: string;
   content?: OpenAIResponseContent[];
+  action?: {
+    sources?: { url: string; title?: string }[];
+  };
 }
 
 interface OpenAIResponsesUsage {
@@ -213,6 +217,7 @@ export class OpenAIChatProvider extends BaseProvider {
             input: query,
             tools: [{ type: 'web_search' }],
             tool_choice: 'auto',
+            include: ['web_search_call.action.sources'],
             ...(this.reasoningEffort && {
               reasoning: { effort: this.reasoningEffort },
             }),
@@ -238,6 +243,21 @@ export class OpenAIChatProvider extends BaseProvider {
 
       const outputText = this.extractResponseText(data.output);
       const citations = this.extractResponseCitations(data.output);
+      const searches = (data.output ?? []).filter(
+        (item) =>
+          item.type === 'web_search_call' &&
+          Array.isArray(item.action?.sources),
+      );
+      const searchResults = searches.length
+        ? deduplicateSearchResults(
+            searches.flatMap((item) =>
+              (item.action?.sources ?? []).map(({ url, title }) => ({
+                url,
+                ...(title !== undefined && { title }),
+              })),
+            ),
+          )
+        : undefined;
 
       if (!outputText) {
         return {
@@ -255,6 +275,7 @@ export class OpenAIChatProvider extends BaseProvider {
         tier: this.tier,
         content: outputText,
         citations,
+        ...(searchResults !== undefined && { search_results: searchResults }),
         durationMs,
         model: data.model ?? this.model,
         tokenUsage: {

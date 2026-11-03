@@ -161,11 +161,13 @@ Absent or `null` means the source does not report its retrieval set; `[]`
 means it reported an empty one. Items have a `url` and optional nullable
 `title`, `snippet`, and RFC 3339 `published_at`.
 
-Claude and Perplexity's Agent-backed answer/research variants report this
-list. Claude supplies URLs and titles, not decrypted snippets or publication
-dates. Perplexity also supplies snippets and publication dates when available.
-OpenAI omits it: its Responses API requires an additional `include` parameter
-for search sources, which this package does not request. Engines and
+OpenAI web-search answers, Claude, and Perplexity's Agent-backed
+answer/research variants report this list. Claude supplies URLs and titles,
+not decrypted snippets or publication dates. Perplexity also supplies
+snippets and publication dates when available.
+OpenAI requests `web_search_call.action.sources` when web search is enabled
+and retains source URLs plus titles if returned. Older responses without
+this field omit the list rather than reporting an empty set. Engines and
 search-only sources (including Perplexity search) omit it. CLI summaries and
 MCP responses show a search-result count when known; read the full Run JSON
 for the retrieval list. Readers built against spec 1.0 must be upgraded before

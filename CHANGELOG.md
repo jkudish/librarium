@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers and research retain uncited results, snippets, and publication dates.
   Exact-URL duplicates keep their first occurrence and provider order. Missing,
   null, and empty retrieval sets remain distinct. CLI and MCP show known counts.
+- OpenAI web-search answers request `web_search_call.action.sources` and retain
+  all returned source URLs (and titles if present), independently of cited
+  `url_citation` annotations. Missing source arrays omit `search_results`;
+  reported empty arrays remain `[]`. Disabling web search sends no `include`
+  parameter and omits the retrieval set.
 - Exposed the shared `collector: direct | dataforseo` option for OpenAI, Claude,
   Perplexity, and Gemini. DataForSEO variants remain unavailable in JavaScript
   and cannot silently dispatch the direct adapter, including at deep depth.

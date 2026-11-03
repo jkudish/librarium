@@ -47,9 +47,14 @@ Built-in mappings follow the providers' documented response fields:
   (Agent preset low) and the Agent-backed deep variants. `/search` already
   exposes its results as citations, so it omits the extra list.
 - [OpenAI Responses](https://developers.openai.com/api/reference/resources/responses/methods/create):
-  `web_search_call.action.sources` requires `include`. The existing request
-  does not opt in; `openai-chat` omits the retrieval set without changing
-  request parameters.
+  `openai-chat` requests `include: ['web_search_call.action.sources']` only
+  when web search is enabled. Collect every `web_search_call.action.sources`
+  array in output order; citations remain `url_citation` annotations. The
+  documented source shape is `{ type: 'url', url }`; preserve `title` if
+  returned, but its availability is not documented or guaranteed. Missing
+  source arrays (including older responses) omit `search_results`; explicit
+  empty arrays produce `[]`. With web search disabled, send no `include`
+  and omit the retrieval set.
 
 Custom provider code is trusted executable code, not a sandbox. Do not load
 an unreviewed module, spawn unreviewed scripts, or grant it access to secrets.
