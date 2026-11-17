@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-11-17
+
+Version 2.0.1 was tagged on GitHub but never published to npm. Version 2.0.2 is the
+first npm release that includes the 2.0.1 changes below.
+
+### Security
+
+- Updated `hono` to 4.13.18 ([GHSA-4m76-xfj5-7975](https://github.com/advisories/GHSA-4m76-xfj5-7975), [GHSA-h7mg-cq63-vhpq](https://github.com/advisories/GHSA-h7mg-cq63-vhpq), [GHSA-3gg2-335m-rxc6](https://github.com/advisories/GHSA-3gg2-335m-rxc6), [GHSA-46wx-v44x-9hh2](https://github.com/advisories/GHSA-46wx-v44x-9hh2), [GHSA-4h7h-rv7c-7m2v](https://github.com/advisories/GHSA-4h7h-rv7c-7m2v)) and `@hono/node-server` to 2.1.8 ([GHSA-qv5m-9pm6-hqp3](https://github.com/advisories/GHSA-qv5m-9pm6-hqp3), [GHSA-jpvv-r467-5p4w](https://github.com/advisories/GHSA-jpvv-r467-5p4w)) in the lockfile. Both are transitive dependencies of `@modelcontextprotocol/sdk`, and Librarium's MCP server uses only the stdio transport, which does not load them.
+
 ## [2.0.1] - 2026-10-30
 
 ### Security
