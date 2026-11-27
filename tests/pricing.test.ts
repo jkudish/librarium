@@ -112,7 +112,7 @@ describe('pricing snapshot validation', () => {
     ].sort();
 
     expect(priced).toEqual(bound);
-    expect(priced).toHaveLength(40);
+    expect(priced).toHaveLength(62);
     expect(priced).not.toContain('searchapi-perplexity/surface');
     // Only tiered research profiles have more than one definition: one per
     // You.com effort, Parallel processor, or Valyu mode.
@@ -656,10 +656,10 @@ describe('pricing snapshot validation', () => {
 
   it('pins and verifies the reviewed built-in fingerprint', async () => {
     expect(BUILTIN_PRICING_SNAPSHOT.fingerprint).toBe(
-      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
+      'sha256:f730f9d61caeb22c35e0e3ca6ab468f0aacf9b239bf7b0a212378545bd0d3951',
     );
     expect(pricingSnapshotFingerprint(BUILTIN_PRICING_SNAPSHOT)).toBe(
-      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
+      'sha256:f730f9d61caeb22c35e0e3ca6ab468f0aacf9b239bf7b0a212378545bd0d3951',
     );
     expect(
       `sha256:${createHash('sha256')

@@ -191,19 +191,51 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       options,
       (configured?.collector as string) ?? config.engines.collector,
     );
-    const key = configured?.key;
+    // A research source's collector option brings its own credential: the
+    // configured key belongs to the source's direct provider.
+    const key =
+      source.kind === 'research' && variant?.env.includes('+')
+        ? undefined
+        : configured?.key;
     return key?.startsWith('env:')
       ? env[key.slice(4)]
       : key?.startsWith('$')
         ? env[key.slice(1)]
         : key?.startsWith('keychain:')
           ? input.resolveCredential?.(key)
-          : (key ?? env[variant?.env ?? '']);
+          : (key ?? envCredential(variant?.env));
+  };
+  /** `A+B` names a two-part credential, such as DataForSEO's login and password. */
+  const envCredential = (name = '') => {
+    if (!name.includes('+')) return env[name];
+    const parts = name.split('+').map((part) => env[part]);
+    return parts.every((part) => !!part) ? parts.join(':') : undefined;
   };
   const sourceOptions = (
     source: SourceDefinition,
     overrides: Record<string, unknown> = {},
   ) => {
+    if (source.kind === 'engine') {
+      for (const name of ['key', 'collector', 'enabled'])
+        if (name in overrides)
+          throw new TypeError(
+            `Engine ${name} belongs in configuration: ${source.id}.${name}`,
+          );
+      const configured = engineConfig(source);
+      const adapterOptions =
+        configured.options &&
+        typeof configured.options === 'object' &&
+        !Array.isArray(configured.options)
+          ? (configured.options as Record<string, unknown>)
+          : {};
+      return {
+        ...adapterOptions,
+        ...(configured.priority !== undefined && {
+          priority: configured.priority,
+        }),
+        ...overrides,
+      };
+    }
     const {
       key: _key,
       enabled: _enabled,
@@ -218,6 +250,17 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       keyFor(source, depth as 'quick' | 'deep', sourceOptions(source)),
     ),
   );
+  // Each half of a two-part credential is a secret on its own.
+  for (const source of SOURCE_CATALOG)
+    for (const variant of [
+      ...Object.values(source.collectors ?? {}),
+      ...Object.values(source.options ?? {}).flatMap((option) =>
+        Object.values(option.variants ?? {}),
+      ),
+    ])
+      if (variant.env.includes('+'))
+        for (const part of variant.env.split('+'))
+          if (env[part]) credentials.push(env[part]);
   function redact(value: unknown): unknown {
     if (typeof value === 'string')
       return redactCredentialText(value, credentials)
@@ -286,6 +329,12 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
     )
       throw new Error('Invalid stored execution signature');
   }
+  const bindingFor = (js: string | null | undefined) =>
+    js
+      ? [...executionAdapterProfileBindings().values()].find(
+          (binding) => `${binding.provider_id}/${binding.profile_id}` === js,
+        )
+      : undefined;
   function planning(
     depth: 'quick' | 'deep',
     overrides: Record<string, Record<string, unknown>> = {},
@@ -308,13 +357,12 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
       );
       if (!variant?.js || custom.some((item) => item.id === source.id))
         continue;
+      const binding = bindingFor(variant.js);
+      // A catalog id this release cannot bind is unavailable, not an error:
+      // engines skip with no_collector and a selected option fails selection.
+      if (!binding) continue;
       const key = keyFor(source, depth, options);
       if (key && !credentials.includes(key)) credentials.push(key);
-      const binding = [...executionAdapterProfileBindings().values()].find(
-        (binding) =>
-          `${binding.provider_id}/${binding.profile_id}` === variant.js,
-      );
-      if (!binding) throw new Error(`Missing adapter binding: ${variant.js}`);
       const configId =
         INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS[
           binding.adapter_id as keyof typeof INTERNAL_ADAPTER_PUBLIC_PROVIDER_IDS
@@ -333,6 +381,7 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
               'mode',
               'output',
               'processor',
+              'priority',
             ].includes(name),
         ),
       );
@@ -340,7 +389,9 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
         adapterOptions.processor = options.processor;
       if (source.id === 'openai' && options.effort !== undefined) {
         delete adapterOptions.effort;
-        adapterOptions.reasoningEffort = options.effort;
+        // DataForSEO's LLM Responses task has no reasoning control.
+        if (options.collector !== 'dataforseo')
+          adapterOptions.reasoningEffort = options.effort;
       }
       if (source.id === 'valyu' && depth === 'deep') {
         if (options.mode !== undefined) adapterOptions.mode = options.mode;
@@ -537,6 +588,21 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
             url: citation.url,
             ...(citation.title && { title: citation.title }),
           })),
+        ...(output?.searchResults && {
+          // Provider order with exact-URL duplicates removed, first kept.
+          search_results: output.searchResults
+            .filter(
+              (item, index, all) =>
+                safeEvidenceUrl(item.url) !== null &&
+                all.findIndex((other) => other.url === item.url) === index,
+            )
+            .map((item) => ({
+              url: item.url,
+              title: item.title ?? null,
+              snippet: item.snippet ?? null,
+              published_at: item.publishedAt ?? null,
+            })),
+        }),
         cost: {
           ...result.cost,
           reported:
@@ -1011,7 +1077,16 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
             ...source,
             collectors: Object.fromEntries(
               Object.entries(source.collectors ?? {}).filter(
-                ([, variant]) => variant.js !== null,
+                ([collector]) =>
+                  custom.some((item) => item.id === source.id) ||
+                  !!bindingFor(
+                    resolveSourceVariant(
+                      source,
+                      'quick',
+                      sourceOptions(source, options.options[source.id]),
+                      collector,
+                    )?.js,
+                  ),
               ),
             ),
           }
@@ -1074,7 +1149,11 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
             variant: legacy[1],
             model: null,
             collector:
-              source.kind === 'engine' ? engineConfig(source).collector : null,
+              source.kind === 'engine'
+                ? engineConfig(source).collector
+                : plan.variants.get(name)?.options.collector === 'dataforseo'
+                  ? 'dataforseo'
+                  : null,
           },
           error: null,
         };
@@ -1215,7 +1294,10 @@ export function createLibrarium(input: LibrariumOptions = {}): Librarium {
                     [
                       depth,
                       {
-                        available: !!variant.js,
+                        available:
+                          !!variant.js &&
+                          (custom.some((item) => item.id === source.id) ||
+                            !!bindingFor(variant.js)),
                         estimated: (depth === 'quick' ? quick : deep).estimates[
                           source.id
                         ],

@@ -278,6 +278,160 @@
       "envVar": "OPENROUTER_API_KEY",
       "estimatedCostUsd": null,
       "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-chatgpt",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-chatgpt-live",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-gemini",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-gemini-live",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-google-ai-mode",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-google-ai-mode-live",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-llm-chatgpt",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-llm-claude",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-llm-perplexity",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "dataforseo-llm-gemini",
+      "tier": "ai-grounded",
+      "envVar": "DATAFORSEO_LOGIN",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-chatgpt",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-chatgpt-live",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-gemini",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-gemini-live",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-google-ai-mode",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-google-ai-mode-live",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-google-ai-overview",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-google-ai-overview-live",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-bing-ai-mode",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-bing-ai-mode-live",
+      "tier": "ai-grounded",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-google-search",
+      "tier": "raw-search",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
+    },
+    {
+      "id": "cloro-google-news",
+      "tier": "raw-search",
+      "envVar": "CLORO_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
     }
   ],
   "builtInGroups": {
@@ -308,6 +462,8 @@
       "serpapi",
       "serpbase-search",
       "serpbase-news",
+      "cloro-google-search",
+      "cloro-google-news",
       "tavily",
       "valyu-search"
     ],
@@ -394,7 +550,29 @@
       "searchapi-bing-copilot",
       "searchapi-google-ai-overview",
       "parallel-search",
-      "parallel-turbo"
+      "parallel-turbo",
+      "cloro-google-search",
+      "cloro-google-news",
+      "dataforseo-chatgpt",
+      "dataforseo-chatgpt-live",
+      "dataforseo-gemini",
+      "dataforseo-gemini-live",
+      "dataforseo-google-ai-mode",
+      "dataforseo-google-ai-mode-live",
+      "dataforseo-llm-chatgpt",
+      "dataforseo-llm-claude",
+      "dataforseo-llm-perplexity",
+      "dataforseo-llm-gemini",
+      "cloro-chatgpt",
+      "cloro-chatgpt-live",
+      "cloro-gemini",
+      "cloro-gemini-live",
+      "cloro-google-ai-mode",
+      "cloro-google-ai-mode-live",
+      "cloro-google-ai-overview",
+      "cloro-google-ai-overview-live",
+      "cloro-bing-ai-mode",
+      "cloro-bing-ai-mode-live"
     ]
   },
   "candidateGroups": {

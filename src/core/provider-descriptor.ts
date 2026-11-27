@@ -20,6 +20,13 @@ import {
 } from '../adapters/valyu-options.js';
 import { YouAnswerOptionsSchema } from '../adapters/you-answer-options.js';
 import type { MeteringKind, ProviderTier } from '../types.js';
+import { CloroOptionsSchemas, type CloroSurfaceId } from './cloro.js';
+import {
+  DATAFORSEO_DESCRIPTORS,
+  DATAFORSEO_LLM_DEFAULT_MODELS,
+  type DataForSeoAdapterId,
+  dataForSeoOptionsSchema,
+} from './dataforseo.js';
 import { searchApiOptionsSchema } from './searchapi.js';
 
 export interface ProviderMeteringDescriptor {
@@ -378,6 +385,113 @@ type DefinitionInput = Omit<
   autoEnable?: boolean;
   optionsSchema?: z.ZodTypeAny;
 };
+
+/** DataForSEO and Cloro adapters: one per task family and priority. */
+function collectorDefinitions(): ProviderDescriptorDefinition[] {
+  const names: Record<string, string> = {
+    chatgpt: 'ChatGPT',
+    gemini: 'Gemini',
+    'google-ai-mode': 'Google AI Mode',
+    'google-ai-overview': 'Google AI Overview',
+    'bing-ai-mode': 'Bing AI Mode',
+    claude: 'Claude',
+    perplexity: 'Perplexity',
+  };
+  const dataforseo = (
+    Object.keys(DATAFORSEO_DESCRIPTORS) as DataForSeoAdapterId[]
+  ).map((id, index) => {
+    const descriptor = DATAFORSEO_DESCRIPTORS[id];
+    const llm = descriptor.seType === 'llm_responses';
+    const surface = id.replace(/^dataforseo-(llm-)?/, '').replace(/-live$/, '');
+    const name = `DataForSEO ${llm ? 'LLM Responses ' : ''}${names[surface]}${
+      llm ? '' : descriptor.mode === 'live' ? ' Live' : ' Standard'
+    }`;
+    return define({
+      id,
+      registrationOrder: 40 + index / 100,
+      tier: 'ai-grounded',
+      envVar: 'DATAFORSEO_LOGIN',
+      autoEnable: false,
+      optionsSchema: dataForSeoOptionsSchema(id),
+      ...(llm && {
+        defaultModel:
+          DATAFORSEO_LLM_DEFAULT_MODELS[
+            id as keyof typeof DATAFORSEO_LLM_DEFAULT_MODELS
+          ],
+      }),
+      display: {
+        family: 'DataForSEO',
+        name,
+        description: llm
+          ? `${names[surface]} model answer with web search through DataForSEO LLM Responses.`
+          : `DataForSEO-observed ${names[surface]} answer (${descriptor.mode} priority).`,
+        bestFor: llm
+          ? `Asking ${names[surface]} with DataForSEO credentials.`
+          : `Comparing the cited answer visible on the ${names[surface]} surface.`,
+        setupUrl: 'https://app.dataforseo.com/api-access',
+        order: 220 + index,
+      },
+      metering: llm
+        ? { kind: 'native_cost' }
+        : {
+            kind: 'request_priced',
+            defaultPerRequestUsd: descriptor.mode === 'live' ? 0.004 : 0.0012,
+            defaultUnitsPerRequest: 1,
+            unit: 'request',
+          },
+      capabilities:
+        descriptor.mode === 'standard' ? background() : inline('always'),
+    });
+  });
+  const cloro = (
+    [
+      ...(
+        [
+          'chatgpt',
+          'gemini',
+          'google-ai-mode',
+          'google-ai-overview',
+          'bing-ai-mode',
+        ] as const
+      ).flatMap((surface) => [
+        [`cloro-${surface}`, surface, 'standard'],
+        [`cloro-${surface}-live`, surface, 'live'],
+      ]),
+      ['cloro-google-search', 'google-search', 'live'],
+      ['cloro-google-news', 'google-news', 'live'],
+    ] as [string, CloroSurfaceId, 'standard' | 'live'][]
+  ).map(([id, surface, priority], index) => {
+    const search = surface === 'google-search' || surface === 'google-news';
+    const name = search
+      ? surface === 'google-news'
+        ? 'Google News'
+        : 'Google Search'
+      : `${names[surface]} ${priority === 'live' ? 'Live' : 'Standard'}`;
+    return define({
+      id,
+      registrationOrder: 41 + index / 100,
+      tier: search ? 'raw-search' : 'ai-grounded',
+      envVar: 'CLORO_API_KEY',
+      autoEnable: false,
+      optionsSchema: CloroOptionsSchemas[surface],
+      display: {
+        family: 'Cloro',
+        name: `Cloro ${name}`,
+        description: search
+          ? `Ranked ${name} results observed by Cloro.`
+          : `Cloro-observed ${names[surface]} answer in a logged-out session (${priority} priority).`,
+        bestFor: search
+          ? 'Ranked Google sources by country.'
+          : `Comparing the cited answer visible on the ${names[surface]} surface.`,
+        setupUrl: 'https://dashboard.cloro.dev',
+        order: 230 + index,
+      },
+      metering: { kind: 'credit_priced', unit: 'credit' },
+      capabilities: priority === 'standard' ? background() : inline('always'),
+    });
+  });
+  return [...dataforseo, ...cloro];
+}
 
 function define(input: DefinitionInput): ProviderDescriptorDefinition {
   const { autoEnable, envVar, ...definition } = input;
@@ -1205,6 +1319,7 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
     metering: { kind: 'native_cost' },
     capabilities: inline('optional'),
   }),
+  ...collectorDefinitions(),
 ] as const satisfies readonly ProviderDescriptorDefinition[];
 
 export const BUILTIN_PROVIDER_DEFINITIONS_IN_REGISTRATION_ORDER = [

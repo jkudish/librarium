@@ -16,6 +16,18 @@ export const RunResultSchema = z
     citations: z.array(
       z.strictObject({ url: z.url(), title: z.string().nullable().optional() }),
     ),
+    // Since spec 1.1: pages the source's own search returned while answering.
+    search_results: z
+      .array(
+        z.strictObject({
+          url: z.url(),
+          title: z.string().nullable().optional(),
+          snippet: z.string().nullable().optional(),
+          published_at: time.nullable().optional(),
+        }),
+      )
+      .nullable()
+      .optional(),
     cost: z.strictObject({
       estimated: MoneySchema.nullable(),
       reported: MoneySchema.nullable(),

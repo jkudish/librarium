@@ -39,7 +39,7 @@ each source reads the environment variable for the variant it would use:
 | exa | `EXA_API_KEY` |
 | firecrawl | `FIRECRAWL_API_KEY` |
 | gemini | `GEMINI_API_KEY` |
-| google | `SEARCHAPI_API_KEY`; `SERPAPI_API_KEY` or `SERPBASE_API_KEY` for those collectors |
+| google | `SEARCHAPI_API_KEY`; `SERPAPI_API_KEY`, `SERPBASE_API_KEY` or `CLORO_API_KEY` for those collectors |
 | grok | `XAI_API_KEY` |
 | jina | `JINA_AI_API_KEY` |
 | kagi | `KAGI_API_KEY` |
@@ -52,11 +52,25 @@ each source reads the environment variable for the variant it would use:
 | you | `YOU_COM_API_KEY` |
 
 Engines are collected through `engines.collector`, keyed by `engines.key`.
-This package supports only the default `searchapi` collector, which reads
-`SEARCHAPI_API_KEY` when no key is set. The shared catalog also lists
-DataForSEO and Firecrawl collectors; only the Laravel package implements them,
-and this package skips engines set to them with reason `no_collector`.
-The `librarium-spec` `sources.json` catalog owns these names.
+An engine entry such as `engines["google-ai-mode"]` can override `collector`,
+`key`, `priority` and `options` for that engine. Without a key, each collector
+reads its own environment variables:
+
+| Collector | Engines | Environment variable |
+| --- | --- | --- |
+| `searchapi` (default) | all but `bing-ai-mode` | `SEARCHAPI_API_KEY` |
+| `dataforseo` | `chatgpt`, `gemini-app`, `google-ai-mode` | `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` |
+| `cloro` | `chatgpt`, `gemini-app`, `google-ai-mode`, `google-ai-overview`, `bing-ai-mode` | `CLORO_API_KEY` |
+
+DataForSEO and Cloro take `priority: standard` (default, a queued background
+task) or `live` (one synchronous call). DataForSEO needs the `locationCode` and
+`languageCode` options, and Cloro needs an uppercase ISO `country` option such
+as `US`. Cloro reports usage in credits, so its `cost.reported` stays `null`.
+Cloro deletes queued results 24 hours after submission; a Run resumed later
+fails with `provider_result_expired`. The shared catalog also lists a Firecrawl
+collector; only the Laravel package implements it, and this package skips
+engines set to it with reason `no_collector`. The `librarium-spec`
+`sources.json` catalog owns these names.
 
 ## Source options
 
@@ -71,7 +85,7 @@ the authoritative shared option catalog.
 | claude | `model` |
 | firecrawl | `sources` (`web`, `news`), `limit` |
 | gemini | `quick: grounded` (default) or `chat` |
-| google | `collector: searchapi` (default), `serpapi`, `serpbase`; `vertical: web` or `news` (news requires serpbase) |
+| google | `collector: searchapi` (default), `serpapi`, `serpbase`, `cloro`; `vertical: web` or `news` (news requires serpbase or cloro) |
 | grok | `search: web` (default), `x`, `both` |
 | openai | `model`, `effort` |
 | openrouter | `quick: grounded` (default) or `chat`, `model` |
@@ -79,6 +93,11 @@ the authoritative shared option catalog.
 | perplexity | `quick: sonar-pro` (default), `search`, `agent` (Laravel package only); `deep_effort: medium` (default) or `high` |
 | valyu | `mode: standard` (default); `output: ["markdown", "pdf"]` (default) |
 | you | `quick: answer` (default) or `research` |
+
+`openai`, `claude`, `perplexity` and `gemini` also take `collector:
+dataforseo`, which asks the same model through DataForSEO's LLM Responses
+Live API with `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` instead of the
+provider's own key.
 
 Exa, Jina, Kagi and Tavily have no public source options. Variant mapping stays
 inside the package; users select one flat source name.

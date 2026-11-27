@@ -1,4 +1,10 @@
 import type { z } from 'zod';
+import { CloroOptionsSchemas, type CloroSurfaceId } from '../core/cloro.js';
+import {
+  DATAFORSEO_DESCRIPTORS,
+  type DataForSeoAdapterId,
+  dataForSeoOptionsSchema,
+} from '../core/dataforseo.js';
 import { normalizedPerplexityAgentUnderlyingModel } from '../core/perplexity-agent-target.js';
 import {
   BUILTIN_PROVIDER_DEFINITIONS,
@@ -27,6 +33,8 @@ import type { Config, Provider, ProviderConfig } from '../types.js';
 import { BraveAnswersProvider } from './brave-answers.js';
 import { BraveSearchProvider } from './brave-search.js';
 import { ClaudeProvider } from './claude.js';
+import { CloroProvider, CloroTaskProvider } from './cloro.js';
+import { DataForSeoProvider, DataForSeoTaskProvider } from './dataforseo.js';
 import { ExaProvider } from './exa.js';
 import { ExaResearchProvider } from './exa-research.js';
 import { FirecrawlSearchProvider } from './firecrawl-search.js';
@@ -395,6 +403,57 @@ const factories: Record<string, ProviderFactory> = {
   'serpbase-news': typedFactory(
     SerpBaseNewsOptionsSchema,
     (context) => new SerpBaseProvider('news', context.options),
+  ),
+  ...Object.fromEntries(
+    (Object.keys(DATAFORSEO_DESCRIPTORS) as DataForSeoAdapterId[]).map((id) => [
+      id,
+      typedFactory(dataForSeoOptionsSchema(id), (context) =>
+        DATAFORSEO_DESCRIPTORS[id].mode === 'standard'
+          ? new DataForSeoTaskProvider(id, {
+              options: context.options as Record<string, unknown>,
+            })
+          : new DataForSeoProvider(id, {
+              options: context.options as Record<string, unknown>,
+              model: configuredModel(context),
+            }),
+      ),
+    ]),
+  ),
+  ...Object.fromEntries(
+    (Object.keys(CloroOptionsSchemas) as CloroSurfaceId[]).flatMap(
+      (surface) => {
+        const live = (context: BuiltInProviderFactoryContext, id: string) =>
+          new CloroProvider(id, surface, {
+            options: CloroOptionsSchemas[surface].parse(
+              context.options ?? {},
+            ) as Record<string, unknown>,
+          });
+        return surface === 'google-search' || surface === 'google-news'
+          ? [
+              [
+                `cloro-${surface}`,
+                (context: BuiltInProviderFactoryContext) =>
+                  live(context, `cloro-${surface}`),
+              ],
+            ]
+          : [
+              [
+                `cloro-${surface}`,
+                (context: BuiltInProviderFactoryContext) =>
+                  new CloroTaskProvider(`cloro-${surface}`, surface, {
+                    options: CloroOptionsSchemas[surface].parse(
+                      context.options ?? {},
+                    ) as Record<string, unknown>,
+                  }),
+              ],
+              [
+                `cloro-${surface}-live`,
+                (context: BuiltInProviderFactoryContext) =>
+                  live(context, `cloro-${surface}-live`),
+              ],
+            ];
+      },
+    ),
   ),
   tavily: () => new TavilyProvider(),
   'tavily-research': typedFactory(

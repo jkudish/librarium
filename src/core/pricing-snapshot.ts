@@ -18,8 +18,10 @@ const GEMINI_WINDOWS_AT = '2026-10-11T00:00:00.000Z';
 const MODEL_DEFAULTS_AT = '2026-10-11T00:00:00.000Z';
 /** Parallel processor and Valyu mode tiers (#4856). */
 const RESEARCH_TIERS_AT = '2026-10-11T00:00:00.000Z';
+/** DataForSEO and Cloro collectors. */
+const COLLECTORS_AT = '2026-11-26T00:00:00.000Z';
 /** The snapshot review time covers its most recently retrieved definition. */
-const REVIEWED_AT = MODEL_DEFAULTS_AT;
+const REVIEWED_AT = COLLECTORS_AT;
 
 interface DefinitionOptions {
   readonly target?: PriceDefinitionInput['effective_target'];
@@ -531,6 +533,84 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     ),
   ),
 
+  // DataForSEO: exact USD per task. Source:
+  // https://dataforseo.com/pricing/ai-optimization/llm-scraper and
+  // https://dataforseo.com/pricing/serp/google-ai-mode-serp-api (accessed
+  // 2026-11-26, matching jkudish/laravel-ai-pricing): $0.0012 standard
+  // priority, $0.004 live priority, per task.
+  ...[
+    'dataforseo-chatgpt',
+    'dataforseo-gemini',
+    'dataforseo-google-ai-mode',
+  ].flatMap((providerId) =>
+    (
+      [
+        ['standard', '0.0012'],
+        ['live', '0.004'],
+      ] as const
+    ).map(([profileId, usd]) =>
+      definition(providerId, profileId, {
+        expected: ['requests'],
+        fixed: { requests: '1' },
+        rates: [rate('requests', usd)],
+        reference:
+          providerId === 'dataforseo-google-ai-mode'
+            ? 'official:dataforseo.com/pricing/serp/google-ai-mode-serp-api'
+            : 'official:dataforseo.com/pricing/ai-optimization/llm-scraper',
+        reviewedAt: COLLECTORS_AT,
+      }),
+    ),
+  ),
+  // LLM Responses adds the model's token charge to its per-task fee.
+  ...(
+    [
+      ['chatgpt', 'gpt-4.1-mini'],
+      ['claude', 'claude-opus-5'],
+      ['perplexity', 'sonar-pro'],
+      ['gemini', 'gemini-2.5-flash'],
+    ] as const
+  ).map(([platform, model]) =>
+    definition(`dataforseo-llm-${platform}`, 'live', {
+      target: { kind: 'model', target_id: model },
+      completeness: 'unavailable',
+      expected: ['requests', ...tokenUnits],
+      missing: ['requests', ...tokenUnits],
+      reason: quantitiesReason,
+      reference:
+        'official:dataforseo.com/pricing/ai-optimization/llm-responses',
+      reviewedAt: COLLECTORS_AT,
+    }),
+  ),
+
+  // Cloro: credits are plan-priced and are not USD. Async (standard) costs
+  // 2 credits less than sync (live); AI Overview adds 2 to Google Search.
+  // Source: https://cloro.dev/docs/guides/providers (accessed 2026-11-26).
+  ...(
+    [
+      ['cloro-chatgpt', 'standard', '5'],
+      ['cloro-chatgpt', 'live', '7'],
+      ['cloro-gemini', 'standard', '4'],
+      ['cloro-gemini', 'live', '6'],
+      ['cloro-google-ai-mode', 'standard', '4'],
+      ['cloro-google-ai-mode', 'live', '6'],
+      ['cloro-google-ai-overview', 'standard', '5'],
+      ['cloro-google-ai-overview', 'live', '7'],
+      ['cloro-bing-ai-mode', 'standard', '4'],
+      ['cloro-bing-ai-mode', 'live', '6'],
+      ['cloro-google', 'search', '5'],
+      ['cloro-google', 'news', '5'],
+    ] as const
+  ).map(([providerId, profileId, credits]) =>
+    unavailable(
+      providerId,
+      profileId,
+      ['credits'],
+      accountReason,
+      'official:cloro.dev/docs/guides/providers',
+      { credits },
+    ),
+  ),
+
   // Tavily
   definition('tavily', 'search', {
     conditions: { account_plan: 'payg' },
@@ -636,10 +716,10 @@ export function adapterPricingConditions(identity: {
 export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
   validatePricingSnapshot({
     schema_version: 1,
-    version: '2026-10-11.v3',
+    version: '2026-11-26.v1',
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:98894e5f129d8971df223e6a0778cbc2f2b9b165767fb1948df85c8bbfeddcfb',
+      'sha256:f730f9d61caeb22c35e0e3ca6ab468f0aacf9b239bf7b0a212378545bd0d3951',
     definitions: DEFINITIONS,
   });

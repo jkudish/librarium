@@ -171,6 +171,15 @@ export interface Citation {
   locator?: string;
 }
 
+/** One page a provider's search returned (Run `search_results`, spec 1.1). */
+export interface SearchResultItem {
+  url: string;
+  title?: string;
+  snippet?: string;
+  /** RFC 3339 publication timestamp when the provider reports one. */
+  publishedAt?: string;
+}
+
 // Result from any provider execution
 export type ProviderFailureKind =
   | 'authentication'
@@ -180,6 +189,8 @@ export type ProviderFailureKind =
   | 'invalid_request'
   | 'network'
   | 'timeout'
+  /** The provider deleted an accepted task's result before retrieval. */
+  | 'expired'
   | 'provider';
 
 /** Bounded, non-secret facts about a provider failure. */
@@ -199,6 +210,11 @@ export interface ProviderResult {
    */
   contentFormat?: 'json';
   citations: Citation[];
+  /**
+   * Pages the provider's own search returned while answering, cited or not,
+   * in provider order. Omitted when the provider does not report them.
+   */
+  searchResults?: SearchResultItem[];
   durationMs: number;
   model?: string;
   tokenUsage?: { input?: number; output?: number };
