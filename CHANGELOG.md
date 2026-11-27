@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Requires librarium-spec 1.3.0, which must be published with this release.
+## [2.1.0] - 2026-11-27
+
+Requires librarium-spec 1.3.0. If you configure `collector: dataforseo` or `collector: cloro`, this release pairs with librarium-spec 1.3: the spec's JS ids for those collectors ship there, and earlier spec versions do not list them.
 
 ### Added
 
