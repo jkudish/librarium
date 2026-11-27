@@ -182,17 +182,25 @@ describe('Serply Google Search', () => {
   });
 
   it('runs as the google collector once the spec lists serply/search', async () => {
-    // librarium-spec has no serply collector yet; inject the planned variant.
+    // librarium-spec lists serply from 1.4.0; inject the same variant on older specs.
     const google = SOURCE_CATALOG.find((source) => source.id === 'google');
     const collector = google?.options?.collector;
     if (!collector?.values || !collector.variants)
       throw new Error('google collector option missing');
-    collector.values.push('serply');
-    collector.variants.serply = {
+    const injected = !collector.values.includes('serply');
+    if (injected) {
+      collector.values.push('serply');
+      collector.variants.serply = {
+        js: 'serply/search',
+        php: 'serply-search',
+        env: 'SERPLY_API_KEY',
+      };
+    }
+    expect(collector.variants.serply).toEqual({
       js: 'serply/search',
       php: 'serply-search',
       env: 'SERPLY_API_KEY',
-    };
+    });
     try {
       const { client, calls } = transport(
         response({ results: [result('https://a.example/', 'A')] }),
@@ -217,8 +225,10 @@ describe('Serply Google Search', () => {
       });
       expect(JSON.stringify(await store.get(run.id))).not.toContain(KEY);
     } finally {
-      collector.values.pop();
-      delete collector.variants.serply;
+      if (injected) {
+        collector.values.pop();
+        delete collector.variants.serply;
+      }
     }
   });
 });
