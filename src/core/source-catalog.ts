@@ -6,6 +6,18 @@ export interface SourceVariant {
   php?: string | null;
   env: string;
   requires?: Record<string, string>;
+  /** Since spec 1.2: replaces this mapping when the source's collector matches. */
+  by_collector?: Record<string, SourceVariant>;
+  /** Engine collector options, such as DataForSEO's and Cloro's `priority`. */
+  options?: Record<
+    string,
+    {
+      default: string;
+      values: string[];
+      js_live?: string | null;
+      php_live?: string | null;
+    }
+  >;
 }
 export interface SourceOption {
   default?: unknown;
@@ -77,8 +89,17 @@ export function selectSources(
     throw new SelectionError('no_sources');
   if (request.only)
     for (const name of names) {
+      const source = byId.get(name);
+      // An engine its collector cannot observe skips with no_collector below.
       if (
-        byId.get(name)?.kind === 'engine'
+        source?.kind === 'engine' &&
+        !source.collectors?.[
+          setup.collectors?.[name] ?? setup.engines.collector
+        ]
+      )
+        continue;
+      if (
+        source?.kind === 'engine'
           ? !(setup.configuredEngines
               ? setup.configuredEngines.includes(name)
               : setup.engines.configured)
@@ -135,9 +156,24 @@ export function resolveSourceVariant(
   options: Record<string, unknown>,
   collector = 'searchapi',
 ): SourceVariant | undefined {
-  if (source.kind === 'engine')
-    return depth === 'quick' ? source.collectors?.[collector] : undefined;
+  if (source.kind === 'engine') {
+    const base = depth === 'quick' ? source.collectors?.[collector] : undefined;
+    const priority = base?.options?.priority;
+    if (!base || !priority) return base;
+    const value = options.priority ?? priority.default;
+    if (typeof value !== 'string' || !priority.values.includes(value))
+      throw new TypeError(`Invalid option ${source.id}.priority`);
+    return value === 'live'
+      ? {
+          js: priority.js_live ?? null,
+          php: priority.php_live ?? null,
+          env: base.env,
+        }
+      : base;
+  }
   let variant = source.variants?.[depth];
+  const sourceCollector =
+    options.collector ?? source.options?.collector?.default;
   for (const [name, option] of Object.entries(source.options ?? {})) {
     const value = options[name] ?? option.default;
     if (
@@ -146,7 +182,11 @@ export function resolveSourceVariant(
       option.variants &&
       typeof value === 'string'
     ) {
-      const candidate = option.variants[value];
+      const mapped = option.variants[value];
+      const candidate =
+        (typeof sourceCollector === 'string' &&
+          mapped?.by_collector?.[sourceCollector]) ||
+        mapped;
       if (
         candidate?.requires &&
         Object.entries(candidate.requires).some(

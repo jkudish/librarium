@@ -73,6 +73,20 @@ export function migrateConfigV1(value: Record<string, unknown>): {
               names.set(binding.adapter_id, definition.id);
         }
   }
+  // v1 visibility observed engines through the migrated collector. An engine
+  // without a bound JS profile for it, such as Cloro-only bing-ai-mode, would
+  // make `only: ['visibility']` fail as not_configured.
+  const visibilityEngines = () =>
+    SOURCE_CATALOG.filter((source) => {
+      const js = source.collectors?.[engines.collector]?.js;
+      return (
+        source.kind === 'engine' &&
+        !!js &&
+        [...bindings.values()].some(
+          (binding) => `${binding.provider_id}/${binding.profile_id}` === js,
+        )
+      );
+    }).map((source) => source.id);
   const notices: string[] = [];
   for (const [originalId, provider] of Object.entries(providers)) {
     const id = resolveProviderId(originalId);
@@ -150,9 +164,7 @@ export function migrateConfigV1(value: Record<string, unknown>): {
     const group = name.startsWith('custom:') ? name.slice(7) : name;
     groups[group] =
       group === 'visibility' && members.length === 0
-        ? SOURCE_CATALOG.filter((source) => source.kind === 'engine').map(
-            (source) => source.id,
-          )
+        ? visibilityEngines()
         : [
             ...new Set(
               members.map(
@@ -163,9 +175,7 @@ export function migrateConfigV1(value: Record<string, unknown>): {
           ];
   }
   if (defaults.group === 'visibility' && !groups.visibility)
-    groups.visibility = SOURCE_CATALOG.filter(
-      (source) => source.kind === 'engine',
-    ).map((source) => source.id);
+    groups.visibility = visibilityEngines();
   const caps = [
     defaults.maxCostUsd,
     defaults.maxEstimatedCostUsd,

@@ -193,6 +193,212 @@ function surfaceProfile(input: {
   });
 }
 
+/**
+ * A surface collected by DataForSEO or Cloro. Standard priority is the
+ * provider's durable queued task; live priority is one synchronous call.
+ */
+function collectedSurface(input: {
+  readonly profile_id: 'standard' | 'live';
+  readonly selection_order: number;
+  readonly operator_id: string;
+  readonly surface_id: string;
+  readonly collector_id: 'dataforseo' | 'cloro';
+}): ExecutableProfileDeclaration {
+  return declare({
+    profile_id: input.profile_id,
+    selection_order: input.selection_order,
+    target: providerManagedTarget(),
+    result_kind: 'surface_observation',
+    grounding_policy: 'optional',
+    observation_mode: 'surface_snapshot',
+    corpora: ['web'],
+    retrieval_method: 'surface_collector',
+    access_mode: 'collected',
+    operator_id: input.operator_id,
+    collector_id: input.collector_id,
+    surface_id: input.surface_id,
+    surface_context: {
+      account_context: input.collector_id === 'cloro' ? 'anonymous' : 'unknown',
+      personalization: 'unknown',
+    },
+    ...(input.profile_id === 'standard' && {
+      invocation: 'background' as const,
+      resumability: 'durable' as const,
+    }),
+  });
+}
+
+const DATAFORSEO_SETUP_URL = 'https://app.dataforseo.com/api-access';
+const CLORO_SETUP_URL = 'https://dashboard.cloro.dev';
+
+function collectorEntry(input: {
+  readonly provider_id: string;
+  readonly order: number;
+  readonly collector_id: 'dataforseo' | 'cloro';
+  readonly name: string;
+  readonly surface_id: string;
+  readonly operator_id: string;
+  readonly selection_order: number;
+}): ProviderCatalogEntry {
+  const dataforseo = input.collector_id === 'dataforseo';
+  return {
+    provider_id: input.provider_id,
+    order: input.order,
+    aliases: [`${input.provider_id}-live`],
+    display: {
+      family: dataforseo ? 'DataForSEO' : 'Cloro',
+      name: `${dataforseo ? 'DataForSEO' : 'Cloro'} ${input.name}`,
+      description: `${dataforseo ? 'DataForSEO' : 'Cloro'}-observed ${input.name} answer; standard priority is a queued task, live is one synchronous call.`,
+      best_for: `Comparing the cited answer visible on the ${input.name} surface.`,
+      setup_url: dataforseo ? DATAFORSEO_SETUP_URL : CLORO_SETUP_URL,
+    },
+    credential: {
+      env_var: dataforseo ? 'DATAFORSEO_LOGIN' : 'CLORO_API_KEY',
+      required: true,
+      auto_enable: false,
+    },
+    profiles: (['standard', 'live'] as const).map((profile_id, index) =>
+      collectedSurface({
+        profile_id,
+        selection_order: input.selection_order + index,
+        operator_id: input.operator_id,
+        surface_id: input.surface_id,
+        collector_id: input.collector_id,
+      }),
+    ),
+  };
+}
+
+function dataForSeoLlmEntry(input: {
+  readonly provider_id: string;
+  readonly order: number;
+  readonly name: string;
+  readonly operator_id: string;
+  readonly model: string;
+  readonly selection_order: number;
+}): ProviderCatalogEntry {
+  return {
+    provider_id: input.provider_id,
+    order: input.order,
+    aliases: [],
+    display: {
+      family: 'DataForSEO',
+      name: `DataForSEO LLM Responses (${input.name})`,
+      description: `${input.name} model answer with web search through DataForSEO's LLM Responses Live API.`,
+      best_for: `Asking ${input.name} with DataForSEO credentials instead of a direct key.`,
+      setup_url: DATAFORSEO_SETUP_URL,
+    },
+    credential: {
+      env_var: 'DATAFORSEO_LOGIN',
+      required: true,
+      auto_enable: false,
+    },
+    profiles: [
+      declare({
+        profile_id: 'live',
+        selection_order: input.selection_order,
+        target: configurableTarget('model', input.model),
+        result_kind: 'grounded_answer',
+        grounding_policy: 'optional',
+        corpora: ['web'],
+        retrieval_method: 'model_search_tool',
+        access_mode: 'brokered',
+        operator_id: input.operator_id,
+      }),
+    ],
+  };
+}
+
+const COLLECTOR_CATALOG_ENTRIES: readonly ProviderCatalogEntry[] = [
+  ...(
+    [
+      ['chatgpt', 'ChatGPT', 'chatgpt', 'openai'],
+      ['gemini', 'Gemini', 'gemini', 'google'],
+      ['google-ai-mode', 'Google AI Mode', 'google_ai_mode', 'google'],
+    ] as const
+  ).map(([suffix, name, surface_id, operator_id], index) =>
+    collectorEntry({
+      provider_id: `dataforseo-${suffix}`,
+      order: 220 + index,
+      collector_id: 'dataforseo',
+      name,
+      surface_id,
+      operator_id,
+      selection_order: 460 + index * 2,
+    }),
+  ),
+  ...(
+    [
+      ['chatgpt', 'ChatGPT', 'openai', 'gpt-4.1-mini'],
+      ['claude', 'Claude', 'anthropic', 'claude-opus-5'],
+      ['perplexity', 'Perplexity', 'perplexity', 'sonar-pro'],
+      ['gemini', 'Gemini', 'google', 'gemini-2.5-flash'],
+    ] as const
+  ).map(([suffix, name, operator_id, model], index) =>
+    dataForSeoLlmEntry({
+      provider_id: `dataforseo-llm-${suffix}`,
+      order: 223 + index,
+      name,
+      operator_id,
+      model,
+      selection_order: 540 + index,
+    }),
+  ),
+  ...(
+    [
+      ['chatgpt', 'ChatGPT', 'chatgpt', 'openai'],
+      ['gemini', 'Gemini', 'gemini', 'google'],
+      ['google-ai-mode', 'Google AI Mode', 'google_ai_mode', 'google'],
+      [
+        'google-ai-overview',
+        'Google AI Overview',
+        'google_ai_overview',
+        'google',
+      ],
+      ['bing-ai-mode', 'Bing AI Mode', 'bing_ai_mode', 'microsoft'],
+    ] as const
+  ).map(([suffix, name, surface_id, operator_id], index) =>
+    collectorEntry({
+      provider_id: `cloro-${suffix}`,
+      order: 230 + index,
+      collector_id: 'cloro',
+      name,
+      surface_id,
+      operator_id,
+      selection_order: 470 + index * 2,
+    }),
+  ),
+  {
+    provider_id: 'cloro-google',
+    order: 235,
+    aliases: ['cloro-google-search', 'cloro-google-news'],
+    display: {
+      family: 'Cloro',
+      name: 'Cloro Google',
+      description: 'Google web and news results observed by Cloro.',
+      best_for: 'Ranked Google sources by country with one synchronous call.',
+      setup_url: CLORO_SETUP_URL,
+    },
+    credential: {
+      env_var: 'CLORO_API_KEY',
+      required: true,
+      auto_enable: false,
+    },
+    profiles: (['search', 'news'] as const).map((profile_id, index) =>
+      declare({
+        profile_id,
+        selection_order: 363 + index,
+        target: NOT_APPLICABLE_TARGET,
+        result_kind: 'search_results',
+        corpora: [profile_id === 'news' ? 'news' : 'web'],
+        retrieval_method: 'search_endpoint',
+        access_mode: 'brokered',
+        operator_id: 'google',
+      }),
+    ),
+  },
+];
+
 const SEARCHAPI_SETUP_URL = 'https://www.searchapi.io/';
 const PERPLEXITY_SETUP_URL =
   'https://docs.perplexity.ai/docs/getting-started/quickstart';
@@ -1257,6 +1463,7 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
       }),
     ],
   },
+  ...COLLECTOR_CATALOG_ENTRIES,
 ];
 
 export interface CatalogProfileRef {

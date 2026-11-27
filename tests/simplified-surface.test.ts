@@ -600,6 +600,37 @@ describe('Run lifecycle without network', () => {
     ).rejects.toThrow('Unknown option');
     expect(await store.list()).toEqual([]);
   });
+  it('treats a catalog js id this release cannot bind as unavailable, not an error', async () => {
+    // A newer spec can name a JS adapter this release lacks.
+    const chatgpt = SOURCE_CATALOG.find((source) => source.id === 'chatgpt');
+    const firecrawl = chatgpt?.collectors?.firecrawl;
+    if (!firecrawl) throw new Error('fixture collector missing');
+    const original = firecrawl.js;
+    firecrawl.js = 'firecrawl-chatgpt/surface';
+    try {
+      const env = {
+        SEARCHAPI_API_KEY: 'dummy-searchapi',
+        FIRECRAWL_API_KEY: 'dummy-firecrawl',
+      };
+      const unselected = await createLibrarium({ env }).research('q', {
+        only: ['chatgpt'],
+        dryRun: true,
+      });
+      expect(unselected.results.map((result) => result.source)).toEqual([
+        'chatgpt',
+      ]);
+      const selected = await createLibrarium({
+        env,
+        config: { version: 3, engines: { collector: 'firecrawl' } },
+      }).research('q', { only: ['chatgpt'], dryRun: true });
+      expect(selected.results).toEqual([]);
+      expect(selected.skipped).toEqual([
+        { source: 'chatgpt', reason: 'no_collector' },
+      ]);
+    } finally {
+      firecrawl.js = original;
+    }
+  });
   it('dry run neither dispatches nor stores, and unknown costs stay null', async () => {
     const store = new MemoryRunStore();
     const client = createLibrarium({
@@ -1246,7 +1277,7 @@ describe('new public transports', () => {
       });
       expect(
         JSON.parse((listed.content as { text: string }[])[0].text).sources,
-      ).toHaveLength(21);
+      ).toHaveLength(22);
       const denied = await client.callTool({
         name: 'research',
         arguments: { question: 'q', max_cost: '2', dry_run: true },

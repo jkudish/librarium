@@ -604,6 +604,51 @@ export const BUILTIN_PROFILE_BINDING_SPECS: readonly BindingSpec[] = [
     profile_id: 'surface',
     adapter_id: 'searchapi-google-ai-overview',
   },
+  ...['chatgpt', 'gemini', 'google-ai-mode'].flatMap((surface) => [
+    {
+      provider_id: `dataforseo-${surface}`,
+      profile_id: 'standard',
+      adapter_id: `dataforseo-${surface}`,
+    },
+    {
+      provider_id: `dataforseo-${surface}`,
+      profile_id: 'live',
+      adapter_id: `dataforseo-${surface}-live`,
+    },
+  ]),
+  ...['chatgpt', 'claude', 'perplexity', 'gemini'].map((platform) => ({
+    provider_id: `dataforseo-llm-${platform}`,
+    profile_id: 'live',
+    adapter_id: `dataforseo-llm-${platform}`,
+  })),
+  ...[
+    'chatgpt',
+    'gemini',
+    'google-ai-mode',
+    'google-ai-overview',
+    'bing-ai-mode',
+  ].flatMap((surface) => [
+    {
+      provider_id: `cloro-${surface}`,
+      profile_id: 'standard',
+      adapter_id: `cloro-${surface}`,
+    },
+    {
+      provider_id: `cloro-${surface}`,
+      profile_id: 'live',
+      adapter_id: `cloro-${surface}-live`,
+    },
+  ]),
+  {
+    provider_id: 'cloro-google',
+    profile_id: 'search',
+    adapter_id: 'cloro-google-search',
+  },
+  {
+    provider_id: 'cloro-google',
+    profile_id: 'news',
+    adapter_id: 'cloro-google-news',
+  },
   {
     provider_id: 'claude',
     profile_id: 'chat',

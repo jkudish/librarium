@@ -157,6 +157,94 @@ export const PROVIDER_CONFORMANCE_EVIDENCE: Readonly<
     evidence: ['tests/adapters/valyu.test.ts'],
     lanes: [...base, 'options'],
   },
+  'dataforseo-chatgpt/standard': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurableBackground,
+  },
+  'dataforseo-chatgpt/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'dataforseo-gemini/standard': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurableBackground,
+  },
+  'dataforseo-gemini/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'dataforseo-google-ai-mode/standard': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurableBackground,
+  },
+  'dataforseo-google-ai-mode/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'dataforseo-llm-chatgpt/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'dataforseo-llm-claude/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'dataforseo-llm-perplexity/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'dataforseo-llm-gemini/live': {
+    evidence: ['tests/adapters/dataforseo.test.ts'],
+    lanes: configurable,
+  },
+  'cloro-chatgpt/standard': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurableBackground,
+  },
+  'cloro-chatgpt/live': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurable,
+  },
+  'cloro-gemini/standard': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurableBackground,
+  },
+  'cloro-gemini/live': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurable,
+  },
+  'cloro-google-ai-mode/standard': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurableBackground,
+  },
+  'cloro-google-ai-mode/live': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurable,
+  },
+  'cloro-google-ai-overview/standard': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurableBackground,
+  },
+  'cloro-google-ai-overview/live': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurable,
+  },
+  'cloro-bing-ai-mode/standard': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurableBackground,
+  },
+  'cloro-bing-ai-mode/live': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: configurable,
+  },
+  'cloro-google/search': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: [...base, 'options'],
+  },
+  'cloro-google/news': {
+    evidence: ['tests/adapters/cloro.test.ts'],
+    lanes: [...base, 'options'],
+  },
   'searchapi-chatgpt/surface': {
     evidence: ['tests/adapters/searchapi-answer-engines.test.ts'],
     lanes: [...grounded, 'options'],

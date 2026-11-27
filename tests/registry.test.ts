@@ -172,7 +172,7 @@ describe('registry', () => {
   it('initializeProviders registers all active providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(38);
+    expect(all).toHaveLength(60);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -216,6 +216,28 @@ describe('registry', () => {
     expect(ids).toContain('parallel-search');
     expect(ids).toContain('valyu-search');
     expect(ids).toContain('valyu-research');
+    expect(ids).toContain('dataforseo-chatgpt');
+    expect(ids).toContain('dataforseo-chatgpt-live');
+    expect(ids).toContain('dataforseo-gemini');
+    expect(ids).toContain('dataforseo-gemini-live');
+    expect(ids).toContain('dataforseo-google-ai-mode');
+    expect(ids).toContain('dataforseo-google-ai-mode-live');
+    expect(ids).toContain('dataforseo-llm-chatgpt');
+    expect(ids).toContain('dataforseo-llm-claude');
+    expect(ids).toContain('dataforseo-llm-perplexity');
+    expect(ids).toContain('dataforseo-llm-gemini');
+    expect(ids).toContain('cloro-chatgpt');
+    expect(ids).toContain('cloro-chatgpt-live');
+    expect(ids).toContain('cloro-gemini');
+    expect(ids).toContain('cloro-gemini-live');
+    expect(ids).toContain('cloro-google-ai-mode');
+    expect(ids).toContain('cloro-google-ai-mode-live');
+    expect(ids).toContain('cloro-google-ai-overview');
+    expect(ids).toContain('cloro-google-ai-overview-live');
+    expect(ids).toContain('cloro-bing-ai-mode');
+    expect(ids).toContain('cloro-bing-ai-mode-live');
+    expect(ids).toContain('cloro-google-search');
+    expect(ids).toContain('cloro-google-news');
   });
 
   it('marks only providers with a complete task lifecycle as background', async () => {
@@ -227,6 +249,14 @@ describe('registry', () => {
       .sort();
 
     expect(background).toEqual([
+      'cloro-bing-ai-mode',
+      'cloro-chatgpt',
+      'cloro-gemini',
+      'cloro-google-ai-mode',
+      'cloro-google-ai-overview',
+      'dataforseo-chatgpt',
+      'dataforseo-gemini',
+      'dataforseo-google-ai-mode',
       'gemini-deep',
       'openai-research',
       'parallel-research',
@@ -236,7 +266,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(32);
+    ).toHaveLength(46);
   });
 
   it('injects credentials into every background built-in', async () => {

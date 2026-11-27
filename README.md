@@ -87,10 +87,13 @@ There are 16 research sources: `brave`, `claude`, `exa`, `firecrawl`,
 `gemini`, `google`, `grok`, `jina`, `kagi`, `openai`, `openrouter`,
 `parallel`, `perplexity`, `tavily`, `valyu` and `you`.
 
-There are 5 engines: `chatgpt`, `gemini-app`, `google-ai-mode`,
-`google-ai-overview` and `copilot`. Engines record what a consumer AI product
-showed, collected through SearchAPI. They run only when named, and their
-results carry `observation: "surface"`.
+There are 6 engines: `chatgpt`, `gemini-app`, `google-ai-mode`,
+`google-ai-overview`, `copilot` and `bing-ai-mode`. Engines record what a
+consumer AI product showed, collected through SearchAPI, DataForSEO or Cloro
+(the `collector` option; `bing-ai-mode` is Cloro only). They run only when
+named, and their results carry `observation: "surface"`. DataForSEO and Cloro
+take a `priority` option: `standard` queues a cheaper background task, `live`
+answers in one call.
 
 Groups are lists you save yourself with `groups add`; none are built in:
 

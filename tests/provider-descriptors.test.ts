@@ -25,7 +25,7 @@ describe('built-in provider descriptors', () => {
 
   it('drives registry, catalog, credentials, aliases, and metering', async () => {
     await initializeProviders();
-    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(38);
+    expect(BUILTIN_PROVIDER_DESCRIPTORS).toHaveLength(60);
     expect(getAllProviders()).toHaveLength(BUILTIN_PROVIDER_DESCRIPTORS.length);
 
     for (const descriptor of BUILTIN_PROVIDER_DESCRIPTORS) {
@@ -111,6 +111,28 @@ describe('built-in provider descriptors', () => {
       'grok-combined',
       'valyu-search',
       'valyu-research',
+      'dataforseo-chatgpt',
+      'dataforseo-chatgpt-live',
+      'dataforseo-gemini',
+      'dataforseo-gemini-live',
+      'dataforseo-google-ai-mode',
+      'dataforseo-google-ai-mode-live',
+      'dataforseo-llm-chatgpt',
+      'dataforseo-llm-claude',
+      'dataforseo-llm-perplexity',
+      'dataforseo-llm-gemini',
+      'cloro-chatgpt',
+      'cloro-chatgpt-live',
+      'cloro-gemini',
+      'cloro-gemini-live',
+      'cloro-google-ai-mode',
+      'cloro-google-ai-mode-live',
+      'cloro-google-ai-overview',
+      'cloro-google-ai-overview-live',
+      'cloro-bing-ai-mode',
+      'cloro-bing-ai-mode-live',
+      'cloro-google-search',
+      'cloro-google-news',
     ]);
   });
 
@@ -618,6 +640,14 @@ describe('built-in provider descriptors', () => {
       'perplexity-sonar-deep': 'remote',
       'perplexity-deep-research': 'remote',
       'valyu-research': 'remote',
+      'dataforseo-chatgpt': 'remote',
+      'dataforseo-gemini': 'remote',
+      'dataforseo-google-ai-mode': 'remote',
+      'cloro-chatgpt': 'remote',
+      'cloro-gemini': 'remote',
+      'cloro-google-ai-mode': 'remote',
+      'cloro-google-ai-overview': 'remote',
+      'cloro-bing-ai-mode': 'remote',
     });
   });
 

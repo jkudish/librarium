@@ -33,10 +33,10 @@ function workerCatalog() {
 describe('provider catalog in workerd', () => {
   it('builds the full catalog without Node APIs', () => {
     const catalog = workerCatalog();
-    expect(catalog.entries).toHaveLength(33);
-    expect(catalog.resolved).toHaveLength(40);
-    expect(catalog.profiles).toHaveLength(40);
-    expect(catalog.workflow('all').members).toHaveLength(40);
+    expect(catalog.entries).toHaveLength(46);
+    expect(catalog.resolved).toHaveLength(62);
+    expect(catalog.profiles).toHaveLength(62);
+    expect(catalog.workflow('all').members).toHaveLength(62);
     expect(catalog.workflow('quick').members).toHaveLength(6);
     expect(catalog.workflow('visibility').members).toHaveLength(8);
     expect(catalog.workflow('deep').members).toHaveLength(8);

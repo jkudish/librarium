@@ -81,6 +81,7 @@ const PROVIDER_FAILURE_KINDS = new Set<ProviderFailureKind>([
   'invalid_request',
   'network',
   'timeout',
+  'expired',
   'provider',
 ]);
 
@@ -140,7 +141,9 @@ function diagnosedProviderFailure(
 ): StructuredError {
   const mapped: Record<
     ProviderFailureKind,
-    Pick<StructuredError, 'code' | 'category' | 'retryable'>
+    Pick<StructuredError, 'code' | 'category' | 'retryable'> & {
+      message?: string;
+    }
   > = {
     authentication: {
       code: 'provider_authentication_failed',
@@ -177,16 +180,23 @@ function diagnosedProviderFailure(
       category: 'timeout',
       retryable: true,
     },
+    expired: {
+      code: 'provider_result_expired',
+      category: 'provider',
+      retryable: false,
+      message:
+        'The provider deleted the task result before it was retrieved; it may still have billed the task.',
+    },
     provider: {
       code: 'provider_reported_error',
       category: 'provider',
       retryable: true,
     },
   };
-  const selected = mapped[diagnostic?.kind ?? 'provider'];
+  const { message, ...selected } = mapped[diagnostic?.kind ?? 'provider'];
   return {
     ...selected,
-    message: 'The provider returned an error.',
+    message: message ?? 'The provider returned an error.',
     fallback_allowed: fallbackAllowed,
     ...(diagnostic?.httpStatus !== undefined && {
       provider_code: `http_${diagnostic.httpStatus}`,
@@ -395,8 +405,15 @@ function durableHandle(
     // reports a terminal provider task. Retrieval/terminalization follows the
     // write-ahead acceptance commit and records the observed terminal handle.
     status: task.status === 'running' ? 'running' : 'pending',
+    // A cost billed at submission (DataForSEO task_post) is reported nowhere
+    // else, so it travels with the handle and survives a resume.
+    ...(task.usage?.costUsdDecimal !== undefined && {
+      extensions: { [SUBMITTED_COST_KEY]: task.usage.costUsdDecimal },
+    }),
   };
 }
+
+const SUBMITTED_COST_KEY = 'librarium.bridge:submitted_cost_usd_decimal';
 
 function observedHandle(
   handle: DurableHandle,
@@ -512,6 +529,12 @@ function taskFromDurableHandle(
     status,
     ...(handle.last_observed_at && {
       lastPolledAt: Date.parse(handle.last_observed_at),
+    }),
+    ...(typeof handle.extensions?.[SUBMITTED_COST_KEY] === 'string' && {
+      usage: {
+        costUsdDecimal: handle.extensions[SUBMITTED_COST_KEY],
+        costUsd: Number(handle.extensions[SUBMITTED_COST_KEY]),
+      },
     }),
   };
 }

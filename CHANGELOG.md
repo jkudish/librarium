@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Requires librarium-spec 1.3.0, which must be published with this release.
+
+### Added
+
+- DataForSEO collectors for the `chatgpt`, `gemini-app` and `google-ai-mode` engines (LLM Scraper and Google AI Mode), and `collector: dataforseo` on `openai`, `claude`, `perplexity` and `gemini` (LLM Responses Live). They read `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD`, and produce the same Run as the Laravel package.
+- Cloro collectors for the `chatgpt`, `gemini-app`, `google-ai-mode` and `google-ai-overview` engines, a new Cloro-only `bing-ai-mode` engine, and `collector: cloro` on `google` (web and news). They read `CLORO_API_KEY` and need a `country` option on engines. Cloro reports credits, so `cost.reported` stays `null`.
+- An engine `priority` option for DataForSEO and Cloro: `standard` (default) is a queued background task, `live` is one synchronous call.
+
+### Fixed
+
+- A catalog `js` id this release cannot bind now makes that source or engine unavailable (`no_collector` for engines) instead of failing every Run with `Missing adapter binding`.
+- The v1 config migration's `visibility` group now lists only engines the migrated collector can observe.
+
 ## [2.0.2] - 2026-11-17
 
 Version 2.0.1 was tagged on GitHub but never published to npm. Version 2.0.2 is the

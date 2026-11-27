@@ -96,7 +96,7 @@ describe('built Run CLI, offline only', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(RunSchema.parse(JSON.parse(result.stdout)).status).toBe('planned');
     expect(existsSync(runs)).toBe(false);
-    expect(JSON.parse(run(['sources', '--json']).stdout)).toHaveLength(21);
+    expect(JSON.parse(run(['sources', '--json']).stdout)).toHaveLength(22);
     expect(JSON.parse(run(['setup', '--check']).stdout)).toMatchObject({
       version: 3,
       live: false,

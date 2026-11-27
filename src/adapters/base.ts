@@ -109,6 +109,18 @@ export abstract class ProviderBase {
     return resolved;
   }
 
+  /** The configured credential reference, resolved, when one is set. */
+  protected configuredCredential(): string | undefined {
+    return this.apiKeyRef === undefined
+      ? undefined
+      : resolveCredential(this.apiKeyRef, this.credentials);
+  }
+
+  /** One environment credential, for providers with a multi-part secret. */
+  protected envCredential(name: string): string | undefined {
+    return resolveCredential(`$${name}`, this.credentials);
+  }
+
   /**
    * Make an HTTP request with provider defaults
    */

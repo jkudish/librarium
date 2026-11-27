@@ -146,6 +146,7 @@ export interface UnresolvedAcceptanceDiagnostic {
     | 'invalid_request'
     | 'network'
     | 'timeout'
+    | 'expired'
     | 'provider';
   http_status?: number;
 }
@@ -159,6 +160,7 @@ export const UnresolvedAcceptanceDiagnosticSchema = z.strictObject({
     'invalid_request',
     'network',
     'timeout',
+    'expired',
     'provider',
   ]),
   http_status: z.number().int().min(100).max(599).optional(),

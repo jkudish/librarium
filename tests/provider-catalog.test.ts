@@ -127,6 +127,8 @@ const IMPLEMENTED_MATRIX = [
   ['serpapi', 'search'],
   ['serpbase', 'search'],
   ['serpbase', 'news'],
+  ['cloro-google', 'search'],
+  ['cloro-google', 'news'],
   ['tavily', 'search'],
   ['parallel', 'turbo'],
   ['parallel', 'search'],
@@ -136,10 +138,30 @@ const IMPLEMENTED_MATRIX = [
   ['searchapi-google-ai-mode', 'surface'],
   ['searchapi-bing-copilot', 'surface'],
   ['searchapi-google-ai-overview', 'surface'],
+  ['dataforseo-chatgpt', 'standard'],
+  ['dataforseo-chatgpt', 'live'],
+  ['dataforseo-gemini', 'standard'],
+  ['dataforseo-gemini', 'live'],
+  ['dataforseo-google-ai-mode', 'standard'],
+  ['dataforseo-google-ai-mode', 'live'],
+  ['cloro-chatgpt', 'standard'],
+  ['cloro-chatgpt', 'live'],
+  ['cloro-gemini', 'standard'],
+  ['cloro-gemini', 'live'],
+  ['cloro-google-ai-mode', 'standard'],
+  ['cloro-google-ai-mode', 'live'],
+  ['cloro-google-ai-overview', 'standard'],
+  ['cloro-google-ai-overview', 'live'],
+  ['cloro-bing-ai-mode', 'standard'],
+  ['cloro-bing-ai-mode', 'live'],
   ['claude', 'chat'],
   ['openai-chat', 'chat'],
   ['gemini-chat', 'chat'],
   ['openrouter', 'chat'],
+  ['dataforseo-llm-chatgpt', 'live'],
+  ['dataforseo-llm-claude', 'live'],
+  ['dataforseo-llm-perplexity', 'live'],
+  ['dataforseo-llm-gemini', 'live'],
 ] as const;
 
 const PLANNED_MATRIX: readonly (readonly [string, string])[] = [];
@@ -154,6 +176,26 @@ const SURFACE_PROFILES = [
   'searchapi-google-ai-mode/surface',
   'searchapi-bing-copilot/surface',
   'searchapi-google-ai-overview/surface',
+];
+
+/** DataForSEO and Cloro observe the same surfaces through their own collectors. */
+const COLLECTOR_SURFACE_PROFILES = [
+  'dataforseo-chatgpt/standard',
+  'dataforseo-chatgpt/live',
+  'dataforseo-gemini/standard',
+  'dataforseo-gemini/live',
+  'dataforseo-google-ai-mode/standard',
+  'dataforseo-google-ai-mode/live',
+  'cloro-chatgpt/standard',
+  'cloro-chatgpt/live',
+  'cloro-gemini/standard',
+  'cloro-gemini/live',
+  'cloro-google-ai-mode/standard',
+  'cloro-google-ai-mode/live',
+  'cloro-google-ai-overview/standard',
+  'cloro-google-ai-overview/live',
+  'cloro-bing-ai-mode/standard',
+  'cloro-bing-ai-mode/live',
 ];
 
 const API_COMPARISON_BASELINES = [
@@ -229,7 +271,11 @@ describe('provider catalog -- declarations', () => {
   it('omits collector and surface context on ordinary API profiles', () => {
     for (const { entry, declaration } of refs) {
       const key = refKey(entry.provider_id, declaration.profile_id);
-      if (SURFACE_PROFILES.includes(key)) continue;
+      if (
+        SURFACE_PROFILES.includes(key) ||
+        COLLECTOR_SURFACE_PROFILES.includes(key)
+      )
+        continue;
       expect(declaration.collector_id).toBeUndefined();
       expect(declaration.surface_id).toBeUndefined();
       expect(declaration.surface_context).toBeUndefined();
@@ -1072,6 +1118,20 @@ describe('provider catalog -- surface versus API proxy semantics', () => {
     }
   });
 
+  it('models DataForSEO and Cloro surfaces as collected snapshots', () => {
+    for (const key of COLLECTOR_SURFACE_PROFILES) {
+      const [providerId, profileId] = key.split('/');
+      const profile = built.get(providerId ?? '', profileId ?? '')?.profile;
+      expect(profile?.result_kind, key).toBe('surface_observation');
+      expect(profile?.observation_mode, key).toBe('surface_snapshot');
+      expect(profile?.access_mode, key).toBe('collected');
+      expect(profile?.collector_id, key).toBe(
+        providerId?.startsWith('cloro-') ? 'cloro' : 'dataforseo',
+      );
+      expect(profile?.surface_id, key).toBeDefined();
+    }
+  });
+
   it('models the three comparison baselines as direct API answers', () => {
     for (const key of API_COMPARISON_BASELINES) {
       const [providerId, profileId] = key.split('/');
@@ -1644,6 +1704,7 @@ describe('provider catalog -- explicit and capability selection', () => {
       'searchapi/search',
       'serpapi/search',
       'serpbase/search',
+      'cloro-google/search',
       'tavily/search',
       'parallel/turbo',
       'parallel/search',
@@ -1667,7 +1728,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     );
     expect(selected).not.toContain('serpapi/search');
     expect(selected).not.toContain('tavily/search');
-    expect(selected).toHaveLength(10);
+    expect(selected).toHaveLength(11);
   });
 
   it('never selects an unauthenticated profile by capability', () => {
@@ -2193,6 +2254,34 @@ const CONFIGURABLE_TARGET_MATRIX = [
   ['openai-chat', 'chat', 'openai-chat', 'model', 'gpt-6-luna'],
   ['gemini-chat', 'chat', 'gemini-chat', 'model', 'gemini-3.8-flash'],
   ['openrouter', 'chat', 'openrouter-chat', 'model', 'openai/gpt-6-luna'],
+  [
+    'dataforseo-llm-chatgpt',
+    'live',
+    'dataforseo-llm-chatgpt',
+    'model',
+    'gpt-4.1-mini',
+  ],
+  [
+    'dataforseo-llm-claude',
+    'live',
+    'dataforseo-llm-claude',
+    'model',
+    'claude-opus-5',
+  ],
+  [
+    'dataforseo-llm-perplexity',
+    'live',
+    'dataforseo-llm-perplexity',
+    'model',
+    'sonar-pro',
+  ],
+  [
+    'dataforseo-llm-gemini',
+    'live',
+    'dataforseo-llm-gemini',
+    'model',
+    'gemini-2.5-flash',
+  ],
 ] as const;
 
 describe('provider catalog -- configured target fidelity', () => {
@@ -2228,7 +2317,7 @@ describe('provider catalog -- configured target fidelity', () => {
     expect(configurable.filter((key) => existing.includes(key))).toEqual(
       existing,
     );
-    expect(configurable).toHaveLength(14);
+    expect(configurable).toHaveLength(18);
     expect(configurable).toEqual(
       expect.arrayContaining([
         'gemini-grounded/grounded',

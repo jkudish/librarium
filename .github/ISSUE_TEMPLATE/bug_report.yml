@@ -88,6 +88,9 @@ body:
         - searchapi-bing-copilot
         - searchapi-google-ai-overview
         - serpapi
+        - serpbase
+        - cloro
+        - dataforseo
         - tavily
         - claude
         - openai-chat

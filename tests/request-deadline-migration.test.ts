@@ -635,6 +635,28 @@ describe('v1 total request-deadline migration', () => {
       'searchapi-google-ai-mode',
       'searchapi-bing-copilot',
       'searchapi-google-ai-overview',
+      'dataforseo-chatgpt',
+      'dataforseo-chatgpt-live',
+      'dataforseo-gemini',
+      'dataforseo-gemini-live',
+      'dataforseo-google-ai-mode',
+      'dataforseo-google-ai-mode-live',
+      'dataforseo-llm-chatgpt',
+      'dataforseo-llm-claude',
+      'dataforseo-llm-perplexity',
+      'dataforseo-llm-gemini',
+      'cloro-chatgpt',
+      'cloro-chatgpt-live',
+      'cloro-gemini',
+      'cloro-gemini-live',
+      'cloro-google-ai-mode',
+      'cloro-google-ai-mode-live',
+      'cloro-google-ai-overview',
+      'cloro-google-ai-overview-live',
+      'cloro-bing-ai-mode',
+      'cloro-bing-ai-mode-live',
+      'cloro-google-search',
+      'cloro-google-news',
       'claude',
       'openai-chat',
       'gemini-chat',
@@ -643,7 +665,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(40);
+    expect(new Set(expectedAdapterIds).size).toBe(62);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [
@@ -664,8 +686,13 @@ describe('v1 total request-deadline migration', () => {
         .get(`${spec.provider_id}/${spec.profile_id}`)
         ?.resolve().profile;
       expect(resolved, spec.adapter_id).toBeDefined();
+      // DataForSEO and Cloro standard priority is a queued task, so it runs in
+      // the background without a v1 deep-research tier (it has no v1 config).
+      const queuedCollector =
+        spec.profile_id === 'standard' &&
+        /^(dataforseo|cloro)-/.test(spec.provider_id);
       expect(resolved?.invocation, spec.adapter_id).toBe(
-        tiers.get(spec.adapter_id) === 'deep-research'
+        tiers.get(spec.adapter_id) === 'deep-research' || queuedCollector
           ? 'background'
           : 'inline',
       );
