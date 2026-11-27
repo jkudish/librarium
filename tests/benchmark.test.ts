@@ -91,7 +91,7 @@ describe('benchmark corpus and target catalog', () => {
     const targets = allTargets(catalog);
     expect(
       targets.filter((target) => target.type === 'individual-provider'),
-    ).toHaveLength(60);
+    ).toHaveLength(61);
     expect(
       targets.filter((target) => target.type === 'built-in-group'),
     ).toHaveLength(8);

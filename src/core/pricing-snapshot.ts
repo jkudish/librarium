@@ -521,6 +521,17 @@ const DEFINITIONS: readonly PriceDefinitionInput[] = [
     { requests: '1' },
   ),
 
+  // Serply: one credit per successful uncached request; credit packs are
+  // account-priced and Serply reports no usage. Source: https://serply.io/docs
+  unavailable(
+    'serply',
+    'search',
+    ['requests'],
+    accountReason,
+    'official:serply.io/docs',
+    { requests: '1' },
+  ),
+
   // SerpBase: credits are account-priced and are not USD.
   ...(['search', 'news'] as const).map((profileId) =>
     unavailable(
@@ -720,6 +731,6 @@ export const BUILTIN_PRICING_SNAPSHOT: PricingSnapshotInput =
     reviewed_at: REVIEWED_AT,
     currency: 'USD',
     fingerprint:
-      'sha256:f730f9d61caeb22c35e0e3ca6ab468f0aacf9b239bf7b0a212378545bd0d3951',
+      'sha256:924702084b05b0de1dbe05f992b3f210158f664876acf09cbb24123d7cdccdcb',
     definitions: DEFINITIONS,
   });

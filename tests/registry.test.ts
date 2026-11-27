@@ -172,7 +172,7 @@ describe('registry', () => {
   it('initializeProviders registers all active providers', async () => {
     await initializeProviders();
     const all = getAllProviders();
-    expect(all).toHaveLength(60);
+    expect(all).toHaveLength(61);
 
     const ids = all.map((p) => p.id);
     expect(ids).toContain('perplexity-sonar-deep');
@@ -200,6 +200,7 @@ describe('registry', () => {
     expect(ids).toContain('serpapi');
     expect(ids).toContain('serpbase-search');
     expect(ids).toContain('serpbase-news');
+    expect(ids).toContain('serply-search');
     expect(ids).toContain('tavily');
     expect(ids).toContain('claude');
     expect(ids).toContain('openai-chat');
@@ -266,7 +267,7 @@ describe('registry', () => {
     ]);
     expect(
       getAllProviders().filter((provider) => provider.execution === 'inline'),
-    ).toHaveLength(46);
+    ).toHaveLength(47);
   });
 
   it('injects credentials into every background built-in', async () => {

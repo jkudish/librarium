@@ -432,6 +432,13 @@
       "envVar": "CLORO_API_KEY",
       "estimatedCostUsd": null,
       "costConfidence": "unknown"
+    },
+    {
+      "id": "serply-search",
+      "tier": "raw-search",
+      "envVar": "SERPLY_API_KEY",
+      "estimatedCostUsd": null,
+      "costConfidence": "unknown"
     }
   ],
   "builtInGroups": {
@@ -462,6 +469,7 @@
       "serpapi",
       "serpbase-search",
       "serpbase-news",
+      "serply-search",
       "cloro-google-search",
       "cloro-google-news",
       "tavily",
@@ -542,6 +550,7 @@
       "serpapi",
       "serpbase-search",
       "serpbase-news",
+      "serply-search",
       "tavily",
       "valyu-search",
       "searchapi-chatgpt",

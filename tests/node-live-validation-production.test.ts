@@ -547,11 +547,11 @@ describe('production live-validation binding (injected, offline)', () => {
 });
 
 describe('production paid matrix and candidate attribution', () => {
-  it('requires the exact canonical 62-target binding inventory', () => {
+  it('requires the exact canonical 63-target binding inventory', () => {
     const matrix = productionValidationMatrix(
       loadConfig(join(tmpdir(), 'librarium-missing-matrix-config.json')),
     );
-    expect(matrix.targets).toHaveLength(62);
+    expect(matrix.targets).toHaveLength(63);
     expect(matrix.targets.map((target) => target.key)).not.toContain(
       'parallel/chat',
     );
@@ -577,7 +577,7 @@ describe('production paid matrix and candidate attribution', () => {
       (target) => target.key === search.key,
     );
 
-    expect(optionBound.targets).toHaveLength(62);
+    expect(optionBound.targets).toHaveLength(63);
     expect(optionBound.catalog_digest).not.toBe(baseline.catalog_digest);
     expect(boundSearch?.catalog_digest).toBe(optionBound.catalog_digest);
   });
