@@ -14,6 +14,7 @@ import {
   SerpBaseNewsOptionsSchema,
   SerpBaseSearchOptionsSchema,
 } from '../adapters/serpbase-options.js';
+import { SerplyOptionsSchema } from '../adapters/serply-options.js';
 import {
   ValyuResearchOptionsSchema,
   ValyuSearchOptionsSchema,
@@ -1131,6 +1132,29 @@ export const BUILTIN_PROVIDER_DEFINITIONS = [
       kind: 'credit_priced',
       defaultUnitsPerRequest: 1,
       unit: 'credit',
+    },
+    capabilities: inline('always'),
+  }),
+  define({
+    id: 'serply-search',
+    registrationOrder: 19.3,
+    tier: 'raw-search',
+    envVar: 'SERPLY_API_KEY',
+    autoEnable: false,
+    optionsSchema: SerplyOptionsSchema,
+    display: {
+      family: 'Serply',
+      name: 'Serply Search',
+      description:
+        'Google organic results through Serply, pinned to a country.',
+      bestFor: 'Low-cost ranked Google web results by country.',
+      setupUrl: 'https://serply.io/docs',
+      order: 213,
+    },
+    metering: {
+      kind: 'request_priced',
+      defaultUnitsPerRequest: 1,
+      unit: 'request',
     },
     capabilities: inline('always'),
   }),

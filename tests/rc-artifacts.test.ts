@@ -114,7 +114,7 @@ function matrix(overrides: Record<string, unknown> = {}) {
     schema_version: 1,
     catalog_digest: catalogDigest,
     pricing_snapshot_fingerprint: pricingFingerprint,
-    targets: Array.from({ length: 62 }, (_, index) => {
+    targets: Array.from({ length: 63 }, (_, index) => {
       const id = String(index).padStart(2, '0');
       return {
         key: `provider-${id}/profile`,
@@ -387,7 +387,7 @@ describe('release candidate artifact contract', () => {
     }
   });
 
-  it('accepts the real 62-profile matrix and its versioned catalog digest', () => {
+  it('accepts the real 63-profile matrix and its versioned catalog digest', () => {
     const actual = buildCanonicalValidationMatrix();
     expect(actual.catalog_digest).toMatch(/^fnv1a64\.1:[0-9a-f]{16}$/);
     expect(() => assertReleaseMatrixParity(actual, actual)).not.toThrow();
@@ -397,17 +397,17 @@ describe('release candidate artifact contract', () => {
     [
       'duplicate targets',
       (value: any) => (value.targets[1] = value.targets[0]),
-      'exact sorted 62-profile matrix',
+      'exact sorted 63-profile matrix',
     ],
     [
       'unsorted targets',
       (value: any) => value.targets.reverse(),
-      'exact sorted 62-profile matrix',
+      'exact sorted 63-profile matrix',
     ],
     [
       'wrong target count',
       (value: any) => value.targets.pop(),
-      'exact sorted 62-profile matrix',
+      'exact sorted 63-profile matrix',
     ],
     [
       'per-target digest drift',
@@ -445,7 +445,7 @@ describe('release candidate artifact contract', () => {
     [
       'wrong target count',
       (value: any) => (value.installed_package.target_count = 42),
-      'must contain exactly 62 targets',
+      'must contain exactly 63 targets',
     ],
     [
       'per-target digest drift',
@@ -544,7 +544,7 @@ describe('release candidate artifact contract', () => {
       },
     });
     expect(commands.map((args) => args[0])).toEqual(['run', 'pack']);
-    expect(frozen.installed_package.target_count).toBe(62);
+    expect(frozen.installed_package.target_count).toBe(63);
     expect(frozen.npm.inventory).toContainEqual(
       expect.objectContaining({ path: 'dist/release-matrix.json' }),
     );
@@ -561,7 +561,7 @@ describe('release candidate artifact contract', () => {
       dependencies: fixtureDependencies,
     });
     expect(verified.candidate).toEqual(fixture.candidate.candidate);
-    expect(verified.installed_package.target_count).toBe(62);
+    expect(verified.installed_package.target_count).toBe(63);
     expect(verified.sea.rows).toHaveLength(5);
     expect(verified.live_validation.record_names).toEqual(
       RELEASE_CANDIDATE_RECORD_NAMES,

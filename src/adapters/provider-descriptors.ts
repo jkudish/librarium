@@ -83,6 +83,8 @@ import {
   SerpBaseNewsOptionsSchema,
   SerpBaseSearchOptionsSchema,
 } from './serpbase-options.js';
+import { SerplyProvider } from './serply.js';
+import { SerplyOptionsSchema } from './serply-options.js';
 import { TavilyProvider } from './tavily.js';
 import { TavilyResearchProvider } from './tavily-research.js';
 import type {
@@ -403,6 +405,10 @@ const factories: Record<string, ProviderFactory> = {
   'serpbase-news': typedFactory(
     SerpBaseNewsOptionsSchema,
     (context) => new SerpBaseProvider('news', context.options),
+  ),
+  'serply-search': typedFactory(
+    SerplyOptionsSchema,
+    (context) => new SerplyProvider(context.options),
   ),
   ...Object.fromEntries(
     (Object.keys(DATAFORSEO_DESCRIPTORS) as DataForSeoAdapterId[]).map((id) => [

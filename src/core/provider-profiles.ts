@@ -1237,6 +1237,36 @@ export const BUILTIN_PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     ],
   },
   {
+    provider_id: 'serply',
+    order: 213,
+    aliases: ['serply-search'],
+    display: {
+      family: 'Serply',
+      name: 'Serply',
+      description:
+        'Google organic results through Serply, pinned to a country.',
+      best_for: 'Low-cost ranked Google web results by country.',
+      setup_url: 'https://serply.io/docs',
+    },
+    credential: {
+      env_var: 'SERPLY_API_KEY',
+      required: true,
+      auto_enable: false,
+    },
+    profiles: [
+      declare({
+        profile_id: 'search',
+        selection_order: 365,
+        target: NOT_APPLICABLE_TARGET,
+        result_kind: 'search_results',
+        corpora: ['web'],
+        retrieval_method: 'search_endpoint',
+        access_mode: 'brokered',
+        operator_id: 'google',
+      }),
+    ],
+  },
+  {
     provider_id: 'serpbase',
     order: 211,
     aliases: ['serpbase-search', 'serpbase-news'],

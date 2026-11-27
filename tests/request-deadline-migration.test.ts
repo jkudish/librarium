@@ -627,6 +627,7 @@ describe('v1 total request-deadline migration', () => {
       'serpapi',
       'serpbase-search',
       'serpbase-news',
+      'serply-search',
       'tavily',
       'valyu-search',
       'valyu-research',
@@ -665,7 +666,7 @@ describe('v1 total request-deadline migration', () => {
     expect(
       BUILTIN_PROFILE_BINDING_SPECS.map((spec) => spec.adapter_id),
     ).toEqual(expectedAdapterIds);
-    expect(new Set(expectedAdapterIds).size).toBe(62);
+    expect(new Set(expectedAdapterIds).size).toBe(63);
     const declarations = new Map(
       catalogProfileRefs(BUILTIN_PROVIDER_CATALOG).map(
         ({ entry, declaration }) => [

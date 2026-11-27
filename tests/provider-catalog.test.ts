@@ -129,6 +129,7 @@ const IMPLEMENTED_MATRIX = [
   ['serpbase', 'news'],
   ['cloro-google', 'search'],
   ['cloro-google', 'news'],
+  ['serply', 'search'],
   ['tavily', 'search'],
   ['parallel', 'turbo'],
   ['parallel', 'search'],
@@ -1705,6 +1706,7 @@ describe('provider catalog -- explicit and capability selection', () => {
       'serpapi/search',
       'serpbase/search',
       'cloro-google/search',
+      'serply/search',
       'tavily/search',
       'parallel/turbo',
       'parallel/search',
@@ -1728,7 +1730,7 @@ describe('provider catalog -- explicit and capability selection', () => {
     );
     expect(selected).not.toContain('serpapi/search');
     expect(selected).not.toContain('tavily/search');
-    expect(selected).toHaveLength(11);
+    expect(selected).toHaveLength(12);
   });
 
   it('never selects an unauthenticated profile by capability', () => {

@@ -15,6 +15,7 @@ Requires librarium-spec 1.3.0. If you configure `collector: dataforseo` or `coll
 
 - DataForSEO collectors for the `chatgpt`, `gemini-app` and `google-ai-mode` engines (LLM Scraper and Google AI Mode), and `collector: dataforseo` on `openai`, `claude`, `perplexity` and `gemini` (LLM Responses Live). They read `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD`, and produce the same Run as the Laravel package.
 - Cloro collectors for the `chatgpt`, `gemini-app`, `google-ai-mode` and `google-ai-overview` engines, a new Cloro-only `bing-ai-mode` engine, and `collector: cloro` on `google` (web and news). They read `CLORO_API_KEY` and need a `country` option on engines. Cloro reports credits, so `cost.reported` stays `null`.
+- A Serply Google Search adapter (`serply/search`, `SERPLY_API_KEY`). It always pins `gl` (default `us`), deduplicates results by link and trims them to `num`, and retries a 502 once. It is not selectable until librarium-spec lists the `serply` collector, and it has not passed a live test yet.
 - An engine `priority` option for DataForSEO and Cloro: `standard` (default) is a queued background task, `live` is one synchronous call.
 
 ### Fixed
